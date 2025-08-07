@@ -1,0 +1,26 @@
+# TrueNAS build artifacts
+truenas-build/
+
+# Node modules
+node_modules/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Environment files
+.env
+.env.local
+
+# Build outputs
+frontend/build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
