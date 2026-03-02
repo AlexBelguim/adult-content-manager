@@ -1,26 +1,78 @@
-# TrueNAS build artifacts
-truenas-build/
-
-# Node modules
+# ===========================================
+# Node.js
+# ===========================================
 node_modules/
-
-# Database files
-*.db
-*.db-shm
-*.db-wal
-
-# Environment files
-.env
-.env.local
-
-# Build outputs
-frontend/build/
-
-# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# ===========================================
+# Build outputs
+# ===========================================
+frontend/build/
+build.log
+truenas-build/
+
+# ===========================================
+# Database files (live data, not in repo)
+# ===========================================
+*.db
+*.db-shm
+*.db-wal
+
+# ===========================================
+# Environment / secrets
+# ===========================================
+.env
+.env.*
+
+# ===========================================
+# Python
+# ===========================================
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ===========================================
+# IDE / Editor
+# ===========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===========================================
 # OS generated files
+# ===========================================
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ===========================================
+# Debug / temp files
+# ===========================================
+backend/debug_*
+backend/temp/
+
+# ===========================================
+# Extra content (ML models, training data, etc.)
+# Large folder — not needed in the repo
+# ===========================================
+extra/
+
+# ===========================================
+# ML models & training data (large binaries)
+# ===========================================
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+backend/ml-datasets/
+backend-pairwise/models/
+
+# ===========================================
+# Standalone ML / vision projects (separate repos)
+# ===========================================
+vision-llm-pairwise/

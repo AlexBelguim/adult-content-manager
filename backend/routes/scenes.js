@@ -6,6 +6,44 @@ const fs = require('fs-extra');
 const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 
+// Helper to get JSON file path for a video
+function getSceneJsonPath(videoPath) {
+  const dir = path.dirname(videoPath);
+  const baseName = path.basename(videoPath, path.extname(videoPath));
+  return path.join(dir, `${baseName}.scenes.json`);
+}
+
+// Auto-save to JSON whenever scenes are modified
+async function autoSaveToJson(videoPath) {
+  try {
+    const scenes = db.prepare(`
+      SELECT * FROM video_scenes 
+      WHERE video_path = ? 
+      ORDER BY start_time ASC
+    `).all(videoPath);
+
+    const jsonScenes = scenes.map(scene => ({
+      name: scene.name,
+      startTime: scene.start_time,
+      endTime: scene.end_time,
+      funscriptPath: scene.funscript_path,
+      tags: scene.tags ? JSON.parse(scene.tags) : []
+    }));
+
+    const jsonData = {
+      videoPath,
+      exportedAt: new Date().toISOString(),
+      scenes: jsonScenes
+    };
+
+    const jsonPath = getSceneJsonPath(videoPath);
+    await fs.writeJson(jsonPath, jsonData, { spaces: 2 });
+    console.log(`[Scenes] Auto-saved ${scenes.length} scenes to ${jsonPath}`);
+  } catch (err) {
+    console.error('[Scenes] Auto-save to JSON failed:', err);
+  }
+}
+
 // Get scenes for a video
 router.get('/video', async (req, res) => {
   const { path: videoPath } = req.query;
@@ -15,11 +53,52 @@ router.get('/video', async (req, res) => {
   }
 
   try {
-    const scenes = db.prepare(`
+    let scenes = db.prepare(`
       SELECT * FROM video_scenes 
       WHERE video_path = ? 
       ORDER BY start_time ASC
     `).all(videoPath);
+
+    // If no scenes in DB, try to auto-load from JSON file
+    if (scenes.length === 0) {
+      const jsonPath = getSceneJsonPath(videoPath);
+      if (await fs.pathExists(jsonPath)) {
+        console.log(`[Scenes] Auto-loading from JSON: ${jsonPath}`);
+        try {
+          const jsonData = await fs.readJson(jsonPath);
+          
+          if (jsonData.scenes && Array.isArray(jsonData.scenes)) {
+            // Import scenes from JSON into database
+            const insertStmt = db.prepare(`
+              INSERT INTO video_scenes (video_path, name, start_time, end_time, funscript_path, tags, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `);
+
+            for (const scene of jsonData.scenes) {
+              insertStmt.run(
+                videoPath,
+                scene.name,
+                scene.startTime,
+                scene.endTime,
+                scene.funscriptPath || null,
+                JSON.stringify(scene.tags || [])
+              );
+            }
+            
+            console.log(`[Scenes] Imported ${jsonData.scenes.length} scenes from JSON`);
+            
+            // Re-fetch from database
+            scenes = db.prepare(`
+              SELECT * FROM video_scenes 
+              WHERE video_path = ? 
+              ORDER BY start_time ASC
+            `).all(videoPath);
+          }
+        } catch (jsonErr) {
+          console.error('[Scenes] Failed to parse JSON file:', jsonErr);
+        }
+      }
+    }
 
     // Parse tags for each scene and convert column names to camelCase
     scenes.forEach(scene => {
@@ -35,6 +114,71 @@ router.get('/video', async (req, res) => {
     res.send({ scenes });
   } catch (err) {
     console.error('Error fetching scenes:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Check if a video has scenes (quick check endpoint for batch queue)
+router.get('/by-video', async (req, res) => {
+  const { videoPath } = req.query;
+  
+  if (!videoPath) {
+    return res.status(400).send({ error: 'Video path is required', scenes: [] });
+  }
+
+  try {
+    // First check database
+    let scenes = db.prepare(`
+      SELECT id, name FROM video_scenes 
+      WHERE video_path = ? 
+      ORDER BY start_time ASC
+    `).all(videoPath);
+
+    // If no scenes in DB, check JSON file
+    if (scenes.length === 0) {
+      const jsonPath = getSceneJsonPath(videoPath);
+      if (await fs.pathExists(jsonPath)) {
+        try {
+          const jsonData = await fs.readJson(jsonPath);
+          if (jsonData.scenes && Array.isArray(jsonData.scenes)) {
+            scenes = jsonData.scenes.map((s, i) => ({ id: i, name: s.name }));
+          }
+        } catch (jsonErr) {
+          console.error('[Scenes] Failed to parse JSON for by-video check:', jsonErr);
+        }
+      }
+    }
+
+    res.send({ scenes, hasScenes: scenes.length > 0 });
+  } catch (err) {
+    console.error('Error checking scenes by video:', err);
+    res.status(500).send({ error: err.message, scenes: [] });
+  }
+});
+
+// Delete all scenes for a video (for reprocessing)
+router.delete('/delete-by-video', async (req, res) => {
+  const { videoPath } = req.query;
+  
+  if (!videoPath) {
+    return res.status(400).send({ error: 'Video path is required' });
+  }
+
+  try {
+    // Delete from database
+    const result = db.prepare('DELETE FROM video_scenes WHERE video_path = ?').run(videoPath);
+    console.log(`[Scenes] Deleted ${result.changes} scenes from DB for: ${videoPath}`);
+    
+    // Delete JSON file if exists
+    const jsonPath = getSceneJsonPath(videoPath);
+    if (await fs.pathExists(jsonPath)) {
+      await fs.remove(jsonPath);
+      console.log(`[Scenes] Deleted JSON file: ${jsonPath}`);
+    }
+    
+    res.send({ success: true, deletedCount: result.changes });
+  } catch (err) {
+    console.error('Error deleting scenes by video:', err);
     res.status(500).send({ error: err.message });
   }
 });
@@ -60,6 +204,9 @@ router.post('/save', async (req, res) => {
       INSERT INTO video_scenes (video_path, name, start_time, end_time, funscript_path, created_at)
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(videoPath, scene.name, scene.startTime, scene.endTime, scene.funscriptPath || null);
+
+    // Auto-save to JSON
+    autoSaveToJson(videoPath);
 
     res.send({ success: true, sceneId: result.lastInsertRowid });
   } catch (err) {
@@ -97,6 +244,9 @@ router.put('/update', async (req, res) => {
       WHERE id = ?
     `).run(scene.name, scene.startTime, scene.endTime, scene.funscriptPath || null, sceneId);
 
+    // Auto-save to JSON
+    autoSaveToJson(currentScene.video_path);
+
     res.send({ success: true });
   } catch (err) {
     console.error('Error updating scene:', err);
@@ -113,10 +263,18 @@ router.delete('/delete/:id', async (req, res) => {
   }
 
   try {
+    // Get video path before deleting for auto-save
+    const scene = db.prepare('SELECT video_path FROM video_scenes WHERE id = ?').get(id);
+    
     const result = db.prepare('DELETE FROM video_scenes WHERE id = ?').run(id);
     
     if (result.changes === 0) {
       return res.status(404).send({ error: 'Scene not found' });
+    }
+
+    // Auto-save to JSON
+    if (scene) {
+      autoSaveToJson(scene.video_path);
     }
 
     res.send({ success: true });
@@ -863,7 +1021,14 @@ router.get('/video/funscripts', async (req, res) => {
     // Look for .funscript files with matching names
     const files = await fs.readdir(videoDir);
     const funscripts = files
-      .filter(f => f.endsWith('.funscript') && f.startsWith(videoName))
+      .filter(f => f.endsWith('.funscript'))
+      .sort((a, b) => {
+        const aMatch = a.startsWith(videoName);
+        const bMatch = b.startsWith(videoName);
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return a.localeCompare(b);
+      })
       .map(f => ({
         name: f,
         path: path.join(videoDir, f)
@@ -893,7 +1058,14 @@ router.get('/scene/:sceneId/funscripts', async (req, res) => {
     // Look for .funscript files with matching names
     const files = await fs.readdir(videoDir);
     const funscripts = files
-      .filter(f => f.endsWith('.funscript') && f.startsWith(videoName))
+      .filter(f => f.endsWith('.funscript'))
+      .sort((a, b) => {
+        const aMatch = a.startsWith(videoName);
+        const bMatch = b.startsWith(videoName);
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return a.localeCompare(b);
+      })
       .map(f => ({
         name: f,
         path: path.join(videoDir, f)
@@ -1318,5 +1490,127 @@ async function updateVideoPathsInDatabase(oldVideoPath, newVideoPath, newDir) {
     throw err;
   }
 }
+
+// Export scenes to JSON file in video folder
+router.post('/export-json', async (req, res) => {
+  const { videoPath } = req.body;
+  
+  if (!videoPath) {
+    return res.status(400).send({ error: 'Video path is required' });
+  }
+
+  try {
+    // Get scenes from database
+    const scenes = db.prepare(`
+      SELECT * FROM video_scenes 
+      WHERE video_path = ? 
+      ORDER BY start_time ASC
+    `).all(videoPath);
+
+    // Format scenes for JSON
+    const jsonScenes = scenes.map(scene => ({
+      name: scene.name,
+      startTime: scene.start_time,
+      endTime: scene.end_time,
+      funscriptPath: scene.funscript_path,
+      tags: scene.tags ? JSON.parse(scene.tags) : []
+    }));
+
+    const jsonData = {
+      videoPath,
+      exportedAt: new Date().toISOString(),
+      scenes: jsonScenes
+    };
+
+    // Write to JSON file
+    const jsonPath = getSceneJsonPath(videoPath);
+    await fs.writeJson(jsonPath, jsonData, { spaces: 2 });
+
+    res.send({ 
+      success: true, 
+      path: jsonPath,
+      sceneCount: scenes.length 
+    });
+  } catch (err) {
+    console.error('Error exporting scenes to JSON:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Import scenes from JSON file in video folder
+router.post('/import-json', async (req, res) => {
+  const { videoPath } = req.body;
+  
+  if (!videoPath) {
+    return res.status(400).send({ error: 'Video path is required' });
+  }
+
+  try {
+    const jsonPath = getSceneJsonPath(videoPath);
+    
+    if (!await fs.pathExists(jsonPath)) {
+      return res.status(404).send({ error: 'No scene JSON file found', path: jsonPath });
+    }
+
+    const jsonData = await fs.readJson(jsonPath);
+    
+    if (!jsonData.scenes || !Array.isArray(jsonData.scenes)) {
+      return res.status(400).send({ error: 'Invalid scene JSON format' });
+    }
+
+    // Clear existing scenes for this video
+    db.prepare('DELETE FROM video_scenes WHERE video_path = ?').run(videoPath);
+
+    // Import scenes
+    const insertStmt = db.prepare(`
+      INSERT INTO video_scenes (video_path, name, start_time, end_time, funscript_path, tags, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `);
+
+    let imported = 0;
+    for (const scene of jsonData.scenes) {
+      insertStmt.run(
+        videoPath,
+        scene.name,
+        scene.startTime,
+        scene.endTime,
+        scene.funscriptPath || null,
+        JSON.stringify(scene.tags || [])
+      );
+      imported++;
+    }
+
+    res.send({ 
+      success: true, 
+      imported,
+      path: jsonPath 
+    });
+  } catch (err) {
+    console.error('Error importing scenes from JSON:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Check if JSON file exists for a video
+router.get('/json-exists', async (req, res) => {
+  const { path: videoPath } = req.query;
+  
+  if (!videoPath) {
+    return res.status(400).send({ error: 'Video path is required' });
+  }
+
+  try {
+    const jsonPath = getSceneJsonPath(videoPath);
+    const exists = await fs.pathExists(jsonPath);
+    
+    res.send({ exists, path: jsonPath });
+  } catch (err) {
+    console.error('Error checking JSON file:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Export the autoSaveToJson function for use in other handlers
+router.autoSaveToJson = autoSaveToJson;
 
 module.exports = router;

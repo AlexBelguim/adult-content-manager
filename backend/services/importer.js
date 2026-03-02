@@ -2,6 +2,9 @@ const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
 const { scanPerformerFolder } = require('./fileScanner');
+const { execSync } = require('child_process');
+const os = require('os');
+const { findPerformerByNameOrAlias } = require('../utils/performerMatcher');
 
 async function importPerformer(performerName, basePath, newName = null, mergeIfExists = false) {
   console.log(`Starting import for performer: ${performerName}, newName: ${newName}, mergeIfExists: ${mergeIfExists}`);
@@ -14,16 +17,29 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
     throw new Error(`Performer folder not found: ${beforePath}`);
   }
   
+  // Check if performer is blacklisted (by name or aliases)
+  const blacklistedPerformer = db.prepare('SELECT * FROM performers WHERE blacklisted = 1 AND name = ?').get(finalName);
+  
+  if (blacklistedPerformer) {
+    const formatDate = (dateStr) => dateStr ? new Date(dateStr).toLocaleDateString() : 'Unknown';
+    throw new Error(
+      `Performer "${finalName}" is blacklisted and cannot be imported.\n\n` +
+      `Reason: ${blacklistedPerformer.blacklist_reason || 'No reason provided'}\n` +
+      `Blacklisted on: ${formatDate(blacklistedPerformer.blacklist_date)}\n\n` +
+      `To import this performer, go to Performer Management and unblacklist them first.`
+    );
+  }
+  
   // Check if performer already exists
   const existingPerformer = db.prepare('SELECT * FROM performers WHERE name = ?').get(finalName);
   console.log(`Existing performer check for "${finalName}":`, existingPerformer);
   
-  if (existingPerformer && !mergeIfExists) {
+  if (existingPerformer) {
     // If existing performer is in "before filter performer" folder (moved_to_after = 0),
-    // require merge option since both would be in the same location
+    // auto-merge to combine content
     if (existingPerformer.moved_to_after === 0) {
-      console.log(`Performer ${finalName} already exists in "before filter performer" and mergeIfExists is false`);
-      throw new Error(`Performer ${finalName} already exists in "before filter performer". Use merge option to combine.`);
+      console.log(`Performer ${finalName} already exists in "before filter performer". Auto-merging...`);
+      return await mergeWithExistingPerformer(existingPerformer, performerFolderPath, basePath);
     }
     
     // If existing performer is in "after filter performer" folder (moved_to_after = 1),
@@ -41,24 +57,110 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
     console.log(`Renaming performer from ${performerName} to ${newName}`);
     const newFolderPath = path.join(basePath, 'before filter performer', finalName);
     
+    console.log(`Checking if new folder path exists: ${newFolderPath}`);
     // Check if there's already a folder in "before filter performer" with this name
     if (await fs.pathExists(newFolderPath)) {
       if (!mergeIfExists) {
         throw new Error(`Folder with name ${finalName} already exists in "before filter performer"`);
       }
       // If mergeIfExists is true and there's already a folder, we'll handle the merge
+      console.log(`New folder already exists, will merge: ${newFolderPath}`);
     } else {
       // Safe to rename the folder
-      await fs.move(beforePath, newFolderPath);
-      performerFolderPath = newFolderPath;
-      console.log(`Renamed performer folder: ${performerName} -> ${finalName}`);
+      console.log(`Renaming folder from ${beforePath} to ${newFolderPath}`);
+      try {
+        // Retry mechanism for EPERM errors (folder locked by another process)
+        const maxRetries = 3;
+        let lastError;
+        let renamed = false;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            // Force close any open handles by adding a small delay
+            if (attempt > 1) {
+              console.log(`Retry attempt ${attempt}/${maxRetries} after ${attempt * 500}ms delay...`);
+              await new Promise(resolve => setTimeout(resolve, attempt * 500));
+            }
+            
+            // Try Node.js rename first
+            await fs.rename(beforePath, newFolderPath);
+            performerFolderPath = newFolderPath;
+            console.log(`Successfully renamed performer folder: ${performerName} -> ${finalName}`);
+            console.log(`Updated performerFolderPath to: ${performerFolderPath}`);
+            renamed = true;
+            break; // Success, exit retry loop
+          } catch (err) {
+            lastError = err;
+            console.error(`Attempt ${attempt} failed:`, err.message);
+          }
+        }
+        
+        // If all retries failed, try Python script for forceful rename
+        if (!renamed) {
+          console.log('All rename attempts failed. Attempting forceful rename using Python script...');
+          try {
+            const pythonScript = path.join(__dirname, '..', 'scripts', 'force_rename.py');
+            const pythonCmd = `python "${pythonScript}" "${beforePath}" "${newFolderPath}"`;
+            console.log('Running:', pythonCmd);
+            
+            const result = execSync(pythonCmd, { 
+              encoding: 'utf8',
+              stdio: 'pipe',
+              windowsHide: true,
+              timeout: 60000 // 60 second timeout
+            });
+            
+            console.log('Python script output:', result);
+            
+            // Verify the rename succeeded
+            if (await fs.pathExists(newFolderPath) && !await fs.pathExists(beforePath)) {
+              performerFolderPath = newFolderPath;
+              console.log(`Successfully renamed performer folder using Python: ${performerName} -> ${finalName}`);
+              renamed = true;
+            } else {
+              throw new Error('Python script completed but folder was not renamed');
+            }
+          } catch (pythonErr) {
+            console.error('Python forceful rename also failed:', pythonErr);
+            
+            // Extract stderr if available
+            let errorDetail = lastError.message;
+            if (pythonErr.stderr) {
+              errorDetail = pythonErr.stderr.toString();
+            }
+            
+            throw new Error(
+              `Failed to rename performer folder: The folder "${performerName}" is locked and cannot be moved.\n\n` +
+              `Please:\n` +
+              `1. Close ALL File Explorer windows showing this folder\n` +
+              `2. Close any video players or image viewers\n` +
+              `3. Wait a few seconds and try again\n\n` +
+              `Technical details: ${errorDetail}`
+            );
+          }
+        }
+        
+        if (!renamed) {
+          throw lastError;
+        }
+      } catch (error) {
+        console.error('Failed to rename folder:', error);
+        
+        // Provide more helpful error message
+        if (error.code === 'EPERM' || error.message.includes('EPERM') || error.message.includes('PermissionError')) {
+          throw new Error(
+            `Failed to rename performer folder: The folder "${performerName}" is currently in use.\n\n` +
+            `Please:\n` +
+            `1. Close any File Explorer windows\n` +
+            `2. Close any media players or image viewers\n` +
+            `3. Wait a few seconds and try again\n\n` +
+            `Technical details: ${error.message}`
+          );
+        }
+        
+        throw new Error(`Failed to rename performer folder: ${error.message}`);
+      }
     }
-  }
-  
-  // If merging with existing performer that's in "before filter performer", merge files and update stats
-  if (existingPerformer && mergeIfExists && existingPerformer.moved_to_after === 0) {
-    console.log(`Merging with existing performer in "before filter performer": ${finalName}`);
-    return await mergeWithExistingPerformer(existingPerformer, performerFolderPath, basePath);
   }
   
   // Check for existing folders (case-insensitive)
@@ -81,6 +183,7 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
     path.join(performerFolderPath, vidsFolder.name) : 
     path.join(performerFolderPath, 'vids');
   
+  // Always use lowercase 'funscript' to prevent duplicate folder creation
   const funscriptPath = path.join(vidsPath, 'funscript');
   
   // Create folders if they don't exist
@@ -91,8 +194,11 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
   // Only organize loose files, don't move existing organized files
   await organizePerformerFiles(performerFolderPath, picsPath, vidsPath, funscriptPath);
   
-  // Scan for stats
-  const stats = await scanPerformerFolder(performerFolderPath);
+  // Scan for stats using enhanced scanning method that works like import modal
+  console.log(`About to scan performer folder for stats: ${performerFolderPath}`);
+  console.log(`Folder exists check:`, await fs.pathExists(performerFolderPath));
+  const stats = await scanPerformerFolderEnhanced(performerFolderPath);
+  console.log(`Scan completed, stats:`, stats);
   
   // Find thumbnail (first image)
   const thumbnail = await findThumbnail(picsPath);
@@ -100,13 +206,17 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
   // Get folder ID
   const folder = db.prepare('SELECT id FROM folders WHERE path = ?').get(basePath);
   
-  // Insert performer into database
+  // Cache the folder paths for faster future loads
+  const now = new Date().toISOString();
+  
+  // Insert performer into database with cached paths
   const result = db.prepare(`
     INSERT INTO performers (
       name, folder_id, thumbnail, pics_count, vids_count, 
       funscript_vids_count, funscript_files_count, total_size_gb,
-      pics_original_count, vids_original_count, funscript_vids_original_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      pics_original_count, vids_original_count, funscript_vids_original_count,
+      last_scan_date, cached_pics_path, cached_vids_path, cached_funscript_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     finalName,
     folder.id,
@@ -118,7 +228,11 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
     stats.total_size_gb,
     stats.pics_count,      // Set original counts same as current counts at import time
     stats.vids_count,      
-    stats.funscript_vids_count
+    stats.funscript_vids_count,
+    now,
+    picsPath,
+    vidsPath,
+    funscriptPath
   );
   
   return {
@@ -278,51 +392,114 @@ async function scanFolderForFiles(folderPath, files, type, currentDepth = 0) {
     const contents = await fs.readdir(folderPath, { withFileTypes: true });
     
     for (const item of contents) {
+      // Skip system folders
+      if (item.isDirectory() && 
+          (item.name === '.thumbnails' || item.name === '.thumbnail' || item.name === '.trash')) {
+        continue;
+      }
+      
       const itemPath = path.join(folderPath, item.name);
       
-      if (item.isFile()) {
-        const ext = path.extname(item.name).toLowerCase();
-        const stat = await fs.stat(itemPath);
-        
-        // Check for image files
-        if ((type === 'all' || type === 'pics') && 
-            ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
-          files.push({
-            name: item.name,
-            path: itemPath,
-            type: 'image',
-            size: stat.size
-          });
+      try {
+        if (item.isFile()) {
+          const ext = path.extname(item.name).toLowerCase();
+          const stat = await fs.stat(itemPath);
+          
+          // Check for image files
+          if ((type === 'all' || type === 'pics') && 
+              ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+            files.push({
+              name: item.name,
+              path: itemPath,
+              type: 'image',
+              size: stat.size
+            });
+          }
+          
+          // Check for video files
+          if ((type === 'all' || type === 'vids') && 
+              ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'].includes(ext)) {
+            files.push({
+              name: item.name,
+              path: itemPath,
+              type: 'video',
+              size: stat.size
+            });
+          }
+          
+          // Check for funscript files
+          if ((type === 'all' || type === 'funscript') && ext === '.funscript') {
+            files.push({
+              name: item.name,
+              path: itemPath,
+              type: 'funscript',
+              size: stat.size
+            });
+          }
+        } else if (item.isDirectory()) {
+          // Recursively scan subdirectories
+          await scanFolderForFiles(itemPath, files, type, currentDepth + 1);
         }
-        
-        // Check for video files
-        if ((type === 'all' || type === 'vids') && 
-            ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'].includes(ext)) {
-          files.push({
-            name: item.name,
-            path: itemPath,
-            type: 'video',
-            size: stat.size
-          });
-        }
-        
-        // Check for funscript files
-        if ((type === 'all' || type === 'funscript') && ext === '.funscript') {
-          files.push({
-            name: item.name,
-            path: itemPath,
-            type: 'funscript',
-            size: stat.size
-          });
-        }
-      } else if (item.isDirectory()) {
-        // Recursively scan subdirectories
-        await scanFolderForFiles(itemPath, files, type, currentDepth + 1);
+      } catch (itemError) {
+        console.warn(`Warning: Could not scan item ${item.name}:`, itemError.message);
+        // Continue processing other items even if one fails
       }
     }
   } catch (error) {
-    console.log(`Warning: Could not scan folder ${folderPath}:`, error.message);
+    console.warn(`Warning: Could not scan folder ${folderPath}:`, error.message);
   }
+}
+
+// Enhanced scanPerformerFolder that uses the same scanning method as import modal
+async function scanPerformerFolderEnhanced(performerPath) {
+  console.log('scanPerformerFolderEnhanced called with path:', performerPath);
+  
+  const stats = {
+    pics_count: 0,
+    vids_count: 0,
+    funscript_vids_count: 0,
+    funscript_files_count: 0,
+    total_size_gb: 0
+  };
+  
+  try {
+    // Check if performer folder exists
+    if (!await fs.pathExists(performerPath)) {
+      console.log('Performer folder does not exist:', performerPath);
+      return stats;
+    }
+
+    const files = [];
+    await scanFolderForFiles(performerPath, files, 'all');
+    
+    // Count files by type
+    for (const file of files) {
+      stats.total_size_gb += file.size / (1024 * 1024 * 1024);
+      
+      if (file.type === 'image') {
+        stats.pics_count++;
+      } else if (file.type === 'video') {
+        // Check if this is a funscript video (in funscript folder)
+        if (file.path.includes(path.sep + 'funscript' + path.sep) || 
+            file.path.includes(path.sep + 'Funscript' + path.sep)) {
+          stats.funscript_vids_count++;
+          // Also count funscript videos in regular video count
+          stats.vids_count++;
+        } else {
+          stats.vids_count++;
+        }
+      } else if (file.type === 'funscript') {
+        stats.funscript_files_count++;
+      }
+    }
+
+    console.log(`Enhanced scan found ${files.length} total files in ${performerPath}`);
+  } catch (error) {
+    console.error('Error in enhanced performer folder scan:', error);
+  }
+  
+  console.log('Enhanced scan stats for performer:', stats);
+  return stats;
 }
 
 async function mergeWithExistingPerformer(existingPerformer, sourceFolderPath, basePath) {
@@ -475,10 +652,6 @@ async function createUniqueName(directory, fileName) {
 
 module.exports = {
   importPerformer,
-  getPerformerFiles
-};
-
-module.exports = {
-  importPerformer,
-  getPerformerFiles
+  getPerformerFiles,
+  scanPerformerFolderEnhanced
 };

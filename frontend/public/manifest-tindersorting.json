@@ -1,0 +1,18 @@
+{
+    "short_name": "Tinder Sort",
+    "name": "Tinder Sorting",
+    "icons": [
+        {
+            "src": "logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "start_url": "/tindersorting",
+    "display": "standalone",
+    "scope": "/tindersorting",
+    "theme_color": "#121212",
+    "background_color": "#121212",
+    "description": "Tinder-style swipe sorting for content filtering"
+}

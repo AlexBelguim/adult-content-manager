@@ -1,0 +1,18 @@
+{
+  "short_name": "App",
+  "name": "Adult Content Manager",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "minimal-ui",
+  "scope": "/",
+  "theme_color": "#000000",
+  "background_color": "#ffffff",
+  "description": "Manage and organize adult content with advanced filtering and hash-based duplicate detection"
+}

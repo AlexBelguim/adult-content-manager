@@ -1,0 +1,48 @@
+# Version control
+.git
+.github
+.gitattributes
+
+# Node modules (rebuilt inside container)
+node_modules
+frontend/node_modules
+backend-pairwise/node_modules
+
+# Database files (live data — not baked into image)
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend build (rebuilt inside container)
+frontend/build
+
+# Dev / IDE
+.vscode
+.venv
+.env
+.env.local
+
+# Extra content (large folder, not needed in image)
+extra
+
+# TrueNAS build artifacts
+truenas-build
+
+# Logs / debug
+*.log
+npm-debug.log*
+backend/debug_*
+backend/temp
+build.log
+
+# Pairwise (separate service)
+backend-pairwise
+
+# Docs (not needed at runtime)
+docs
+TECHNICAL_OVERVIEW.md
+README.md
+
+# Python virtual envs
+__pycache__
+*.pyc

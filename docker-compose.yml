@@ -1,0 +1,63 @@
+# =============================================================================
+# Adult Content Manager - Docker Compose for TrueNAS
+# =============================================================================
+#
+# Quick start:
+#   docker compose up -d
+#
+# Volumes you MUST configure:
+#   - ./data     → persistent database & config  (or a TrueNAS dataset)
+#   - /mnt/media → your media library on TrueNAS (adjust the host path)
+#
+# =============================================================================
+
+services:
+  app:
+    build: .
+    image: adult-content-manager:latest
+    container_name: adult-content-manager
+    restart: unless-stopped
+    ports:
+      - "4069:4069"
+    environment:
+      - NODE_ENV=production
+      - PORT=4069
+      - DB_PATH=/app/data/app.db
+      - MEDIA_BASE_PATH=/media
+      - CONTENT_BASE_PATH=/app/content
+      - DATA_PATH=/app/data
+    volumes:
+      # Persistent data (database, settings) — map to a TrueNAS dataset
+      - ./data:/app/data
+
+      # Your media library — adjust the left side to your TrueNAS pool path
+      # Example: /mnt/tank/media:/media
+      - /mnt/media:/media
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http=require('http');const r=http.get('http://localhost:4069/health',res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  # -------------------------------------------------------------------------
+  # Optional: Pairwise ranking service (uncomment to enable)
+  # Adds ML-based preference learning — requires ~4 GB extra for PyTorch
+  # -------------------------------------------------------------------------
+  # pairwise:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.pairwise
+  #   image: adult-content-manager-pairwise:latest
+  #   container_name: acm-pairwise
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3334:3334"
+  #   environment:
+  #     - PAIRWISE_PORT=3334
+  #     - PAIRWISE_DB_PATH=/app/data/pairwise.db
+  #     - INFERENCE_SERVER_URL=http://localhost:3344
+  #   volumes:
+  #     - ./data:/app/data
+  #     - /mnt/media:/media

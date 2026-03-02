@@ -5,46 +5,42 @@
 
 set -e
 
-echo "🚀 Starting Adult Content Manager..."
-echo "Environment: ${NODE_ENV:-development}"
-echo "Port: ${PORT:-3000}"
-echo "Database: ${DB_PATH:-./app.db}"
+echo "============================================="
+echo "  Adult Content Manager - Container Start"
+echo "============================================="
+echo "Environment : ${NODE_ENV:-development}"
+echo "Port        : ${PORT:-4069}"
+echo "Database    : ${DB_PATH:-/app/data/app.db}"
+echo "Media path  : ${MEDIA_BASE_PATH:-/media}"
+echo "Data path   : ${DATA_PATH:-/app/data}"
+echo ""
 
 # Create necessary directories
-echo "📁 Creating directories..."
-mkdir -p /app/data
-mkdir -p /app/media
-mkdir -p /app/content
-
-# Check if running as root (not recommended)
-if [ "$(id -u)" = "0" ]; then
-    echo "⚠️  Warning: Running as root is not recommended"
-fi
+echo "📁 Ensuring directories exist..."
+mkdir -p "${DATA_PATH:-/app/data}"
+mkdir -p "${CONTENT_BASE_PATH:-/app/content}"
 
 # Database initialization check
-if [ ! -f "${DB_PATH:-/app/data/app.db}" ]; then
-    echo "📊 Initializing new database..."
-    touch "${DB_PATH:-/app/data/app.db}"
+DB_FILE="${DB_PATH:-/app/data/app.db}"
+if [ ! -f "$DB_FILE" ]; then
+    echo "📊 No database found — a fresh one will be created on first run."
 fi
 
-# Set proper permissions for database
-if [ -w "$(dirname "${DB_PATH:-/app/data/app.db}")" ]; then
-    chmod 644 "${DB_PATH:-/app/data/app.db}" 2>/dev/null || true
+# Verify media mount
+if [ ! -d "${MEDIA_BASE_PATH:-/media}" ]; then
+    echo "⚠️  Warning: Media path '${MEDIA_BASE_PATH:-/media}' does not exist."
+    echo "   Make sure you mounted your media volume in docker-compose.yml"
 fi
 
-# Verify required directories exist
-if [ ! -d "${MEDIA_BASE_PATH:-/app/media}" ]; then
-    echo "⚠️  Warning: Media base path ${MEDIA_BASE_PATH:-/app/media} does not exist"
+# Check runtime dependencies
+echo ""
+echo "🔧 Node.js : $(node --version)"
+if command -v ffmpeg &> /dev/null; then
+    echo "🔧 ffmpeg  : $(ffmpeg -version 2>&1 | head -1)"
+else
+    echo "⚠️  Warning: ffmpeg not found in PATH — video thumbnails will fail"
 fi
 
-if [ ! -d "${CONTENT_BASE_PATH:-/app/content}" ]; then
-    echo "⚠️  Warning: Content base path ${CONTENT_BASE_PATH:-/app/content} does not exist"
-fi
-
-# Check Node.js version
-echo "🔧 Node.js version: $(node --version)"
-echo "🔧 NPM version: $(npm --version)"
-
-# Start the application
-echo "🎬 Starting Adult Content Manager server..."
+echo ""
+echo "🎬 Starting server..."
 exec node index.js

@@ -5,17 +5,19 @@ const filterService = require('../services/filterService');
 // Get filterable files for a performer
 router.get('/files/:performerId', async (req, res) => {
   const { performerId } = req.params;
-  const { type, sortBy, sortOrder, hideKept } = req.query;
-  
+  const { type, sortBy, sortOrder, hideKept, limit, offset } = req.query;
+
   try {
-    const files = await filterService.getFilterableFiles(
-      performerId, 
-      type || 'all', 
-      sortBy || 'name', 
+    const result = await filterService.getFilterableFiles(
+      performerId,
+      type || 'all',
+      sortBy || 'name',
       sortOrder || 'asc',
-      hideKept === 'true'
+      hideKept === 'true',
+      limit ? parseInt(limit) : undefined,
+      offset ? parseInt(offset) : undefined
     );
-    res.send(files);
+    res.send(result);
   } catch (err) {
     res.status(500).send({ error: err.message });
   }
@@ -23,10 +25,10 @@ router.get('/files/:performerId', async (req, res) => {
 
 // Perform filter action (keep, delete, move_to_funscript)
 router.post('/action', async (req, res) => {
-  const { performerId, filePath, action, options } = req.body;
-  
+  const { performerId, performerName, basePath, filePath, action, options } = req.body;
+
   try {
-    const result = await filterService.performFilterAction(performerId, filePath, action, options);
+    const result = await filterService.performFilterAction(performerId, filePath, action, { ...options, performerName, basePath });
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: err.message });
@@ -46,13 +48,13 @@ router.post('/undo', async (req, res) => {
 // Manage funscript files
 router.post('/funscript', async (req, res) => {
   const { performerId, videoFolder, action, funscriptFile, options } = req.body;
-  
+
   try {
     const result = await filterService.manageFunscriptFiles(
-      performerId, 
-      videoFolder, 
-      action, 
-      funscriptFile, 
+      performerId,
+      videoFolder,
+      action,
+      funscriptFile,
       options
     );
     res.send(result);
@@ -64,13 +66,47 @@ router.post('/funscript', async (req, res) => {
 // Handle video after last funscript deletion
 router.post('/video-after-funscript', async (req, res) => {
   const { performerId, videoFolder, keepVideo } = req.body;
-  
+
   try {
     const result = await filterService.handleVideoAfterLastFunscriptDelete(
-      performerId, 
-      videoFolder, 
+      performerId,
+      videoFolder,
       keepVideo
     );
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Get batch unfiltered counts for all "before" folder performers (fast - database only)
+router.get('/stats-batch', (req, res) => {
+  try {
+    const db = require('../db');
+
+    // Get all "before" folder performers with their counts
+    const performers = db.prepare(`
+      SELECT 
+        id,
+        name,
+        pics_count,
+        vids_count,
+        pics_filtered,
+        vids_filtered,
+        thumbnail
+      FROM performers 
+      WHERE moved_to_after = 0
+    `).all();
+
+    // Calculate unfiltered counts
+    const result = performers.map(p => ({
+      id: p.id,
+      name: p.name,
+      thumbnail: p.thumbnail,
+      unfiltered_pics: Math.max(0, (p.pics_count || 0) - (p.pics_filtered || 0)),
+      unfiltered_vids: Math.max(0, (p.vids_count || 0) - (p.vids_filtered || 0))
+    })).filter(p => p.unfiltered_pics > 0 || p.unfiltered_vids > 0);
+
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: err.message });
@@ -80,7 +116,7 @@ router.post('/video-after-funscript', async (req, res) => {
 // Get filter statistics for a performer
 router.get('/stats/:performerId', (req, res) => {
   const { performerId } = req.params;
-  
+
   try {
     const stats = filterService.getFilterStats(performerId);
     res.send(stats);
@@ -93,7 +129,7 @@ router.get('/stats/:performerId', (req, res) => {
 // Keep action for phone interface
 router.post('/keep', async (req, res) => {
   const { performerId, itemId, itemType } = req.body;
-  
+
   try {
     const result = await filterService.performFilterAction(performerId, itemId, 'keep', { itemType });
     res.send(result);
@@ -105,7 +141,7 @@ router.post('/keep', async (req, res) => {
 // Delete action for phone interface
 router.post('/delete', async (req, res) => {
   const { performerId, itemId, itemType } = req.body;
-  
+
   try {
     const result = await filterService.performFilterAction(performerId, itemId, 'delete', { itemType });
     res.send(result);

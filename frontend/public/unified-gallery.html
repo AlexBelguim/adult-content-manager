@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gallery</title>
+    <script src="handy.js"></script>
+    <script type="module">
+        import { FunscriptPlayer, FunscriptImage } from './static/js/FunscriptPlayer.js';
+        // The components are automatically registered when imported
+    </script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(35, 35, 35, 0.8);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .gallery-title {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #333;
+            margin: 0;
+        }
+        .stats {
+            display: flex;
+            gap: 15px;
+        }
+        .stat {
+            padding: 8px 16px;
+            background: rgba(33, 150, 243, 0.2);
+            border-radius: 20px;
+            font-size: 0.9rem;
+            color: #1976d2;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(40, 40, 40, 0.9);
+            border-radius: 8px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background: #2a2a2a;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.3s;
+            color: #ccc;
+        }
+        .tab.active {
+            background: #1976d2;
+            color: white;
+        }
+        .tab:hover {
+            background: #333;
+            color: white;
+        }
+        .sort-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .sort-select {
+            padding: 8px 12px;
+            border: 1px solid #555;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background: #2a2a2a;
+            color: #ccc;
+        }
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .gallery-item {
+            width: 280px;
+            height: 480px;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: rgba(18, 18, 18, 0.7);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .gallery-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+        .gallery-item funscript-player,
+        .gallery-item funscript-image {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .gallery-item-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 120px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
+            z-index: 1;
+        }
+        .gallery-item-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 15px;
+            z-index: 2;
+            color: white;
+        }
+        .gallery-item-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin: 0 0 8px 0;
+            color: white;
+            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .gallery-item-meta {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .gallery-item-size {
+            opacity: 0.7;
+        }
+        .funscript-badge {
+            background: #4caf50;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="gallery-title" id="galleryTitle">Gallery</h1>
+            <div class="stats">
+                <div class="stat" id="picsCount">0 pics</div>
+                <div class="stat" id="vidsCount">0 videos</div>
+                <div class="stat" id="funscriptsCount">0 funscripts</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab(0)">Pictures</button>
+                <button class="tab" onclick="switchTab(1)">Videos</button>
+                <button class="tab" onclick="switchTab(2)">Funscripts</button>
+            </div>
+            
+            <div class="sort-controls">
+                <label for="sortBy">Sort by:</label>
+                <select id="sortBy" class="sort-select" onchange="sortContent()">
+                    <option value="name">Name (A-Z)</option>
+                    <option value="name-desc">Name (Z-A)</option>
+                    <option value="size">Size (Small-Large)</option>
+                    <option value="size-desc">Size (Large-Small)</option>
+                    <option value="date">Date (Old-New)</option>
+                    <option value="date-desc">Date (New-Old)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div id="loading" class="loading">Loading...</div>
+        <div id="gallery" class="gallery"></div>
+    </div>
+
+    <script>
+        let currentContent = null;
+        let currentTab = 0;
+        let galleryType = null; // 'performer' or 'genre'
+        let galleryName = null;
+        let basePath = null;
+
+        // Parse URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const performer = urlParams.get('performer');
+        const genre = urlParams.get('genre');
+        basePath = urlParams.get('basePath');
+
+        // Determine gallery type and name
+        if (performer) {
+            galleryType = 'performer';
+            galleryName = performer;
+            document.title = `${performer} - Gallery`;
+            document.getElementById('galleryTitle').textContent = performer;
+        } else if (genre) {
+            galleryType = 'genre';
+            galleryName = genre;
+            document.title = `${genre} - Gallery`;
+            document.getElementById('galleryTitle').textContent = genre;
+        }
+
+        // Fetch content based on gallery type
+        fetchContent();
+
+        async function fetchContent() {
+            try {
+                let apiUrl;
+                if (galleryType === 'performer') {
+                    apiUrl = `/api/gallery/performer-name/${encodeURIComponent(galleryName)}?basePath=${encodeURIComponent(basePath)}`;
+                } else if (galleryType === 'genre') {
+                    apiUrl = `/api/gallery/genre/${encodeURIComponent(galleryName)}?basePath=${encodeURIComponent(basePath)}`;
+                }
+
+                console.log('Fetching from URL:', apiUrl);
+                
+                const response = await fetch(apiUrl);
+                console.log('Response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const responseText = await response.text();
+                console.log('Response text (first 100 chars):', responseText.substring(0, 100));
+                
+                const data = JSON.parse(responseText);
+                currentContent = data;
+                
+                // Update stats
+                document.getElementById('picsCount').textContent = `${data.pics.length} pics`;
+                document.getElementById('vidsCount').textContent = `${data.vids.length} videos`;
+                document.getElementById('funscriptsCount').textContent = `${data.funscriptVids.length} funscripts`;
+                
+                // Update tab labels
+                const tabs = document.querySelectorAll('.tab');
+                tabs[0].textContent = `Pictures (${data.pics.length})`;
+                tabs[1].textContent = `Videos (${data.vids.length})`;
+                tabs[2].textContent = `Funscripts (${data.funscriptVids.length})`;
+                
+                // Hide loading and show content
+                document.getElementById('loading').style.display = 'none';
+                renderContent();
+            } catch (error) {
+                console.error('Error fetching content:', error);
+                document.getElementById('loading').textContent = 'Error loading content';
+            }
+        }
+
+        function switchTab(tabIndex) {
+            currentTab = tabIndex;
+            
+            // Update tab appearance
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach((tab, index) => {
+                tab.classList.toggle('active', index === tabIndex);
+            });
+            
+            renderContent();
+        }
+
+        function renderContent() {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = '';
+            
+            if (!currentContent) return;
+            
+            let items = [];
+            if (currentTab === 0) {
+                items = currentContent.pics;
+            } else if (currentTab === 1) {
+                items = currentContent.vids;
+            } else if (currentTab === 2) {
+                items = currentContent.funscriptVids;
+            }
+            
+            items.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'gallery-item';
+                
+                // Create custom component based on content type
+                if (currentTab === 0) {
+                    // Pictures - use funscript-image
+                    itemDiv.innerHTML = `
+                        <funscript-image 
+                            src="${item.url}" 
+                            mode="modal" 
+                            view="stretch">
+                        </funscript-image>
+                        <div class="gallery-item-overlay"></div>
+                        <div class="gallery-item-info">
+                            <div class="gallery-item-title">${item.name}</div>
+                            <div class="gallery-item-meta">
+                                <span class="gallery-item-size">${item.sizeFormatted}</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Videos - use funscript-player
+                    itemDiv.innerHTML = `
+                        <funscript-player 
+                            src="${item.url}" 
+                            type="video" 
+                            mode="modal" 
+                            view="stretch" 
+                            funscriptmode="true">
+                        </funscript-player>
+                        <div class="gallery-item-overlay"></div>
+                        <div class="gallery-item-info">
+                            <div class="gallery-item-title">${item.name}</div>
+                            <div class="gallery-item-meta">
+                                <span class="gallery-item-size">${item.sizeFormatted}</span>
+                                ${item.funscriptCount ? `<span class="funscript-badge">${item.funscriptCount} funscripts</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                gallery.appendChild(itemDiv);
+            });
+        }
+
+        function sortContent() {
+            // Re-render content (sorting will be handled by the API in the future)
+            renderContent();
+        }
+    </script>
+</body>
+</html>

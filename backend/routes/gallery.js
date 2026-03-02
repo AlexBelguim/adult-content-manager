@@ -3,6 +3,56 @@ const router = express.Router();
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
+const { getVideoDuration, formatDuration } = require('../utils/videoDuration');
+
+const ratingLookupStmt = db.prepare(`
+  SELECT video_rating AS videoRating, funscript_rating AS funscriptRating
+  FROM file_ratings
+  WHERE file_path = ?
+`);
+
+const tagLookupStmt = db.prepare(`
+  SELECT tag
+  FROM file_tags
+  WHERE file_path = ?
+`);
+
+function attachFileMetadata(media, filePath) {
+  if (!media) {
+    return media;
+  }
+
+  if (!Array.isArray(media.tags)) {
+    media.tags = media.tags ? [media.tags] : [];
+  }
+
+  if (!filePath) {
+    return media;
+  }
+
+  try {
+    const rating = ratingLookupStmt.get(filePath);
+    if (rating) {
+      media.videoRating = rating.videoRating ?? null;
+      media.funscriptRating = rating.funscriptRating ?? null;
+    }
+  } catch (error) {
+    console.warn('Failed to load ratings for', filePath, error.message);
+  }
+
+  try {
+    const rows = tagLookupStmt.all(filePath);
+    if (rows && rows.length) {
+      const merged = new Set(media.tags);
+      rows.forEach(row => merged.add(row.tag));
+      media.tags = Array.from(merged);
+    }
+  } catch (error) {
+    console.warn('Failed to load tags for', filePath, error.message);
+  }
+
+  return media;
+}
 
 // Get performer gallery data by name (must come before ID route)
 router.get('/performer/:name', async (req, res) => {
@@ -176,7 +226,8 @@ router.get('/genre/:name', async (req, res) => {
             modified: stat.mtime,
             url: `/api/files/raw?path=${encodeURIComponent(file.file_path)}`,
             tags: [file.tag],
-            virtual: true
+            virtual: true,
+            filePath: file.file_path
           };
           if ([".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext)) {
             galleryData.pics.push(fileInfo);
@@ -190,9 +241,10 @@ router.get('/genre/:name', async (req, res) => {
               const matchingFunscripts = filesInDir.filter(f => f.endsWith('.funscript') && (f.startsWith(path.basename(base))));
               if (matchingFunscripts.length > 0) {
                 // Add to funscriptVids
-                galleryData.funscriptVids.push({
+                const funscriptEntry = {
                   name: path.basename(base),
                   path: file.file_path,
+                  filePath: file.file_path,
                   url: `/api/files/raw?path=${encodeURIComponent(file.file_path)}`,
                   thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(file.file_path)}`,
                   type: 'funscript_video',
@@ -205,22 +257,30 @@ router.get('/genre/:name', async (req, res) => {
                   tags: [file.tag],
                   virtual: true,
                   missingFunscripts: matchingFunscripts.length === 0 // Flag for frontend styling
-                });
+                };
+                attachFileMetadata(funscriptEntry, file.file_path);
+                galleryData.funscriptVids.push(funscriptEntry);
                 virtualCounts.funscriptVids++;
               } else {
                 // Add to vids
-                galleryData.vids.push({
+                const videoEntry = {
                   ...fileInfo,
+                  filePath: file.file_path,
                   thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(file.file_path)}`
-                });
+                };
+                attachFileMetadata(videoEntry, file.file_path);
+                galleryData.vids.push(videoEntry);
                 virtualCounts.vids++;
               }
             } catch (dirError) {
               // Can't read directory, treat as regular video
-              galleryData.vids.push({
+              const videoEntry = {
                 ...fileInfo,
+                filePath: file.file_path,
                 thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(file.file_path)}`
-              });
+              };
+              attachFileMetadata(videoEntry, file.file_path);
+              galleryData.vids.push(videoEntry);
               virtualCounts.vids++;
             }
           }
@@ -302,9 +362,10 @@ router.get('/genre/:name', async (req, res) => {
               console.log('Could not scan directory for additional funscripts:', dirError);
             }
             
-            galleryData.funscriptVids.push({
+            const funscriptEntry = {
               name: expFile.name || path.basename(expFile.file_path, ext),
               path: expFile.file_path,
+              filePath: expFile.file_path,
               url: `/api/files/raw?path=${encodeURIComponent(expFile.file_path)}`,
               thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(expFile.file_path)}`,
               type: 'funscript_video',
@@ -321,14 +382,17 @@ router.get('/genre/:name', async (req, res) => {
               sceneName: expFile.scene_name,
               contentType: expFile.content_type,
               missingFunscripts: funscripts.length === 0 // Flag for frontend styling
-            });
+            };
+            attachFileMetadata(funscriptEntry, expFile.file_path);
+            galleryData.funscriptVids.push(funscriptEntry);
             virtualCounts.funscriptVids++;
             console.log('Added to funscriptVids with', funscripts.length, 'funscripts:', funscripts);
           } else {
             // Add to regular vids
-            galleryData.vids.push({
+            const videoEntry = {
               name: expFile.name || path.basename(expFile.file_path, ext),
               path: expFile.file_path,
+              filePath: expFile.file_path,
               url: `/api/files/raw?path=${encodeURIComponent(expFile.file_path)}`,
               thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(expFile.file_path)}`,
               type: 'video',
@@ -341,7 +405,9 @@ router.get('/genre/:name', async (req, res) => {
               sceneId: expFile.scene_id,
               sceneName: expFile.scene_name,
               contentType: expFile.content_type
-            });
+            };
+            attachFileMetadata(videoEntry, expFile.file_path);
+            galleryData.vids.push(videoEntry);
             virtualCounts.vids++;
             console.log('Added to regular vids');
           }
@@ -505,16 +571,25 @@ async function getMediaFiles(dirPath, type, sortBy = 'name', sortOrder = 'asc') 
           }
           if (isValidType) {
             const stat = await fs.stat(itemPath);
-            files.push({
+            // Use appropriate thumbnail endpoint based on media type
+            const thumbnailEndpoint = type === 'video' 
+              ? `/api/files/video-thumbnail?path=${encodeURIComponent(itemPath)}`
+              : `/api/files/preview?path=${encodeURIComponent(itemPath)}`;
+            
+            const mediaEntry = {
               name: item.name,
               path: itemPath,
+              filePath: itemPath,
               url: `/api/files/raw?path=${encodeURIComponent(itemPath)}`,
-              thumbnail: `/api/files/preview?path=${encodeURIComponent(itemPath)}`,
+              thumbnail: thumbnailEndpoint,
               type: type,
               size: stat.size,
               modified: stat.mtime.getTime(),
               sizeFormatted: formatFileSize(stat.size)
-            });
+            };
+
+            attachFileMetadata(mediaEntry, itemPath);
+            files.push(mediaEntry);
           }
         } else if (item.isDirectory()) {
           // Recursively scan subdirectories
@@ -529,25 +604,51 @@ async function getMediaFiles(dirPath, type, sortBy = 'name', sortOrder = 'asc') 
   await scanRecursively(dirPath);
   
   // Sort files
-  files.sort((a, b) => {
-    let compareValue = 0;
-    
-    switch (sortBy) {
-      case 'name':
-        compareValue = a.name.localeCompare(b.name);
-        break;
-      case 'size':
-        compareValue = a.size - b.size;
-        break;
-      case 'date':
-        compareValue = a.modified - b.modified;
-        break;
-        default:
-          compareValue = 0;
+  // For duration sorting on videos, we need to fetch durations first
+  if (sortBy === 'duration' && files.some(f => f.type === 'video')) {
+    const durationsMap = new Map();
+    for (const file of files) {
+      if (file.type === 'video') {
+        try {
+          const duration = await getVideoDuration(file.filePath);
+          durationsMap.set(file.filePath, duration);
+          file.duration = duration;
+          file.durationFormatted = formatDuration(duration);
+        } catch (err) {
+          durationsMap.set(file.filePath, 0);
+          file.duration = 0;
+          file.durationFormatted = '0:00';
+        }
+      } else {
+        durationsMap.set(file.filePath, 0);
       }
-      
+    }
+    
+    files.sort((a, b) => {
+      const compareValue = (durationsMap.get(a.filePath) || 0) - (durationsMap.get(b.filePath) || 0);
       return sortOrder === 'desc' ? -compareValue : compareValue;
     });
+  } else {
+    files.sort((a, b) => {
+      let compareValue = 0;
+      
+      switch (sortBy) {
+        case 'name':
+          compareValue = a.name.localeCompare(b.name);
+          break;
+        case 'size':
+          compareValue = a.size - b.size;
+          break;
+        case 'date':
+          compareValue = a.modified - b.modified;
+          break;
+          default:
+            compareValue = 0;
+        }
+        
+        return sortOrder === 'desc' ? -compareValue : compareValue;
+      });
+  }
   
   return files;
 }
@@ -588,9 +689,10 @@ async function getFunscriptVideos(funscriptPath, sortBy = 'name', sortOrder = 'a
         // Include the video regardless of whether it has funscripts
         const stat = await fs.stat(videoPath);
         
-        videos.push({
+        const videoEntry = {
           name: videoBaseName,
           path: funscriptPath,
+          filePath: videoPath,
           url: `/api/files/raw?path=${encodeURIComponent(videoPath)}`,
           thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(videoPath)}`,
           type: 'funscript_video',
@@ -601,7 +703,10 @@ async function getFunscriptVideos(funscriptPath, sortBy = 'name', sortOrder = 'a
           modified: stat.mtime.getTime(),
           sizeFormatted: formatFileSize(stat.size),
           missingFunscripts: matchingFunscripts.length === 0 // Flag for frontend styling
-        });
+        };
+
+  attachFileMetadata(videoEntry, videoPath);
+        videos.push(videoEntry);
       }
     }
     
@@ -627,9 +732,10 @@ async function getFunscriptVideos(funscriptPath, sortBy = 'name', sortOrder = 'a
           const videoPath = path.join(vidFolderPath, videoFile);
           const stat = await fs.stat(videoPath);
           
-          videos.push({
+          const videoEntry = {
             name: item.name,
             path: vidFolderPath,
+            filePath: videoPath,
             url: `/api/files/raw?path=${encodeURIComponent(videoPath)}`,
             thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(videoPath)}`,
             type: 'funscript_video',
@@ -640,34 +746,60 @@ async function getFunscriptVideos(funscriptPath, sortBy = 'name', sortOrder = 'a
             modified: stat.mtime.getTime(),
             sizeFormatted: formatFileSize(stat.size),
             missingFunscripts: funscriptFiles.length === 0 // Flag for frontend styling
-          });
+          };
+
+          attachFileMetadata(videoEntry, videoPath);
+          videos.push(videoEntry);
         }
       }
     }
     
     // Sort videos
-    videos.sort((a, b) => {
-      let compareValue = 0;
-      
-      switch (sortBy) {
-        case 'name':
-          compareValue = a.name.localeCompare(b.name);
-          break;
-        case 'size':
-          compareValue = a.size - b.size;
-          break;
-        case 'date':
-          compareValue = a.modified - b.modified;
-          break;
-        case 'funscript_count':
-          compareValue = a.funscriptCount - b.funscriptCount;
-          break;
-        default:
-          compareValue = 0;
+    // For duration sorting, we need to fetch durations first
+    if (sortBy === 'duration') {
+      // Get durations for all videos
+      const durationsMap = new Map();
+      for (const video of videos) {
+        try {
+          const duration = await getVideoDuration(video.filePath);
+          durationsMap.set(video.filePath, duration);
+          video.duration = duration;
+          video.durationFormatted = formatDuration(duration);
+        } catch (err) {
+          durationsMap.set(video.filePath, 0);
+          video.duration = 0;
+          video.durationFormatted = '0:00';
+        }
       }
       
-      return sortOrder === 'desc' ? -compareValue : compareValue;
-    });
+      videos.sort((a, b) => {
+        const compareValue = (durationsMap.get(a.filePath) || 0) - (durationsMap.get(b.filePath) || 0);
+        return sortOrder === 'desc' ? -compareValue : compareValue;
+      });
+    } else {
+      videos.sort((a, b) => {
+        let compareValue = 0;
+        
+        switch (sortBy) {
+          case 'name':
+            compareValue = a.name.localeCompare(b.name);
+            break;
+          case 'size':
+            compareValue = a.size - b.size;
+            break;
+          case 'date':
+            compareValue = a.modified - b.modified;
+            break;
+          case 'funscript_count':
+            compareValue = a.funscriptCount - b.funscriptCount;
+            break;
+          default:
+            compareValue = 0;
+        }
+        
+        return sortOrder === 'desc' ? -compareValue : compareValue;
+      });
+    }
   } catch (error) {
     console.error('Error getting funscript videos:', error);
   }
@@ -795,28 +927,54 @@ async function getFunscriptVideosRecursive(dirPath, sortBy = 'name', sortOrder =
   await scanRecursively(dirPath);
   
   // Sort videos
-  videos.sort((a, b) => {
-    let compareValue = 0;
-    
-    switch (sortBy) {
-      case 'name':
-        compareValue = a.name.localeCompare(b.name);
-        break;
-      case 'size':
-        compareValue = a.size - b.size;
-        break;
-      case 'date':
-        compareValue = a.modified - b.modified;
-        break;
-      case 'funscript_count':
-        compareValue = a.funscriptCount - b.funscriptCount;
-        break;
-      default:
-        compareValue = 0;
+  // For duration sorting, we need to fetch durations first
+  if (sortBy === 'duration') {
+    const durationsMap = new Map();
+    for (const video of videos) {
+      try {
+        const filePath = path.join(video.path, video.video);
+        const duration = await getVideoDuration(filePath);
+        durationsMap.set(filePath, duration);
+        video.duration = duration;
+        video.durationFormatted = formatDuration(duration);
+      } catch (err) {
+        const filePath = path.join(video.path, video.video);
+        durationsMap.set(filePath, 0);
+        video.duration = 0;
+        video.durationFormatted = '0:00';
+      }
     }
     
-    return sortOrder === 'desc' ? -compareValue : compareValue;
-  });
+    videos.sort((a, b) => {
+      const aPath = path.join(a.path, a.video);
+      const bPath = path.join(b.path, b.video);
+      const compareValue = (durationsMap.get(aPath) || 0) - (durationsMap.get(bPath) || 0);
+      return sortOrder === 'desc' ? -compareValue : compareValue;
+    });
+  } else {
+    videos.sort((a, b) => {
+      let compareValue = 0;
+      
+      switch (sortBy) {
+        case 'name':
+          compareValue = a.name.localeCompare(b.name);
+          break;
+        case 'size':
+          compareValue = a.size - b.size;
+          break;
+        case 'date':
+          compareValue = a.modified - b.modified;
+          break;
+        case 'funscript_count':
+          compareValue = a.funscriptCount - b.funscriptCount;
+          break;
+        default:
+          compareValue = 0;
+      }
+      
+      return sortOrder === 'desc' ? -compareValue : compareValue;
+    });
+  }
   
   return videos;
 }

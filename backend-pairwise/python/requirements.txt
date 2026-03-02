@@ -1,0 +1,23 @@
+# Pairwise Preference Learning Requirements
+# For training CLIP-based preference scorer
+
+# Core ML
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.30.0
+
+# Image processing
+Pillow>=9.0.0
+
+# Training utilities
+tqdm>=4.64.0
+numpy>=1.23.0
+
+# For visualization (optional)
+matplotlib>=3.6.0
+
+# Inference server (for fast batch processing)
+flask>=2.0.0
+
+# CLIP model (using HuggingFace transformers)
+# Model: openai/clip-vit-large-patch14

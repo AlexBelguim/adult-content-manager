@@ -4,126 +4,99 @@ const fs = require('fs-extra');
 const path = require('path');
 const { calculateSize } = require('../services/stats'); // Assume extended stats
 const { scanDirectory } = require('../services/fileScanner');
+const db = require('../db');
+
+// In-memory cache for genres list
+let genresCache = null;
+let genresCacheTime = 0;
+const GENRES_CACHE_TTL = 60 * 1000; // 1 minute cache
 
 router.get('/genres', async (req, res) => {
-  const { basePath } = req.query;
+  const { basePath, fast } = req.query;
   const contentPath = path.join(basePath, 'content');
-  const genres = await fs.readdir(contentPath, { withFileTypes: true });
-  const data = [];
-const { getGenreGalleryData, formatFileSize } = require('./gallery');
-  // Use the same logic as /gallery/genre/:name?includeTagged=true for each genre
-  for (const genre of genres.filter(g => g.isDirectory())) {
-    const genrePath = path.join(contentPath, genre.name);
-    // Call getGenreGalleryData to get origin files
-    const galleryData = await getGenreGalleryData(genrePath, 'all', 'name', 'asc');
-    // Count origin files
-    const originCounts = {
-      pics: galleryData.pics ? galleryData.pics.length : 0,
-      vids: galleryData.vids ? galleryData.vids.length : 0,
-      funscripts: galleryData.funscriptVids ? galleryData.funscriptVids.length : 0
-    };
-    // Now count virtual/tagged files (not in this genre folder)
-    let virtualCounts = { pics: 0, vids: 0, funscripts: 0 };
-    const db = require('../db');
-    const taggedFiles = db.prepare('SELECT file_path, tag FROM file_tags WHERE tag = ?').all(genre.name);
-    
-    // Also get exported files that have this tag
-    const taggedExportedFiles = db.prepare(`
-      SELECT ef.*, vs.name as scene_name 
-      FROM exported_files ef
-      LEFT JOIN video_scenes vs ON ef.scene_id = vs.id
-      WHERE ef.tags LIKE ?
-    `).all(`%"${genre.name}"%`);
-    
-    // Create a set of exported file paths to exclude from regular tagged file processing
-    const exportedFilePaths = new Set(taggedExportedFiles.map(ef => ef.file_path));
-    
-    for (const file of taggedFiles) {
-      if (!file.file_path.startsWith(genrePath)) {
-        // Skip if this is an exported file (it will be handled separately)
-        if (exportedFilePaths.has(file.file_path)) {
-          continue;
-        }
-        
-        try {
-          const stat = await fs.stat(file.file_path);
-          const ext = path.extname(file.file_path).toLowerCase();
-          if ([".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext)) {
-            virtualCounts.pics++;
-          } else if ([".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm"].includes(ext)) {
-            // Check for matching funscript file(s)
-            const base = file.file_path.slice(0, -ext.length);
-            const dir = path.dirname(file.file_path);
-            try {
-              const filesInDir = await fs.readdir(dir);
-              const matchingFunscripts = filesInDir.filter(f => f.endsWith('.funscript') && (f.startsWith(path.basename(base))));
-              if (matchingFunscripts.length > 0) {
-                virtualCounts.funscripts++;
-              } else {
-                virtualCounts.vids++;
-              }
-            } catch (dirError) {
-              // Can't read directory, treat as regular video
-              virtualCounts.vids++;
-            }
-          }
-        } catch (e) {}
-      }
+  const startTime = Date.now();
+  
+  try {
+    // Check cache first
+    const cacheKey = `genres_${basePath}`;
+    if (genresCache && genresCache.basePath === basePath && (Date.now() - genresCacheTime) < GENRES_CACHE_TTL) {
+      console.log(`[genres] Returning cached data (${Date.now() - startTime}ms)`);
+      return res.send(genresCache.data);
     }
-
     
-    for (const expFile of taggedExportedFiles) {
+    const genres = await fs.readdir(contentPath, { withFileTypes: true });
+    const data = [];
+    
+    // Fast mode: just get folder names and basic counts from DB if available
+    // Avoid expensive file system scans
+    for (const genre of genres.filter(g => g.isDirectory())) {
+      const genrePath = path.join(contentPath, genre.name);
+      
+      // Get counts from database cache if available
+      const dbCounts = db.prepare(`
+        SELECT 
+          (SELECT COUNT(*) FROM file_tags WHERE tag = ?) as tagged_count
+      `).get(genre.name);
+      
+      // Quick directory listing without stats
+      let originCounts = { pics: 0, vids: 0, funscripts: 0 };
       try {
-        // Parse tags from JSON
-        let fileTags = [];
-        if (expFile.tags) {
-          try {
-            fileTags = JSON.parse(expFile.tags);
-          } catch (e) {
-            fileTags = [];
-          }
-        }
-        
-        // Only count if this file actually has the tag we're looking for
-        if (!fileTags.includes(genre.name)) {
-          continue;
-        }
-        
-        // Check if file exists
-        if (!await fs.pathExists(expFile.file_path)) {
-          continue;
-        }
-        
-        const ext = path.extname(expFile.file_path).toLowerCase();
-        if ([".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm"].includes(ext)) {
-          // Use the content_type field to determine categorization
-          if (expFile.content_type === 'funscript') {
-            virtualCounts.funscripts++;
-          } else {
-            virtualCounts.vids++;
+        const files = await fs.readdir(genrePath);
+        for (const file of files) {
+          const ext = path.extname(file).toLowerCase();
+          if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+            originCounts.pics++;
+          } else if (['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'].includes(ext)) {
+            originCounts.vids++;
+          } else if (ext === '.funscript') {
+            originCounts.funscripts++;
           }
         }
       } catch (e) {
-        // Skip files with errors
+        // Skip if can't read
       }
+      
+      // Get virtual counts from database (fast)
+      const virtualCounts = { pics: 0, vids: 0, funscripts: 0 };
+      const taggedFiles = db.prepare('SELECT file_path FROM file_tags WHERE tag = ?').all(genre.name);
+      for (const file of taggedFiles) {
+        if (!file.file_path.startsWith(genrePath)) {
+          const ext = path.extname(file.file_path).toLowerCase();
+          if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+            virtualCounts.pics++;
+          } else if (['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'].includes(ext)) {
+            virtualCounts.vids++;
+          }
+        }
+      }
+      
+      // Get exported files count (fast)
+      const exportedCount = db.prepare(`
+        SELECT COUNT(*) as count FROM exported_files WHERE tags LIKE ?
+      `).get(`%"${genre.name}"%`);
+      virtualCounts.vids += exportedCount?.count || 0;
+      
+      data.push({
+        name: genre.name,
+        pics: originCounts.pics + virtualCounts.pics,
+        vids: originCounts.vids + virtualCounts.vids,
+        funscripts: originCounts.funscripts + virtualCounts.funscripts,
+        size: '0', // Skip size calculation in fast mode
+        originCounts,
+        virtualCounts
+      });
     }
-    // Calculate total size (origin only)
-    let size = 0;
-    try {
-      const { calculateSize } = require('../services/stats');
-      size = await calculateSize(genrePath);
-    } catch (e) {}
-    data.push({
-      name: genre.name,
-      pics: originCounts.pics + virtualCounts.pics,
-      vids: originCounts.vids + virtualCounts.vids,
-      funscripts: originCounts.funscripts + virtualCounts.funscripts,
-      size: (size / 1e9).toFixed(2),
-      originCounts,
-      virtualCounts
-    });
+    
+    // Cache the result
+    genresCache = { basePath, data };
+    genresCacheTime = Date.now();
+    
+    console.log(`[genres] Completed in ${Date.now() - startTime}ms for ${data.length} genres`);
+    res.send(data);
+  } catch (err) {
+    console.error('Error in /genres:', err);
+    res.status(500).send({ error: err.message });
   }
-  res.send(data);
 });
 
 // Helper to get tags for a file

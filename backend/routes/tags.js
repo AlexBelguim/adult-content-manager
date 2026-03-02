@@ -13,6 +13,14 @@ router.get('/file', (req, res) => {
   res.json({ tags: rows.map(r => r.tag) });
 });
 
+// Get tags for a specific performer
+router.get('/performer/:performerId', (req, res) => {
+  const { performerId } = req.params;
+  if (!performerId) return res.status(400).json({ error: 'Performer ID required' });
+  const rows = db.prepare('SELECT tag FROM tags WHERE performer_id = ?').all(performerId);
+  res.json({ tags: rows.map(r => r.tag) });
+});
+
 // Get all tags (for suggestions)
 router.get('/all', async (req, res) => {
   const tagsFromDB = db.prepare('SELECT DISTINCT tag FROM tags').all();
