@@ -27,12 +27,11 @@ services:
       - CONTENT_BASE_PATH=/app/content
       - DATA_PATH=/app/data
     volumes:
-      # Persistent data (database, settings) — map to a TrueNAS dataset
+      # Persistent data (database, settings)
       - ./data:/app/data
 
-      # Your media library — adjust the left side to your TrueNAS pool path
-      # Example: /mnt/tank/media:/media
-      - /mnt/media:/media
+      # Media library
+      - ./media:/media
 
     healthcheck:
       test: ["CMD", "node", "-e", "const http=require('http');const r=http.get('http://localhost:4069/health',res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
