@@ -123,8 +123,9 @@ function AppContent() {
   const [handyConnected, setHandyConnected] = useState(false);
   const [basePath, setBasePath] = useState(null);
   const [handyIntegration, setHandyIntegration] = useState(null);
-  const [licenseChecked, setLicenseChecked] = useState(false);
-  const [licenseValid, setLicenseValid] = useState(false);
+  // License check disabled
+  const [licenseChecked, setLicenseChecked] = useState(true);
+  const [licenseValid, setLicenseValid] = useState(true);
   const [showLicenseModal, setShowLicenseModal] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [licenseError, setLicenseError] = useState('');
@@ -150,73 +151,11 @@ function AppContent() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  // License: initial status check
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const res = await fetch('/api/license/status');
-        const data = await res.json();
+  // License: initial status check — DISABLED
+  // useEffect(() => { ... }, []);
 
-        // Check if over limit
-        if (data.overLimit || (res.status === 403 && data.error)) {
-          setLicenseValid(false);
-          setLicenseChecked(true);
-          setLicenseError(data.message || data.error || 'License activation limit exceeded');
-          setShowLicenseModal(true);
-          setCachedKey(localStorage.getItem('licenseKey') || '');
-          return;
-        }
-
-        const ok = !!data.licensed;
-        setLicenseValid(ok);
-        setLicenseChecked(true);
-        if (!ok) setShowLicenseModal(true);
-        setCachedKey(localStorage.getItem('licenseKey') || '');
-      } catch (e) {
-        setLicenseChecked(true);
-        setLicenseValid(false);
-        setShowLicenseModal(true);
-      }
-    };
-    check();
-  }, []);
-
-  // Silent refresh when online
-  useEffect(() => {
-    if (!licenseChecked || !licenseValid) return;
-    const controller = new AbortController();
-    const doRefresh = async () => {
-      // Skip refresh if offline
-      if (!navigator.onLine) {
-        console.log('[license] Skipping refresh - offline');
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/license/refresh', { method: 'POST', signal: controller.signal });
-        const data = await res.json();
-
-        // Check if refresh failed due to over-limit
-        if (res.status === 403 && data.overLimit) {
-          console.log('[license] Refresh blocked - over limit');
-          setLicenseValid(false);
-          setLicenseError(data.message || 'License activation limit exceeded');
-          setShowLicenseModal(true);
-        } else if (!res.ok) {
-          console.warn('[license] Refresh failed:', data.error);
-          setLicenseValid(false);
-          setShowLicenseModal(true);
-        }
-      } catch (err) {
-        console.warn('[license] Refresh error (may be offline):', err.message);
-        // Don't show modal on network errors during background refresh
-        // User can continue working offline with cached token
-      }
-    };
-    const interval = setInterval(doRefresh, 6 * 60 * 60 * 1000); // every 6 hours
-    doRefresh(); // Initial refresh on app start (when online)
-    return () => { controller.abort(); clearInterval(interval); };
-  }, [licenseChecked, licenseValid]);
+  // Silent license refresh — DISABLED
+  // useEffect(() => { ... }, [licenseChecked, licenseValid]);
 
   const handleLicenseSubmit = async (key) => {
     setVerifying(true);
