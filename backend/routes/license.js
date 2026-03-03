@@ -129,7 +129,7 @@ async function decrementWithGumroad(licenseKey) {
   // 1. Go to your Gumroad dashboard
   // 2. Find the purchase
   // 3. Manually adjust the license usage count
-  
+
   // For now, we'll just return success without actually decrementing
   // This will clear the local license, which is still useful for the user
   console.warn('[license] Decrement not actually performed - requires Gumroad seller OAuth');
@@ -137,18 +137,13 @@ async function decrementWithGumroad(licenseKey) {
 }
 
 function buildStatus() {
-  const token = getSetting('license_token');
-  const tokenExpiresAt = getSetting('license_token_expires_at');
-  const payload = verifyToken(token);
-  const nowTs = now().getTime();
-  const expTs = tokenExpiresAt ? new Date(tokenExpiresAt).getTime() : 0;
-  const licensed = !!(payload && tokenExpiresAt && expTs > nowTs);
+  // License check disabled — always return licensed
   return {
-    licensed,
-    expiresAt: tokenExpiresAt || null,
-    email: getSetting('license_email') || null,
-    product: getSetting('gumroad_product_permalink') || null,
-    needsRevalidation: !licensed,
+    licensed: true,
+    expiresAt: null,
+    email: null,
+    product: null,
+    needsRevalidation: false,
   };
 }
 
@@ -174,34 +169,34 @@ router.post('/verify', async (req, res) => {
     }
     const masked = licenseKey.replace(/.(?=.{4})/g, '*');
     console.log('[license] verifying key', masked);
-    
+
     // Check if this is a new key (first activation) or existing key (refresh)
     const existingKey = getSetting('license_key');
     const isNewActivation = !existingKey || existingKey.trim() !== licenseKey.trim();
-    
+
     console.log('[license] isNewActivation:', isNewActivation);
-    
+
     // Only increment on first activation of a new key
     const data = await verifyWithGumroad(licenseKey.trim(), isNewActivation);
-    
+
     if (!data.success) {
       return res.status(400).json({ error: data.message || 'Invalid license key' });
     }
-    
+
     const purchase = data.purchase || {};
     const uses = data.uses || 0;
     const quantity = purchase.quantity || 1;
     const isMultiseat = purchase.is_multiseat_license;
-    
+
     // Determine max uses from quantity (Gumroad's multiseat uses quantity as the limit)
     const maxUses = isMultiseat ? quantity : 1;
-    
+
     console.log('[license] Uses:', uses, 'Max:', maxUses, 'Multiseat:', isMultiseat);
-    
+
     // Check if over limit BEFORE saving (only if we just incremented)
     if (isNewActivation && uses > maxUses) {
       console.log('[license] BLOCKED - Usage limit exceeded:', uses, '>', maxUses);
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'License activation limit exceeded',
         uses: uses,
         maxUses: maxUses,
@@ -209,7 +204,7 @@ router.post('/verify', async (req, res) => {
         overLimit: true
       });
     }
-    
+
     // Persist product_id if present
     if (purchase.product_id) {
       setSetting('gumroad_product_id', purchase.product_id);
@@ -250,32 +245,32 @@ router.post('/refresh', async (req, res) => {
     if (!licenseKey) {
       return res.status(400).json({ error: 'No stored license key. Please verify again.' });
     }
-    
+
     console.log('[license] Refreshing existing license (no increment)');
-    
+
     // Refresh should NOT increment - just check validity
     const data = await verifyWithGumroad(licenseKey, false);
-    
+
     if (!data.success) {
       // Invalidate token if Gumroad says invalid
       deleteSetting('license_token');
       deleteSetting('license_token_expires_at');
       return res.status(400).json({ error: data.message || 'License invalid' });
     }
-    
+
     const purchase = data.purchase || {};
     const uses = data.uses || 0;
     const quantity = purchase.quantity || 1;
     const isMultiseat = purchase.is_multiseat_license;
     const maxUses = isMultiseat ? quantity : 1;
-    
+
     console.log('[license] Refresh check - Uses:', uses, 'Max:', maxUses);
-    
+
     // Check if over limit (should block app from continuing)
     if (uses > maxUses) {
       console.log('[license] BLOCKED on refresh - Usage limit exceeded');
       // Don't delete the token yet, but return error so UI can show warning
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'License activation limit exceeded',
         uses: uses,
         maxUses: maxUses,
@@ -283,7 +278,7 @@ router.post('/refresh', async (req, res) => {
         overLimit: true
       });
     }
-    
+
     const issuedAt = now();
     const expiresAt = addDays(issuedAt, TOKEN_VALID_DAYS);
     const payload = {
@@ -320,7 +315,7 @@ router.delete('/', async (req, res) => {
         // Continue with local cleanup even if Gumroad fails
       }
     }
-    
+
     deleteSetting('license_key');
     deleteSetting('license_email');
     deleteSetting('license_token');
