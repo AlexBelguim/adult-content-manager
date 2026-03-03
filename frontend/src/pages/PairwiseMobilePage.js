@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import {
     Settings, ScreenRotation, Fullscreen,
-    SkipNext, CheckCircle, Undo, FilterList, Save, Refresh, Warning, WifiOff
+    SkipNext, CheckCircle, Undo, FilterList, Save, Refresh, Warning, WifiOff, ThumbDown
 } from '@mui/icons-material';
 
 function PairwiseMobilePage() {
