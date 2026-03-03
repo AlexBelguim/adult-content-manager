@@ -43,4 +43,5 @@ fi
 
 echo ""
 echo "🎬 Starting server..."
+cd /app/backend
 exec node index.js
