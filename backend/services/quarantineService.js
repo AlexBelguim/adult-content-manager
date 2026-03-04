@@ -263,7 +263,13 @@ async function commitBatchAction(runId, action, selectedItems) {
             hammingDistance: item.hamming_distance,
           });
 
-          // DELETE the hash record completely (we're keeping the good duplicate)
+          // Clean up ALL references in run items (both as source and candidate)
+          db.prepare(`
+            DELETE FROM hash_run_items 
+            WHERE file_id_ref = ? OR candidate_id = ?
+          `).run(item.file_id_ref, item.file_id_ref);
+
+          // DELETE the hash record completely (the kept duplicate's hash covers re-upload detection)
           db.prepare(`
             DELETE FROM performer_file_hashes 
             WHERE id = ?
@@ -277,17 +283,15 @@ async function commitBatchAction(runId, action, selectedItems) {
         } else if (action === 'delete') {
           await permanentDelete(item.file_path);
 
-          // Clean up ALL references in run items first (both as source and candidate)
-          // This prevents foreign key issues and ensures "ghost" matches don't persist
+          // Clean up ALL references in run items (both as source and candidate)
           db.prepare(`
             DELETE FROM hash_run_items 
             WHERE file_id_ref = ? OR candidate_id = ?
           `).run(item.file_id_ref, item.file_id_ref);
 
-          // Soft-delete the hash record so we remember it for future filtering
+          // DELETE the hash record completely (the kept duplicate's hash covers re-upload detection)
           db.prepare(`
-            UPDATE performer_file_hashes 
-            SET deleted_flag = 1 
+            DELETE FROM performer_file_hashes 
             WHERE id = ?
           `).run(item.file_id_ref);
 
@@ -304,6 +308,30 @@ async function commitBatchAction(runId, action, selectedItems) {
           error: error.message,
         });
       }
+    }
+
+    // Recalculate internal_duplicate_count based on remaining run items
+    if (run.source_performer_id && results.success.length > 0) {
+      const performerId = run.source_performer_id;
+
+      // Count remaining matches across all internal runs for this performer
+      const remaining = db.prepare(`
+        SELECT COUNT(*) as count FROM hash_run_items hri
+        JOIN hash_runs hr ON hri.run_id = hr.run_id
+        WHERE hr.source_performer_id = ? 
+          AND hr.target_performer_id = ?
+          AND (hri.exact_match = 1 OR hri.hamming_distance <= 6)
+      `).get(performerId, performerId);
+
+      const newCount = remaining ? remaining.count : 0;
+
+      db.prepare(`
+        UPDATE performers 
+        SET internal_duplicate_count = ?
+        WHERE id = ?
+      `).run(newCount, performerId);
+
+      console.log(`Updated internal_duplicate_count for performer ${performerId}: ${newCount}`);
     }
 
     // Update run metadata with action taken
@@ -326,6 +354,7 @@ async function commitBatchAction(runId, action, selectedItems) {
     return {
       success: true,
       results,
+      updatedDuplicateCount: run.source_performer_id ? true : false,
     };
   } catch (error) {
     console.error('Error committing batch action:', error);

@@ -58,6 +58,7 @@ function HashResultsPage() {
   const [hashVerified, setHashVerified] = useState(false);
   const [rerunLoading, setRerunLoading] = useState(false);
   const [performerId, setPerformerId] = useState(null);
+  const [keptSectionOpen, setKeptSectionOpen] = useState(false);
   const groupsPerPage = 20;
   const itemsPerPage = 300;
 
@@ -665,6 +666,149 @@ function HashResultsPage() {
                     </Paper>
                   );
                 })}
+              </Box>
+            </Box>
+          </Collapse>
+        </Paper>
+      )}
+
+      {/* Kept Matches Section - shown when verified and there are still active matches */}
+      {hashVerified && filteredActiveGroups.length > 0 && (
+        <Paper
+          elevation={0}
+          sx={{
+            mb: 3,
+            bgcolor: 'rgba(76, 175, 80, 0.05)',
+            border: '1px solid rgba(76, 175, 80, 0.3)',
+            borderRadius: 2,
+            overflow: 'hidden'
+          }}
+        >
+          <Box
+            onClick={() => setKeptSectionOpen(!keptSectionOpen)}
+            sx={{
+              p: 2,
+              minHeight: 48,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              '&:hover': { bgcolor: 'rgba(76, 175, 80, 0.08)' }
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <CheckCircleIcon sx={{ color: '#4caf50', flexShrink: 0 }} />
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: '#4caf50', whiteSpace: 'nowrap' }}>
+                Verified Kept Matches ({filteredActiveGroups.length} groups)
+              </Typography>
+              <Chip
+                label="Acknowledged as acceptable"
+                size="small"
+                sx={{ bgcolor: 'rgba(76, 175, 80, 0.2)', color: '#4caf50' }}
+              />
+            </Box>
+            <IconButton size="small" sx={{ color: '#4caf50', flexShrink: 0 }}>
+              {keptSectionOpen ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+            </IconButton>
+          </Box>
+
+          <Collapse in={keptSectionOpen}>
+            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid rgba(76, 175, 80, 0.2)' }}>
+              <Typography variant="body2" sx={{ color: '#888', mb: 2 }}>
+                These matches were present when you marked this performer as verified. They are considered acceptable duplicates.
+              </Typography>
+
+              <Box sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: 1.5
+              }}>
+                {filteredActiveGroups.slice(0, 50).flatMap((group) =>
+                  group.map((item, idx) => {
+                    const isVideo = isVideoPath(item.source_path);
+                    const filename = item.source_path.split(/[\\/]/).pop();
+
+                    return (
+                      <Paper
+                        key={`kept-${item.id}-${idx}`}
+                        elevation={0}
+                        sx={{
+                          p: 1,
+                          bgcolor: '#1a1a1a',
+                          border: '1px solid rgba(76, 175, 80, 0.3)',
+                          borderRadius: 1.5,
+                        }}
+                      >
+                        <Box sx={{ position: 'relative' }}>
+                          <Box sx={{
+                            width: '100%',
+                            height: 100,
+                            borderRadius: 1,
+                            overflow: 'hidden',
+                            bgcolor: '#000',
+                            mb: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            {isVideo ? (
+                              <video
+                                muted
+                                preload="metadata"
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                src={`/api/files/raw?path=${encodeURIComponent(item.source_path)}&_t=${Date.now()}`}
+                              />
+                            ) : (
+                              <CardMedia
+                                component="img"
+                                image={`/api/files/preview?path=${encodeURIComponent(item.source_path)}&_t=${Date.now()}`}
+                                alt={filename}
+                                sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            )}
+                          </Box>
+
+                          <Chip
+                            label={item.exact_match ? 'EXACT' : `${getSimilarityPercent(item.hamming_distance)}%`}
+                            size="small"
+                            sx={{
+                              position: 'absolute',
+                              bottom: 8,
+                              right: 4,
+                              height: 18,
+                              fontSize: '0.55rem',
+                              fontWeight: 'bold',
+                              bgcolor: 'rgba(76, 175, 80, 0.8)',
+                              color: '#fff'
+                            }}
+                          />
+                        </Box>
+
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                          {isVideo ? <MovieIcon sx={{ fontSize: 12, color: '#ce93d8' }} /> : <ImageIcon sx={{ fontSize: 12, color: '#90caf9' }} />}
+                          <Typography variant="caption" sx={{ color: '#666', fontSize: '0.55rem' }}>
+                            {isVideo ? 'Video' : 'Image'}
+                          </Typography>
+                        </Box>
+                        <Tooltip title={item.source_path}>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: '#aaa',
+                              fontSize: '0.65rem',
+                              display: 'block',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {filename}
+                          </Typography>
+                        </Tooltip>
+                      </Paper>
+                    );
+                  })
+                )}
               </Box>
             </Box>
           </Collapse>

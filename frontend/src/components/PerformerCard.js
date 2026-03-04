@@ -796,10 +796,10 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
 
                   {mode === 'filter' && onOpenHash && (
                     <Tooltip title={
-                      performer.internal_duplicate_count > 0
-                        ? `${performer.internal_duplicate_count} duplicates found - click to view`
-                        : performer.hash_verified
-                          ? 'Verified - no duplicates'
+                      performer.hash_verified
+                        ? 'Verified - no remaining concerns'
+                        : performer.internal_duplicate_count > 0
+                          ? `${performer.internal_duplicate_count} duplicates found - click to view`
                           : 'Open hash results'
                     }>
                       <IconButton
@@ -815,10 +815,10 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                         sx={{
                           background: 'transparent',
                           border: 'none',
-                          color: performer.internal_duplicate_count > 0
-                            ? '#f44336'
-                            : performer.hash_verified
-                              ? '#4caf50'
+                          color: performer.hash_verified
+                            ? '#4caf50'
+                            : performer.internal_duplicate_count > 0
+                              ? '#f44336'
                               : '#2196f3',
                           padding: 0,
                           margin: 0,
@@ -834,7 +834,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                           }
                         }}
                       >
-                        {performer.hash_verified && performer.internal_duplicate_count === 0 ? (
+                        {performer.hash_verified ? (
                           <CheckCircleIcon />
                         ) : performer.internal_duplicate_count > 0 ? (
                           <Badge
