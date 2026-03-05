@@ -12,6 +12,34 @@ try {
 }
 
 /**
+ * Detect Chromium/Chrome executable path based on environment.
+ * Checks env vars first, then common Linux paths, then Windows fallback.
+ */
+function getChromePath() {
+  // Environment variable overrides (set in Dockerfile or docker-compose)
+  if (process.env.CHROME_BIN) return process.env.CHROME_BIN;
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  // Common Linux paths (Docker / TrueNAS / bare-metal Linux)
+  const linuxPaths = [
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable'
+  ];
+  for (const p of linuxPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+
+  // Windows fallback
+  const winPath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  if (fs.existsSync(winPath)) return winPath;
+
+  console.warn('No Chrome/Chromium binary found! Puppeteer scraping will fail.');
+  return null;
+}
+
+/**
  * Parse measurement string into detailed fields
  * Examples: "34C (Natural)", "32D (Fake)", "36DD"
  */
@@ -249,8 +277,8 @@ async function scrapeWithPuppeteer(name) {
 
   const browser = await puppeteer.launch({
     headless: true,
-    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // Windows Chrome path
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    executablePath: getChromePath(),
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
   });
 
   try {
@@ -1007,8 +1035,8 @@ async function fetchLatestContentTimeWithPuppeteer(nameToSearch) {
 
   const browser = await puppeteer.launch({
     headless: true,
-    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    executablePath: getChromePath(),
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
   });
 
   try {

@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
     build-essential \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -58,7 +59,9 @@ ENV NODE_ENV=production \
     MEDIA_BASE_PATH=/media \
     CONTENT_BASE_PATH=/app/content \
     DATA_PATH=/app/data \
-    CONTAINER=true
+    CONTAINER=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 EXPOSE 4069
 
