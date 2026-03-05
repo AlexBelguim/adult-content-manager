@@ -60,7 +60,7 @@ function HashResultsPage() {
   const [performerId, setPerformerId] = useState(null);
   const [keptSectionOpen, setKeptSectionOpen] = useState(false);
   const groupsPerPage = 20;
-  const itemsPerPage = 300;
+  const itemsPerPage = 5000;
 
   useEffect(() => {
     if (runId) {

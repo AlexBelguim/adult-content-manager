@@ -15,7 +15,7 @@ router.get('/genres', async (req, res) => {
   const { basePath, fast } = req.query;
   const contentPath = path.join(basePath, 'content');
   const startTime = Date.now();
-  
+
   try {
     // Check cache first
     const cacheKey = `genres_${basePath}`;
@@ -23,39 +23,47 @@ router.get('/genres', async (req, res) => {
       console.log(`[genres] Returning cached data (${Date.now() - startTime}ms)`);
       return res.send(genresCache.data);
     }
-    
+
     const genres = await fs.readdir(contentPath, { withFileTypes: true });
     const data = [];
-    
+
     // Fast mode: just get folder names and basic counts from DB if available
     // Avoid expensive file system scans
     for (const genre of genres.filter(g => g.isDirectory())) {
       const genrePath = path.join(contentPath, genre.name);
-      
+
       // Get counts from database cache if available
       const dbCounts = db.prepare(`
         SELECT 
           (SELECT COUNT(*) FROM file_tags WHERE tag = ?) as tagged_count
       `).get(genre.name);
-      
-      // Quick directory listing without stats
+
+      // Recursive directory scan for origin counts
       let originCounts = { pics: 0, vids: 0, funscripts: 0 };
-      try {
-        const files = await fs.readdir(genrePath);
-        for (const file of files) {
-          const ext = path.extname(file).toLowerCase();
-          if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
-            originCounts.pics++;
-          } else if (['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'].includes(ext)) {
-            originCounts.vids++;
-          } else if (ext === '.funscript') {
-            originCounts.funscripts++;
+      async function countFilesRecursive(dirPath) {
+        try {
+          const entries = await fs.readdir(dirPath, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name);
+            if (entry.isDirectory()) {
+              await countFilesRecursive(fullPath);
+            } else {
+              const ext = path.extname(entry.name).toLowerCase();
+              if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+                originCounts.pics++;
+              } else if (['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'].includes(ext)) {
+                originCounts.vids++;
+              } else if (ext === '.funscript') {
+                originCounts.funscripts++;
+              }
+            }
           }
+        } catch (e) {
+          // Skip if can't read
         }
-      } catch (e) {
-        // Skip if can't read
       }
-      
+      await countFilesRecursive(genrePath);
+
       // Get virtual counts from database (fast)
       const virtualCounts = { pics: 0, vids: 0, funscripts: 0 };
       const taggedFiles = db.prepare('SELECT file_path FROM file_tags WHERE tag = ?').all(genre.name);
@@ -69,13 +77,13 @@ router.get('/genres', async (req, res) => {
           }
         }
       }
-      
+
       // Get exported files count (fast)
       const exportedCount = db.prepare(`
         SELECT COUNT(*) as count FROM exported_files WHERE tags LIKE ?
       `).get(`%"${genre.name}"%`);
       virtualCounts.vids += exportedCount?.count || 0;
-      
+
       data.push({
         name: genre.name,
         pics: originCounts.pics + virtualCounts.pics,
@@ -86,11 +94,11 @@ router.get('/genres', async (req, res) => {
         virtualCounts
       });
     }
-    
+
     // Cache the result
     genresCache = { basePath, data };
     genresCacheTime = Date.now();
-    
+
     console.log(`[genres] Completed in ${Date.now() - startTime}ms for ${data.length} genres`);
     res.send(data);
   } catch (err) {
