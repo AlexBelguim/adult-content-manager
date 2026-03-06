@@ -44,6 +44,9 @@ class FunscriptPlayer extends HTMLElement {
     if (video) {
       video.pause();
       video.removeAttribute('src');
+      // Remove all <source> children so the browser fully releases the stream
+      video.querySelectorAll('source').forEach(s => s.remove());
+      video.srcObject = null;
       video.load(); // Force release of media resources
     }
   }
@@ -136,6 +139,9 @@ class FunscriptPlayer extends HTMLElement {
   }
 
   disconnectedCallback() {
+    // Mark disconnected immediately to prevent stale renders
+    this._isConnected = false;
+
     // Stop any playing video to prevent ghost audio
     this.stopExistingVideo();
     // Cancel any pending autoplay

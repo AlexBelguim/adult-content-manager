@@ -598,70 +598,16 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   const [shouldRestoreModal, setShouldRestoreModal] = useState(false);
   const mediaContainerRef = React.useRef(null);
 
-  // Simple fullscreen restoration - use native video fullscreen directly
+  // Fullscreen restoration - the FunscriptPlayer component handles this natively
+  // via the autofullscreen attribute, so we just clear the flag after it's been consumed
   useEffect(() => {
-    if (shouldRestoreFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids') && mediaContainerRef.current) {
-      console.log('Starting fullscreen restoration...');
-
-      // Already in fullscreen? Done.
-      if (document.fullscreenElement) {
-        console.log('Already in fullscreen');
+    if (shouldRestoreFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids')) {
+      // The flag is consumed by passing autofullscreen="true" to the funscript-player.
+      // Clear it after a short delay so the attribute is applied first.
+      const timeout = setTimeout(() => {
         setShouldRestoreFullscreen(false);
-        return;
-      }
-
-      let retryCount = 0;
-      const maxRetries = 10;
-      let timeoutId = null;
-
-      const attemptFullscreen = () => {
-        const container = mediaContainerRef.current;
-        if (!container) {
-          setShouldRestoreFullscreen(false);
-          return;
-        }
-
-        // Find video element (may be in shadow DOM)
-        const funscriptPlayer = container.querySelector('funscript-player');
-        const video = container.querySelector('video') ||
-          (funscriptPlayer?.shadowRoot?.querySelector('video'));
-
-        console.log(`Fullscreen attempt ${retryCount + 1}/${maxRetries}:`, { video: !!video });
-
-        if (video) {
-          // Use native video fullscreen directly
-          video.requestFullscreen()
-            .then(() => {
-              console.log('Video fullscreen successful');
-              // Also try to autoplay
-              video.play().catch(() => {});
-              setShouldRestoreFullscreen(false);
-            })
-            .catch(err => {
-              console.log('Video fullscreen failed:', err.message);
-              retryCount++;
-              if (retryCount < maxRetries) {
-                timeoutId = setTimeout(attemptFullscreen, 300);
-              } else {
-                setShouldRestoreFullscreen(false);
-              }
-            });
-        } else {
-          retryCount++;
-          if (retryCount < maxRetries) {
-            timeoutId = setTimeout(attemptFullscreen, 200);
-          } else {
-            setShouldRestoreFullscreen(false);
-          }
-        }
-      };
-
-      const initialTimeout = setTimeout(attemptFullscreen, 200);
-
-      return () => {
-        clearTimeout(initialTimeout);
-        if (timeoutId) clearTimeout(timeoutId);
-      };
+      }, 500);
+      return () => clearTimeout(timeout);
     }
   }, [shouldRestoreFullscreen, currentTab, currentFile]);
 
@@ -1174,7 +1120,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               )}
               {currentTab === 'vids' && (
                 <funscript-player
-                  key="vid-player"
+                  key={`vid-${currentFile.path}`}
                   src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
                   type="video"
                   performer-id={performer.id}
@@ -1184,12 +1130,13 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                   tagassign="true"
                   scenemanager="true"
                   autoplay="true"
+                  autofullscreen={shouldRestoreFullscreen ? 'true' : undefined}
                   className="funscript-player-embed"
                 ></funscript-player>
               )}
               {currentTab === 'funscript_vids' && (
                 <funscript-player
-                  key="fvid-player"
+                  key={`fvid-${currentFile.path}`}
                   src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
                   type="video"
                   performer-id={performer.id}
@@ -1200,6 +1147,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                   mode="standalone"
                   scenemanager="true"
                   autoplay="true"
+                  autofullscreen={shouldRestoreFullscreen ? 'true' : undefined}
                   funscripts={JSON.stringify(Array.isArray(currentFile.funscripts) ? currentFile.funscripts : [])}
                   data-debug-funscripts={JSON.stringify(Array.isArray(currentFile.funscripts) ? currentFile.funscripts : [])}
                   data-debug-performer={performer.name}
