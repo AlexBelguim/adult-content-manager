@@ -1,6 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
-const { uploadImportPerformer, uploadProgressMap } = require('./uploadImporter');
+const { uploadImportPerformer, localImportPerformer, uploadProgressMap } = require('./uploadImporter');
 
 /**
  * Upload Queue Service
@@ -27,6 +27,7 @@ function addToQueue(job) {
         uploadId: job.uploadId,
         totalFiles: job.totalFiles,
         createHashes: job.createHashes || false,
+        isLocalImport: false,
         status: 'queued',
         progress: 0,
         currentFile: null,
@@ -40,6 +41,39 @@ function addToQueue(job) {
     console.log(`[UploadQueue] Job ${jobId} added for "${job.performerName}" (${job.totalFiles} files)`);
 
     // Start processing if not already running
+    processNext();
+
+    return jobId;
+}
+
+/**
+ * Add a local import job to the queue (files already on disk in "before upload" folder)
+ * @param {Object} job - Job details
+ * @returns {string} - Job ID
+ */
+function addLocalImportToQueue(job) {
+    const jobId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const queuedJob = {
+        id: jobId,
+        performerName: job.performerName,
+        basePath: job.basePath,
+        uploadId: jobId,
+        totalFiles: job.totalFiles,
+        createHashes: job.createHashes || false,
+        isLocalImport: true,
+        status: 'queued',
+        progress: 0,
+        currentFile: null,
+        createdAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+        error: null
+    };
+
+    uploadQueue.push(queuedJob);
+    console.log(`[UploadQueue] Local import job ${jobId} added for "${job.performerName}" (${job.totalFiles} files)`);
+
     processNext();
 
     return jobId;
@@ -64,46 +98,56 @@ async function processNext() {
     nextJob.status = 'processing';
     nextJob.startedAt = new Date().toISOString();
 
-    console.log(`[UploadQueue] Starting processing job ${nextJob.id} for "${nextJob.performerName}"`);
+    console.log(`[UploadQueue] Starting processing job ${nextJob.id} for "${nextJob.performerName}" (local: ${nextJob.isLocalImport})`);
 
     try {
-        // Get files from temp directory
-        const tempDir = path.join(nextJob.basePath, '.temp-uploads');
-        const allTempFiles = await fs.readdir(tempDir);
+        if (nextJob.isLocalImport) {
+            // Local import — files are already in "before upload" folder
+            const result = await localImportPerformer(
+                nextJob.performerName,
+                nextJob.basePath,
+                nextJob.uploadId,
+                nextJob.createHashes
+            );
+            nextJob.result = result;
+        } else {
+            // Regular upload — files are in temp directory
+            const tempDir = path.join(nextJob.basePath, '.temp-uploads');
+            const allTempFiles = await fs.readdir(tempDir);
 
-        // Build file info array from temp files
-        const tempFileInfos = allTempFiles.map(filename => ({
-            path: path.join(tempDir, filename),
-            originalname: filename.replace(/^\d+-[a-z0-9]+-/, '') // Remove timestamp prefix
-        }));
+            const tempFileInfos = allTempFiles.map(filename => ({
+                path: path.join(tempDir, filename),
+                originalname: filename.replace(/^\d+-[a-z0-9]+-/, '')
+            }));
 
-        console.log(`[UploadQueue] Found ${tempFileInfos.length} files in temp for job ${nextJob.id}`);
+            console.log(`[UploadQueue] Found ${tempFileInfos.length} files in temp for job ${nextJob.id}`);
 
-        if (tempFileInfos.length === 0) {
-            throw new Error(`No files found in temp folder: ${tempDir}. Check storage permissions or path.`);
-        }
+            if (tempFileInfos.length === 0) {
+                throw new Error(`No files found in temp folder: ${tempDir}. Check storage permissions or path.`);
+            }
 
-        // Process the upload
-        const result = await uploadImportPerformer(
-            nextJob.performerName,
-            nextJob.basePath,
-            tempFileInfos,
-            nextJob.uploadId,
-            nextJob.createHashes
-        );
+            const result = await uploadImportPerformer(
+                nextJob.performerName,
+                nextJob.basePath,
+                tempFileInfos,
+                nextJob.uploadId,
+                nextJob.createHashes
+            );
 
-        // Clean up temp directory
-        try {
-            await fs.emptyDir(tempDir);
-            console.log(`[UploadQueue] Cleaned up temp directory for job ${nextJob.id}`);
-        } catch (cleanErr) {
-            console.error(`[UploadQueue] Failed to clean temp dir for job ${nextJob.id}:`, cleanErr.message);
+            // Clean up temp directory
+            try {
+                await fs.emptyDir(tempDir);
+                console.log(`[UploadQueue] Cleaned up temp directory for job ${nextJob.id}`);
+            } catch (cleanErr) {
+                console.error(`[UploadQueue] Failed to clean temp dir for job ${nextJob.id}:`, cleanErr.message);
+            }
+
+            nextJob.result = result;
         }
 
         nextJob.status = 'completed';
         nextJob.completedAt = new Date().toISOString();
         nextJob.progress = 100;
-        nextJob.result = result;
 
         console.log(`[UploadQueue] Job ${nextJob.id} completed successfully`);
 
@@ -142,6 +186,7 @@ function getQueueStatus() {
             status: job.status,
             progress: job.progress,
             currentFile: job.currentFile,
+            isLocalImport: job.isLocalImport,
             createdAt: job.createdAt,
             startedAt: job.startedAt,
             completedAt: job.completedAt,
@@ -185,7 +230,9 @@ function clearCompleted() {
 
 module.exports = {
     addToQueue,
+    addLocalImportToQueue,
     getQueueStatus,
     removeJob,
     clearCompleted
 };
+

@@ -327,6 +327,56 @@ async function uploadImportPerformer(performerName, basePath, files, uploadId, c
     };
 }
 
+/**
+ * Local import - import performer from "before upload" folder (no HTTP upload needed)
+ * Files are already on the filesystem, so we just build file infos and call uploadImportPerformer
+ */
+async function localImportPerformer(performerName, basePath, uploadId, createHashes = false) {
+    const sourceDir = path.join(basePath, 'before upload', performerName);
+
+    if (!await fs.pathExists(sourceDir)) {
+        throw new Error(`Folder not found: ${sourceDir}`);
+    }
+
+    // Recursively collect all files
+    const fileInfos = [];
+    async function collectFiles(dir) {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (entry.name.startsWith('.')) continue;
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                await collectFiles(fullPath);
+            } else if (entry.isFile()) {
+                fileInfos.push({
+                    path: fullPath,
+                    originalname: entry.name
+                });
+            }
+        }
+    }
+    await collectFiles(sourceDir);
+
+    if (fileInfos.length === 0) {
+        throw new Error(`No files found in folder: ${sourceDir}`);
+    }
+
+    console.log(`[LocalImport] Found ${fileInfos.length} files for "${performerName}" in before upload folder`);
+
+    // Use the existing import pipeline (files will be MOVED to before filter performer)
+    const result = await uploadImportPerformer(performerName, basePath, fileInfos, uploadId, createHashes);
+
+    // Clean up the now-empty source folder
+    try {
+        await fs.remove(sourceDir);
+        console.log(`[LocalImport] Cleaned up source folder: ${sourceDir}`);
+    } catch (cleanErr) {
+        console.warn(`[LocalImport] Could not remove source folder: ${cleanErr.message}`);
+    }
+
+    return result;
+}
+
 async function findThumbnailFromPath(picsPath) {
     try {
         if (!await fs.pathExists(picsPath)) return null;
@@ -343,5 +393,6 @@ async function findThumbnailFromPath(picsPath) {
 
 module.exports = {
     uploadImportPerformer,
+    localImportPerformer,
     uploadProgressMap
 };

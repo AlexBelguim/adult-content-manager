@@ -46,7 +46,7 @@ function setupWatcher(basePath, onNew) {
 }
 
 async function validateAndCreateStructure(basePath) {
-  const requiredSubs = ['before filter performer', 'content', 'after filter performer'];
+  const requiredSubs = ['before filter performer', 'content', 'after filter performer', 'before upload'];
   for (const sub of requiredSubs) {
     const subPath = path.join(basePath, sub);
     if (!await fs.pathExists(subPath)) {
@@ -84,6 +84,28 @@ async function scanBeforeFolder(basePath) {
   }
   
   return newPerformers;
+}
+
+async function scanBeforeUploadFolder(basePath) {
+  const uploadPath = path.join(basePath, 'before upload');
+  if (!await fs.pathExists(uploadPath)) return [];
+
+  const entries = await fs.readdir(uploadPath, { withFileTypes: true });
+  const performers = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+
+    const performerPath = path.join(uploadPath, entry.name);
+    const stats = await scanPerformerFolder(performerPath);
+    performers.push({
+      name: entry.name,
+      path: performerPath,
+      stats
+    });
+  }
+
+  return performers;
 }
 
 async function scanAfterFolder(basePath) {
@@ -404,6 +426,7 @@ module.exports = {
   validateAndCreateStructure, 
   scanBeforeFolder, 
   scanAfterFolder,
+  scanBeforeUploadFolder,
   scanPerformerFolder,
   scanDirectory,
   scanContentFolder,

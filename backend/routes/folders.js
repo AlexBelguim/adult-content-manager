@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { validateAndCreateStructure, scanBeforeFolder, scanAfterFolder, scanContentFolder, scanOrphanedPerformers } = require('../services/fileScanner');
+const { validateAndCreateStructure, scanBeforeFolder, scanAfterFolder, scanContentFolder, scanOrphanedPerformers, scanBeforeUploadFolder } = require('../services/fileScanner');
 const { importPerformer, getPerformerFiles } = require('../services/importer');
 const { uploadImportPerformer, uploadProgressMap } = require('../services/uploadImporter');
+const { addLocalImportToQueue } = require('../services/uploadQueue');
 
 const merger = require('../services/merger');
 
@@ -228,6 +229,62 @@ router.get('/performer-files/:performerName', async (req, res) => {
     res.send(files);
   } catch (err) {
     res.status(500).send({ error: err.message });
+  }
+});
+
+// Scan "before upload" folder for performer folders ready for local import
+router.get('/scan-before-upload', async (req, res) => {
+  try {
+    const folders = db.prepare('SELECT * FROM folders').all();
+    if (!folders.length) return res.json({ performers: [] });
+
+    const basePath = req.query.basePath || folders[0].path;
+    const performers = await scanBeforeUploadFolder(basePath);
+
+    res.json({
+      success: true,
+      performers,
+      count: performers.length
+    });
+  } catch (err) {
+    console.error('Error scanning before upload folder:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Local import - import performer(s) from "before upload" folder (no HTTP upload needed)
+router.post('/local-import', async (req, res) => {
+  const { performers, basePath, createHashes } = req.body;
+
+  if (!performers || !Array.isArray(performers) || performers.length === 0) {
+    return res.status(400).json({ error: 'performers array is required' });
+  }
+
+  if (!basePath) {
+    return res.status(400).json({ error: 'basePath is required' });
+  }
+
+  try {
+    const jobIds = [];
+
+    for (const performer of performers) {
+      const jobId = addLocalImportToQueue({
+        performerName: performer.name,
+        basePath,
+        totalFiles: performer.totalFiles || 0,
+        createHashes: !!createHashes
+      });
+      jobIds.push({ performerName: performer.name, jobId });
+    }
+
+    res.json({
+      success: true,
+      message: `${performers.length} performer(s) queued for local import`,
+      jobs: jobIds
+    });
+  } catch (err) {
+    console.error('Error queuing local import:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

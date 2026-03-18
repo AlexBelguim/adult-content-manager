@@ -21,6 +21,7 @@ import PairwisePage from './pages/PairwisePage';
 import './App.css';
 import BatchQueuePage from './pages/BatchQueuePage';
 import UploadQueuePage from './pages/UploadQueuePage';
+import LocalImportPage from './pages/LocalImportPage';
 import TinderSortingPage from './pages/TinderSortingPage';
 import PairwiseMobilePage from './pages/PairwiseMobilePage';
 import RankingInsightPage from './pages/RankingInsightPage';
@@ -518,6 +519,9 @@ function AppContent() {
 
             <Route path="/upload-queue" element={
               <UploadQueuePage basePath={basePath} />
+            } />
+            <Route path="/local-import" element={
+              <LocalImportPage basePath={basePath} />
             } />
             <Route path="/tindersorting" element={
               <TinderSortingPage basePath={basePath} />

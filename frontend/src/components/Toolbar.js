@@ -179,24 +179,44 @@ function Toolbar({
 
         {/* Upload Folder button - only show in filter mode */}
         {mode === 'filter' && (
-          <button
-            className="upload-folder-btn"
-            onClick={() => navigate('/upload-queue')}
-            style={{
-              marginLeft: '8px',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              color: 'white',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '14px'
-            }}
-            title="Upload a folder directly instead of scanning"
-          >
-            📁 Upload Folder
-          </button>
+          <>
+            <button
+              className="upload-folder-btn"
+              onClick={() => navigate('/upload-queue')}
+              style={{
+                marginLeft: '8px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '14px'
+              }}
+              title="Upload a folder directly instead of scanning"
+            >
+              📁 Upload Folder
+            </button>
+            <button
+              className="local-import-btn"
+              onClick={() => navigate('/local-import')}
+              style={{
+                marginLeft: '8px',
+                background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '14px'
+              }}
+              title="Import performers from the 'before upload' folder — faster than uploading"
+            >
+              📂 Local Import
+            </button>
+          </>
         )}
       </div>
 
