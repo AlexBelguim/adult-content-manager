@@ -1023,11 +1023,15 @@ class FunscriptPlayer extends HTMLElement {
 
   enterFullscreen() {
     console.log('🎥 enterFullscreen() called');
+    if (this.classList.contains('fullscreen')) {
+      console.log('🎥 Already in fullscreen mode, skipping');
+      return;
+    }
 
     // Try native browser fullscreen first (gives true fullscreen experience)
+    // ALWAYS use 'this' (the host element) so that when we replace inner HTML on file change, we don't exit fullscreen
+    const elementToFullscreen = this;
     const video = this.shadowRoot.querySelector('video');
-    const mediaContainer = this.shadowRoot.querySelector('.media-container');
-    const elementToFullscreen = video || mediaContainer || this;
 
     if (elementToFullscreen.requestFullscreen) {
       elementToFullscreen.requestFullscreen()

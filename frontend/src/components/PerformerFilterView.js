@@ -743,18 +743,34 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e) => {
-      if (e.key === shortcuts.keep) handleFilterAction('keep');
-      if (e.key === shortcuts.delete) handleFilterAction('delete');
-      if (e.key === shortcuts.move_to_funscript && currentTab === 'vids') handleFilterAction('move_to_funscript');
-      if (e.key === shortcuts.undo) handleUndo();
-      if (e.key === shortcuts.prev && currentIndex > 0) navigateWithFullscreen(currentIndex - 1);
-      if (e.key === shortcuts.next && currentIndex < files.length - 1) navigateWithFullscreen(currentIndex + 1);
+      // Ignore if typing in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      let actionTaken = false;
+      if (e.key === shortcuts.keep) { handleFilterAction('keep'); actionTaken = true; }
+      else if (e.key === shortcuts.delete) { handleFilterAction('delete'); actionTaken = true; }
+      else if (e.key === shortcuts.move_to_funscript && currentTab === 'vids') { handleFilterAction('move_to_funscript'); actionTaken = true; }
+      else if (e.key === shortcuts.undo) { handleUndo(); actionTaken = true; }
+      else if (e.key === shortcuts.prev && currentIndex > 0) { navigateWithFullscreen(currentIndex - 1); actionTaken = true; }
+      else if (e.key === shortcuts.next && currentIndex < files.length - 1) { navigateWithFullscreen(currentIndex + 1); actionTaken = true; }
+
+      if (actionTaken) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // If a button (like the fullscreen button) happens to be focused, blurring it
+        // ensures that subsequent spaces/enters don't re-trigger that button unintentionally.
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }
     };
 
     // Only add listener if shortcuts are loaded
     if (Object.keys(shortcuts).length > 0) {
-      window.addEventListener('keydown', handleKeyPress);
-      return () => window.removeEventListener('keydown', handleKeyPress);
+      // Use capture phase (true) to intercept shortcuts before native video elements consume them
+      window.addEventListener('keydown', handleKeyPress, true);
+      return () => window.removeEventListener('keydown', handleKeyPress, true);
     }
   }, [currentIndex, files.length, currentTab, handleFilterAction, handleUndo, shortcuts, navigateWithFullscreen]);
 
@@ -1120,7 +1136,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               )}
               {currentTab === 'vids' && (
                 <funscript-player
-                  key={`vid-${currentFile.path}`}
+                  key="vid-player"
                   src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
                   type="video"
                   performer-id={performer.id}
@@ -1136,7 +1152,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               )}
               {currentTab === 'funscript_vids' && (
                 <funscript-player
-                  key={`fvid-${currentFile.path}`}
+                  key="fvid-player"
                   src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
                   type="video"
                   performer-id={performer.id}
