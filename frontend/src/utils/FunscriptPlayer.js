@@ -3607,6 +3607,63 @@ class FunscriptPlayer extends HTMLElement {
   }
 
   render() {
+    const src = this.getAttribute('src');
+    const type = this.getAttribute('type') || 'video';
+    const mode = this.getAttribute('mode') || 'standalone';
+
+    // Fast-path DOM update to prevent destroying the video element
+    // Destroying the video element forces the browser to exit native fullscreen and breaks autoplay gesture trust.
+    if (this._isConnected && this.shadowRoot && this.shadowRoot.querySelector('.media-container')) {
+      const video = this.shadowRoot.querySelector('video');
+      if (video && type === 'video' && mode === 'standalone') {
+        video.pause(); // Stop old playback
+
+        let filePath = src;
+        if (src && src.includes('/api/files/raw?path=')) {
+          const urlParams = new URLSearchParams(src.split('?')[1]);
+          filePath = urlParams.get('path');
+        }
+
+        if (!this._cachedThumbnailUrl || this._lastSrc !== src) {
+          this._cachedThumbnailUrl = `/api/files/video-thumbnail?path=${encodeURIComponent(filePath)}`;
+          this._lastSrc = src;
+        }
+
+        video.poster = this._cachedThumbnailUrl;
+        
+        const sourceElement = video.querySelector('source');
+        if (sourceElement) {
+          sourceElement.src = src;
+        } else {
+          video.src = src;
+        }
+        
+        video.load();
+
+        // Update auxiliary buttons without destroying the rest of the UI
+        const updateButton = (selector, renderFunc) => {
+          const oldBtn = this.shadowRoot.querySelector(selector);
+          const temp = document.createElement('div');
+          temp.innerHTML = renderFunc.call(this);
+          const newBtn = temp.firstElementChild;
+          
+          if (oldBtn && newBtn) {
+            oldBtn.replaceWith(newBtn);
+          } else if (oldBtn && !newBtn) {
+            oldBtn.remove();
+          } else if (!oldBtn && newBtn) {
+            this.shadowRoot.querySelector('.media-container').appendChild(newBtn);
+          }
+        };
+
+        updateButton('.funscript-btn', this.renderFunscriptButton);
+        updateButton('.tagassign-btn', this.renderTagAssignButton);
+        updateButton('.scenemanager-btn', this.renderSceneManagerButton);
+
+        return; // Skip full render!
+      }
+    }
+
     // Stop any existing video before replacing the DOM to prevent ghost audio
     this.stopExistingVideo();
 
