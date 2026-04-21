@@ -3364,7 +3364,7 @@ class FunscriptPlayer extends HTMLElement {
 
     return `
       <div class="media-container ${view}">
-        <video poster="${videoThumbnailUrl}" preload="metadata" ${this.getAttribute('mode') !== 'modal' ? 'controls' : ''} style="object-fit: contain; width: 100%; height: 100%;">
+        <video data-last-src="${src}" poster="${videoThumbnailUrl}" preload="metadata" ${this.getAttribute('mode') !== 'modal' ? 'controls' : ''} style="object-fit: contain; width: 100%; height: 100%;">
           <source src="${src}" type="video/mp4">
           Your browser does not support the video tag.
         </video>
@@ -3616,29 +3616,34 @@ class FunscriptPlayer extends HTMLElement {
     if (this._isConnected && this.shadowRoot && this.shadowRoot.querySelector('.media-container')) {
       const video = this.shadowRoot.querySelector('video');
       if (video && type === 'video' && mode === 'standalone') {
-        video.pause(); // Stop old playback
+        const needsSrcUpdate = video.getAttribute('data-last-src') !== src;
 
-        let filePath = src;
-        if (src && src.includes('/api/files/raw?path=')) {
-          const urlParams = new URLSearchParams(src.split('?')[1]);
-          filePath = urlParams.get('path');
-        }
+        if (needsSrcUpdate) {
+          video.pause(); // Stop old playback
 
-        if (!this._cachedThumbnailUrl || this._lastSrc !== src) {
-          this._cachedThumbnailUrl = `/api/files/video-thumbnail?path=${encodeURIComponent(filePath)}`;
-          this._lastSrc = src;
-        }
+          let filePath = src;
+          if (src && src.includes('/api/files/raw?path=')) {
+            const urlParams = new URLSearchParams(src.split('?')[1]);
+            filePath = urlParams.get('path');
+          }
 
-        video.poster = this._cachedThumbnailUrl;
-        
-        const sourceElement = video.querySelector('source');
-        if (sourceElement) {
-          sourceElement.src = src;
-        } else {
-          video.src = src;
+          if (!this._cachedThumbnailUrl || this._lastSrc !== src) {
+            this._cachedThumbnailUrl = `/api/files/video-thumbnail?path=${encodeURIComponent(filePath)}`;
+            this._lastSrc = src;
+          }
+
+          video.poster = this._cachedThumbnailUrl;
+          
+          const sourceElement = video.querySelector('source');
+          if (sourceElement) {
+            sourceElement.src = src;
+          } else {
+            video.src = src;
+          }
+          
+          video.setAttribute('data-last-src', src);
+          video.load();
         }
-        
-        video.load();
 
         // Update auxiliary buttons without destroying the rest of the UI
         const updateButton = (selector, renderFunc) => {
