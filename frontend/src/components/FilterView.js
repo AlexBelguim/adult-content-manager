@@ -111,6 +111,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
   const [containerWidth, setContainerWidth] = useState(0);
   const [backgroundTasks, setBackgroundTasks] = useState([]);
   const pollingIntervalsRef = useRef(new Map());
+  const prevSortRef = useRef(sort);
 
   // Track initial tab when opening performer
   const [initialTab, setInitialTab] = useState(null);
@@ -140,8 +141,11 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
   };
 
   useEffect(() => {
-    // If we have cached data, use it immediately
-    if (cachedPerformers && cachedPerformers.length > 0) {
+    const isSortChange = prevSortRef.current !== sort;
+    prevSortRef.current = sort;
+
+    // If we have cached data and sort hasn't just changed, use it immediately
+    if (!isSortChange && cachedPerformers && cachedPerformers.length > 0) {
       console.log(`FilterView: Using ${cachedPerformers.length} cached performers`);
       setAllPerformers(cachedPerformers);
       setRenderedCount(cachedPerformers.length);
