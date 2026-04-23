@@ -269,6 +269,7 @@ router.post('/local-import', async (req, res) => {
 
     for (const performer of performers) {
       const jobId = addLocalImportToQueue({
+        folderName: performer.folderName,
         performerName: performer.name,
         basePath,
         totalFiles: performer.totalFiles || 0,

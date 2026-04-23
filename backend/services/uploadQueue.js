@@ -56,6 +56,7 @@ function addLocalImportToQueue(job) {
 
     const queuedJob = {
         id: jobId,
+        folderName: job.folderName,
         performerName: job.performerName,
         basePath: job.basePath,
         uploadId: jobId,
@@ -104,6 +105,7 @@ async function processNext() {
         if (nextJob.isLocalImport) {
             // Local import — files are already in "before upload" folder
             const result = await localImportPerformer(
+                nextJob.folderName || nextJob.performerName,
                 nextJob.performerName,
                 nextJob.basePath,
                 nextJob.uploadId,

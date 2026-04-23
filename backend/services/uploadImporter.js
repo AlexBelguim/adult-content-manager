@@ -331,8 +331,8 @@ async function uploadImportPerformer(performerName, basePath, files, uploadId, c
  * Local import - import performer from "before upload" folder (no HTTP upload needed)
  * Files are already on the filesystem, so we just build file infos and call uploadImportPerformer
  */
-async function localImportPerformer(performerName, basePath, uploadId, createHashes = false) {
-    const sourceDir = path.join(basePath, 'before upload', performerName);
+async function localImportPerformer(folderName, performerName, basePath, uploadId, createHashes = false) {
+    const sourceDir = path.join(basePath, 'before upload', folderName);
 
     if (!await fs.pathExists(sourceDir)) {
         throw new Error(`Folder not found: ${sourceDir}`);

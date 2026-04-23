@@ -20,7 +20,8 @@ import {
     FormControlLabel,
     Tooltip,
     Fade,
-    Checkbox
+    Checkbox,
+    TextField
 } from '@mui/material';
 import {
     Delete as DeleteIcon,
@@ -52,6 +53,8 @@ function LocalImportPage({ basePath }) {
     const [selectedPerformers, setSelectedPerformers] = useState(new Set());
     const [importing, setImporting] = useState(false);
     const [createHashes, setCreateHashes] = useState(true);
+    // name overrides: folderName -> custom performer name
+    const [nameOverrides, setNameOverrides] = useState({});
 
     const formatFileSize = (gb) => {
         if (!gb || gb === 0) return '0 B';
@@ -95,6 +98,7 @@ function LocalImportPage({ basePath }) {
             if (data.success) {
                 setPerformers(data.performers);
                 setSelectedPerformers(new Set());
+                setNameOverrides({});
                 if (data.performers.length === 0) {
                     setSuccess('No performer folders found in "before upload". Place performer folders there first.');
                 }
@@ -154,7 +158,8 @@ function LocalImportPage({ basePath }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     performers: toImport.map(p => ({
-                        name: p.name,
+                        folderName: p.name,
+                        name: nameOverrides[p.name]?.trim() || p.name,
                         totalFiles: (p.stats?.pics_count || 0) + (p.stats?.vids_count || 0) + (p.stats?.funscript_files_count || 0)
                     })),
                     basePath,
@@ -168,6 +173,11 @@ function LocalImportPage({ basePath }) {
                 setSuccess(`${toImport.length} performer(s) queued for import! View progress in the queue.`);
                 // Remove imported performers from the list
                 setPerformers(prev => prev.filter(p => !selectedPerformers.has(p.name)));
+                setNameOverrides(prev => {
+                    const next = { ...prev };
+                    selectedPerformers.forEach(n => delete next[n]);
+                    return next;
+                });
                 setSelectedPerformers(new Set());
                 fetchQueueStatus();
             } else {
@@ -319,9 +329,20 @@ function LocalImportPage({ basePath }) {
                                                     />
                                                     <ListItemText
                                                         primary={
-                                                            <Typography variant="subtitle2" fontWeight="500">
-                                                                {performer.name}
-                                                            </Typography>
+                                                            <TextField
+                                                                value={nameOverrides[performer.name] ?? performer.name}
+                                                                onChange={e => setNameOverrides(prev => ({ ...prev, [performer.name]: e.target.value }))}
+                                                                onClick={e => e.stopPropagation()}
+                                                                size="small"
+                                                                variant="standard"
+                                                                inputProps={{ style: { fontSize: '0.875rem', fontWeight: 500, color: '#fff', padding: '2px 0' } }}
+                                                                sx={{
+                                                                    width: '100%',
+                                                                    '& .MuiInput-underline:before': { borderBottomColor: '#444' },
+                                                                    '& .MuiInput-underline:hover:before': { borderBottomColor: '#777' },
+                                                                    '& .MuiInput-underline:after': { borderBottomColor: '#4CAF50' },
+                                                                }}
+                                                            />
                                                         }
                                                         secondary={
                                                             <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
