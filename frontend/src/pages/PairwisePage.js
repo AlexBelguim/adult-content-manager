@@ -6,7 +6,7 @@ import {
 } from '@mui/material';
 import {
     CompareArrows, School, Psychology, TuneRounded, HealthAndSafety, AutoFixHigh, SmartToy,
-    Settings, Refresh, CheckCircle, Error as ErrorIcon
+    Settings, Refresh, CheckCircle, Error as ErrorIcon, FilterAlt, Science
 } from '@mui/icons-material';
 
 // Sub-pages (will create these next)
@@ -17,6 +17,8 @@ import PairwiseThresholdPage from './PairwiseThresholdPage';
 import PairwiseHealthPage from './PairwiseHealthPage';
 import PairwiseRefinePage from './PairwiseRefinePage';
 import PairwiseAutoLabelPage from './PairwiseAutoLabelPage';
+import PairwiseFilterPage from './PairwiseFilterPage';
+import PairwiseBinaryPage from './PairwiseBinaryPage';
 
 const PAIRWISE_API = 'http://localhost:3334/api';
 
@@ -41,8 +43,12 @@ function PairwisePage() {
         if (path.includes('/training')) return 1;
         if (path.includes('/inference')) return 2;
         if (path.includes('/threshold')) return 3;
-        if (path.includes('/health')) return 4;
-        return 0; // labeler
+        if (path.includes('/filter')) return 4;
+        if (path.includes('/binary')) return 5;
+        if (path.includes('/refine')) return 6;
+        if (path.includes('/auto')) return 7;
+        if (path.includes('/health')) return 8;
+        return 0;
     };
 
     const [tabValue, setTabValue] = useState(getTabFromPath());
@@ -104,7 +110,17 @@ function PairwisePage() {
 
     const handleTabChange = (event, newValue) => {
         setTabValue(newValue);
-        const paths = ['/pairwise', '/pairwise/training', '/pairwise/inference', '/pairwise/threshold', '/pairwise/health'];
+        const paths = [
+            '/pairwise', 
+            '/pairwise/training', 
+            '/pairwise/inference', 
+            '/pairwise/threshold', 
+            '/pairwise/filter',
+            '/pairwise/binary',
+            '/pairwise/refine',
+            '/pairwise/auto',
+            '/pairwise/health'
+        ];
         navigate(paths[newValue]);
     };
 
@@ -336,6 +352,8 @@ function PairwisePage() {
                     <Tab icon={<School />} iconPosition="start" label="Training" />
                     <Tab icon={<Psychology />} iconPosition="start" label="Inference" />
                     <Tab icon={<TuneRounded />} iconPosition="start" label="Threshold" />
+                    <Tab icon={<FilterAlt />} iconPosition="start" label="Filter" />
+                    <Tab icon={<Science />} iconPosition="start" label="Binary" />
                     <Tab icon={<AutoFixHigh />} iconPosition="start" label="Refine" />
                     <Tab icon={<SmartToy />} iconPosition="start" label="Auto" />
                     <Tab icon={<HealthAndSafety />} iconPosition="start" label="Health" />
@@ -349,6 +367,8 @@ function PairwisePage() {
                     <Route path="training" element={<PairwiseTrainingPage serverUrl={serverUrl} />} />
                     <Route path="inference" element={<PairwiseInferencePage serverUrl={serverUrl} />} />
                     <Route path="threshold" element={<PairwiseThresholdPage serverUrl={serverUrl} />} />
+                    <Route path="filter" element={<PairwiseFilterPage serverUrl={serverUrl} />} />
+                    <Route path="binary" element={<PairwiseBinaryPage serverUrl={serverUrl} />} />
                     <Route path="refine" element={<PairwiseRefinePage serverUrl={serverUrl} />} />
                     <Route path="auto" element={<PairwiseAutoLabelPage serverUrl={serverUrl} />} />
                     <Route path="health" element={<PairwiseHealthPage serverUrl={serverUrl} />} />

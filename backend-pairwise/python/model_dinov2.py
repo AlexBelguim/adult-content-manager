@@ -29,7 +29,8 @@ class DinoV2PreferenceModel(nn.Module):
     def __init__(
         self, 
         model_name: str = "facebook/dinov2-large",
-        freeze_backbone: bool = True
+        freeze_backbone: bool = True,
+        unfreeze_last_n_blocks: int = 1
     ):
         super().__init__()
         
@@ -48,8 +49,9 @@ class DinoV2PreferenceModel(nn.Module):
         print(f"   Hidden dim: {hidden_dim}")
         
         # Preference Head - deeper MLP for nuanced scoring
+        # Input is now hidden_dim * 2 (CLS token + GAP patch tokens)
         self.head = nn.Sequential(
-            nn.Linear(hidden_dim, 512),
+            nn.Linear(hidden_dim * 2, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Dropout(0.3),
@@ -59,11 +61,22 @@ class DinoV2PreferenceModel(nn.Module):
             nn.Linear(128, 1)  # Single scalar score
         )
         
-        # Freeze backbone (train only the head)
+        # Freeze backbone (train only the head and last N blocks)
         if freeze_backbone:
-            print(f"   Freezing backbone weights")
+            print(f"   Freezing backbone weights (except last {unfreeze_last_n_blocks} blocks)")
             for param in self.backbone.parameters():
                 param.requires_grad = False
+                
+            if unfreeze_last_n_blocks > 0:
+                # Unfreeze last N blocks
+                for block in self.backbone.encoder.layer[-unfreeze_last_n_blocks:]:
+                    for param in block.parameters():
+                        param.requires_grad = True
+                
+                # Also unfreeze the final layernorm
+                if hasattr(self.backbone, 'layernorm'):
+                    for param in self.backbone.layernorm.parameters():
+                        param.requires_grad = True
     
     def forward_single(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """
@@ -79,14 +92,22 @@ class DinoV2PreferenceModel(nn.Module):
         outputs = self.backbone(pixel_values)
         
         # Extract [CLS] token (first token, represents whole image)
-        # Shape: [batch, hidden_dim]
         cls_token = outputs.last_hidden_state[:, 0, :]
         
+        # Extract patch tokens (all tokens after the first one)
+        patch_tokens = outputs.last_hidden_state[:, 1:, :]
+        
+        # Global Average Pooling over patch tokens for dense spatial features
+        patch_gap = patch_tokens.mean(dim=1)
+        
+        # Concatenate CLS and Patch GAP
+        combined_features = torch.cat([cls_token, patch_gap], dim=1)
+        
         # L2 normalize for training stability
-        cls_token = nn.functional.normalize(cls_token, p=2, dim=1)
+        combined_features = nn.functional.normalize(combined_features, p=2, dim=1)
         
         # Get preference score
-        score = self.head(cls_token)
+        score = self.head(combined_features)
         return score.squeeze(-1)
     
     def forward(

@@ -13,6 +13,7 @@ function PairwiseInferencePage({ serverUrl }) {
     const [loadingPerformers, setLoadingPerformers] = useState(true);
     const [folderPath, setFolderPath] = useState('');
     const [folderResults, setFolderResults] = useState(null);
+    const [progress, setProgress] = useState(null);
 
     // Inference server state
     const [inferenceHealth, setInferenceHealth] = useState(null);
@@ -92,6 +93,7 @@ function PairwiseInferencePage({ serverUrl }) {
 
         setLoading(true);
         setResults(null);
+        setProgress(null);
 
         try {
             const res = await fetch(`${serverUrl}/api/run-inference`, {
@@ -100,15 +102,72 @@ function PairwiseInferencePage({ serverUrl }) {
                 body: JSON.stringify({ performer: selectedPerformer })
             });
 
-            const data = await res.json();
-            if (data.success) {
-                setResults(data);
-            } else {
-                alert(data.error || 'Inference failed');
+            if (!res.ok) {
+                alert(`Error: ${res.statusText}`);
+                setLoading(false);
+                return;
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                
+                if (value) {
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    
+                    for (let line of lines) {
+                        line = line.trim();
+                        if (line.startsWith('data:')) {
+                            try {
+                                const data = JSON.parse(line.substring(5).trim());
+                                if (data.type === 'start' || data.type === 'progress') {
+                                    setProgress({ current: data.current || 0, total: data.total });
+                                } else if (data.type === 'done') {
+                                    setResults({
+                                        success: true,
+                                        performer: selectedPerformer,
+                                        totalImages: data.total,
+                                        results: data.results
+                                    });
+                                    setProgress(null);
+                                } else if (data.error) {
+                                    alert(data.error);
+                                    setProgress(null);
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e, line);
+                            }
+                        }
+                    }
+                }
+                
+                if (done) {
+                    if (buffer.trim().startsWith('data:')) {
+                        try {
+                            const data = JSON.parse(buffer.trim().substring(5).trim());
+                            if (data.type === 'done') {
+                                setResults({
+                                    success: true,
+                                    performer: selectedPerformer,
+                                    totalImages: data.total,
+                                    results: data.results
+                                });
+                                setProgress(null);
+                            }
+                        } catch (e) { }
+                    }
+                    break;
+                }
             }
         } catch (err) {
             console.error('Error running inference:', err);
             alert('Failed to run inference. Is the inference server running?');
+            setProgress(null);
         } finally {
             setLoading(false);
         }
@@ -119,6 +178,7 @@ function PairwiseInferencePage({ serverUrl }) {
 
         setLoading(true);
         setFolderResults(null);
+        setProgress(null);
 
         try {
             const res = await fetch(`${serverUrl}/api/run-inference-folder`, {
@@ -127,15 +187,72 @@ function PairwiseInferencePage({ serverUrl }) {
                 body: JSON.stringify({ folderPath })
             });
 
-            const data = await res.json();
-            if (data.success) {
-                setFolderResults(data);
-            } else {
-                alert(data.error || 'Inference failed');
+            if (!res.ok) {
+                alert(`Error: ${res.statusText}`);
+                setLoading(false);
+                return;
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                
+                if (value) {
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    
+                    for (let line of lines) {
+                        line = line.trim();
+                        if (line.startsWith('data:')) {
+                            try {
+                                const data = JSON.parse(line.substring(5).trim());
+                                if (data.type === 'start' || data.type === 'progress') {
+                                    setProgress({ current: data.current || 0, total: data.total });
+                                } else if (data.type === 'done') {
+                                    setFolderResults({
+                                        success: true,
+                                        folderPath: folderPath,
+                                        totalImages: data.total,
+                                        results: data.results
+                                    });
+                                    setProgress(null);
+                                } else if (data.error) {
+                                    alert(data.error);
+                                    setProgress(null);
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e, line);
+                            }
+                        }
+                    }
+                }
+                
+                if (done) {
+                    if (buffer.trim().startsWith('data:')) {
+                        try {
+                            const data = JSON.parse(buffer.trim().substring(5).trim());
+                            if (data.type === 'done') {
+                                setFolderResults({
+                                    success: true,
+                                    folderPath: folderPath,
+                                    totalImages: data.total,
+                                    results: data.results
+                                });
+                                setProgress(null);
+                            }
+                        } catch (e) { }
+                    }
+                    break;
+                }
             }
         } catch (err) {
             console.error('Error running folder inference:', err);
             alert('Failed to run inference');
+            setProgress(null);
         } finally {
             setLoading(false);
         }
@@ -303,10 +420,25 @@ function PairwiseInferencePage({ serverUrl }) {
 
                 {loading && (
                     <Box sx={{ mt: 2 }}>
-                        <Typography variant="body2" sx={{ mb: 1, color: '#888' }}>
-                            Scoring images... This may take a moment.
-                        </Typography>
-                        <LinearProgress color="secondary" />
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                            <Typography variant="body2" sx={{ color: '#888' }}>
+                                Scoring images... This may take a moment.
+                            </Typography>
+                            {progress && (
+                                <Typography variant="body2" sx={{ color: '#00d9ff', fontWeight: 'bold' }}>
+                                    {progress.current} / {progress.total} ({Math.round((progress.current / progress.total) * 100)}%)
+                                </Typography>
+                            )}
+                        </Box>
+                        {progress ? (
+                            <LinearProgress 
+                                variant="determinate" 
+                                value={(progress.current / progress.total) * 100} 
+                                color="secondary" 
+                            />
+                        ) : (
+                            <LinearProgress color="secondary" />
+                        )}
                     </Box>
                 )}
 

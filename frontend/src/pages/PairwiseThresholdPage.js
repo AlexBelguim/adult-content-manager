@@ -206,65 +206,68 @@ function PairwiseThresholdPage({ serverUrl }) {
                             Images Sorted by Score ({calibrationData.totalImages} total)
                         </Typography>
 
-                        <Grid container spacing={1} sx={{ maxHeight: 400, overflow: 'auto' }}>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                            gap: '8px',
+                            marginTop: '16px',
+                            width: '100%'
+                        }}>
                             {calibrationData.images?.map((img, i) => (
-                                <Grid item xs={4} sm={3} md={2} lg={1.5} key={i}>
+                                <Box
+                                    key={i}
+                                    sx={{
+                                        position: 'relative',
+                                        aspectRatio: '1',
+                                        bgcolor: '#1a1a2e',
+                                        borderRadius: 1,
+                                        overflow: 'hidden',
+                                        border: '1px solid #333'
+                                    }}
+                                >
+                                    <img
+                                        src={`${serverUrl}/api/image?path=${encodeURIComponent(img.path)}`}
+                                        alt=""
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                        loading="lazy"
+                                    />
+                                    {/* Original label badge */}
                                     <Box
                                         sx={{
-                                            position: 'relative',
-                                            aspectRatio: '1',
-                                            bgcolor: '#0f3460',
-                                            borderRadius: 1,
-                                            overflow: 'hidden',
-                                            border: `2px solid ${(img.score >= threshold && img.originalLabel === 'keep') ||
-                                                    (img.score < threshold && img.originalLabel === 'delete')
-                                                    ? '#4caf50' : '#f44336'
-                                                }`
+                                            position: 'absolute',
+                                            top: 4,
+                                            left: 4,
+                                            bgcolor: img.originalLabel === 'keep' ? '#4caf50' : '#f44336',
+                                            px: 0.5,
+                                            borderRadius: 0.5
                                         }}
                                     >
-                                        <img
-                                            src={`${serverUrl}/api/image?path=${encodeURIComponent(img.path)}`}
-                                            alt=""
-                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                        />
-                                        {/* Original label badge */}
-                                        <Box
-                                            sx={{
-                                                position: 'absolute',
-                                                top: 4,
-                                                left: 4,
-                                                bgcolor: img.originalLabel === 'keep' ? '#4caf50' : '#f44336',
-                                                px: 0.5,
-                                                borderRadius: 0.5
-                                            }}
-                                        >
-                                            <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: 10 }}>
-                                                {img.originalLabel === 'keep' ? 'K' : 'D'}
-                                            </Typography>
-                                        </Box>
-                                        {/* Score badge */}
-                                        <Box
-                                            sx={{
-                                                position: 'absolute',
-                                                bottom: 0,
-                                                left: 0,
-                                                right: 0,
-                                                bgcolor: 'rgba(0,0,0,0.8)',
-                                                py: 0.25,
-                                                textAlign: 'center'
-                                            }}
-                                        >
-                                            <Typography
-                                                variant="caption"
-                                                sx={{ fontWeight: 'bold', color: getScoreColor(img.score) }}
-                                            >
-                                                {Math.round(img.score)}
-                                            </Typography>
-                                        </Box>
+                                        <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: 10 }}>
+                                            {img.originalLabel === 'keep' ? 'K' : 'D'}
+                                        </Typography>
                                     </Box>
-                                </Grid>
+                                    {/* Score badge */}
+                                    <Box
+                                        sx={{
+                                            position: 'absolute',
+                                            bottom: 0,
+                                            left: 0,
+                                            right: 0,
+                                            bgcolor: 'rgba(0,0,0,0.7)',
+                                            py: 0.5,
+                                            textAlign: 'center'
+                                        }}
+                                    >
+                                        <Typography
+                                            variant="body2"
+                                            sx={{ fontWeight: 'bold', color: getScoreColor(img.score) }}
+                                        >
+                                            {Math.round(img.score)}
+                                        </Typography>
+                                    </Box>
+                                </Box>
                             ))}
-                        </Grid>
+                        </div>
                     </Paper>
                 </>
             )}

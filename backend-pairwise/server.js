@@ -110,6 +110,7 @@ async function scanPerformerFolders() {
         // Scan "after filter performer" folder for performers
         const afterPath = path.join(basePath, config.afterFolderName);
         const trainingRoot = path.join(basePath, config.trainingFolderName);
+        const beforeRoot = path.join(basePath, 'before filter performer');
         const blacklistRoot = path.join(basePath, 'blacklist'); // Standard naming
 
         const afterDirs = fs.existsSync(afterPath)
@@ -120,17 +121,17 @@ async function scanPerformerFolders() {
             ? fs.readdirSync(trainingRoot, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('.')).map(d => d.name)
             : [];
 
+        const beforeDirs = fs.existsSync(beforeRoot)
+            ? fs.readdirSync(beforeRoot, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('.')).map(d => d.name)
+            : [];
+
         const blacklistDirs = fs.existsSync(blacklistRoot)
             ? fs.readdirSync(blacklistRoot, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('.')).map(d => d.name)
             : [];
 
         // Union all performer names
-        const allPerfNames = new Set([...afterDirs, ...trainingDirs]);
+        const allPerfNames = new Set([...afterDirs, ...trainingDirs, ...beforeDirs]);
         // Note: We flag blacklisted ones but maybe don't want to load them for labeling unless they are also in others?
-        // User says "icon if the performer is blacklisted". Implies they might show up.
-        // If they are ONLY in blacklist, should they show up?
-        // "performers that only exist in in the keep for training should show up alswel"
-        // I'll include blacklist names too just in case.
         blacklistDirs.forEach(n => allPerfNames.add(n));
 
         console.log(`\n📂 Scanning ${allPerfNames.size} total performers across folders`);
@@ -139,10 +140,12 @@ async function scanPerformerFolders() {
             // Paths
             const pAfter = path.join(afterPath, perfName);
             const pTrain = path.join(trainingRoot, perfName);
+            const pBefore = path.join(beforeRoot, perfName);
 
             // Flags
             const inAfter = afterDirs.includes(perfName);
             const inTraining = trainingDirs.includes(perfName);
+            const inBefore = beforeDirs.includes(perfName);
             const inBlacklist = blacklistDirs.includes(perfName);
 
             // Scan images
@@ -155,14 +158,21 @@ async function scanPerformerFolders() {
             if (inTraining) {
                 deleteImages = scanForImages(pTrain);
             }
+            
+            let beforeImages = [];
+            if (inBefore) {
+                beforeImages = scanForImages(pBefore);
+            }
 
-            if (keepImages.length > 0 || deleteImages.length > 0) {
+            if (keepImages.length > 0 || deleteImages.length > 0 || beforeImages.length > 0) {
                 imageCache.performers[perfName] = {
                     name: perfName,
                     keep: keepImages,
                     delete: deleteImages,
+                    before: beforeImages,
                     inAfter,
                     inTraining,
+                    inBefore,
                     inBlacklist
                 };
             }
@@ -176,9 +186,11 @@ async function scanPerformerFolders() {
                     name,
                     keepCount: p.keep.length,
                     deleteCount: p.delete.length,
-                    totalCount: p.keep.length + p.delete.length,
+                    beforeCount: p.before.length,
+                    totalCount: p.keep.length + p.delete.length + p.before.length,
                     inAfter: p.inAfter,
                     inTraining: p.inTraining,
+                    inBefore: p.inBefore,
                     inBlacklist: p.inBlacklist
                 };
             })
@@ -706,8 +718,196 @@ app.get('/api/export', (req, res) => {
     });
 });
 
+// ─── Binary Classifier Endpoints ─────────────────────────────────────────────
+
+let binaryTrainingProcess = null;
+let binaryTrainingLogs = [];
+
+function addBinaryLog(msg) {
+    binaryTrainingLogs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+    if (binaryTrainingLogs.length > 500) binaryTrainingLogs.shift();
+}
+
+// Start binary training
+app.post('/api/train-binary', (req, res) => {
+    if (binaryTrainingProcess) {
+        return res.status(400).json({ error: 'Binary training already in progress' });
+    }
+
+    const { performers, epochs, warmupEpochs, outputName, resumeModel } = req.body;
+
+    if (!performers || performers.length === 0) {
+        return res.status(400).json({ error: 'No performers selected' });
+    }
+
+    binaryTrainingLogs = [];
+
+    // Gather keep/delete paths from imageCache
+    const keepDirs = [];
+    const deleteDirs = [];
+
+    for (const perfName of performers) {
+        const perf = imageCache.performers[perfName];
+        if (!perf) {
+            addBinaryLog(`WARNING: performer not found: ${perfName}`);
+            continue;
+        }
+
+        const basePath = imageCache.basePath || config.basePath;
+        const afterPath = path.join(basePath, config.afterFolderName, perfName);
+        const trainingPath = path.join(basePath, config.trainingFolderName, perfName);
+
+        if (fs.existsSync(afterPath) && perf.keep.length > 0) keepDirs.push(afterPath);
+        if (fs.existsSync(trainingPath) && perf.delete.length > 0) deleteDirs.push(trainingPath);
+    }
+
+    if (keepDirs.length === 0 || deleteDirs.length === 0) {
+        return res.status(400).json({ error: 'Not enough keep or delete images across selected performers' });
+    }
+
+    const outName = (outputName || 'binary_model').replace(/[^a-zA-Z0-9_-]/g, '_') + '.pt';
+    addBinaryLog(`Starting binary training on ${performers.length} performers`);
+    addBinaryLog(`Keep dirs: ${keepDirs.length}, Delete dirs: ${deleteDirs.length}`);
+    addBinaryLog(`Output: ${outName}, Epochs: ${epochs || 5}`);
+
+    const pythonScript = path.join(__dirname, 'python', 'train_binary.py');
+    const python = process.platform === 'win32' ? 'python' : 'python3';
+
+    const args = [
+        '-u', pythonScript,
+        '--keep-dirs', keepDirs.join(','),
+        '--delete-dirs', deleteDirs.join(','),
+        '--epochs', String(epochs || 5),
+        '--warmup-epochs', String(warmupEpochs !== undefined ? warmupEpochs : 2),
+        '--output', outName
+    ];
+
+    if (resumeModel) {
+        const resumePath = path.isAbsolute(resumeModel)
+            ? resumeModel
+            : path.join(__dirname, 'models', resumeModel);
+        args.push('--resume', resumePath);
+        addBinaryLog(`Resuming from: ${resumeModel}`);
+    }
+
+    addBinaryLog(`Command: ${python} ${args.join(' ')}`);
+
+    try {
+        binaryTrainingProcess = spawn(python, args, {
+            cwd: path.join(__dirname, 'python'),
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        });
+
+        binaryTrainingProcess.stdout.on('data', (data) => {
+            data.toString().split('\n').forEach(line => {
+                if (line.trim()) addBinaryLog(line.trim());
+            });
+        });
+
+        binaryTrainingProcess.stderr.on('data', (data) => {
+            data.toString().split('\n').forEach(line => {
+                if (line.trim()) addBinaryLog(`ERR: ${line.trim()}`);
+            });
+        });
+
+        binaryTrainingProcess.on('close', (code) => {
+            addBinaryLog(`Training finished with exit code ${code}`);
+            binaryTrainingProcess = null;
+        });
+
+        res.json({ success: true, message: 'Binary training started', output: outName });
+    } catch (err) {
+        addBinaryLog(`Failed to start: ${err.message}`);
+        binaryTrainingProcess = null;
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Binary training status
+app.get('/api/binary-training-status', (req, res) => {
+    res.json({
+        active: !!binaryTrainingProcess,
+        logs: binaryTrainingLogs
+    });
+});
+
+// Stop binary training
+app.post('/api/stop-binary-training', (req, res) => {
+    if (binaryTrainingProcess) {
+        binaryTrainingProcess.kill();
+        addBinaryLog('Training stopped by user');
+        binaryTrainingProcess = null;
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ error: 'No binary training in progress' });
+    }
+});
+
+// Evaluate binary model against known keep/delete images for selected performers
+app.post('/api/evaluate-binary', async (req, res) => {
+    const { performers, modelPath, threshold } = req.body;
+    const binaryUrl = 'http://localhost:3345';
+    const fetch = require('node-fetch');
+
+    if (!performers || performers.length === 0) {
+        return res.status(400).json({ error: 'No performers selected' });
+    }
+
+    try {
+        // Check binary server health
+        const healthRes = await fetch(`${binaryUrl}/health`).catch(() => null);
+        if (!healthRes || !healthRes.ok) {
+            return res.status(503).json({ error: 'Binary inference server not running on port 3345' });
+        }
+        const health = await healthRes.json();
+        if (!health.model_loaded) {
+            return res.status(400).json({ error: 'No binary model loaded in the inference server' });
+        }
+
+        // Gather keep/delete images for selected performers
+        const keepImages = [];
+        const deleteImages = [];
+
+        for (const perfName of performers) {
+            const perf = imageCache.performers[perfName];
+            if (!perf) continue;
+            keepImages.push(...perf.keep);
+            deleteImages.push(...perf.delete);
+        }
+
+        // Call binary evaluate endpoint (sample for speed)
+        const MAX_SAMPLE = 200;
+        const sampledKeep = keepImages.sort(() => Math.random() - 0.5).slice(0, MAX_SAMPLE);
+        const sampledDelete = deleteImages.sort(() => Math.random() - 0.5).slice(0, MAX_SAMPLE);
+
+        const evalRes = await fetch(`${binaryUrl}/evaluate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                keep_images: sampledKeep,
+                delete_images: sampledDelete,
+                threshold: threshold || 50
+            })
+        });
+
+        if (!evalRes.ok) {
+            throw new Error(`Evaluate returned ${evalRes.status}`);
+        }
+
+        const evalData = await evalRes.json();
+        res.json({ ...evalData, sampled: { keep: sampledKeep.length, delete: sampledDelete.length } });
+
+    } catch (err) {
+        console.error('Binary evaluate error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── End Binary Classifier Endpoints ──────────────────────────────────────────
+
 // Start training
 app.post('/api/train', (req, res) => {
+
     if (trainingProcess) {
         return res.status(400).json({ error: 'Training already in progress' });
     }
@@ -922,7 +1122,7 @@ app.get('/api/calibrate/:performer', (req, res) => {
 
 // Run inference
 app.post('/api/run-inference', async (req, res) => {
-    const { performer } = req.body;
+    const { performer, target, model, modelType } = req.body;
 
     if (!performer) {
         return res.status(400).json({ error: 'Missing performer' });
@@ -933,47 +1133,90 @@ app.post('/api/run-inference', async (req, res) => {
         return res.status(404).json({ error: 'Performer not found' });
     }
 
-    const allImages = [...perf.keep, ...perf.delete];
-    const inferenceUrl = queries.getSetting.get('inferenceServerUrl')?.value || config.inferenceServerUrl;
+    let allImages = [];
+    let cacheKey = performer;
+    if (target === 'before') {
+        allImages = perf.before || [];
+        cacheKey = `${performer}_before`;
+    } else {
+        allImages = [...perf.keep, ...perf.delete];
+    }
 
+    if (allImages.length === 0) {
+        return res.status(400).json({ error: 'No images found to infer' });
+    }
+
+    // Route to binary server or pairwise server based on modelType
+    const isBinary = modelType === 'binary';
+    const inferenceUrl = isBinary
+        ? BINARY_URL
+        : (queries.getSetting.get('inferenceServerUrl')?.value || config.inferenceServerUrl);
+
+    if (isBinary) cacheKey = `binary_${cacheKey}`;
+
+    console.log(`\n🧠 Running inference on ${allImages.length} images for: ${performer} (${target || 'default'}) [${isBinary ? 'binary' : 'pairwise'}]`);
+    console.log(`   Server: ${inferenceUrl}`);
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    res.write(`data: ${JSON.stringify({ type: 'start', total: allImages.length })}\n\n`);
+
+    const fetch = require('node-fetch');
+    const chunkSize = 32;
+    let allResults = [];
     try {
-        console.log(`\n🧠 Running inference on ${allImages.length} images for: ${performer}`);
-        console.log(`   Server: ${inferenceUrl}`);
-
-        const fetch = require('node-fetch');
-        const response = await fetch(`${inferenceUrl}/score`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ images: allImages })
-        });
-
-        if (!response.ok) {
-            throw new Error(`Inference server returned ${response.status}`);
+        // Auto-load model if not already loaded
+        const healthRes = await fetch(`${inferenceUrl}/health`).catch(() => null);
+        const healthData = healthRes ? await healthRes.json().catch(() => ({})) : {};
+        if (!healthData.model_loaded) {
+            console.log('   ⏳ Model not loaded — loading now...');
+            res.write(`data: ${JSON.stringify({ type: 'loading', message: 'Loading model...' })}\n\n`);
+            const loadRes = await fetch(`${inferenceUrl}/load`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: model || undefined })
+            });
+            if (!loadRes.ok) {
+                throw new Error(`Failed to load model: ${loadRes.status}`);
+            }
+            console.log('   ✅ Model loaded');
         }
 
-        const inferenceData = await response.json();
-        const results = inferenceData.results || [];
+        for (let i = 0; i < allImages.length; i += chunkSize) {
+            const chunk = allImages.slice(i, i + chunkSize);
+            
+            const response = await fetch(`${inferenceUrl}/score`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ images: chunk })
+            });
 
-        console.log(`   ✅ Scored ${results.length} images (${inferenceData.speed?.toFixed(1) || '?'} img/s)`);
+            if (!response.ok) {
+                throw new Error(`Inference server returned ${response.status}`);
+            }
 
-        // Cache results
-        queries.upsertInferenceResult.run(performer, JSON.stringify(results));
+            const inferenceData = await response.json();
+            const results = inferenceData.results || [];
+            allResults = allResults.concat(results);
+
+            res.write(`data: ${JSON.stringify({ type: 'progress', current: Math.min(i + chunkSize, allImages.length), total: allImages.length })}\n\n`);
+        }
+
+        // Cache results unconditionally
+        queries.upsertInferenceResult.run(cacheKey, JSON.stringify(allResults));
 
         // Sort by score
-        results.sort((a, b) => (b.score || b.normalized || 0) - (a.score || a.normalized || 0));
+        allResults.sort((a, b) => (b.score || b.normalized || 0) - (a.score || a.normalized || 0));
 
-        res.json({
-            success: true,
-            performer,
-            totalImages: allImages.length,
-            results
-        });
-
+        res.write(`data: ${JSON.stringify({ type: 'done', results: allResults, total: allImages.length })}\n\n`);
+        res.end();
+        console.log(`   ✅ Scored ${allResults.length} images for ${performer}`);
     } catch (err) {
         console.error('Inference error:', err);
-        res.status(500).json({
-            error: `Inference failed: ${err.message}. Is the inference server running at ${inferenceUrl}?`
-        });
+        res.write(`data: ${JSON.stringify({ error: `Inference failed: ${err.message}. Is the inference server running at ${inferenceUrl}?` })}\n\n`);
+        res.end();
     }
 });
 
@@ -995,32 +1238,45 @@ app.post('/api/run-inference-folder', async (req, res) => {
 
     const inferenceUrl = queries.getSetting.get('inferenceServerUrl')?.value || config.inferenceServerUrl;
 
-    try {
-        const fetch = require('node-fetch');
-        const response = await fetch(`${inferenceUrl}/score`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ images: imageFiles })
-        });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
 
-        if (!response.ok) {
-            throw new Error(`Inference server returned ${response.status}`);
+    res.write(`data: ${JSON.stringify({ type: 'start', total: imageFiles.length })}\n\n`);
+
+    const fetch = require('node-fetch');
+    const chunkSize = 32;
+    let allResults = [];
+
+    try {
+        for (let i = 0; i < imageFiles.length; i += chunkSize) {
+            const chunk = imageFiles.slice(i, i + chunkSize);
+            
+            const response = await fetch(`${inferenceUrl}/score`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ images: chunk })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Inference server returned ${response.status}`);
+            }
+
+            const inferenceData = await response.json();
+            const results = inferenceData.results || [];
+            allResults = allResults.concat(results);
+
+            res.write(`data: ${JSON.stringify({ type: 'progress', current: Math.min(i + chunkSize, imageFiles.length), total: imageFiles.length })}\n\n`);
         }
 
-        const inferenceData = await response.json();
-        const results = (inferenceData.results || []).sort((a, b) =>
-            (b.score || b.normalized || 0) - (a.score || a.normalized || 0)
-        );
+        allResults.sort((a, b) => (b.score || b.normalized || 0) - (a.score || a.normalized || 0));
 
-        res.json({
-            success: true,
-            folderPath,
-            totalImages: imageFiles.length,
-            results
-        });
-
+        res.write(`data: ${JSON.stringify({ type: 'done', results: allResults, total: imageFiles.length })}\n\n`);
+        res.end();
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Inference error:', err);
+        res.write(`data: ${JSON.stringify({ error: `Inference failed: ${err.message}. Is the inference server running at ${inferenceUrl}?` })}\n\n`);
+        res.end();
     }
 });
 
@@ -1038,7 +1294,10 @@ app.post('/api/predict-proposals', async (req, res) => {
         let candidates = [];
         for (const perfName of performers) {
             // Get all images for this performer
-            const images = imageCache.performerImages.get(perfName) || [];
+            const perfData = imageCache.performers[perfName];
+            if (!perfData) continue;
+            
+            const images = [...perfData.keep, ...perfData.delete];
             if (images.length === 0) continue;
 
             // Pick random subset (e.g. 2x requested count to ensure enough high-conf pairs)
@@ -1115,6 +1374,64 @@ app.post('/api/predict-proposals', async (req, res) => {
 
     } catch (err) {
         console.error('Proposal generation failed:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Execute filter by moving rejected images to 'deleted keep for training'
+app.post('/api/execute-filter', async (req, res) => {
+    const { performerName, deletePaths } = req.body;
+    
+    if (!performerName || !Array.isArray(deletePaths)) {
+        return res.status(400).json({ error: 'Missing performerName or deletePaths array' });
+    }
+
+    try {
+        const basePath = imageCache.basePath || config.basePath;
+        const fsExtra = require('fs-extra');
+        
+        let movedCount = 0;
+        let failedCount = 0;
+
+        // Path where rejected images go
+        const targetDir = path.join(basePath, 'deleted keep for training', performerName, 'pics');
+        await fsExtra.ensureDir(targetDir);
+
+        for (const sourcePath of deletePaths) {
+            try {
+                if (fs.existsSync(sourcePath)) {
+                    const fileName = path.basename(sourcePath);
+                    let destPath = path.join(targetDir, fileName);
+                    
+                    // Handle collisions
+                    if (fs.existsSync(destPath)) {
+                        const ext = path.extname(fileName);
+                        const nameWithoutExt = path.basename(fileName, ext);
+                        destPath = path.join(targetDir, `${nameWithoutExt}_${Date.now()}${ext}`);
+                    }
+                    
+                    await fsExtra.move(sourcePath, destPath, { overwrite: false });
+                    movedCount++;
+                } else {
+                    failedCount++;
+                }
+            } catch (moveErr) {
+                console.error(`Failed to move ${sourcePath}:`, moveErr);
+                failedCount++;
+            }
+        }
+
+        // Trigger a rescan so the cache updates
+        scanPerformerFolders();
+
+        res.json({ 
+            success: true, 
+            moved: movedCount, 
+            failed: failedCount 
+        });
+
+    } catch (err) {
+        console.error('Filter execution failed:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1229,8 +1546,41 @@ app.get('/api/image', (req, res) => {
     });
 });
 
+// ─── Binary Server Proxy Endpoints ───────────────────────────────────────────
+const BINARY_URL = 'http://localhost:3345';
+
+app.get('/api/binary-health', async (req, res) => {
+    try {
+        const fetch = require('node-fetch');
+        const r = await fetch(`${BINARY_URL}/health`);
+        const data = await r.json();
+        res.json(data);
+    } catch (err) {
+        res.json({ online: false, model_loaded: false, error: err.message });
+    }
+});
+
+app.post('/api/load-binary-model', async (req, res) => {
+    const { modelName } = req.body;
+    if (!modelName) return res.status(400).json({ error: 'Model name required' });
+    try {
+        const fetch = require('node-fetch');
+        const r = await fetch(`${BINARY_URL}/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: modelName })
+        });
+        const data = await r.json();
+        res.status(r.status).json(data);
+    } catch (err) {
+        res.status(503).json({ error: `Binary server not reachable: ${err.message}` });
+    }
+});
+// ─── End Binary Server Proxy ───────────────────────────────────────────────
+
 // Load model on inference server
 app.post('/api/load-model', async (req, res) => {
+
     const { modelName } = req.body;
     const inferenceUrl = queries.getSetting.get('inferenceServerUrl')?.value || config.inferenceServerUrl;
 

@@ -4,7 +4,8 @@
     "start:backend": "cd backend && node index.js",
     "start:pairwise": "cd backend-pairwise && node server.js",
     "start:inference": "cd backend-pairwise/python && python inference_server_dinov2.py",
-    "full": "npx concurrently \"npm run start:backend\" \"npm run start:pairwise\" \"npm run start:inference\"",
+    "start:binary": "cd backend-pairwise/python && python inference_binary.py",
+    "full": "npx concurrently \"npm run start:backend\" \"npm run start:pairwise\" \"npm run start:inference\" \"npm run start:binary\"",
     "build": "cd frontend && npm run build",
     "kill": "taskkill /f /im node.exe && taskkill /f /im python.exe"
   },

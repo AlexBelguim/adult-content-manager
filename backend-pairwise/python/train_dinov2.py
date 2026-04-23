@@ -26,6 +26,8 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from tqdm import tqdm
 from PIL import Image
 from transformers import AutoImageProcessor
+import torchvision.transforms as T
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from model_dinov2 import DinoV2PreferenceModel
 
@@ -50,6 +52,11 @@ class DINOv2PairwiseDataset(Dataset):
         self.pairs = pairs
         self.processor = processor
         self.augment = augment
+        
+        self.augment_transform = T.Compose([
+            T.RandomHorizontalFlip(p=0.5),
+            T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05)
+        ])
         
         # Resolve paths
         self.valid_pairs = []
@@ -98,6 +105,10 @@ class DINOv2PairwiseDataset(Dataset):
         else:
             image_a, image_b = winner_img, loser_img
             label = 1.0  # A IS the winner
+            
+        if self.augment:
+            image_a = self.augment_transform(image_a)
+            image_b = self.augment_transform(image_b)
         
         # Process with DINOv2 processor
         inputs_a = self.processor(images=image_a, return_tensors="pt")
@@ -183,9 +194,9 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--val-split", type=float, default=0.1)
     parser.add_argument("--output", default="output_dinov2", help="Output directory")
-    parser.add_argument("--output", default="output_dinov2", help="Output directory")
     parser.add_argument("--images", default="data/images", help="Path to images directory")
     parser.add_argument("--resume", default=None, help="Path to checkpoint to resume from")
+    parser.add_argument("--unfreeze-blocks", type=int, default=1, help="Number of final transformer blocks to unfreeze")
     args = parser.parse_args()
     
     # Device
@@ -257,7 +268,7 @@ def main():
     
     # Create model
     print(f"\n🔧 Creating DINOv2 model...")
-    model = DinoV2PreferenceModel(model_name=model_name).to(device)
+    model = DinoV2PreferenceModel(model_name=model_name, unfreeze_last_n_blocks=args.unfreeze_blocks).to(device)
     
     if args.resume:
         print(f"\n🔄 Resuming from checkpoint: {args.resume}")
@@ -277,6 +288,7 @@ def main():
         lr=args.lr,
         weight_decay=0.01
     )
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = nn.BCEWithLogitsLoss()
     
     # Output directory
@@ -294,11 +306,15 @@ def main():
         train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
         val_loss, val_acc = validate(model, val_loader, criterion, device)
         
+        scheduler.step()
+        
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
         
+        current_lr = scheduler.get_last_lr()[0]
+        print(f"   LR:         {current_lr:.6f}")
         print(f"   Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"   Val Loss:   {val_loss:.4f} | Val Acc:   {val_acc:.4f}")
         
