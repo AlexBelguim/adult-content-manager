@@ -138,9 +138,9 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
   const filteredImages = getFilteredImages();
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#1a1a1a' }}>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       {/* Header */}
-      <AppBar position="static" sx={{ bgcolor: '#2a2a2a' }}>
+      <AppBar position="static" sx={{ bgcolor: 'background.paper', backgroundImage: 'none' }}>
         <Toolbar>
           <IconButton
             edge="start"
@@ -178,7 +178,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
       </AppBar>
 
       {/* Controls */}
-      <Box sx={{ p: 2, bgcolor: '#252525', borderBottom: '1px solid #333' }}>
+      <Box sx={{ p: 2, bgcolor: 'background.paper', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', mb: 2 }}>
           <ToggleButtonGroup
             value={filter}
@@ -249,14 +249,14 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                 <Card
                   sx={{
                     position: 'relative',
-                    border: '1px solid #333',
-                    bgcolor: '#1a1a1a',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    bgcolor: 'background.paper',
                     height: '400px',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'linear-gradient(90deg, #1a1a1a 25%, #252525 50%, #1a1a1a 75%)',
+                    background: 'linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.02) 75%)',
                     backgroundSize: '200% 100%',
                     animation: 'shimmer 1.5s infinite',
                     '@keyframes shimmer': {
@@ -287,9 +287,9 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                   <Card
                     sx={{
                       position: 'relative',
-                      border: isSelected ? '3px solid #1976d2' : '1px solid #444',
+                      border: isSelected ? '3px solid #1976d2' : '1px solid rgba(255,255,255,0.1)',
                       boxShadow: isSelected ? 4 : 1,
-                      bgcolor: '#000',
+                      bgcolor: 'background.paper',
                       height: '400px',
                       display: 'flex',
                       flexDirection: 'column'
@@ -314,7 +314,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                           alignItems: 'center',
                           justifyContent: 'center',
                           overflow: 'hidden',
-                          bgcolor: '#1a1a1a',
+                          bgcolor: 'background.default',
                           position: 'relative',
                           p: 1
                         }}
@@ -331,7 +331,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              bgcolor: '#222'
+                              bgcolor: 'rgba(0,0,0,0.5)'
                             }}
                           >
                             <CircularProgress size={24} sx={{ color: 'rgba(255,255,255,0.3)' }} />
@@ -441,8 +441,8 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                   <Card
                     sx={{
                       position: 'relative',
-                      border: '1px solid #333',
-                      bgcolor: '#1a1a1a',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      bgcolor: 'background.paper',
                       height: '400px',
                       display: 'flex',
                       alignItems: 'center',
@@ -475,7 +475,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
             />
           )}
         </DialogContent>
-        <DialogActions sx={{ bgcolor: '#2a2a2a' }}>
+        <DialogActions sx={{ bgcolor: 'background.paper' }}>
           <Button onClick={() => setPreviewImage(null)} color="primary">
             Close
           </Button>

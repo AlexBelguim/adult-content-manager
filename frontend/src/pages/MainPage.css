@@ -1,7 +1,5 @@
 .main-page {
   min-height: calc(100vh - 60px);
-  background-color: #1a1a1a;
-  color: white;
 }
 
 .new-performers-notification {

@@ -706,7 +706,7 @@ function PerformerManagementPage() {
 
     return (
       <React.Fragment key={`group-${groupKey}`}>
-        <TableRow hover style={{ backgroundColor: '#fff3cd' }}>
+        <TableRow hover sx={{ backgroundColor: 'rgba(255, 152, 0, 0.15)' }}>
           <TableCell colSpan={8}>
             <Box display="flex" alignItems="center" justifyContent="space-between">
               <Box display="flex" alignItems="center">
@@ -742,7 +742,7 @@ function PerformerManagementPage() {
 
     return (
       <React.Fragment key={performer.id}>
-        <TableRow hover style={isDuplicate ? { backgroundColor: '#fffbf0' } : {}}>
+        <TableRow hover sx={isDuplicate ? { backgroundColor: 'rgba(255, 152, 0, 0.05)' } : {}}>
           <TableCell>
             <Box display="flex" alignItems="center">
               <IconButton

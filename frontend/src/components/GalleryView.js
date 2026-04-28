@@ -705,50 +705,15 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                 placeholder="Search performers..."
                 value={performerSearchTerm}
                 onChange={e => setPerformerSearchTerm(e.target.value)}
-                sx={{
-                  minWidth: 200,
-                  '& .MuiOutlinedInput-root': {
-                    color: 'white',
-                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                    '& fieldset': {
-                      borderColor: 'rgba(255, 255, 255, 0.3)',
-                    },
-                    '&:hover fieldset': {
-                      borderColor: 'rgba(255, 255, 255, 0.5)',
-                    },
-                    '&.Mui-focused fieldset': {
-                      borderColor: 'rgba(255, 255, 255, 0.7)',
-                    },
-                  },
-                  '& .MuiInputBase-input::placeholder': {
-                    color: 'rgba(255, 255, 255, 0.5)',
-                    opacity: 1,
-                  },
-                }}
+                sx={{ minWidth: 200 }}
               />
 
               <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)', '&.Mui-focused': { color: 'white' } }}>Sort By</InputLabel>
+                <InputLabel>Sort By</InputLabel>
                 <Select
                   value={performerSortBy}
                   label="Sort By"
                   onChange={e => setPerformerSortBy(e.target.value)}
-                  sx={{
-                    color: 'white',
-                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'rgba(255, 255, 255, 0.3)',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'rgba(255, 255, 255, 0.5)',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'rgba(255, 255, 255, 0.7)',
-                    },
-                    '& .MuiSvgIcon-root': {
-                      color: 'white',
-                    },
-                  }}
                 >
                   <MenuItem value="name-asc">Name (A-Z)</MenuItem>
                   <MenuItem value="name-desc">Name (Z-A)</MenuItem>
@@ -769,28 +734,13 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                 variant="outlined"
                 startIcon={<FilterIcon />}
                 onClick={() => setFilterModalOpen(true)}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255, 255, 255, 0.3)',
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  '&:hover': {
-                    borderColor: 'rgba(255, 255, 255, 0.5)',
-                    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-                  },
-                }}
               >
                 Filters
               </Button>
 
               <IconButton
                 onClick={() => setFullscreenMode(true)}
-                sx={{
-                  color: 'white',
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  '&:hover': {
-                    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-                  },
-                }}
+                color="inherit"
               >
                 <FullscreenIcon />
               </IconButton>
@@ -1117,16 +1067,10 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
         onClose={() => setFilterModalOpen(false)}
         maxWidth="md"
         fullWidth
-        PaperProps={{
-          sx: {
-            backgroundColor: '#1e1e1e',
-            color: 'white'
-          }
-        }}
       >
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6">Filter Performers</Typography>
-          <IconButton onClick={() => setFilterModalOpen(false)} sx={{ color: 'white' }}>
+          <IconButton onClick={() => setFilterModalOpen(false)}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, ButtonGroup } from '@mui/material';
+import { Settings, Build, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 import TrueNASFixModal from './TrueNASFixModal';
 import './Toolbar.css';
@@ -39,11 +41,12 @@ const VideoPathModal = ({ open, onClose, onSubmit }) => {
       zIndex: 10000
     }} onClick={onClose}>
       <div style={{
-        backgroundColor: '#2d2d30',
+        backgroundColor: '#1e1e1e',
         padding: '24px',
-        borderRadius: '8px',
+        borderRadius: '12px',
         minWidth: '500px',
-        maxWidth: '800px'
+        maxWidth: '800px',
+        border: '1px solid rgba(255,255,255,0.1)'
       }} onClick={e => e.stopPropagation()}>
         <h3 style={{ color: '#fff', marginTop: 0 }}>🎬 Open Video in Scene Editor</h3>
         <p style={{ color: '#aaa', fontSize: '14px' }}>
@@ -60,42 +63,17 @@ const VideoPathModal = ({ open, onClose, onSubmit }) => {
             width: '100%',
             padding: '12px',
             fontSize: '14px',
-            backgroundColor: '#1a1a1a',
+            backgroundColor: '#121212',
             border: '1px solid #444',
-            borderRadius: '4px',
+            borderRadius: '8px',
             color: '#fff',
             marginBottom: '16px',
             boxSizing: 'border-box'
           }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#444',
-              border: 'none',
-              borderRadius: '4px',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!videoPath.trim()}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: videoPath.trim() ? '#2196F3' : '#555',
-              border: 'none',
-              borderRadius: '4px',
-              color: '#fff',
-              cursor: videoPath.trim() ? 'pointer' : 'not-allowed'
-            }}
-          >
-            Open
-          </button>
+          <Button onClick={onClose} variant="outlined" color="inherit">Cancel</Button>
+          <Button onClick={handleSubmit} disabled={!videoPath.trim()} variant="contained" color="primary">Open</Button>
         </div>
       </div>
     </div>
@@ -148,22 +126,25 @@ function Toolbar({
   };
 
   return (
-    <div className="toolbar">
-      <div className="toolbar-left">
-        <div className="mode-toggle">
-          <button
-            className={mode === 'gallery' ? 'active' : ''}
-            onClick={() => handleModeChange('gallery')}
-          >
-            Gallery
-          </button>
-          <button
-            className={mode === 'filter' ? 'active' : ''}
-            onClick={() => handleModeChange('filter')}
-          >
-            Filter
-          </button>
-        </div>
+    <AppBar position="sticky">
+      <MuiToolbar sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <ButtonGroup variant="contained" aria-label="outlined primary button group" size="small">
+            <Button 
+              color={mode === 'gallery' ? 'primary' : 'inherit'} 
+              onClick={() => handleModeChange('gallery')}
+              startIcon={<Image />}
+            >
+              Gallery
+            </Button>
+            <Button 
+              color={mode === 'filter' ? 'primary' : 'inherit'} 
+              onClick={() => handleModeChange('filter')}
+              startIcon={<FilterList />}
+            >
+              Filter
+            </Button>
+          </ButtonGroup>
 
         {/* Scan button - HIDDEN
         {mode === 'filter' && onScanPerformers && (
@@ -180,128 +161,87 @@ function Toolbar({
         {/* Upload Folder button - only show in filter mode */}
         {mode === 'filter' && (
           <>
-            <button
-              className="upload-folder-btn"
+            <Button
+              variant="contained"
+              color="secondary"
               onClick={() => navigate('/upload-queue')}
-              style={{
-                marginLeft: '8px',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: '600',
-                fontSize: '14px'
-              }}
-              title="Upload a folder directly instead of scanning"
+              startIcon={<FolderOpen />}
+              size="small"
             >
-              📁 Upload Folder
-            </button>
-            <button
-              className="local-import-btn"
+              Upload Folder
+            </Button>
+            <Button
+              variant="contained"
               onClick={() => navigate('/local-import')}
-              style={{
-                marginLeft: '8px',
-                background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: '600',
-                fontSize: '14px'
-              }}
-              title="Import performers from the 'before upload' folder — faster than uploading"
+              startIcon={<Add />}
+              sx={{ background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)', color: 'white' }}
+              size="small"
             >
-              📂 Local Import
-            </button>
+              Local Import
+            </Button>
           </>
         )}
-      </div>
+        </Box>
 
-      <div className="toolbar-right">
-        <div className="sidebar-controls">
-          <button
-            className="settings-btn"
-            onClick={() => setShowVideoPathModal(true)}
-            title="Scene Editor - Open Video File"
-          >
-            🎬
-          </button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title="Scene Editor - Open Video File">
+            <IconButton color="inherit" onClick={() => setShowVideoPathModal(true)}>
+              <Videocam />
+            </IconButton>
+          </Tooltip>
 
-          <button
-            className="settings-btn"
-            onClick={() => window.open('/performer-management', '_blank')}
-            title="Performer Management"
-          >
-            👥
-          </button>
+          <Tooltip title="Performer Management">
+            <IconButton color="inherit" onClick={() => window.open('/performer-management', '_blank')}>
+              <People />
+            </IconButton>
+          </Tooltip>
 
-          <button
-            className="settings-btn"
-            onClick={() => window.open('/hash-management', '_blank')}
-            title="Hash-Based Duplicate Detection"
-            style={{ marginLeft: '5px' }}
-          >
-            ⚖️
-          </button>
+          <Tooltip title="Hash-Based Duplicate Detection">
+            <IconButton color="inherit" onClick={() => window.open('/hash-management', '_blank')}>
+              <Difference />
+            </IconButton>
+          </Tooltip>
 
-          <button
-            className="settings-btn"
-            onClick={() => navigate('/pairwise')}
-            title="Pairwise Labeler - Train Image Preference Model"
-            style={{ marginLeft: '5px' }}
-          >
-            🎯
-          </button>
+          <Tooltip title="Pairwise Labeler - Train Image Preference Model">
+            <IconButton color="inherit" onClick={() => navigate('/pairwise')}>
+              <Science />
+            </IconButton>
+          </Tooltip>
 
+          <Tooltip title="Keyboard Shortcuts Settings">
+            <IconButton color="inherit" onClick={() => setShowSettings(true)}>
+              <Settings />
+            </IconButton>
+          </Tooltip>
 
+          <Tooltip title="TrueNAS Compatibility Fixes">
+            <IconButton color="inherit" onClick={() => setShowTrueNASFix(true)}>
+              <Build />
+            </IconButton>
+          </Tooltip>
 
-          <button
-            className="settings-btn"
-            onClick={() => setShowSettings(true)}
-            title="Keyboard Shortcuts Settings"
-            style={{ marginLeft: '5px' }}
-          >
-            ⚙️
-          </button>
-
-          <button
-            className="settings-btn"
-            onClick={() => setShowTrueNASFix(true)}
-            title="TrueNAS Compatibility Fixes"
-            style={{ marginLeft: '5px' }}
-          >
-            🔧
-          </button>
-
-          <div className="handy-section">
-            <input
-              type="text"
-              placeholder="Handy Connection Code"
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 2, bgcolor: 'background.paper', p: 0.5, borderRadius: 1 }}>
+            <InputBase
+              placeholder="Handy Code"
               value={localHandyCode}
               onChange={(e) => {
                 setLocalHandyCode(e.target.value);
                 localStorage.setItem('handyConnectionCode', e.target.value);
               }}
-              className="handy-input"
               disabled={handyConnected}
+              sx={{ ml: 1, flex: 1, width: 120, fontSize: '0.875rem' }}
             />
-            <button
-              className={`handy-btn ${handyConnected ? 'connected' : ''}`}
+            <Button
+              variant={handyConnected ? "outlined" : "contained"}
+              color={handyConnected ? "error" : "primary"}
               onClick={handleHandyConnect}
+              size="small"
             >
               {handyConnected ? 'Disconnect' : 'Connect'}
-            </button>
-            {handyConnected && (
-              <span className="handy-status">
-                🔗 Connected
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
+            </Button>
+          </Box>
+        </Box>
+      </MuiToolbar>
 
       <ShortcutSettingsModal
         open={showSettings}
@@ -320,7 +260,7 @@ function Toolbar({
         onClose={() => setShowVideoPathModal(false)}
         onSubmit={handleVideoPathSubmit}
       />
-    </div>
+    </AppBar>
   );
 }
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import './UnifiedGallery.css';
+import { Box, Typography, Button, Select, MenuItem, Chip, Paper, TextField, Grid } from '@mui/material';
 import '../utils/FunscriptPlayer.js'; // Import to register custom elements
 import { ensureFlag } from '../utils/countryFlags';
 import FlagEmoji from './FlagEmoji';
@@ -884,7 +884,29 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     }
 
     return items.map((item, index) => (
-      <div key={index} className="gallery-item">
+      <Box 
+        key={index} 
+        sx={{
+          width: '100%',
+          maxWidth: 320,
+          height: 480,
+          borderRadius: 2,
+          overflow: 'hidden',
+          bgcolor: 'rgba(18, 18, 18, 0.7)',
+          boxShadow: 3,
+          position: 'relative',
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: 6,
+          },
+          '& funscript-player, & funscript-image': {
+            width: '100%',
+            height: '100%',
+            display: 'block'
+          }
+        }}
+      >
         {currentTab === 0 ? (
           // Pictures - use funscript-image with tagassign
           <>
@@ -894,13 +916,42 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
               view="stretch"
               tagassign="true"
             ></funscript-image>
-            <div className="gallery-item-overlay"></div>
-            <div className="gallery-item-info">
-              <div className="gallery-item-title">{item.name}</div>
-              <div className="gallery-item-meta">
-                <span className="gallery-item-size">{item.sizeFormatted}</span>
-              </div>
-            </div>
+            <Box sx={{
+              position: 'absolute',
+              bottom: 0, left: 0, right: 0,
+              height: 120,
+              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
+              zIndex: 1
+            }} />
+            <Box sx={{
+              position: 'absolute',
+              bottom: 0, left: 0, right: 0,
+              p: 2,
+              zIndex: 2,
+              color: 'white'
+            }}>
+              <Typography sx={{
+                fontSize: '1.1rem',
+                fontWeight: 'bold',
+                mb: 1,
+                color: 'white',
+                textShadow: '0 1px 1px rgba(0,0,0,0.3)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {item.name}
+              </Typography>
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 1,
+                color: 'rgba(255,255,255,0.9)'
+              }}>
+                <Typography variant="caption" sx={{ opacity: 0.7 }}>{item.sizeFormatted}</Typography>
+              </Box>
+            </Box>
           </>
         ) : (
           // Videos (tab 1) and Funscript Videos (tab 2) - use funscript-player with tagassign and scenemanager
@@ -916,180 +967,225 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
               tagassign="true"
               scenemanager="true"
             ></funscript-player>
-            <div className="gallery-item-overlay"></div>
-            <div className="gallery-item-info">
-              <div className="gallery-item-title">{item.name}</div>
-              <div className="gallery-item-meta">
-                <span className="gallery-item-size">{item.sizeFormatted}</span>
+            <Box sx={{
+              position: 'absolute',
+              bottom: 0, left: 0, right: 0,
+              height: 120,
+              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
+              zIndex: 1
+            }} />
+            <Box sx={{
+              position: 'absolute',
+              bottom: 0, left: 0, right: 0,
+              p: 2,
+              zIndex: 2,
+              color: 'white'
+            }}>
+              <Typography sx={{
+                fontSize: '1.1rem',
+                fontWeight: 'bold',
+                mb: 1,
+                color: 'white',
+                textShadow: '0 1px 1px rgba(0,0,0,0.3)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {item.name}
+              </Typography>
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 1,
+                color: 'rgba(255,255,255,0.9)'
+              }}>
+                <Typography variant="caption" sx={{ opacity: 0.7 }}>{item.sizeFormatted}</Typography>
                 {item.funscriptCount !== undefined && (
-                  <span
-                    className="funscript-badge"
-                    style={{
-                      backgroundColor: item.missingFunscripts || item.funscriptCount === 0 ? '#ff4444' : '#4caf50',
-                      color: '#ffffff',
+                  <Chip
+                    size="small"
+                    label={`${item.funscriptCount} funscripts`}
+                    sx={{
+                      bgcolor: item.missingFunscripts || item.funscriptCount === 0 ? 'error.main' : 'success.main',
+                      color: 'white',
                       fontWeight: 'bold',
-                      padding: '2px 6px',
-                      borderRadius: '3px'
+                      height: 20,
+                      fontSize: '0.7rem'
                     }}
-                  >
-                    {item.funscriptCount} funscripts
-                  </span>
+                  />
                 )}
-              </div>
-              <div className="gallery-item-ratings">
-                <span className={`rating-chip${item.videoRating == null ? ' rating-chip--empty' : ''}`}>
-                  ⭐ {formatRating(item.videoRating)}
-                </span>
+              </Box>
+              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                <Chip
+                  size="small"
+                  label={`⭐ ${formatRating(item.videoRating)}`}
+                  sx={{
+                    bgcolor: 'rgba(255, 215, 0, 0.15)',
+                    color: '#ffd700',
+                    border: '1px solid rgba(255, 215, 0, 0.35)',
+                    height: 20,
+                    fontSize: '0.7rem',
+                    fontWeight: 'bold',
+                    opacity: item.videoRating == null ? 0.55 : 1
+                  }}
+                />
                 {currentTab === 2 && (
-                  <span className={`rating-chip rating-chip--funscript${item.funscriptRating == null ? ' rating-chip--empty' : ''}`}>
-                    🎵 {formatRating(item.funscriptRating)}
-                  </span>
+                  <Chip
+                    size="small"
+                    label={`🎵 ${formatRating(item.funscriptRating)}`}
+                    sx={{
+                      bgcolor: 'rgba(156, 39, 176, 0.2)',
+                      color: '#f8bbd0',
+                      border: '1px solid rgba(248, 187, 208, 0.4)',
+                      height: 20,
+                      fontSize: '0.7rem',
+                      fontWeight: 'bold',
+                      opacity: item.funscriptRating == null ? 0.55 : 1
+                    }}
+                  />
                 )}
-              </div>
-            </div>
+              </Box>
+            </Box>
           </>
         )}
-      </div>
+      </Box>
     ));
   };
 
   if (loading) {
     return (
-      <div className="unified-gallery">
-        <div className="container">
-          <div className="loading">Loading...</div>
-        </div>
-      </div>
+      <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <Typography variant="h6" color="text.secondary">Loading...</Typography>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="unified-gallery">
-        <div className="container">
-          <div className="loading">{error}</div>
-        </div>
-      </div>
+      <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <Typography variant="h6" color="error">{error}</Typography>
+      </Box>
     );
   }
 
   return (
-    <div className="unified-gallery">
-      <div className="container">
-        <div className="header">
-          <h1 className="gallery-title">{galleryName}</h1>
-          <div className="stats">
-            <div className="stat">{currentContent?.pics?.length || 0} pics</div>
-            <div className="stat">{currentContent?.vids?.length || 0} videos</div>
-            <div className="stat">{currentContent?.funscriptVids?.length || 0} funscripts</div>
-          </div>
-        </div>
+    <Box sx={{ p: { xs: 1, md: 3 }, bgcolor: 'background.default', minHeight: '100vh' }}>
+      <Paper elevation={3} sx={{ maxWidth: 1480, mx: 'auto', p: { xs: 2, md: 3 }, borderRadius: 2, bgcolor: 'background.paper' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, pb: 2, borderBottom: 1, borderColor: 'divider' }}>
+          <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'text.primary', m: 0 }}>{galleryName}</Typography>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Chip color="primary" variant="outlined" label={`${currentContent?.pics?.length || 0} pics`} />
+            <Chip color="primary" variant="outlined" label={`${currentContent?.vids?.length || 0} videos`} />
+            <Chip color="primary" variant="outlined" label={`${currentContent?.funscriptVids?.length || 0} funscripts`} />
+          </Box>
+        </Box>
 
         {/* Performer Info Section */}
         {galleryType === 'performer' && performerData && (performerData.age || performerData.born || performerData.birthplace || performerData.orientation || performerData.height || performerData.weight || performerData.measurements || performerData.body_type || performerData.hair_color || performerData.eye_color || performerData.ethnicity) && (
-          <div className="performer-info" style={{
-            background: 'rgba(25, 25, 25, 0.9)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '8px',
-            padding: '20px',
-            marginBottom: '20px',
+          <Box sx={{
+            bgcolor: 'background.default',
+            border: 1,
+            borderColor: 'divider',
+            borderRadius: 2,
+            p: 3,
+            mb: 3,
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: '15px'
+            gap: 2
           }}>
             {/* Personal Info */}
             {(performerData.age || performerData.born || performerData.birthplace || performerData.orientation) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <h3 style={{ margin: '0 0 10px 0', color: '#2196f3', fontSize: '1.1rem', borderBottom: '2px solid #2196f3', paddingBottom: '5px' }}>Personal Info</h3>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'primary.main', borderBottom: 2, borderColor: 'primary.main', pb: 0.5 }}>Personal Info</Typography>
                 {performerData.age && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Age:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{calculateCurrentAge(performerData.age, performerData.scraped_at)} years old</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Age:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{calculateCurrentAge(performerData.age, performerData.scraped_at)} years old</Typography>
+                  </Box>
                 )}
                 {performerData.born && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Born:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.born}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Born:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.born}</Typography>
+                  </Box>
                 )}
                 {performerData.birthplace && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Birthplace:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">Birthplace:</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.primary', fontWeight: 'bold' }}>
                       {ensureFlag(performerData.country_flag) && (
                         <FlagEmoji
                           countryCode={ensureFlag(performerData.country_flag)}
                           size="1.5rem"
                         />
                       )}
-                      <span>{performerData.birthplace}</span>
-                    </span>
-                  </div>
+                      <Typography variant="body2">{performerData.birthplace}</Typography>
+                    </Box>
+                  </Box>
                 )}
                 {performerData.orientation && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Orientation:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.orientation}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Orientation:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.orientation}</Typography>
+                  </Box>
                 )}
-              </div>
+              </Box>
             )}
 
             {/* Physical Attributes */}
             {(performerData.height || performerData.weight || performerData.measurements || performerData.body_type) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <h3 style={{ margin: '0 0 10px 0', color: '#4caf50', fontSize: '1.1rem', borderBottom: '2px solid #4caf50', paddingBottom: '5px' }}>Physical Attributes</h3>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'success.main', borderBottom: 2, borderColor: 'success.main', pb: 0.5 }}>Physical Attributes</Typography>
                 {performerData.height && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Height:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.height}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Height:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.height}</Typography>
+                  </Box>
                 )}
                 {performerData.weight && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Weight:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.weight}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Weight:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.weight}</Typography>
+                  </Box>
                 )}
                 {performerData.measurements && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Measurements:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.measurements}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Measurements:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.measurements}</Typography>
+                  </Box>
                 )}
                 {performerData.body_type && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Body Type:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.body_type}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Body Type:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.body_type}</Typography>
+                  </Box>
                 )}
-              </div>
+              </Box>
             )}
 
             {/* Appearance */}
             {(performerData.hair_color || performerData.eye_color || performerData.ethnicity) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <h3 style={{ margin: '0 0 10px 0', color: '#ff9800', fontSize: '1.1rem', borderBottom: '2px solid #ff9800', paddingBottom: '5px' }}>Appearance</h3>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'warning.main', borderBottom: 2, borderColor: 'warning.main', pb: 0.5 }}>Appearance</Typography>
                 {performerData.hair_color && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Hair:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.hair_color}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Hair:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.hair_color}</Typography>
+                  </Box>
                 )}
                 {performerData.eye_color && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Eyes:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.eye_color}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Eyes:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.eye_color}</Typography>
+                  </Box>
                 )}
                 {performerData.ethnicity && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Ethnicity:</span>
-                    <span style={{ color: 'white', fontWeight: 'bold' }}>{performerData.ethnicity}</span>
-                  </div>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Ethnicity:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.ethnicity}</Typography>
+                  </Box>
                 )}
-              </div>
+              </Box>
             )}
 
             {/* Tags */}
@@ -1098,62 +1194,65 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                 const tags = JSON.parse(performerData.scraped_tags);
                 if (Array.isArray(tags) && tags.length > 0) {
                   return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', gridColumn: '1 / -1' }}>
-                      <h3 style={{ margin: '0 0 10px 0', color: '#e91e63', fontSize: '1.1rem', borderBottom: '2px solid #e91e63', paddingBottom: '5px' }}>Tags</h3>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, gridColumn: '1 / -1' }}>
+                      <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'secondary.main', borderBottom: 2, borderColor: 'secondary.main', pb: 0.5 }}>Tags</Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                         {tags.map((tag, index) => (
-                          <span key={index} style={{
-                            background: 'rgba(233, 30, 99, 0.2)',
-                            border: '1px solid rgba(233, 30, 99, 0.5)',
-                            borderRadius: '4px',
-                            padding: '4px 12px',
-                            color: '#e91e63',
-                            fontSize: '0.9rem',
-                            fontWeight: 'bold'
-                          }}>
-                            {tag}
-                          </span>
+                          <Chip 
+                            key={index}
+                            label={tag}
+                            color="secondary"
+                            variant="outlined"
+                            size="small"
+                            sx={{ fontWeight: 'bold' }}
+                          />
                         ))}
-                      </div>
-                    </div>
+                      </Box>
+                    </Box>
                   );
                 }
               } catch (e) { }
               return null;
             })()}
-          </div>
+          </Box>
         )}
 
-        <div className="controls">
-          <div className="tabs">
-            <button
-              className={`tab ${currentTab === 0 ? 'active' : ''}`}
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, gap: 2, mb: 3, p: 2, bgcolor: 'background.default', borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Button
+              variant={currentTab === 0 ? 'contained' : 'outlined'}
               onClick={() => switchTab(0)}
+              sx={{ borderRadius: 5 }}
             >
               Pictures ({currentContent?.pics?.length || 0})
-            </button>
-            <button
-              className={`tab ${currentTab === 1 ? 'active' : ''}`}
+            </Button>
+            <Button
+              variant={currentTab === 1 ? 'contained' : 'outlined'}
               onClick={() => switchTab(1)}
+              sx={{ borderRadius: 5 }}
             >
               Videos ({currentContent?.vids?.length || 0})
-            </button>
-            <button
-              className={`tab ${currentTab === 2 ? 'active' : ''}`}
+            </Button>
+            <Button
+              variant={currentTab === 2 ? 'contained' : 'outlined'}
               onClick={() => switchTab(2)}
+              sx={{ borderRadius: 5 }}
             >
               Funscripts ({currentContent?.funscriptVids?.length || 0})
-            </button>
+            </Button>
             {galleryType === 'genre' && (
-              <button
-                className={`tab showtagged-mode-${showTaggedMode}`}
-                style={{
-                  marginLeft: 10,
-                  background: showTaggedMode === 0 ? '#1976d2' : showTaggedMode === 1 ? '#388e3c' : '#fbc02d',
-                  color: showTaggedMode === 2 ? '#333' : '#fff',
+              <Button
+                variant="contained"
+                sx={{
+                  ml: { xs: 0, md: 1 },
+                  bgcolor: showTaggedMode === 0 ? 'primary.main' : showTaggedMode === 1 ? 'success.main' : 'warning.main',
+                  color: showTaggedMode === 2 ? 'warning.contrastText' : 'white',
                   fontWeight: 'bold',
-                  border: '2px solid #1976d2',
-                  transition: 'background 0.2s, color 0.2s',
+                  border: 2,
+                  borderColor: 'primary.main',
+                  '&:hover': {
+                    bgcolor: showTaggedMode === 0 ? 'primary.dark' : showTaggedMode === 1 ? 'success.dark' : 'warning.dark',
+                  }
                 }}
                 onClick={() => setShowTaggedMode((showTaggedMode + 1) % 3)}
                 title={
@@ -1165,178 +1264,182 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                 {showTaggedMode === 0 && 'All'}
                 {showTaggedMode === 1 && 'Folder'}
                 {showTaggedMode === 2 && 'Tag'}
-              </button>
+              </Button>
             )}
-          </div>
+          </Box>
 
-          <div className="control-actions">
-            <div className="sort-controls">
-              <label htmlFor="sortBy">Sort by:</label>
-              <select
-                id="sortBy"
-                className="sort-select"
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" color="text.secondary">Sort by:</Typography>
+              <Select
+                size="small"
                 value={`${sortBy}${sortOrder === 'desc' ? '-desc' : ''}`}
                 onChange={handleSortChange}
+                sx={{ minWidth: 150, bgcolor: 'background.paper' }}
               >
-                <option value="name">Name (A-Z)</option>
-                <option value="name-desc">Name (Z-A)</option>
-                <option value="size">Size (Small-Large)</option>
-                <option value="size-desc">Size (Large-Small)</option>
-                <option value="date">Date (Old-New)</option>
-                <option value="date-desc">Date (New-Old)</option>
-                {currentTab !== 0 && (
-                  <>
-                    <option value="duration">Duration (Short-Long)</option>
-                    <option value="duration-desc">Duration (Long-Short)</option>
-                    <option value="video_rating">Video Score (Low-High)</option>
-                    <option value="video_rating-desc">Video Score (High-Low)</option>
-                  </>
-                )}
-                {currentTab === 2 && (
-                  <>
-                    <option value="funscript_rating">Funscript Score (Low-High)</option>
-                    <option value="funscript_rating-desc">Funscript Score (High-Low)</option>
-                    <option value="funscript_count">Funscript Count (Low-High)</option>
-                    <option value="funscript_count-desc">Funscript Count (High-Low)</option>
-                  </>
-                )}
-              </select>
-            </div>
-            <button
-              type="button"
-              className={`filter-toggle${showFilterPanel ? ' filter-toggle--active' : ''}${totalActiveFilters ? ' filter-toggle--has-active' : ''}`}
+                <MenuItem value="name">Name (A-Z)</MenuItem>
+                <MenuItem value="name-desc">Name (Z-A)</MenuItem>
+                <MenuItem value="size">Size (Small-Large)</MenuItem>
+                <MenuItem value="size-desc">Size (Large-Small)</MenuItem>
+                <MenuItem value="date">Date (Old-New)</MenuItem>
+                <MenuItem value="date-desc">Date (New-Old)</MenuItem>
+                {currentTab !== 0 && [
+                  <MenuItem key="d1" value="duration">Duration (Short-Long)</MenuItem>,
+                  <MenuItem key="d2" value="duration-desc">Duration (Long-Short)</MenuItem>,
+                  <MenuItem key="v1" value="video_rating">Video Score (Low-High)</MenuItem>,
+                  <MenuItem key="v2" value="video_rating-desc">Video Score (High-Low)</MenuItem>
+                ]}
+                {currentTab === 2 && [
+                  <MenuItem key="f1" value="funscript_rating">Funscript Score (Low-High)</MenuItem>,
+                  <MenuItem key="f2" value="funscript_rating-desc">Funscript Score (High-Low)</MenuItem>,
+                  <MenuItem key="fc1" value="funscript_count">Funscript Count (Low-High)</MenuItem>,
+                  <MenuItem key="fc2" value="funscript_count-desc">Funscript Count (High-Low)</MenuItem>
+                ]}
+              </Select>
+            </Box>
+            <Button
+              variant={showFilterPanel ? 'contained' : 'outlined'}
+              color={totalActiveFilters ? 'warning' : 'primary'}
               onClick={() => setShowFilterPanel(prev => !prev)}
             >
               Filters{totalActiveFilters ? ` (${totalActiveFilters})` : ''}
-            </button>
-          </div>
-        </div>
+            </Button>
+          </Box>
+        </Box>
 
         {showFilterPanel && (
-          <div className="filter-panel">
-            <div className="filter-controls">
-              <div className="filter-header">
-                <label>Filter tags:</label>
-                <div className="tag-filter-actions">
-                  <button
-                    type="button"
-                    className="tag-filter-btn"
+          <Paper elevation={1} sx={{ mb: 3, p: 2, bgcolor: 'background.default', border: 1, borderColor: 'divider' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="subtitle2" color="text.secondary">Filter tags:</Typography>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
                     onClick={handleClearTags}
                     disabled={activeFilters.tagActiveCount === 0}
                   >
                     Clear
-                  </button>
-                  <button
-                    type="button"
-                    className="tag-filter-btn"
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
                     onClick={handleReverseTags}
                     disabled={activeFilters.tagActiveCount === 0}
                   >
                     Reverse
-                  </button>
-                </div>
-              </div>
-              <div className="tag-chips">
+                  </Button>
+                </Box>
+              </Box>
+              <Box sx={{ 
+                display: 'flex', 
+                flexWrap: 'wrap', 
+                gap: 1, 
+                maxHeight: 160, 
+                overflowY: 'auto', 
+                p: 1, 
+                bgcolor: 'background.paper', 
+                borderRadius: 1, 
+                border: 1, 
+                borderColor: 'divider' 
+              }}>
                 {availableTags.length === 0 && (
-                  <span className="tag-chip tag-chip--empty-state">No tags available</span>
+                  <Typography variant="body2" color="text.disabled" sx={{ p: 1, fontStyle: 'italic' }}>No tags available</Typography>
                 )}
                 {availableTags.map(tag => {
                   const state = tagStates[tag] || 'neutral';
                   return (
-                    <button
+                    <Chip
                       key={tag}
-                      type="button"
-                      className={`tag-chip tag-chip--${state}`}
+                      label={`${state === 'include' ? '✓ ' : state === 'exclude' ? '✕ ' : ''}${tag}`}
                       onClick={() => handleTagToggle(tag)}
-                      title={
-                        state === 'neutral'
-                          ? 'Click to include this tag'
-                          : state === 'include'
-                            ? 'Click to exclude this tag'
-                            : 'Click to clear this tag filter'
-                      }
-                    >
-                      <span className="tag-chip__indicator">
-                        {state === 'include' ? '✓' : state === 'exclude' ? '✕' : '•'}
-                      </span>
-                      <span className="tag-chip__label">{tag}</span>
-                    </button>
+                      color={state === 'include' ? 'success' : state === 'exclude' ? 'error' : 'default'}
+                      variant={state === 'neutral' ? 'outlined' : 'filled'}
+                      size="small"
+                      sx={{ fontWeight: 'bold' }}
+                    />
                   );
                 })}
-              </div>
+              </Box>
 
-              <div className="score-filters">
-                <div className="score-filter-row">
-                  <span className="score-filter-label">Video score</span>
-                  <input
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                  <Typography variant="subtitle2" sx={{ minWidth: 120 }}>Video score</Typography>
+                  <TextField
+                    size="small"
                     type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
+                    inputProps={{ min: 0, max: 10, step: 0.1 }}
                     placeholder="Min"
                     value={scoreFilters.video.min ?? ''}
                     onChange={(e) => handleScoreFilterChange('video', 'min', e.target.value)}
+                    sx={{ width: 80 }}
                   />
-                  <span className="score-filter-separator">to</span>
-                  <input
+                  <Typography variant="body2" color="text.secondary">to</Typography>
+                  <TextField
+                    size="small"
                     type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
+                    inputProps={{ min: 0, max: 10, step: 0.1 }}
                     placeholder="Max"
                     value={scoreFilters.video.max ?? ''}
                     onChange={(e) => handleScoreFilterChange('video', 'max', e.target.value)}
+                    sx={{ width: 80 }}
                   />
-                  <button
-                    type="button"
-                    className="tag-filter-btn score-filter-clear"
+                  <Button
+                    size="small"
                     onClick={() => handleClearScoreFilter('video')}
                     disabled={!isScoreFilterActive('video')}
+                    sx={{ ml: 'auto' }}
                   >
                     Clear
-                  </button>
-                </div>
+                  </Button>
+                </Box>
 
-                <div className="score-filter-row">
-                  <span className="score-filter-label">Funscript score</span>
-                  <input
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                  <Typography variant="subtitle2" sx={{ minWidth: 120 }}>Funscript score</Typography>
+                  <TextField
+                    size="small"
                     type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
+                    inputProps={{ min: 0, max: 10, step: 0.1 }}
                     placeholder="Min"
                     value={scoreFilters.funscript.min ?? ''}
                     onChange={(e) => handleScoreFilterChange('funscript', 'min', e.target.value)}
+                    sx={{ width: 80 }}
                   />
-                  <span className="score-filter-separator">to</span>
-                  <input
+                  <Typography variant="body2" color="text.secondary">to</Typography>
+                  <TextField
+                    size="small"
                     type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
+                    inputProps={{ min: 0, max: 10, step: 0.1 }}
                     placeholder="Max"
                     value={scoreFilters.funscript.max ?? ''}
                     onChange={(e) => handleScoreFilterChange('funscript', 'max', e.target.value)}
+                    sx={{ width: 80 }}
                   />
-                  <button
-                    type="button"
-                    className="tag-filter-btn score-filter-clear"
+                  <Button
+                    size="small"
                     onClick={() => handleClearScoreFilter('funscript')}
                     disabled={!isScoreFilterActive('funscript')}
+                    sx={{ ml: 'auto' }}
                   >
                     Clear
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+                  </Button>
+                </Box>
+              </Box>
+            </Box>
+          </Paper>
         )}
 
-        <div className="gallery">
+        <Box sx={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+          gap: 3, 
+          mt: 3 
+        }}>
           {renderContent()}
-        </div>
-      </div>
-    </div>
+        </Box>
+      </Paper>
+    </Box>
+
   );
 };
 

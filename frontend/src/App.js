@@ -28,8 +28,8 @@ import RankingInsightPage from './pages/RankingInsightPage';
 import PairwiseRefinePage from './pages/PairwiseRefinePage';
 import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
 
-// Create a default theme for Material-UI
-const theme = createTheme();
+import CssBaseline from '@mui/material/CssBaseline';
+import theme from './theme';
 
 function LicenseModal({ open, onSubmit, onCancel, defaultKey, verifying, error }) {
   const [key, setKey] = useState(defaultKey || '');
@@ -613,6 +613,7 @@ function App() {
   return (
     <Provider store={store}>
       <ThemeProvider theme={theme}>
+        <CssBaseline />
         <AppContent />
       </ThemeProvider>
     </Provider>

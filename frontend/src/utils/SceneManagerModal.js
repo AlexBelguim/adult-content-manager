@@ -22,8 +22,6 @@ import {
   Divider,
   Alert,
   CircularProgress,
-  createTheme,
-  ThemeProvider,
   Autocomplete,
   Select,
   MenuItem,
@@ -51,26 +49,6 @@ import {
   Movie as MovieIcon
 } from '@mui/icons-material';
 
-// Create dark theme for the modal
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#2196F3',
-    },
-    secondary: {
-      main: '#4CAF50',
-    },
-    background: {
-      default: '#1a1a1a',
-      paper: '#2d2d30',
-    },
-    text: {
-      primary: '#ffffff',
-      secondary: '#cccccc',
-    },
-  },
-});
 
 const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal' }) => {
   const videoRef = useRef(null);
@@ -1918,7 +1896,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   };
 
   const getSceneColor = (index) => {
-    const colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#00BCD4'];
+    const colors = ['primary.main', 'success.main', 'warning.main', 'secondary.main', '#F44336', '#00BCD4'];
     return colors[index % colors.length];
   };
 
@@ -2056,8 +2034,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   const content = (
     <DialogContent sx={{ 
         p: 0, 
-        backgroundColor: '#1a1a1a',
-        color: '#ffffff',
+        backgroundColor: 'background.default',
+        color: 'text.primary',
         display: 'flex',
         flexDirection: 'row',
         height: '100%',
@@ -2071,7 +2049,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             right: 8, 
             top: 8,
             zIndex: 1000,
-            color: '#ffffff',
+            color: 'text.primary',
             fontSize: '1.5rem',
             minWidth: 'auto',
             padding: '4px 8px',
@@ -2088,7 +2066,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
           borderRight: '1px solid #404040', 
           display: 'flex', 
           flexDirection: 'column', 
-          backgroundColor: '#2d2d30',
+          backgroundColor: 'background.paper',
           overflow: 'hidden',
           flexShrink: 0,
           position: 'relative'
@@ -2105,12 +2083,12 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 cursor: 'col-resize',
                 zIndex: 100,
                 '&:hover': {
-                  backgroundColor: '#2196F3'
+                  backgroundColor: 'primary.main'
                 }
               }}
             />
             {/* Tabs Header */}
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#252526' }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: 'background.paper' }}>
               <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} textColor="inherit" indicatorColor="primary" variant="fullWidth">
                 <Tab icon={<MovieIcon />} iconPosition="start" label={`Scenes (${scenes.length})`} sx={{ color: '#fff', minHeight: '48px' }} />
                 <Tab icon={<AutoFixHighIcon />} iconPosition="start" label="AI" sx={{ color: '#fff', minHeight: '48px' }} />
@@ -2121,9 +2099,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             {/* Tab 0: Scenes List */}
             {activeTab === 0 && (
               <>
-            <Box sx={{ p: 2, borderBottom: '1px solid #404040', backgroundColor: '#252526' }}>
+            <Box sx={{ p: 2, borderBottom: '1px solid #404040', backgroundColor: 'background.paper' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ color: '#ffffff' }}>
+                <Typography variant="h6" sx={{ color: 'text.primary' }}>
                   Scenes ({scenes.length})
                 </Typography>
                 <Box>
@@ -2135,14 +2113,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       disabled={isAnalyzing || loading}
                       sx={{
                         mr: 1,
-                        borderColor: '#FF9800',
-                        color: '#FF9800',
+                        borderColor: 'warning.main',
+                        color: 'warning.main',
                         '&:hover': {
-                          borderColor: '#F57C00',
+                          borderColor: 'warning.dark',
                           backgroundColor: 'rgba(255, 152, 0, 0.1)'
                         },
                         '&:disabled': {
-                          borderColor: '#555555',
+                          borderColor: 'divider',
                           color: '#777777'
                         }
                       }}
@@ -2157,14 +2135,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                     onClick={analyzeFullVideo}
                     disabled={isAnalyzing || loading}
                     sx={{
-                      borderColor: '#9C27B0',
-                      color: '#9C27B0',
+                      borderColor: 'secondary.main',
+                      color: 'secondary.main',
                       '&:hover': {
-                        borderColor: '#7B1FA2',
+                        borderColor: 'secondary.dark',
                         backgroundColor: 'rgba(156, 39, 176, 0.1)'
                       },
                       '&:disabled': {
-                        borderColor: '#555555',
+                        borderColor: 'divider',
                         color: '#777777'
                       }
                     }}
@@ -2191,11 +2169,11 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         ...prev, 
                         includeFunscript: e.target.checked 
                       }))}
-                      sx={{ color: '#ffffff', '& .MuiSvgIcon-root': { fontSize: 18 } }}
+                      sx={{ color: 'text.primary', '& .MuiSvgIcon-root': { fontSize: 18 } }}
                     />
                   }
                   label={<Typography variant="body2">Include Funscript</Typography>}
-                  sx={{ color: '#ffffff', mr: 1 }}
+                  sx={{ color: 'text.primary', mr: 1 }}
                 />
                 <FormControlLabel
                   control={
@@ -2205,11 +2183,11 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         ...prev, 
                         createFunscriptFolder: e.target.checked 
                       }))}
-                      sx={{ color: '#ffffff', '& .MuiSvgIcon-root': { fontSize: 18 } }}
+                      sx={{ color: 'text.primary', '& .MuiSvgIcon-root': { fontSize: 18 } }}
                     />
                   }
                   label={<Typography variant="body2">Create Folder</Typography>}
-                  sx={{ color: '#ffffff' }}
+                  sx={{ color: 'text.primary' }}
                 />
               </Box>
               
@@ -2219,7 +2197,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                   <Button
                     size="small"
                     onClick={selectAllScenes}
-                    sx={{ color: '#2196F3', borderColor: '#2196F3', fontSize: '0.7rem' }}
+                    sx={{ color: 'primary.main', borderColor: 'primary.main', fontSize: '0.7rem' }}
                   >
                     {selectedScenes.size === scenes.length ? 'Deselect All' : 'Select All'}
                   </Button>
@@ -2229,8 +2207,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       onClick={cutMultipleScenes}
                       disabled={loading}
                       sx={{ 
-                        color: '#FF9800', 
-                        borderColor: '#FF9800',
+                        color: 'warning.main', 
+                        borderColor: 'warning.main',
                         fontSize: '0.7rem',
                         '&:hover': {
                           backgroundColor: 'rgba(255, 152, 0, 0.1)'
@@ -2247,8 +2225,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       onClick={mergeSelectedScenes}
                       disabled={loading}
                       sx={{ 
-                        color: '#4CAF50', 
-                        borderColor: '#4CAF50',
+                        color: 'success.main', 
+                        borderColor: 'success.main',
                         fontSize: '0.7rem',
                         '&:hover': {
                           backgroundColor: 'rgba(76, 175, 80, 0.1)'
@@ -2264,8 +2242,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       onClick={openTransitionDialog}
                       disabled={loading || isAnalyzing}
                       sx={{ 
-                        color: '#9C27B0', 
-                        borderColor: '#9C27B0',
+                        color: 'secondary.main', 
+                        borderColor: 'secondary.main',
                         fontSize: '0.7rem',
                         '&:hover': {
                           backgroundColor: 'rgba(156, 39, 176, 0.1)'
@@ -2299,7 +2277,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         checked={selectedScenes.has(scene.id)}
                         onChange={() => toggleSceneSelection(scene.id)}
                         sx={{ 
-                          color: '#ffffff',
+                          color: 'text.primary',
                           p: 0.5,
                           '&.Mui-checked': {
                             color: getSceneColor(index)
@@ -2314,8 +2292,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           cursor: 'pointer', 
                           flex: 1,
                           ml: 1,
-                          '& .MuiListItemText-primary': { color: '#ffffff', fontSize: '0.9rem' },
-                          '& .MuiListItemText-secondary': { color: '#cccccc', fontSize: '0.8rem' }
+                          '& .MuiListItemText-primary': { color: 'text.primary', fontSize: '0.9rem' },
+                          '& .MuiListItemText-secondary': { color: 'text.secondary', fontSize: '0.8rem' }
                         }}
                       />
                       <ListItemSecondaryAction>
@@ -2323,7 +2301,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           edge="end"
                           onClick={() => playScene(scene.id)}
                           size="small"
-                          sx={{ color: '#2196F3' }}
+                          sx={{ color: 'primary.main' }}
                         >
                           <PlayIcon fontSize="small" />
                         </IconButton>
@@ -2331,7 +2309,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           edge="end"
                           onClick={() => setEditingScene(index)}
                           size="small"
-                          sx={{ color: '#ffffff' }}
+                          sx={{ color: 'text.primary' }}
                         >
                           <EditIcon fontSize="small" />
                         </IconButton>
@@ -2340,7 +2318,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           onClick={() => exportScene(scene.id)}
                           size="small"
                           disabled={loading}
-                          sx={{ color: '#4CAF50' }}
+                          sx={{ color: 'success.main' }}
                         >
                           <ExportIcon fontSize="small" />
                         </IconButton>
@@ -2349,7 +2327,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           onClick={() => cutScene(scene.id)}
                           size="small"
                           disabled={loading}
-                          sx={{ color: '#FF9800' }}
+                          sx={{ color: 'warning.main' }}
                         >
                           <CutIcon fontSize="small" />
                         </IconButton>
@@ -2370,7 +2348,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         size="small"
                         onClick={() => snapToScenePoint(scene.id, 'start')}
                         sx={{ 
-                          color: '#2196F3',
+                          color: 'primary.main',
                           fontSize: '0.65rem',
                           minWidth: 'auto',
                           p: '2px 4px'
@@ -2382,7 +2360,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         size="small"
                         onClick={() => snapToScenePoint(scene.id, 'end')}
                         sx={{
-                          color: '#FF9800',
+                          color: 'warning.main',
                           fontSize: '0.65rem',
                           minWidth: 'auto',
                           p: '2px 4px'
@@ -2400,8 +2378,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             label={scene.funscriptPath.split(/[\\\/]/).pop()}
                             size="small"
                             sx={{
-                              backgroundColor: '#4CAF50',
-                              color: '#ffffff',
+                              backgroundColor: 'success.main',
+                              color: 'text.primary',
                               height: '20px',
                               fontSize: '0.7rem',
                               maxWidth: '150px'
@@ -2410,7 +2388,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           <IconButton
                             size="small"
                             onClick={() => removeFunscriptFromScene(scene.id)}
-                            sx={{ color: '#FF5722', p: 0.5 }}
+                            sx={{ color: 'error.main', p: 0.5 }}
                           >
                             <CancelIcon fontSize="small" />
                           </IconButton>
@@ -2424,7 +2402,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           variant="standard"
                           disableUnderline
                           sx={{
-                            color: '#aaaaaa',
+                            color: 'text.secondary',
                             fontSize: '0.75rem',
                             width: '100%'
                           }}
@@ -2448,13 +2426,13 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             {/* Tab 1: AI Settings */}
             {activeTab === 1 && (
               <Box sx={{ p: 2, overflow: 'auto', flex: 1 }}>
-                <Typography variant="h6" sx={{ color: '#9C27B0', mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h6" sx={{ color: 'secondary.main', mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                   <AutoFixHighIcon /> AI Video Analysis
                 </Typography>
                 
                 {/* Analysis Status */}
                 {isAnalyzing && (
-                  <Alert severity="info" sx={{ mb: 2, backgroundColor: '#1a237e', color: '#fff' }}>
+                  <Alert severity="info" sx={{ mb: 2, backgroundColor: 'info.dark', color: '#fff' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <CircularProgress size={16} sx={{ color: '#fff' }} />
                       <span>{analysisProgress || 'Analyzing...'}</span>
@@ -2463,14 +2441,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 )}
                 
                 {/* Service Status */}
-                <Box sx={{ mb: 3, p: 2, backgroundColor: '#1e1e1e', borderRadius: 1, border: '1px solid #333' }}>
-                  <Typography variant="subtitle2" sx={{ color: '#aaa', mb: 1 }}>Service Status</Typography>
+                <Box sx={{ mb: 3, p: 2, backgroundColor: 'background.paper', borderRadius: 1, border: '1px solid #333' }}>
+                  <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 1 }}>Service Status</Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Chip 
                       label={serviceRunning ? 'Running' : 'Stopped'} 
                       size="small" 
                       sx={{ 
-                        backgroundColor: serviceRunning ? '#4CAF50' : '#666',
+                        backgroundColor: serviceRunning ? 'success.main' : 'text.disabled',
                         color: '#fff'
                       }} 
                     />
@@ -2480,7 +2458,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         size="small"
                         onClick={() => startVideoService(false)}
                         disabled={startingService}
-                        sx={{ borderColor: '#4CAF50', color: '#4CAF50' }}
+                        sx={{ borderColor: 'success.main', color: 'success.main' }}
                       >
                         {startingService ? 'Starting...' : 'Start Service'}
                       </Button>
@@ -2489,7 +2467,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         variant="outlined"
                         size="small"
                         onClick={stopVideoService}
-                        sx={{ borderColor: '#f44336', color: '#f44336' }}
+                        sx={{ borderColor: 'error.main', color: 'error.main' }}
                       >
                         Stop Service
                       </Button>
@@ -2498,9 +2476,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 </Box>
 
                 {/* Analysis Configuration */}
-                <Box sx={{ mb: 3, p: 2, backgroundColor: '#1e1e1e', borderRadius: 1, border: '1px solid #333' }}>
+                <Box sx={{ mb: 3, p: 2, backgroundColor: 'background.paper', borderRadius: 1, border: '1px solid #333' }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="subtitle2" sx={{ color: '#aaa' }}>Analysis Settings</Typography>
+                    <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Analysis Settings</Typography>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                       {settingsSaved && !settingsModified && (
                         <Chip label="Saved" size="small" color="success" variant="outlined" />
@@ -2514,8 +2492,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         onClick={saveAnalysisSettings}
                         disabled={!settingsModified}
                         sx={{ 
-                          borderColor: settingsModified ? '#4CAF50' : '#666',
-                          color: settingsModified ? '#4CAF50' : '#666'
+                          borderColor: settingsModified ? 'success.main' : 'text.disabled',
+                          color: settingsModified ? 'success.main' : 'text.disabled'
                         }}
                       >
                         Save for Batch
@@ -2532,13 +2510,13 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                     helperText="Comma-separated list of actions to detect. Leave empty to detect all."
                     sx={{ 
                       mb: 2,
-                      '& .MuiInputLabel-root': { color: '#888' }, 
+                      '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                       '& .MuiOutlinedInput-root': { 
                         color: '#fff',
-                        '& fieldset': { borderColor: '#444' },
-                        '&:hover fieldset': { borderColor: '#666' }
+                        '& fieldset': { borderColor: 'divider' },
+                        '&:hover fieldset': { borderColor: 'text.disabled' }
                       },
-                      '& .MuiFormHelperText-root': { color: '#666' }
+                      '& .MuiFormHelperText-root': { color: 'text.disabled' }
                     }}
                   />
                   
@@ -2552,13 +2530,13 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       helperText="Analysis window size. Leave empty for auto."
                       sx={{ 
                         width: 180,
-                        '& .MuiInputLabel-root': { color: '#888' }, 
+                        '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                         '& .MuiOutlinedInput-root': { 
                           color: '#fff',
-                          '& fieldset': { borderColor: '#444' },
-                          '&:hover fieldset': { borderColor: '#666' }
+                          '& fieldset': { borderColor: 'divider' },
+                          '&:hover fieldset': { borderColor: 'text.disabled' }
                         },
-                        '& .MuiFormHelperText-root': { color: '#666' }
+                        '& .MuiFormHelperText-root': { color: 'text.disabled' }
                       }}
                     />
                     
@@ -2567,20 +2545,20 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         <Checkbox
                           checked={analysisConfig.preserveExisting}
                           onChange={(e) => updateAnalysisConfig({ preserveExisting: e.target.checked })}
-                          sx={{ color: '#888', '&.Mui-checked': { color: '#4CAF50' } }}
+                          sx={{ color: 'text.disabled', '&.Mui-checked': { color: 'success.main' } }}
                         />
                       }
                       label={
                         <Box>
                           <Typography sx={{ color: '#fff' }}>Keep Existing Scenes</Typography>
-                          <Typography variant="caption" sx={{ color: '#666' }}>Don't delete previous [Auto] scenes</Typography>
+                          <Typography variant="caption" sx={{ color: 'text.disabled' }}>Don't delete previous [Auto] scenes</Typography>
                         </Box>
                       }
                       sx={{ mt: 1 }}
                     />
                   </Box>
                   
-                  <Typography variant="caption" sx={{ color: '#888', mt: 2, display: 'block' }}>
+                  <Typography variant="caption" sx={{ color: 'text.disabled', mt: 2, display: 'block' }}>
                     💡 Tip: Save settings for batch processing. When the batch queue processes this video, it will use these saved settings.
                   </Typography>
                 </Box>
@@ -2596,8 +2574,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                     }}
                     disabled={isAnalyzing || loading || !serviceRunning}
                     sx={{ 
-                      backgroundColor: '#9C27B0', 
-                      '&:hover': { backgroundColor: '#7B1FA2' },
+                      backgroundColor: 'secondary.main', 
+                      '&:hover': { backgroundColor: 'secondary.dark' },
                       flex: 1,
                       minWidth: 200
                     }}
@@ -2616,9 +2594,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       }}
                       disabled={isAnalyzing || loading || !serviceRunning}
                       sx={{ 
-                        borderColor: '#FF9800', 
-                        color: '#FF9800',
-                        '&:hover': { borderColor: '#F57C00', backgroundColor: 'rgba(255, 152, 0, 0.1)' },
+                        borderColor: 'warning.main', 
+                        color: 'warning.main',
+                        '&:hover': { borderColor: 'warning.dark', backgroundColor: 'rgba(255, 152, 0, 0.1)' },
                         flex: 1,
                         minWidth: 200
                       }}
@@ -2642,9 +2620,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         }
                       }}
                       sx={{ 
-                        borderColor: '#f44336', 
-                        color: '#f44336',
-                        '&:hover': { borderColor: '#d32f2f', backgroundColor: 'rgba(244, 67, 54, 0.1)' }
+                        borderColor: 'error.main', 
+                        color: 'error.main',
+                        '&:hover': { borderColor: 'error.dark', backgroundColor: 'rgba(244, 67, 54, 0.1)' }
                       }}
                     >
                       ⏹ Stop Analysis
@@ -2663,15 +2641,15 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             {/* Tab 2: Logs */}
             {activeTab === 2 && (
               <>
-                <Box sx={{ p: 2, backgroundColor: '#1e1e1e', borderBottom: '1px solid #333' }}>
+                <Box sx={{ p: 2, backgroundColor: 'background.paper', borderBottom: '1px solid #333' }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="subtitle2" sx={{ color: '#aaa' }}>Service Output</Typography>
+                    <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Service Output</Typography>
                     <Box>
                       {!serviceRunning && (
                         <Button 
                           size="small" 
                           onClick={() => startVideoService(false)} 
-                          sx={{ color: '#4CAF50', mr: 1, borderColor: '#4CAF50' }} 
+                          sx={{ color: 'success.main', mr: 1, borderColor: 'success.main' }} 
                           variant="outlined"
                           disabled={startingService}
                         >
@@ -2682,7 +2660,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         <Button 
                           size="small" 
                           onClick={stopVideoService} 
-                          sx={{ color: '#ff6b6b', mr: 1, borderColor: '#ff6b6b' }} 
+                          sx={{ color: 'error.light', mr: 1, borderColor: 'error.light' }} 
                           variant="outlined"
                         >
                           Stop Service
@@ -2702,37 +2680,37 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                               await loadScenes();
                             }
                           }} 
-                          sx={{ color: '#FF9800', mr: 1, borderColor: '#FF9800' }} 
+                          sx={{ color: 'warning.main', mr: 1, borderColor: 'warning.main' }} 
                           variant="outlined"
                         >
                           Stop Analysis
                         </Button>
                       )}
-                      <Button size="small" onClick={() => setServiceLogs([])} sx={{ color: '#aaa' }}>Clear</Button>
+                      <Button size="small" onClick={() => setServiceLogs([])} sx={{ color: 'text.secondary' }}>Clear</Button>
                     </Box>
                   </Box>
                 </Box>
 
                 <Box 
                   ref={logsContainerRef}
-                  sx={{ flex: 1, overflow: 'auto', p: 2, backgroundColor: '#1e1e1e', fontFamily: 'monospace' }}
+                  sx={{ flex: 1, overflow: 'auto', p: 2, backgroundColor: 'background.paper', fontFamily: 'monospace' }}
                 >
                   {serviceLogs.length === 0 ? (
-                    <Typography sx={{ color: '#666', fontStyle: 'italic', mt: 2, textAlign: 'center' }}>
+                    <Typography sx={{ color: 'text.disabled', fontStyle: 'italic', mt: 2, textAlign: 'center' }}>
                       No logs available.<br/>Start the service to see output.
                     </Typography>
                   ) : (
                     serviceLogs.map((log, i) => (
                       <Box key={i} sx={{ 
                         mb: 0.5, 
-                        color: log.type === 'stderr' ? '#ff6b6b' : '#cccccc', 
+                        color: log.type === 'stderr' ? 'error.light' : 'text.secondary', 
                         fontSize: '0.8rem', 
                         whiteSpace: 'pre', 
                         width: 'fit-content',
                         minWidth: '100%',
                         pr: 2
                       }}>
-                        <span style={{ color: '#666', marginRight: '8px', userSelect: 'none' }}>[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                        <span style={{ color: 'text.disabled', marginRight: '8px', userSelect: 'none' }}>[{new Date(log.timestamp).toLocaleTimeString()}]</span>
                         {log.message}
                       </Box>
                     ))
@@ -2752,11 +2730,11 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             borderRight: '1px solid #404040', 
             display: 'flex', 
             flexDirection: 'column', 
-            backgroundColor: '#2d2d30',
+            backgroundColor: 'background.paper',
             overflow: 'hidden'
           }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid #404040', backgroundColor: '#252526' }}>
-              <Typography variant="h6" sx={{ color: '#ffffff' }}>
+            <Box sx={{ p: 2, borderBottom: '1px solid #404040', backgroundColor: 'background.paper' }}>
+              <Typography variant="h6" sx={{ color: 'text.primary' }}>
                 Exported Files ({exportedFiles.length})
               </Typography>
             </Box>
@@ -2795,8 +2773,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                                 mt: 0.5,
                                 height: 20,
                                 fontSize: '0.65rem',
-                                borderColor: file.content_type === 'funscript' ? '#FF9800' : '#2196F3',
-                                color: file.content_type === 'funscript' ? '#FF9800' : '#2196F3'
+                                borderColor: file.content_type === 'funscript' ? 'warning.main' : 'primary.main',
+                                color: file.content_type === 'funscript' ? 'warning.main' : 'primary.main'
                               }}
                             />
                           </Box>
@@ -2804,11 +2782,11 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         sx={{ 
                           flex: 1,
                           '& .MuiListItemText-primary': { 
-                            color: '#ffffff',
+                            color: 'text.primary',
                             fontSize: '0.9rem',
                             wordBreak: 'break-word'
                           },
-                          '& .MuiListItemText-secondary': { color: '#cccccc' }
+                          '& .MuiListItemText-secondary': { color: 'text.secondary' }
                         }}
                       />
                       <ListItemSecondaryAction>
@@ -2816,7 +2794,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           edge="end"
                           onClick={() => setEditingFile(editingFile === index ? null : index)}
                           size="small"
-                          sx={{ color: editingFile === index ? '#4CAF50' : '#ffffff' }}
+                          sx={{ color: editingFile === index ? 'success.main' : 'text.primary' }}
                         >
                           <EditIcon fontSize="small" />
                         </IconButton>
@@ -2841,8 +2819,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             size="small"
                             variant="outlined"
                             sx={{
-                              borderColor: '#4CAF50',
-                              color: '#4CAF50',
+                              borderColor: 'success.main',
+                              color: 'success.main',
                               height: 20,
                               fontSize: '0.65rem'
                             }}
@@ -2864,9 +2842,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                                 onDelete={() => removeTag(tag)}
                                 size="small"
                                 sx={{
-                                  backgroundColor: '#404040',
-                                  color: '#ffffff',
-                                  '& .MuiChip-deleteIcon': { color: '#ffffff' }
+                                  backgroundColor: 'divider',
+                                  color: 'text.primary',
+                                  '& .MuiChip-deleteIcon': { color: 'text.primary' }
                                 }}
                               />
                             ))}
@@ -2912,19 +2890,19 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                                   }
                                 }}
                                 sx={{
-                                  '& .MuiInputLabel-root': { color: '#ffffff' },
+                                  '& .MuiInputLabel-root': { color: 'text.primary' },
                                   '& .MuiOutlinedInput-root': {
-                                    color: '#ffffff',
-                                    '& fieldset': { borderColor: '#404040' },
-                                    '&:hover fieldset': { borderColor: '#2196F3' },
-                                    '&.Mui-focused fieldset': { borderColor: '#2196F3' }
+                                    color: 'text.primary',
+                                    '& fieldset': { borderColor: 'divider' },
+                                    '&:hover fieldset': { borderColor: 'primary.main' },
+                                    '&.Mui-focused fieldset': { borderColor: 'primary.main' }
                                   }
                                 }}
                               />
                             )}
                             sx={{
-                              '& .MuiAutocomplete-popupIndicator': { color: '#ffffff' },
-                              '& .MuiAutocomplete-clearIndicator': { color: '#ffffff' }
+                              '& .MuiAutocomplete-popupIndicator': { color: 'text.primary' },
+                              '& .MuiAutocomplete-clearIndicator': { color: 'text.primary' }
                             }}
                           />
                           <Button
@@ -2945,7 +2923,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             disabled={loading}
                             size="small"
                             fullWidth
-                            sx={{ backgroundColor: '#4CAF50' }}
+                            sx={{ backgroundColor: 'success.main' }}
                           >
                             Save
                           </Button>
@@ -2954,7 +2932,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             onClick={() => setEditingFile(null)}
                             size="small"
                             fullWidth
-                            sx={{ borderColor: '#666666', color: '#ffffff' }}
+                            sx={{ borderColor: 'text.disabled', color: 'text.primary' }}
                           >
                             Cancel
                           </Button>
@@ -2974,7 +2952,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <Paper sx={{ 
               p: 2, 
-              backgroundColor: '#2d2d30',
+              backgroundColor: 'background.paper',
               border: '1px solid #404040',
               display: 'flex',
               flexDirection: 'column',
@@ -2999,19 +2977,19 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                       <IconButton 
                         onClick={handlePlayPause}
-                        sx={{ color: '#ffffff' }}
+                        sx={{ color: 'text.primary' }}
                       >
                         {isPlaying ? <PauseIcon /> : <PlayIcon />}
                       </IconButton>
-                      <Typography variant="body2" sx={{ mx: 1, color: '#ffffff' }}>
+                      <Typography variant="body2" sx={{ mx: 1, color: 'text.primary' }}>
                         {formatTime(currentTime)} / {formatTime(effectiveDuration)}
                         {bufferedRanges.length > 0 && effectiveDuration > 1 && (
-                          <span style={{ color: '#888', marginLeft: 8, fontSize: '0.8em' }}>
+                          <span style={{ color: 'text.disabled', marginLeft: 8, fontSize: '0.8em' }}>
                             (buffered: {Math.min(100, Math.round((bufferedRanges.reduce((acc, r) => acc + (r.end - r.start), 0) / effectiveDuration) * 100))}%)
                           </span>
                         )}
                       </Typography>
-                      <Typography variant="body2" sx={{ mx: 1, color: '#ffffff' }}>
+                      <Typography variant="body2" sx={{ mx: 1, color: 'text.primary' }}>
                         Speed: {playbackRate}x
                       </Typography>
                     </Box>
@@ -3028,9 +3006,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         sx={{ 
                           padding: 0,
                           height: '40px',
-                          '& .MuiSlider-track': { height: 4, backgroundColor: '#2196F3', opacity: 0.5 },
+                          '& .MuiSlider-track': { height: 4, backgroundColor: 'primary.main', opacity: 0.5 },
                           '& .MuiSlider-thumb': { 
-                            color: '#2196F3', 
+                            color: 'primary.main', 
                             width: 2, 
                             height: 40, 
                             borderRadius: 0,
@@ -3054,7 +3032,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                               }
                             }
                           },
-                          '& .MuiSlider-rail': { backgroundColor: '#404040', height: 4 }
+                          '& .MuiSlider-rail': { backgroundColor: 'divider', height: 4 }
                         }}
                       />
                       {renderSceneOverlays()}
@@ -3074,9 +3052,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                               minWidth: 'auto',
                               fontSize: '0.6rem',
                               padding: '2px 4px',
-                              color: playbackRate === speed ? '#ffffff' : '#4CAF50',
-                              borderColor: '#4CAF50',
-                              backgroundColor: playbackRate === speed ? '#4CAF50' : 'transparent',
+                              color: playbackRate === speed ? 'text.primary' : 'success.main',
+                              borderColor: 'success.main',
+                              backgroundColor: playbackRate === speed ? 'success.main' : 'transparent',
                               '&:hover': {
                                 backgroundColor: playbackRate === speed ? '#45a049' : 'rgba(76, 175, 80, 0.1)'
                               }
@@ -3092,16 +3070,16 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                     <Box sx={{ mb: 2 }}>
                       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 1, mb: 1 }}>
                         {/* Backward Controls */}
-                        <Button size="small" onClick={() => seekBackward(15)} sx={{ color: '#FF9800', borderColor: '#FF9800', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<FastRewindIcon />}>15s</Button>
-                        <Button size="small" onClick={() => seekBackward(5)} sx={{ color: '#FF9800', borderColor: '#FF9800', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<SkipPreviousIcon />}>5s</Button>
-                        <Button size="small" onClick={() => seekBackward(1)} sx={{ color: '#FF9800', borderColor: '#FF9800', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<SkipPreviousIcon />}>1s</Button>
-                        <Button size="small" onClick={() => seekBackward(0.2)} sx={{ color: '#FF9800', borderColor: '#FF9800', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<SkipPreviousIcon />}>.2s</Button>
+                        <Button size="small" onClick={() => seekBackward(15)} sx={{ color: 'warning.main', borderColor: 'warning.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<FastRewindIcon />}>15s</Button>
+                        <Button size="small" onClick={() => seekBackward(5)} sx={{ color: 'warning.main', borderColor: 'warning.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<SkipPreviousIcon />}>5s</Button>
+                        <Button size="small" onClick={() => seekBackward(1)} sx={{ color: 'warning.main', borderColor: 'warning.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<SkipPreviousIcon />}>1s</Button>
+                        <Button size="small" onClick={() => seekBackward(0.2)} sx={{ color: 'warning.main', borderColor: 'warning.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} startIcon={<SkipPreviousIcon />}>.2s</Button>
                         
                         {/* Forward Controls */}
-                        <Button size="small" onClick={() => seekForward(0.2)} sx={{ color: '#2196F3', borderColor: '#2196F3', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<SkipNextIcon />}>.2s</Button>
-                        <Button size="small" onClick={() => seekForward(1)} sx={{ color: '#2196F3', borderColor: '#2196F3', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<SkipNextIcon />}>1s</Button>
-                        <Button size="small" onClick={() => seekForward(5)} sx={{ color: '#2196F3', borderColor: '#2196F3', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<SkipNextIcon />}>5s</Button>
-                        <Button size="small" onClick={() => seekForward(15)} sx={{ color: '#2196F3', borderColor: '#2196F3', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<FastForwardIcon />}>15s</Button>
+                        <Button size="small" onClick={() => seekForward(0.2)} sx={{ color: 'primary.main', borderColor: 'primary.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<SkipNextIcon />}>.2s</Button>
+                        <Button size="small" onClick={() => seekForward(1)} sx={{ color: 'primary.main', borderColor: 'primary.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<SkipNextIcon />}>1s</Button>
+                        <Button size="small" onClick={() => seekForward(5)} sx={{ color: 'primary.main', borderColor: 'primary.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<SkipNextIcon />}>5s</Button>
+                        <Button size="small" onClick={() => seekForward(15)} sx={{ color: 'primary.main', borderColor: 'primary.main', fontSize: '0.7rem', minWidth: 'auto', padding: '4px 8px' }} endIcon={<FastForwardIcon />}>15s</Button>
                       </Box>
                     </Box>
                   </Box>
@@ -3109,7 +3087,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 
                 {/* Video Management Controls */}
                 <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mt: 2 }}>
-                  <Typography variant="body2" sx={{ color: '#cccccc', flex: '1 1 auto' }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', flex: '1 1 auto' }}>
                     Location: {isInFunscriptFolder() ? 'Funscript Section' : 'Regular Videos'}
                   </Typography>
                   
@@ -3119,7 +3097,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       size="small"
                       onClick={moveToFunscript}
                       disabled={loading}
-                      sx={{ backgroundColor: '#FF9800', color: '#ffffff' }}
+                      sx={{ backgroundColor: 'warning.main', color: 'text.primary' }}
                     >
                       📁 Move to Funscript
                     </Button>
@@ -3129,7 +3107,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       size="small"
                       onClick={moveFromFunscript}
                       disabled={loading}
-                      sx={{ backgroundColor: '#2196F3', color: '#ffffff' }}
+                      sx={{ backgroundColor: 'primary.main', color: 'text.primary' }}
                     >
                       ↩️ Move Back
                     </Button>
@@ -3141,11 +3119,11 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             {/* Scene Creation Controls */}
             <Paper sx={{ 
               p: 2,
-              backgroundColor: '#2d2d30',
+              backgroundColor: 'background.paper',
               border: '1px solid #404040',
               flex: '0 0 auto'
             }}>
-              <Typography variant="h6" gutterBottom sx={{ color: '#ffffff' }}>
+              <Typography variant="h6" gutterBottom sx={{ color: 'text.primary' }}>
                 {editingScene !== null ? 'Edit Scene' : 'Create New Scene'}
               </Typography>
               
@@ -3173,12 +3151,12 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       }
                     }}
                     sx={{
-                      '& .MuiInputLabel-root': { color: '#ffffff' },
+                      '& .MuiInputLabel-root': { color: 'text.primary' },
                       '& .MuiOutlinedInput-root': {
-                        color: '#ffffff',
-                        '& fieldset': { borderColor: '#404040' },
-                        '&:hover fieldset': { borderColor: '#2196F3' },
-                        '&.Mui-focused fieldset': { borderColor: '#2196F3' }
+                        color: 'text.primary',
+                        '& fieldset': { borderColor: 'divider' },
+                        '&:hover fieldset': { borderColor: 'primary.main' },
+                        '&.Mui-focused fieldset': { borderColor: 'primary.main' }
                       }
                     }}
                   />
@@ -3209,24 +3187,24 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       }}
                       InputProps={{ step: 0.1 }}
                       sx={{
-                        '& .MuiInputLabel-root': { color: '#ffffff' },
+                        '& .MuiInputLabel-root': { color: 'text.primary' },
                         '& .MuiOutlinedInput-root': {
-                          color: '#ffffff',
-                          '& fieldset': { borderColor: '#404040' }
+                          color: 'text.primary',
+                          '& fieldset': { borderColor: 'divider' }
                         }
                       }}
                     />
                     <Button
                       variant="outlined"
                       onClick={setCurrentTimeAsStart}
-                      sx={{ borderColor: '#2196F3', color: '#2196F3', minWidth: '60px' }}
+                      sx={{ borderColor: 'primary.main', color: 'primary.main', minWidth: '60px' }}
                     >
                       NOW
                     </Button>
                     <Button
                       variant="outlined"
                       onClick={setStartToPreviousEnd}
-                      sx={{ borderColor: '#FF9800', color: '#FF9800', minWidth: '60px', fontSize: '0.65rem', lineHeight: 1.2 }}
+                      sx={{ borderColor: 'warning.main', color: 'warning.main', minWidth: '60px', fontSize: '0.65rem', lineHeight: 1.2 }}
                     >
                       PREV END
                     </Button>
@@ -3257,24 +3235,24 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       }}
                       InputProps={{ step: 0.1 }}
                       sx={{
-                        '& .MuiInputLabel-root': { color: '#ffffff' },
+                        '& .MuiInputLabel-root': { color: 'text.primary' },
                         '& .MuiOutlinedInput-root': {
-                          color: '#ffffff',
-                          '& fieldset': { borderColor: '#404040' }
+                          color: 'text.primary',
+                          '& fieldset': { borderColor: 'divider' }
                         }
                       }}
                     />
                     <Button
                       variant="outlined"
                       onClick={setCurrentTimeAsEnd}
-                      sx={{ borderColor: '#2196F3', color: '#2196F3', minWidth: '60px' }}
+                      sx={{ borderColor: 'primary.main', color: 'primary.main', minWidth: '60px' }}
                     >
                       NOW
                     </Button>
                     <Button
                       variant="outlined"
                       onClick={setEndToNextStart}
-                      sx={{ borderColor: '#FF9800', color: '#FF9800', minWidth: '60px', fontSize: '0.65rem', lineHeight: 1.2 }}
+                      sx={{ borderColor: 'warning.main', color: 'warning.main', minWidth: '60px', fontSize: '0.65rem', lineHeight: 1.2 }}
                     >
                       NEXT START
                     </Button>
@@ -3290,10 +3268,10 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                     startIcon={<SaveIcon />}
                     fullWidth
                     sx={{
-                      backgroundColor: '#2196F3',
-                      color: '#ffffff',
+                      backgroundColor: 'primary.main',
+                      color: 'text.primary',
                       fontWeight: 'bold',
-                      '&:hover': { backgroundColor: '#1976D2' }
+                      '&:hover': { backgroundColor: 'primary.dark' }
                     }}
                   >
                     {editingScene !== null ? 'UPDATE SCENE' : 'SAVE SCENE'}
@@ -3303,7 +3281,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       variant="outlined"
                       onClick={() => setEditingScene(null)}
                       fullWidth
-                      sx={{ mt: 1, borderColor: '#666666', color: '#ffffff' }}
+                      sx={{ mt: 1, borderColor: 'text.disabled', color: 'text.primary' }}
                       startIcon={<CancelIcon />}
                     >
                       Cancel Edit
@@ -3327,12 +3305,12 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         fullWidth
         PaperProps={{
           sx: { 
-            backgroundColor: '#2d2d30',
-            color: '#ffffff'
+            backgroundColor: 'background.paper',
+            color: 'text.primary'
           }
         }}
       >
-        <DialogTitle sx={{ backgroundColor: '#1a1a1a', borderBottom: '1px solid #404040' }}>
+        <DialogTitle sx={{ backgroundColor: 'background.default', borderBottom: '1px solid #404040' }}>
           🤖 AI Video Analysis
         </DialogTitle>
         <DialogContent sx={{ p: 3 }}>
@@ -3342,10 +3320,10 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
               <Typography variant="body1" sx={{ mb: 2, color: '#ff9800' }}>
                 ⚠️ Video Analysis Service Not Running
               </Typography>
-              <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
+              <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
                 The Qwen2-VL video analysis service needs to be started.
               </Typography>
-              <Typography variant="body2" sx={{ mb: 3, color: '#888' }}>
+              <Typography variant="body2" sx={{ mb: 3, color: 'text.disabled' }}>
                 This will start the AI service in the background.
                 First load may take 2-3 minutes to download and initialize.
                 You can view the progress in the "Logs" tab.
@@ -3354,8 +3332,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 variant="contained"
                 onClick={startVideoService}
                 sx={{
-                  backgroundColor: '#9C27B0',
-                  '&:hover': { backgroundColor: '#7B1FA2' }
+                  backgroundColor: 'secondary.main',
+                  '&:hover': { backgroundColor: 'secondary.dark' }
                 }}
               >
                 🚀 Start AI Service
@@ -3366,14 +3344,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
           {/* Service starting */}
           {startingService && (
             <Box sx={{ textAlign: 'center', py: 3 }}>
-              <CircularProgress sx={{ mb: 2, color: '#9C27B0' }} />
-              <Typography variant="body1" sx={{ color: '#9C27B0' }}>
+              <CircularProgress sx={{ mb: 2, color: 'secondary.main' }} />
+              <Typography variant="body1" sx={{ color: 'secondary.main' }}>
                 Starting service & loading model...
               </Typography>
-              <Typography variant="body2" sx={{ mt: 1, color: '#aaa' }}>
+              <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
                 This may take 1-2 minutes. Check the Logs tab for progress.
               </Typography>
-              <Typography variant="body2" sx={{ mt: 2, color: '#666' }}>
+              <Typography variant="body2" sx={{ mt: 2, color: 'text.disabled' }}>
                 Once ready, analysis will start automatically.
               </Typography>
             </Box>
@@ -3382,8 +3360,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
           {/* Unknown state - checking */}
           {serviceRunning === null && !startingService && (
             <Box sx={{ textAlign: 'center', py: 3 }}>
-              <CircularProgress size={24} sx={{ color: '#9C27B0' }} />
-              <Typography variant="body2" sx={{ mt: 2, color: '#aaa' }}>
+              <CircularProgress size={24} sx={{ color: 'secondary.main' }} />
+              <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
                 Checking service status...
               </Typography>
             </Box>
@@ -3392,7 +3370,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         <Box sx={{ p: 2, borderTop: '1px solid #404040', display: 'flex', justifyContent: 'flex-end' }}>
           <Button 
             onClick={() => setShowActionPicker(false)}
-            sx={{ color: '#aaa' }}
+            sx={{ color: 'text.secondary' }}
           >
             Cancel
           </Button>
@@ -3406,14 +3384,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         maxWidth="sm"
         fullWidth
         PaperProps={{
-          sx: { backgroundColor: '#2d2d30', color: '#ffffff' }
+          sx: { backgroundColor: 'background.paper', color: 'text.primary' }
         }}
       >
-        <DialogTitle sx={{ backgroundColor: '#1a1a1a', borderBottom: '1px solid #404040' }}>
+        <DialogTitle sx={{ backgroundColor: 'background.default', borderBottom: '1px solid #404040' }}>
           {analysisTarget === 'selected' ? 'Batch Analysis Configuration' : 'Full Video Analysis Configuration'}
         </DialogTitle>
         <DialogContent sx={{ p: 3 }}>
-          <Typography variant="body2" sx={{ mb: 3, color: '#aaa' }}>
+          <Typography variant="body2" sx={{ mb: 3, color: 'text.secondary' }}>
             Configure the AI analysis parameters.
           </Typography>
           
@@ -3423,7 +3401,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             value={analysisConfig.allowedActions}
             onChange={(e) => setAnalysisConfig(prev => ({ ...prev, allowedActions: e.target.value }))}
             placeholder="e.g. reverse-cowgirl, blowjob, handjob"
-            sx={{ mb: 3, '& .MuiInputLabel-root': { color: '#aaa' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } } }}
+            sx={{ mb: 3, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } } }}
             helperText="Leave empty to detect all supported actions."
           />
 
@@ -3434,18 +3412,18 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             value={analysisConfig.windowSize}
             onChange={(e) => setAnalysisConfig(prev => ({ ...prev, windowSize: e.target.value }))}
             placeholder={videoDuration ? `${Math.max(4, Math.min(8, Math.floor(videoDuration * 0.025)))}` : "Auto"}
-            sx={{ mb: 1, '& .MuiInputLabel-root': { color: '#aaa' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } } }}
+            sx={{ mb: 1, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } } }}
             helperText={`Controls the context window for analysis. Default is calculated based on video length.`}
           />
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid #404040' }}>
-          <Button onClick={() => setShowAnalysisConfig(false)} sx={{ color: '#aaa' }}>
+          <Button onClick={() => setShowAnalysisConfig(false)} sx={{ color: 'text.secondary' }}>
             Cancel
           </Button>
           <Button 
             onClick={handleStartAnalysis}
             variant="contained"
-            sx={{ backgroundColor: '#2196F3', '&:hover': { backgroundColor: '#1976D2' } }}
+            sx={{ backgroundColor: 'primary.main', '&:hover': { backgroundColor: 'primary.dark' } }}
           >
             Run Analysis
           </Button>
@@ -3459,14 +3437,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         maxWidth="sm"
         fullWidth
         PaperProps={{
-          sx: { backgroundColor: '#2d2d30', color: '#ffffff' }
+          sx: { backgroundColor: 'background.paper', color: 'text.primary' }
         }}
       >
-        <DialogTitle sx={{ backgroundColor: '#1a1a1a', borderBottom: '1px solid #404040' }}>
+        <DialogTitle sx={{ backgroundColor: 'background.default', borderBottom: '1px solid #404040' }}>
           Detailed Transition Analysis
         </DialogTitle>
         <DialogContent sx={{ p: 3 }}>
-          <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
             Analyze the transition between the two selected scenes with higher precision.
           </Typography>
           
@@ -3475,7 +3453,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             fullWidth
             value={transitionParams.prompt}
             onChange={(e) => setTransitionParams(prev => ({ ...prev, prompt: e.target.value }))}
-            sx={{ mb: 3, mt: 1, '& .MuiInputLabel-root': { color: '#aaa' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } } }}
+            sx={{ mb: 3, mt: 1, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } } }}
             helperText="Leave empty to allow all actions, or specify expected actions."
           />
           
@@ -3488,7 +3466,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 fullWidth
                 inputProps={{ step: 0.1 }}
                 helperText={formatTime(transitionParams.startTime)}
-                sx={{ '& .MuiInputLabel-root': { color: '#aaa' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } }, '& .MuiFormHelperText-root': { color: '#888' } }}
+                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
             />
             <TextField
                 label="End Time (s)"
@@ -3498,7 +3476,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 fullWidth
                 inputProps={{ step: 0.1 }}
                 helperText={formatTime(transitionParams.endTime)}
-                sx={{ '& .MuiInputLabel-root': { color: '#aaa' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } }, '& .MuiFormHelperText-root': { color: '#888' } }}
+                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
             />
             <TextField
                 label="Original Window (s)"
@@ -3508,12 +3486,12 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 fullWidth
                 inputProps={{ step: 1, min: 0 }}
                 helperText="Window size used in analysis"
-                sx={{ '& .MuiInputLabel-root': { color: '#aaa' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } }, '& .MuiFormHelperText-root': { color: '#888' } }}
+                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
             />
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid #404040' }}>
-          <Button onClick={() => setShowTransitionDialog(false)} sx={{ color: '#aaa' }}>Cancel</Button>
+          <Button onClick={() => setShowTransitionDialog(false)} sx={{ color: 'text.secondary' }}>Cancel</Button>
           <Button onClick={runTransitionAnalysis} variant="contained" color="primary">Find Exact Cut</Button>
         </DialogActions>
       </Dialog>
@@ -3522,20 +3500,20 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
 
   if (variant === 'page') {
     return (
-      <ThemeProvider theme={darkTheme}>
-        <Box sx={{ height: '100vh', backgroundColor: '#1a1a1a', color: '#ffffff', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      
+        <Box sx={{ height: '100vh', backgroundColor: 'background.default', color: 'text.primary', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <Box sx={{ width: '98%', mx: 'auto', py: 2, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {header}
             {content}
           </Box>
           {extraDialogs}
         </Box>
-      </ThemeProvider>
+      
     );
   }
 
   return (
-    <ThemeProvider theme={darkTheme}>
+    <>
       <Dialog
         open={open}
         onClose={onClose}
@@ -3547,8 +3525,8 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             maxWidth: '100vw',
             height: '95vh', 
             maxHeight: '95vh',
-            backgroundColor: '#1a1a1a',
-            color: '#ffffff',
+            backgroundColor: 'background.default',
+            color: 'text.primary',
             m: 1
           }
         }}
@@ -3557,7 +3535,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         {content}
       </Dialog>
       {extraDialogs}
-    </ThemeProvider>
+    </>
   );
 };
 
