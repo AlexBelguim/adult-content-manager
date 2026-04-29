@@ -32,7 +32,7 @@ import PairwiseMobilePage from './pages/PairwiseMobilePage';
 import RankingInsightPage from './pages/RankingInsightPage';
 import PairwiseRefinePage from './pages/PairwiseRefinePage';
 import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
-import PerformerCardSamplesPage from './extra/PerformerCardSamplesPage';
+
 
 import CssBaseline from '@mui/material/CssBaseline';
 import { getThemeById, getStoredThemeId, setStoredThemeId } from './theme';
@@ -542,9 +542,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/auto-label" element={
               <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
             } />
-            <Route path="/extra/performer-cards" element={
-              <PerformerCardSamplesPage />
-            } />
+
             <Route path="/thumbnail-selector/:performerId" element={
               <ThumbnailSelectorWrapper />
             } />
