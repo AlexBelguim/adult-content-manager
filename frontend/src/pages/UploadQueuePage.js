@@ -403,7 +403,7 @@ function UploadQueuePage({ basePath }) {
     const getStatusIcon = (status) => {
         switch (status) {
             case 'uploading': return <UploadingIcon color="info" />;
-            case 'queued': return <QueuedIcon sx={{ color: '#888' }} />;
+            case 'queued': return <QueuedIcon sx={{ color: 'text.secondary' }} />;
             case 'processing': return <ProcessingIcon color="primary" sx={{ animation: 'spin 2s linear infinite' }} />;
             case 'completed': return <CheckCircleIcon color="success" />;
             case 'error': return <ErrorIcon color="error" />;
@@ -431,7 +431,7 @@ function UploadQueuePage({ basePath }) {
 
     return (
         <Box sx={{ p: 3, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
-            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                 Upload Queue
             </Typography>
 
@@ -449,8 +449,8 @@ function UploadQueuePage({ basePath }) {
                         sx={{
                             p: 3,
                             height: '100%',
-                            background: '#1E1E1E',
-                            color: '#fff',
+                            
+                            
                             borderRadius: 2,
                             display: 'flex',
                             flexDirection: 'column'
@@ -459,7 +459,7 @@ function UploadQueuePage({ basePath }) {
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
                             <Box sx={{
                                 width: 40, height: 40, borderRadius: '50%',
-                                bgcolor: 'rgba(255, 142, 83, 0.2)', color: '#FF8E53',
+                                bgcolor: 'action.selected', color: 'primary.main',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', mr: 2
                             }}>
                                 <AddIcon />
@@ -476,12 +476,12 @@ function UploadQueuePage({ basePath }) {
                             onChange={(e) => setPerformerName(e.target.value)}
                             sx={{
                                 mb: 3,
-                                '& .MuiInputLabel-root': { color: '#aaa' },
+                                '& .MuiInputLabel-root': { color: 'text.secondary' },
                                 '& .MuiOutlinedInput-root': {
-                                    color: '#fff',
-                                    '& fieldset': { borderColor: '#444' },
-                                    '&:hover fieldset': { borderColor: '#FF8E53' },
-                                    '&.Mui-focused fieldset': { borderColor: '#FF8E53' }
+                                    
+                                    '& fieldset': { borderColor: 'divider' },
+                                    '&:hover fieldset': { borderColor: 'primary.main' },
+                                    '&.Mui-focused fieldset': { borderColor: 'primary.main' }
                                 }
                             }}
                         />
@@ -504,11 +504,11 @@ function UploadQueuePage({ basePath }) {
                             sx={{
                                 mb: 2,
                                 py: 1.5,
-                                borderColor: '#444',
-                                color: '#fff',
+                                borderColor: 'divider',
+                                
                                 textTransform: 'none',
                                 justifyContent: 'flex-start',
-                                '&:hover': { borderColor: '#FF8E53', bgcolor: 'rgba(255, 142, 83, 0.05)' }
+                                '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
                             }}
                         >
                             Select Folder
@@ -516,9 +516,9 @@ function UploadQueuePage({ basePath }) {
 
                         {selectedFiles.length > 0 && (
                             <Fade in>
-                                <Card variant="outlined" sx={{ mb: 3, bgcolor: '#252525', borderColor: '#444' }}>
+                                <Card variant="outlined" sx={{ mb: 3, bgcolor: 'background.paper', borderColor: 'divider' }}>
                                     <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-                                        <Typography variant="body2" color="#aaa" gutterBottom>
+                                        <Typography variant="body2" color="text.secondary" gutterBottom>
                                             {selectedFiles.length} files selected
                                         </Typography>
                                         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -527,7 +527,7 @@ function UploadQueuePage({ basePath }) {
                                             {fileStats.funscript > 0 && (
                                                 <Chip label={`${fileStats.funscript} funscripts`} size="small" sx={{ bgcolor: 'rgba(255, 204, 128, 0.1)', color: '#ffcc80' }} />
                                             )}
-                                            <Chip label={formatFileSize(fileStats.totalSize)} size="small" sx={{ bgcolor: '#333', color: '#fff' }} />
+                                            <Chip label={formatFileSize(fileStats.totalSize)} size="small" sx={{ bgcolor: 'background.default',  }} />
                                         </Box>
                                     </CardContent>
                                 </Card>
@@ -562,9 +562,9 @@ function UploadQueuePage({ basePath }) {
                                 disabled={!performerName.trim() || selectedFiles.length === 0}
                                 sx={{
                                     py: 1.5,
-                                    background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)',
+                                    background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)',
                                     fontWeight: 'bold',
-                                    boxShadow: '0 3px 5px 2px rgba(255, 105, 135, .3)'
+                                    boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)'
                                 }}
                             >
                                 Add to Queue
@@ -581,12 +581,12 @@ function UploadQueuePage({ basePath }) {
                             height: '100%',
                             display: 'flex',
                             flexDirection: 'column',
-                            bgcolor: '#1E1E1E',
-                            color: '#fff',
+                            
+                            
                             borderRadius: 2
                         }}
                     >
-                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
+                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
                             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                                 <Typography variant="h6" fontWeight="bold">Queue Activity</Typography>
                                 {isProcessing && (
@@ -603,11 +603,11 @@ function UploadQueuePage({ basePath }) {
                                 <Button
                                     size="small"
                                     onClick={handleClearCompleted}
-                                    sx={{ color: '#aaa', '&:hover': { color: '#fff', bgcolor: '#333' } }}
+                                    sx={{ color: 'text.secondary', '&:hover': {  bgcolor: 'background.default' } }}
                                 >
                                     Clear Completed
                                 </Button>
-                                <IconButton size="small" onClick={fetchQueueStatus} sx={{ color: '#aaa' }}>
+                                <IconButton size="small" onClick={fetchQueueStatus} sx={{ color: 'text.secondary' }}>
                                     <RefreshIcon />
                                 </IconButton>
                             </Box>
@@ -615,22 +615,22 @@ function UploadQueuePage({ basePath }) {
 
                         <Box sx={{ flex: 1, overflow: 'auto', p: 0 }}>
                             {combinedQueue.length === 0 ? (
-                                <Box sx={{ p: 6, textAlign: 'center', color: '#666', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                     <QueuedIcon sx={{ fontSize: 60, mb: 2, opacity: 0.2 }} />
-                                    <Typography variant="h6" color="#555">Queue is empty</Typography>
-                                    <Typography variant="body2" color="#444">Add uploads to get started</Typography>
+                                    <Typography variant="h6" color="text.disabled">Queue is empty</Typography>
+                                    <Typography variant="body2" color="text.disabled">Add uploads to get started</Typography>
                                 </Box>
                             ) : (
                                 <List sx={{ p: 0 }}>
                                     {combinedQueue.map((job, index) => (
                                         <React.Fragment key={job.id}>
-                                            {index > 0 && <Divider sx={{ borderColor: '#333' }} />}
+                                            {index > 0 && <Divider sx={{ borderColor: 'divider' }} />}
                                             <ListItem
                                                 sx={{
                                                     py: 2.5,
                                                     px: 3,
                                                     transition: 'background-color 0.2s',
-                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.02)' }
+                                                    '&:hover': { bgcolor: 'action.hover' }
                                                 }}
                                             >
                                                 <Box sx={{ mr: 2.5, minWidth: 40, display: 'flex', justifyContent: 'center' }}>
@@ -646,7 +646,7 @@ function UploadQueuePage({ basePath }) {
                                                                 size="small"
                                                                 sx={{ height: 20, fontSize: '0.7rem' }}
                                                             />
-                                                            <Typography variant="caption" sx={{ color: '#777' }}>
+                                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                                                                 • {job.totalFiles} files
                                                             </Typography>
                                                         </Box>
@@ -656,26 +656,26 @@ function UploadQueuePage({ basePath }) {
                                                             {job.status === 'uploading' && (
                                                                 <Box>
                                                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                                        <Typography variant="caption" color="#aaa">Uploading...</Typography>
-                                                                        <Typography variant="caption" color="#aaa">{job.progress}%</Typography>
+                                                                        <Typography variant="caption" color="text.secondary">Uploading...</Typography>
+                                                                        <Typography variant="caption" color="text.secondary">{job.progress}%</Typography>
                                                                     </Box>
                                                                     <LinearProgress
                                                                         variant="determinate"
                                                                         value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: '#333', '& .MuiLinearProgress-bar': { bgcolor: '#29b6f6' } }}
+                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: '#29b6f6' } }}
                                                                     />
                                                                 </Box>
                                                             )}
                                                             {job.status === 'processing' && (
                                                                 <Box>
                                                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                                        <Typography variant="caption" color="#aaa">{job.currentFile || 'Processing...'}</Typography>
-                                                                        <Typography variant="caption" color="#aaa">{job.progress}%</Typography>
+                                                                        <Typography variant="caption" color="text.secondary">{job.currentFile || 'Processing...'}</Typography>
+                                                                        <Typography variant="caption" color="text.secondary">{job.progress}%</Typography>
                                                                     </Box>
                                                                     <LinearProgress
                                                                         variant="determinate"
                                                                         value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: '#333', '& .MuiLinearProgress-bar': { bgcolor: '#7e57c2' } }}
+                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: '#7e57c2' } }}
                                                                     />
                                                                 </Box>
                                                             )}
@@ -697,7 +697,7 @@ function UploadQueuePage({ basePath }) {
                                                         <IconButton
                                                             edge="end"
                                                             onClick={() => handleRemoveJob(job.id, job.status === 'uploading')}
-                                                            sx={{ color: '#555', '&:hover': { color: '#f44336' } }}
+                                                            sx={{ color: 'text.disabled', '&:hover': { color: '#f44336' } }}
                                                         >
                                                             <DeleteIcon />
                                                         </IconButton>

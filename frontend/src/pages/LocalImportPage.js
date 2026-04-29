@@ -193,7 +193,7 @@ function LocalImportPage({ basePath }) {
     const getStatusIcon = (status) => {
         switch (status) {
             case 'uploading': return <UploadingIcon color="info" />;
-            case 'queued': return <QueuedIcon sx={{ color: '#888' }} />;
+            case 'queued': return <QueuedIcon sx={{ color: 'text.secondary' }} />;
             case 'processing': return <ProcessingIcon color="primary" sx={{ animation: 'spin 2s linear infinite' }} />;
             case 'completed': return <CheckCircleIcon color="success" />;
             case 'error': return <ErrorIcon color="error" />;
@@ -231,7 +231,7 @@ function LocalImportPage({ basePath }) {
 
     return (
         <Box sx={{ p: 3, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
-            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: 'linear-gradient(45deg, #4CAF50 30%, #66BB6A 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                 📂 Local Import
             </Typography>
 
@@ -254,8 +254,8 @@ function LocalImportPage({ basePath }) {
                         sx={{
                             p: 3,
                             height: '100%',
-                            background: '#1E1E1E',
-                            color: '#fff',
+                            
+                            
                             borderRadius: 2,
                             display: 'flex',
                             flexDirection: 'column'
@@ -264,7 +264,7 @@ function LocalImportPage({ basePath }) {
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 2 }}>
                             <Box sx={{
                                 width: 40, height: 40, borderRadius: '50%',
-                                bgcolor: 'rgba(76, 175, 80, 0.2)', color: '#4CAF50',
+                                bgcolor: 'action.selected', color: 'primary.main',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center'
                             }}>
                                 <FolderOpen />
@@ -279,26 +279,26 @@ function LocalImportPage({ basePath }) {
                                 onClick={handleScan}
                                 disabled={scanning}
                                 sx={{
-                                    borderColor: '#4CAF50',
-                                    color: '#4CAF50',
-                                    '&:hover': { borderColor: '#66BB6A', bgcolor: 'rgba(76, 175, 80, 0.08)' }
+                                    borderColor: 'primary.main',
+                                    color: 'primary.main',
+                                    '&:hover': { borderColor: '#66BB6A', bgcolor: 'action.hover' }
                                 }}
                             >
                                 {scanning ? 'Scanning...' : 'Scan'}
                             </Button>
                         </Box>
 
-                        <Typography variant="body2" color="#888" sx={{ mb: 2 }}>
-                            Place performer folders in <code style={{ color: '#4CAF50' }}>before upload/</code> then scan to import them.
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            Place performer folders in <code style={{ color: 'primary.main' }}>before upload/</code> then scan to import them.
                             Files are moved directly — no slow upload needed.
                         </Typography>
 
-                        {scanning && <LinearProgress sx={{ mb: 2, bgcolor: '#333', '& .MuiLinearProgress-bar': { bgcolor: '#4CAF50' } }} />}
+                        {scanning && <LinearProgress sx={{ mb: 2, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }} />}
 
                         {/* Performer list */}
                         <Box sx={{ flex: 1, overflow: 'auto', mb: 2 }}>
                             {performers.length === 0 && !scanning ? (
-                                <Box sx={{ p: 4, textAlign: 'center', color: '#555' }}>
+                                <Box sx={{ p: 4, textAlign: 'center', color: 'text.disabled' }}>
                                     <FolderOpen sx={{ fontSize: 48, opacity: 0.3, mb: 1 }} />
                                     <Typography variant="body2">No performer folders found</Typography>
                                 </Box>
@@ -309,7 +309,7 @@ function LocalImportPage({ basePath }) {
                                         const isSelected = selectedPerformers.has(performer.name);
                                         return (
                                             <React.Fragment key={performer.name}>
-                                                {index > 0 && <Divider sx={{ borderColor: '#333' }} />}
+                                                {index > 0 && <Divider sx={{ borderColor: 'divider' }} />}
                                                 <ListItem
                                                     onClick={() => togglePerformer(performer.name)}
                                                     sx={{
@@ -319,12 +319,12 @@ function LocalImportPage({ basePath }) {
                                                         bgcolor: isSelected ? 'rgba(76, 175, 80, 0.08)' : 'transparent',
                                                         borderLeft: isSelected ? '3px solid #4CAF50' : '3px solid transparent',
                                                         transition: 'all 0.15s',
-                                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' }
+                                                        '&:hover': { bgcolor: 'action.hover' }
                                                     }}
                                                 >
                                                     <Checkbox
                                                         checked={isSelected}
-                                                        sx={{ mr: 1, color: '#555', '&.Mui-checked': { color: '#4CAF50' } }}
+                                                        sx={{ mr: 1, color: 'text.disabled', '&.Mui-checked': { color: 'primary.main' } }}
                                                         size="small"
                                                     />
                                                     <ListItemText
@@ -335,12 +335,12 @@ function LocalImportPage({ basePath }) {
                                                                 onClick={e => e.stopPropagation()}
                                                                 size="small"
                                                                 variant="standard"
-                                                                inputProps={{ style: { fontSize: '0.875rem', fontWeight: 500, color: '#fff', padding: '2px 0' } }}
+                                                                inputProps={{ style: { fontSize: '0.875rem', fontWeight: 500,  padding: '2px 0' } }}
                                                                 sx={{
                                                                     width: '100%',
-                                                                    '& .MuiInput-underline:before': { borderBottomColor: '#444' },
+                                                                    '& .MuiInput-underline:before': { borderBottomColor: 'divider' },
                                                                     '& .MuiInput-underline:hover:before': { borderBottomColor: '#777' },
-                                                                    '& .MuiInput-underline:after': { borderBottomColor: '#4CAF50' },
+                                                                    '& .MuiInput-underline:after': { borderBottomColor: 'primary.main' },
                                                                 }}
                                                             />
                                                         }
@@ -365,7 +365,7 @@ function LocalImportPage({ basePath }) {
                                                                 <Chip
                                                                     label={formatFileSize(performer.stats?.total_size_gb || 0)}
                                                                     size="small"
-                                                                    sx={{ height: 20, fontSize: '0.7rem', bgcolor: '#333', color: '#aaa' }}
+                                                                    sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'background.default', color: 'text.secondary' }}
                                                                 />
                                                             </Box>
                                                         }
@@ -380,17 +380,17 @@ function LocalImportPage({ basePath }) {
 
                         {/* Bottom actions */}
                         {performers.length > 0 && (
-                            <Box sx={{ borderTop: '1px solid #333', pt: 2 }}>
+                            <Box sx={{ borderTop: 1, borderColor: 'divider', pt: 2 }}>
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                     <Button
                                         size="small"
                                         startIcon={<SelectAllIcon />}
                                         onClick={toggleAll}
-                                        sx={{ color: '#aaa', textTransform: 'none', '&:hover': { color: '#fff' } }}
+                                        sx={{ color: 'text.secondary', textTransform: 'none', '&:hover': {  } }}
                                     >
                                         {selectedPerformers.size === performers.length ? 'Deselect All' : 'Select All'}
                                     </Button>
-                                    <Typography variant="caption" color="#888">
+                                    <Typography variant="caption" color="text.secondary">
                                         {selectedPerformers.size} of {performers.length} selected
                                     </Typography>
                                 </Box>
@@ -402,12 +402,12 @@ function LocalImportPage({ basePath }) {
                                                 checked={createHashes}
                                                 onChange={(e) => setCreateHashes(e.target.checked)}
                                                 size="small"
-                                                sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: '#4CAF50' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: '#4CAF50' } }}
+                                                sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: 'primary.main' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: 'primary.main' } }}
                                             />
                                         }
                                         label={
                                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                                <HashIcon fontSize="small" sx={{ color: '#888' }} />
+                                                <HashIcon fontSize="small" sx={{ color: 'text.secondary' }} />
                                                 <Typography variant="body2" color="#ccc">Create Hashes</Typography>
                                             </Box>
                                         }
@@ -423,9 +423,9 @@ function LocalImportPage({ basePath }) {
                                     disabled={importing || selectedPerformers.size === 0}
                                     sx={{
                                         py: 1.5,
-                                        background: 'linear-gradient(45deg, #4CAF50 30%, #66BB6A 90%)',
+                                        background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)',
                                         fontWeight: 'bold',
-                                        boxShadow: '0 3px 5px 2px rgba(76, 175, 80, .3)',
+                                        boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)',
                                         '&:disabled': { background: '#333' }
                                     }}
                                 >
@@ -444,12 +444,12 @@ function LocalImportPage({ basePath }) {
                             height: '100%',
                             display: 'flex',
                             flexDirection: 'column',
-                            bgcolor: '#1E1E1E',
-                            color: '#fff',
+                            
+                            
                             borderRadius: 2
                         }}
                     >
-                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
+                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
                             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                                 <Typography variant="h6" fontWeight="bold">Queue Activity</Typography>
                                 {isProcessing && (
@@ -466,11 +466,11 @@ function LocalImportPage({ basePath }) {
                                 <Button
                                     size="small"
                                     onClick={handleClearCompleted}
-                                    sx={{ color: '#aaa', '&:hover': { color: '#fff', bgcolor: '#333' } }}
+                                    sx={{ color: 'text.secondary', '&:hover': {  bgcolor: 'background.default' } }}
                                 >
                                     Clear Completed
                                 </Button>
-                                <IconButton size="small" onClick={fetchQueueStatus} sx={{ color: '#aaa' }}>
+                                <IconButton size="small" onClick={fetchQueueStatus} sx={{ color: 'text.secondary' }}>
                                     <RefreshIcon />
                                 </IconButton>
                             </Box>
@@ -478,22 +478,22 @@ function LocalImportPage({ basePath }) {
 
                         <Box sx={{ flex: 1, overflow: 'auto', p: 0 }}>
                             {queuedJobs.length === 0 ? (
-                                <Box sx={{ p: 6, textAlign: 'center', color: '#666', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                     <QueuedIcon sx={{ fontSize: 60, mb: 2, opacity: 0.2 }} />
-                                    <Typography variant="h6" color="#555">Queue is empty</Typography>
-                                    <Typography variant="body2" color="#444">Import performers to see progress here</Typography>
+                                    <Typography variant="h6" color="text.disabled">Queue is empty</Typography>
+                                    <Typography variant="body2" color="text.disabled">Import performers to see progress here</Typography>
                                 </Box>
                             ) : (
                                 <List sx={{ p: 0 }}>
                                     {queuedJobs.map((job, index) => (
                                         <React.Fragment key={job.id}>
-                                            {index > 0 && <Divider sx={{ borderColor: '#333' }} />}
+                                            {index > 0 && <Divider sx={{ borderColor: 'divider' }} />}
                                             <ListItem
                                                 sx={{
                                                     py: 2.5,
                                                     px: 3,
                                                     transition: 'background-color 0.2s',
-                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.02)' }
+                                                    '&:hover': { bgcolor: 'action.hover' }
                                                 }}
                                             >
                                                 <Box sx={{ mr: 2.5, minWidth: 40, display: 'flex', justifyContent: 'center' }}>
@@ -513,10 +513,10 @@ function LocalImportPage({ basePath }) {
                                                                 <Chip
                                                                     label="local"
                                                                     size="small"
-                                                                    sx={{ height: 18, fontSize: '0.65rem', bgcolor: 'rgba(76, 175, 80, 0.15)', color: '#4CAF50' }}
+                                                                    sx={{ height: 18, fontSize: '0.65rem', bgcolor: 'rgba(76, 175, 80, 0.15)', color: 'primary.main' }}
                                                                 />
                                                             )}
-                                                            <Typography variant="caption" sx={{ color: '#777' }}>
+                                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                                                                 • {job.totalFiles} files
                                                             </Typography>
                                                         </Box>
@@ -526,13 +526,13 @@ function LocalImportPage({ basePath }) {
                                                             {job.status === 'processing' && (
                                                                 <Box>
                                                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                                        <Typography variant="caption" color="#aaa">{job.currentFile || 'Processing...'}</Typography>
-                                                                        <Typography variant="caption" color="#aaa">{job.progress}%</Typography>
+                                                                        <Typography variant="caption" color="text.secondary">{job.currentFile || 'Processing...'}</Typography>
+                                                                        <Typography variant="caption" color="text.secondary">{job.progress}%</Typography>
                                                                     </Box>
                                                                     <LinearProgress
                                                                         variant="determinate"
                                                                         value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: '#333', '& .MuiLinearProgress-bar': { bgcolor: '#4CAF50' } }}
+                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }}
                                                                     />
                                                                 </Box>
                                                             )}
@@ -561,7 +561,7 @@ function LocalImportPage({ basePath }) {
                                                                     console.error('Failed to remove job:', err);
                                                                 }
                                                             }}
-                                                            sx={{ color: '#555', '&:hover': { color: '#f44336' } }}
+                                                            sx={{ color: 'text.disabled', '&:hover': { color: '#f44336' } }}
                                                         >
                                                             <DeleteIcon />
                                                         </IconButton>
