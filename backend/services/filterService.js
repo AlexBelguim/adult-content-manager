@@ -504,7 +504,6 @@ class FilterService {
               UPDATE performers 
               SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
                   funscript_files_count = ?, total_size_gb = ?,
-                  pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
                   last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
               WHERE id = ?
             `).run(
@@ -513,15 +512,22 @@ class FilterService {
             stats.funscript_vids_count,
             stats.funscript_files_count,
             stats.total_size_gb,
-            stats.pics_count,
-            stats.vids_count,
-            stats.funscript_vids_count,
             now,
             picsPath,
             vidsPath,
             funscriptPath,
             performerId
           );
+
+          // Only set original counts if they are currently 0 or NULL (first-time baseline)
+          const current = db.prepare('SELECT pics_original_count, vids_original_count, funscript_vids_original_count FROM performers WHERE id = ?').get(performerId);
+          if (current && (!current.pics_original_count && !current.vids_original_count && !current.funscript_vids_original_count)) {
+            db.prepare(`
+              UPDATE performers 
+              SET pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?
+              WHERE id = ?
+            `).run(stats.pics_count, stats.vids_count, stats.funscript_vids_count, performerId);
+          }
           console.log(`Stats refreshed for performer ${performer.name}`);
         }
       } catch (err) {
@@ -750,31 +756,37 @@ class FilterService {
       };
     }
 
-    // Use cached counts from performers table
-    const picsTotal = performer.pics_count || 0;
-    const vidsTotal = performer.vids_count || 0;
-    const funscriptTotal = performer.funscript_vids_count || 0;
+    // Use ORIGINAL counts as the denominator (baseline from import time)
+    // Current counts change when duplicates are deleted, but original stays fixed
+    const picsOriginal = performer.pics_original_count || performer.pics_count || 0;
+    const vidsOriginal = performer.vids_original_count || performer.vids_count || 0;
+    const funscriptOriginal = performer.funscript_vids_original_count || performer.funscript_vids_count || 0;
+
+    // Current counts (may be lower than original after duplicate deletion)
+    const picsCurrent = performer.pics_count || 0;
+    const vidsCurrent = performer.vids_count || 0;
+    const funscriptCurrent = performer.funscript_vids_count || 0;
     
     const picsFiltered = performer.pics_filtered || 0;
     const vidsFiltered = performer.vids_filtered || 0;
     const funscriptFiltered = performer.funscript_vids_filtered || 0;
 
-    const totalFiles = picsTotal + vidsTotal + funscriptTotal;
+    const totalOriginal = picsOriginal + vidsOriginal + funscriptOriginal;
     const totalFiltered = picsFiltered + vidsFiltered + funscriptFiltered;
 
-    const picsCompletion = picsTotal === 0 ? 100 : Math.round((picsFiltered / picsTotal) * 100);
-    const vidsCompletion = vidsTotal === 0 ? 100 : Math.round((vidsFiltered / vidsTotal) * 100);
-    const funscriptCompletion = funscriptTotal === 0 ? 100 : Math.round((funscriptFiltered / funscriptTotal) * 100);
-    const overallCompletion = totalFiles === 0 ? 100 : Math.round((totalFiltered / totalFiles) * 100);
+    const picsCompletion = picsOriginal === 0 ? 100 : Math.round((picsFiltered / picsOriginal) * 100);
+    const vidsCompletion = vidsOriginal === 0 ? 100 : Math.round((vidsFiltered / vidsOriginal) * 100);
+    const funscriptCompletion = funscriptOriginal === 0 ? 100 : Math.round((funscriptFiltered / funscriptOriginal) * 100);
+    const overallCompletion = totalOriginal === 0 ? 100 : Math.round((totalFiltered / totalOriginal) * 100);
 
     return {
-      total: totalFiles,
+      total: totalOriginal,
       processed: totalFiltered,
-      remaining: totalFiles - totalFiltered,
+      remaining: totalOriginal - totalFiltered,
       completion: overallCompletion,
-      picsTotal, picsProcessed: picsFiltered, picsCompletion,
-      vidsTotal, vidsProcessed: vidsFiltered, vidsCompletion,
-      funscriptTotal, funscriptProcessed: funscriptFiltered, funscriptCompletion
+      picsTotal: picsOriginal, picsProcessed: picsFiltered, picsCompletion,
+      vidsTotal: vidsOriginal, vidsProcessed: vidsFiltered, vidsCompletion,
+      funscriptTotal: funscriptOriginal, funscriptProcessed: funscriptFiltered, funscriptCompletion
     };
   }
 

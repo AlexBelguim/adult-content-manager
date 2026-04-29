@@ -326,8 +326,8 @@ function PhonePerformerSettingsModal({ performer, open, onClose, onUpdate }) {
                         checked={completionState.pics}
                         onChange={(e) => setCompletionState(prev => ({ ...prev, pics: e.target.checked }))}
                         sx={{ 
-                          color: '#1976d2',
-                          '&.Mui-checked': { color: '#1976d2' }
+                          color: 'primary.main',
+                          '&.Mui-checked': { color: 'primary.main' }
                         }}
                       />
                     }
@@ -343,8 +343,8 @@ function PhonePerformerSettingsModal({ performer, open, onClose, onUpdate }) {
                         checked={completionState.vids}
                         onChange={(e) => setCompletionState(prev => ({ ...prev, vids: e.target.checked }))}
                         sx={{ 
-                          color: '#1976d2',
-                          '&.Mui-checked': { color: '#1976d2' }
+                          color: 'primary.main',
+                          '&.Mui-checked': { color: 'primary.main' }
                         }}
                       />
                     }
@@ -360,8 +360,8 @@ function PhonePerformerSettingsModal({ performer, open, onClose, onUpdate }) {
                         checked={completionState.funscript_vids}
                         onChange={(e) => setCompletionState(prev => ({ ...prev, funscript_vids: e.target.checked }))}
                         sx={{ 
-                          color: '#1976d2',
-                          '&.Mui-checked': { color: '#1976d2' }
+                          color: 'primary.main',
+                          '&.Mui-checked': { color: 'primary.main' }
                         }}
                       />
                     }

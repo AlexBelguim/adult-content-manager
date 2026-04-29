@@ -852,7 +852,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
             flexWrap: 'wrap',
             gap: 2
           }}>
-            <Typography variant="h5" sx={{ fontWeight: 500 }}>
+            <Typography className="section-title" variant="h5" sx={{ fontWeight: 500 }}>
               Content by Genre
             </Typography>
 
@@ -1092,12 +1092,12 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
               min={getAgeRange().min}
               max={getAgeRange().max}
               sx={{
-                color: '#1976d2',
+                color: 'primary.main',
                 '& .MuiSlider-thumb': {
                   backgroundColor: '#fff',
                 },
                 '& .MuiSlider-valueLabel': {
-                  backgroundColor: '#1976d2',
+                  backgroundcolor: 'primary.main',
                 },
               }}
             />

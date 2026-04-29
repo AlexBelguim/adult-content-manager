@@ -257,7 +257,7 @@ const HashResultsGrid = ({
             showLastButton
             sx={{
               '& .MuiPaginationItem-root': { color: '#aaa' },
-              '& .Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.2) !important', color: '#FF8E53' }
+              '& .Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.2) !important', color: 'primary.light' }
             }}
           />
         </Box>
@@ -353,7 +353,7 @@ const HashResultsGrid = ({
                           onClick={() => typeof onSwitch === 'function' && onSwitch(group)}
                           sx={{
                             bgcolor: 'rgba(255, 142, 83, 0.1)',
-                            color: '#FF8E53',
+                            color: 'primary.light',
                             '&:hover': { bgcolor: 'rgba(255, 142, 83, 0.2)' }
                           }}
                         >
@@ -373,13 +373,13 @@ const HashResultsGrid = ({
                           p: 1,
                           bgcolor: '#1a1a1a',
                           borderRadius: 1,
-                          border: isSelected ? '2px solid #FF8E53' : '1px solid #333',
+                          border: isSelected ? '2px solid #b085f5' : '1px solid #333',
                           display: 'flex',
                           flexDirection: 'column',
                           cursor: 'pointer',
                           transition: 'border-color 0.15s',
                           flex: 1,
-                          '&:hover': { borderColor: isSelected ? '#FE6B8B' : '#555' }
+                          '&:hover': { borderColor: isSelected ? 'var(--primary-main, #7e57c2)' : '#555' }
                         }}
                       >
                         <Box sx={{ position: 'relative', width: '100%', paddingTop: '100%', borderRadius: 1, overflow: 'hidden', bgcolor: '#000', mb: 1 }}>
@@ -391,8 +391,8 @@ const HashResultsGrid = ({
                               </Box>
                             ) : (committing && isSelected) ? (
                               <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: '#000' }}>
-                                <CircularProgress size={24} sx={{ color: '#FF8E53', mb: 1 }} />
-                                <Typography variant="caption" sx={{ color: '#FF8E53', fontSize: '0.6rem' }}>Processing...</Typography>
+                                <CircularProgress size={24} sx={{ color: 'primary.light', mb: 1 }} />
+                                <Typography variant="caption" sx={{ color: 'primary.light', fontSize: '0.6rem' }}>Processing...</Typography>
                               </Box>
                             ) : (
                               <MediaThumbnail
@@ -415,7 +415,7 @@ const HashResultsGrid = ({
                                 bgcolor: 'rgba(0,0,0,0.6)',
                                 borderRadius: 0.5,
                                 color: '#888',
-                                '&.Mui-checked': { color: '#FF8E53' }
+                                '&.Mui-checked': { color: 'primary.light' }
                               }}
                               onClick={(e) => e.stopPropagation()}
                             />
@@ -547,7 +547,7 @@ const HashResultsGrid = ({
                             disabled={!group.some(i => !selectedItems.has(i.id))}
                             sx={{
                               bgcolor: 'rgba(255, 142, 83, 0.1)',
-                              color: '#FF8E53',
+                              color: 'primary.light',
                               transform: 'rotate(90deg)',
                               '&:hover': { bgcolor: 'rgba(255, 142, 83, 0.2)' },
                               '&.Mui-disabled': { color: '#444', bgcolor: 'transparent' }
@@ -601,18 +601,18 @@ const HashResultsGrid = ({
                                 p: 1,
                                 bgcolor: '#252525',
                                 borderRadius: 1,
-                                border: isSelected ? '2px solid #FF8E53' : '1px solid #444',
+                                border: isSelected ? '2px solid #b085f5' : '1px solid #444',
                                 cursor: 'pointer',
                                 transition: 'border-color 0.15s',
-                                '&:hover': { borderColor: isSelected ? '#FE6B8B' : '#666' }
+                                '&:hover': { borderColor: isSelected ? 'var(--primary-main, #7e57c2)' : '#666' }
                               }}
                             >
                               <Box sx={{ position: 'relative', width: '100%', paddingTop: '100%', borderRadius: 1, overflow: 'hidden', bgcolor: '#000', mb: 0.5 }}>
                                 <Box sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
                                   {(committing && isSelected) ? (
                                     <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: '#000' }}>
-                                      <CircularProgress size={24} sx={{ color: '#FF8E53', mb: 1 }} />
-                                      <Typography variant="caption" sx={{ color: '#FF8E53', fontSize: '0.6rem' }}>Processing...</Typography>
+                                      <CircularProgress size={24} sx={{ color: 'primary.light', mb: 1 }} />
+                                      <Typography variant="caption" sx={{ color: 'primary.light', fontSize: '0.6rem' }}>Processing...</Typography>
                                     </Box>
                                   ) : (
                                     <MediaThumbnail
@@ -635,7 +635,7 @@ const HashResultsGrid = ({
                                     bgcolor: 'rgba(0,0,0,0.6)',
                                     borderRadius: 0.5,
                                     color: '#888',
-                                    '&.Mui-checked': { color: '#FF8E53' }
+                                    '&.Mui-checked': { color: 'primary.light' }
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                 />
@@ -688,7 +688,7 @@ const HashResultsGrid = ({
             showLastButton
             sx={{
               '& .MuiPaginationItem-root': { color: '#aaa' },
-              '& .Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.2) !important', color: '#FF8E53' }
+              '& .Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.2) !important', color: 'primary.light' }
             }}
           />
         </Box>

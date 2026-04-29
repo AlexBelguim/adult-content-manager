@@ -233,6 +233,18 @@ db.exec(`
   WHERE pics_original_count = 0 AND vids_original_count = 0 AND funscript_vids_original_count = 0
 `);
 
+// Data repair: fix corrupted original counts where filtered > original
+// This happens when the old code overwrote original counts with reduced current counts after duplicate deletion
+db.exec(`
+  UPDATE performers 
+  SET pics_original_count = MAX(pics_original_count, pics_filtered, pics_count),
+      vids_original_count = MAX(vids_original_count, vids_filtered, vids_count),
+      funscript_vids_original_count = MAX(funscript_vids_original_count, funscript_vids_filtered, funscript_vids_count)
+  WHERE pics_filtered > pics_original_count 
+     OR vids_filtered > vids_original_count 
+     OR funscript_vids_filtered > funscript_vids_original_count
+`);
+
 // Migration: Add caching columns if they don't exist
 try {
   db.exec(`ALTER TABLE performers ADD COLUMN last_scan_date DATETIME;`);

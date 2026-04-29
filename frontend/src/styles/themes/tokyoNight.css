@@ -1,0 +1,136 @@
+/* ══════════════════════════════════════════════════════════════════
+   TOKYO NIGHT THEME  –  Style 5 from extras
+   Rounded, #1a1b26 bg, #c0caf5 text, #292e42 borders
+   Name overlaid on image bottom, neon progress bars
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ─── Performer Card ─────────────────────────────────────────── */
+[data-theme="tokyoNight"] .performer-card {
+  border-radius: 12px !important;
+  border: 1px solid #292e42 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  background-color: #1a1b26 !important;
+}
+
+[data-theme="tokyoNight"] .performer-card:hover {
+  border-color: rgba(122, 162, 247, 0.3) !important;
+  box-shadow: 0 0 30px rgba(122, 162, 247, 0.1), 0 12px 32px rgba(0, 0, 0, 0.4) !important;
+  transform: translateY(-3px) !important;
+}
+
+[data-theme="tokyoNight"] .performer-card .card-header {
+  background: rgba(36, 40, 59, 0.9) !important;
+  border-radius: 8px !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
+}
+
+[data-theme="tokyoNight"] .performer-card .card-info-section {
+  background: rgba(36, 40, 59, 0.0) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+}
+
+[data-theme="tokyoNight"] .performer-card .performer-name {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-weight: 600 !important;
+  color: #c0caf5 !important;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  text-transform: none !important;
+  font-style: normal !important;
+}
+
+/* Icon colors matching Style5 */
+[data-theme="tokyoNight"] .performer-card .settings-icon { color: #e0af68 !important; }
+[data-theme="tokyoNight"] .performer-card .hash-icon { color: #7aa2f7 !important; }
+[data-theme="tokyoNight"] .performer-card .scan-icon { color: #bb9af7 !important; }
+[data-theme="tokyoNight"] .performer-card .refresh-icon { color: #f7768e !important; }
+
+/* Rating badge: rounded pill, Tokyo colors */
+[data-theme="tokyoNight"] .performer-card .rating-badge {
+  background: rgba(26, 27, 38, 0.85) !important;
+  border: 1px solid #292e42 !important;
+  border-radius: 16px !important;
+  color: #e0af68 !important;
+}
+
+/* Progress buttons: neon progress bars */
+[data-theme="tokyoNight"] .progress-btn {
+  border-radius: 6px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 0.75rem !important;
+  border: none !important;
+}
+
+/* ─── Content Card ───────────────────────────────────────────── */
+[data-theme="tokyoNight"] .content-card {
+  border-radius: 12px !important;
+  border: 1px solid #292e42 !important;
+  background: #1a1b26 !important;
+}
+
+[data-theme="tokyoNight"] .content-card .MuiCardContent-root {
+  background: #1a1b26;
+}
+
+[data-theme="tokyoNight"] .content-card:hover {
+  border-color: rgba(122, 162, 247, 0.25) !important;
+  box-shadow: 0 0 24px rgba(122, 162, 247, 0.08) !important;
+}
+
+[data-theme="tokyoNight"] .content-card .genre-avatar {
+  background: linear-gradient(135deg, #7aa2f7, #bb9af7) !important;
+}
+
+/* ─── Section titles ─────────────────────────────────────────── */
+[data-theme="tokyoNight"] .section-title {
+  font-family: 'JetBrains Mono', monospace !important;
+  color: #7aa2f7 !important;
+}
+
+/* ─── Modals ─────────────────────────────────────────────────── */
+[data-theme="tokyoNight"] .MuiDialog-paper {
+  border: 1px solid #292e42 !important;
+  background: #24283b !important;
+  border-radius: 12px !important;
+  box-shadow: 0 0 50px rgba(122, 162, 247, 0.08) !important;
+}
+
+/* ─── Filter controls ────────────────────────────────────────── */
+[data-theme="tokyoNight"] .filter-controls,
+[data-theme="tokyoNight"] .gallery-controls {
+  border-radius: 12px !important;
+  background: rgba(36, 40, 59, 0.7) !important;
+  border: 1px solid #292e42 !important;
+  backdrop-filter: blur(8px);
+}
+
+/* ─── Input glow ─────────────────────────────────────────────── */
+[data-theme="tokyoNight"] .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  box-shadow: 0 0 12px rgba(187, 154, 247, 0.15);
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+[data-theme="tokyoNight"] ::-webkit-scrollbar-thumb {
+  background: rgba(122, 162, 247, 0.25);
+  border-radius: 4px;
+}
+[data-theme="tokyoNight"] ::-webkit-scrollbar-track {
+  background: #1a1b26;
+}
+
+/* ─── Chip glow ──────────────────────────────────────────────── */
+[data-theme="tokyoNight"] .MuiChip-filled {
+  box-shadow: 0 0 8px rgba(122, 162, 247, 0.1);
+}
+
+/* ─── Unified Gallery ────────────────────────────────────────── */
+[data-theme="tokyoNight"] .unified-gallery-card {
+  border-radius: 12px !important;
+  border: 1px solid #292e42 !important;
+}
+[data-theme="tokyoNight"] .unified-gallery-card:hover {
+  box-shadow: 0 0 20px rgba(187, 154, 247, 0.1) !important;
+}

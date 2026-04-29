@@ -326,7 +326,7 @@ function UploadImportModal({ open, onClose, basePath, onImportComplete }) {
                         mb: 3,
                         cursor: 'pointer',
                         '&:hover': {
-                            borderColor: '#1976d2',
+                            bordercolor: 'primary.main',
                             backgroundColor: 'rgba(25, 118, 210, 0.04)'
                         }
                     }}
@@ -352,7 +352,7 @@ function UploadImportModal({ open, onClose, basePath, onImportComplete }) {
 
                 {/* File Stats */}
                 {selectedFiles.length > 0 && (
-                    <Box sx={{ mb: 3, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+                    <Box sx={{ mb: 3, p: 2, backgroundColor: '#1e1e1e', borderRadius: 1 }}>
                         <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
                             Selected Files: {selectedFiles.length}
                         </Typography>

@@ -675,7 +675,7 @@ function UploadQueuePage({ basePath }) {
                                                                     <LinearProgress
                                                                         variant="determinate"
                                                                         value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: '#7e57c2' } }}
+                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }}
                                                                     />
                                                                 </Box>
                                                             )}

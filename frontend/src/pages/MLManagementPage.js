@@ -460,7 +460,7 @@ function MLManagementPage({ basePath }) {
                       {/* Image Model Card */}
                       {session.imageModel && (
                         <Grid item xs={12} md={session.videoModel ? 6 : 12}>
-                          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+                          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#121212' }}>
                             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
                               📸 Image Model
                               <Chip
@@ -490,7 +490,7 @@ function MLManagementPage({ basePath }) {
                       {/* Video Model Card */}
                       {session.videoModel && (
                         <Grid item xs={12} md={session.imageModel ? 6 : 12}>
-                          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+                          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#121212' }}>
                             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
                               🎬 Video Model
                               <Chip

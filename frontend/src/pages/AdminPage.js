@@ -160,10 +160,10 @@ function AdminPage() {
   }
 
   return (
-    <Box sx={{ p: 4, bgcolor: '#f5f5f5', minHeight: '100vh' }}>
+    <Box sx={{ p: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
       {/* Header */}
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
+        <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
           ⚙️ Admin Dashboard
         </Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
@@ -209,7 +209,7 @@ function AdminPage() {
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <KeyIcon sx={{ mr: 1, color: '#1976d2' }} />
+                    <KeyIcon sx={{ mr: 1, color: 'primary.main' }} />
                     <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                       License Information
                     </Typography>
@@ -358,7 +358,7 @@ function AdminPage() {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <TimerIcon sx={{ mr: 1, color: '#1976d2' }} />
+                  <TimerIcon sx={{ mr: 1, color: 'primary.main' }} />
                   <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                     Uptime
                   </Typography>
@@ -395,7 +395,7 @@ function AdminPage() {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <StorageIcon sx={{ mr: 1, color: '#1976d2' }} />
+                  <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
                   <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                     Storage Usage (Database Records)
                   </Typography>
@@ -439,13 +439,13 @@ function AdminPage() {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <FilterIcon sx={{ mr: 1, color: '#1976d2' }} />
+                  <FilterIcon sx={{ mr: 1, color: 'primary.main' }} />
                   <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                     Filter Actions
                   </Typography>
                 </Box>
                 <Divider sx={{ mb: 2 }} />
-                <Typography variant="h4" sx={{ mb: 2, textAlign: 'center', color: '#1976d2' }}>
+                <Typography variant="h4" sx={{ mb: 2, textAlign: 'center', color: 'primary.main' }}>
                   {stats.filterActions.total.toLocaleString()}
                 </Typography>
                 <TableContainer>
@@ -469,7 +469,7 @@ function AdminPage() {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <MemoryIcon sx={{ mr: 1, color: '#1976d2' }} />
+                  <MemoryIcon sx={{ mr: 1, color: 'primary.main' }} />
                   <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                     Database Statistics
                   </Typography>
@@ -506,7 +506,7 @@ function AdminPage() {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <MemoryIcon sx={{ mr: 1, color: '#1976d2' }} />
+                  <MemoryIcon sx={{ mr: 1, color: 'primary.main' }} />
                   <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                     Memory Usage
                   </Typography>
@@ -543,7 +543,7 @@ function AdminPage() {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <FolderIcon sx={{ mr: 1, color: '#1976d2' }} />
+                  <FolderIcon sx={{ mr: 1, color: 'primary.main' }} />
                   <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
                     Configured Folders ({stats.folders.length})
                   </Typography>

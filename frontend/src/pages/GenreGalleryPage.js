@@ -140,17 +140,17 @@ function GenreGalleryPage() {
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Chip
-            icon={<PhotoLibrary sx={{ color: '#1976d2' }} />}
+            icon={<PhotoLibrary sx={{ color: 'primary.main' }} />}
             label={<span><b>{content.pics.length}</b> pics</span>}
             size="small"
-            sx={{ bgcolor: '#e3f2fd', color: '#1976d2', fontWeight: 500, px: 1.2, height: 28, fontSize: 14, borderRadius: 2 }}
+            sx={{ bgcolor: '#e3f2fd', color: 'primary.main', fontWeight: 500, px: 1.2, height: 28, fontSize: 14, borderRadius: 2 }}
           />
           <Chip
             label={<span style={{ color: taggedPicsCount > 0 ? '#388e3c' : '#aaa', fontWeight: 600 }}>
               +{taggedPicsCount}
             </span>}
             size="small"
-            sx={{ bgcolor: taggedPicsCount > 0 ? '#c8e6c9' : '#f5f5f5', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
+            sx={{ bgcolor: taggedPicsCount > 0 ? 'rgba(76, 175, 80, 0.25)' : '#2a2a2a', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
             title="Tagged pictures"
           />
           <Chip
@@ -164,7 +164,7 @@ function GenreGalleryPage() {
               +{taggedVidsCount}
             </span>}
             size="small"
-            sx={{ bgcolor: taggedVidsCount > 0 ? '#c8e6c9' : '#f5f5f5', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
+            sx={{ bgcolor: taggedVidsCount > 0 ? 'rgba(76, 175, 80, 0.25)' : '#2a2a2a', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
             title="Tagged videos"
           />
         </Box>
@@ -292,7 +292,7 @@ function GenreGalleryPage() {
                   {item.tags && item.tags.length > 0 && (
                     <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                       {item.tags.map((tag, i) => (
-                        <Chip key={i} label={tag} size="small" sx={{ bgcolor: '#e3f2fd', color: '#1976d2', fontWeight: 500 }} />
+                        <Chip key={i} label={tag} size="small" sx={{ bgcolor: '#e3f2fd', color: 'primary.main', fontWeight: 500 }} />
                       ))}
                     </Box>
                   )}

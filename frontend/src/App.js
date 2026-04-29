@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { useMediaQuery, useTheme, ThemeProvider, createTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Link, Typography, CircularProgress, Box, Alert, Divider } from '@mui/material';
+import { ThemeProvider, createTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Link, Typography, CircularProgress, Box, Alert, Divider } from '@mui/material';
 import Toolbar from './components/Toolbar';
 import MainPage from './pages/MainPage';
 import UnifiedGalleryPage from './pages/UnifiedGalleryPage';
-import PhoneFilterView from './pages/phone/PhoneFilterView';
+
 import HashManagementPage from './pages/HashManagementPage';
 import HashResultsPage from './pages/HashResultsPage';
 import PerformerManagementPage from './pages/PerformerManagementPageNew';
@@ -19,6 +19,11 @@ import HashCreationQueue from './components/HashCreationQueue';
 // Pairwise Labeler (integrated from vision-llm-pairwise)
 import PairwisePage from './pages/PairwisePage';
 import './App.css';
+import './styles/themes/gamerEdge.css';
+import './styles/themes/gamer.css';
+import './styles/themes/tokyoNight.css';
+import './styles/themes/cinematic.css';
+import './styles/themes/cleanSplit.css';
 import BatchQueuePage from './pages/BatchQueuePage';
 import UploadQueuePage from './pages/UploadQueuePage';
 import LocalImportPage from './pages/LocalImportPage';
@@ -27,9 +32,10 @@ import PairwiseMobilePage from './pages/PairwiseMobilePage';
 import RankingInsightPage from './pages/RankingInsightPage';
 import PairwiseRefinePage from './pages/PairwiseRefinePage';
 import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
+import PerformerCardSamplesPage from './extra/PerformerCardSamplesPage';
 
 import CssBaseline from '@mui/material/CssBaseline';
-import theme from './theme';
+import { getThemeById, getStoredThemeId, setStoredThemeId } from './theme';
 
 function LicenseModal({ open, onSubmit, onCancel, defaultKey, verifying, error }) {
   const [key, setKey] = useState(defaultKey || '');
@@ -117,7 +123,7 @@ function LicenseModal({ open, onSubmit, onCancel, defaultKey, verifying, error }
 }
 
 // Component that uses the theme
-function AppContent() {
+function AppContent({ onThemeChange, currentThemeId }) {
   const [mode, setMode] = useState('gallery'); // 'gallery' or 'filter'
   const [subMode, setSubMode] = useState('performer'); // 'performer' or 'content'
   const [handyCode, setHandyCode] = useState('');
@@ -149,8 +155,7 @@ function AppContent() {
   const currentJobRef = useRef(null);
   const pollingIntervalRef = useRef(null);
 
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
 
   // License: initial status check — DISABLED
   // useEffect(() => { ... }, []);
@@ -490,13 +495,6 @@ function AppContent() {
                 handyConnected={handyConnected}
               />
             } />
-            <Route path="/phone-filter" element={
-              <PhoneFilterView
-                basePath={basePath}
-                handyIntegration={handyIntegration}
-                handyConnected={handyConnected}
-              />
-            } />
             <Route path="/scene-manager" element={
               <SceneManagerPage />
             } />
@@ -544,48 +542,42 @@ function AppContent() {
             <Route path="/auto-label" element={
               <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
             } />
+            <Route path="/extra/performer-cards" element={
+              <PerformerCardSamplesPage />
+            } />
             <Route path="/thumbnail-selector/:performerId" element={
               <ThumbnailSelectorWrapper />
             } />
             <Route path="*" element={
               <>
-                {/* Mobile users only see filter view */}
-                {isMobile ? (
-                  <PhoneFilterView
-                    basePath={basePath}
-                    handyIntegration={handyIntegration}
-                    handyConnected={handyConnected}
-                  />
-                ) : (
-                  <>
-                    <Toolbar
-                      mode={mode}
-                      subMode={subMode}
-                      onModeChange={handleModeChange}
-                      onSubModeChange={handleSubModeChange}
-                      onHandyConnect={handleHandyConnect}
-                      onHandyDisconnect={handleHandyDisconnect}
-                      handyCode={handyCode}
-                      handyConnected={handyConnected}
-                      basePath={basePath}
-                      onFolderDeleted={handleFolderDeleted}
-                      onScanPerformers={onScanPerformers}
-                      onUploadFolder={() => setShowUploadImport(true)}
-                      isScanning={isScanning}
-                    />
-                    <MainPage
-                      mode={mode}
-                      subMode={subMode}
-                      basePath={basePath}
-                      handyIntegration={handyIntegration}
-                      handyCode={handyCode}
-                      handyConnected={handyConnected}
-                      onFolderAdded={handleFolderAdded}
-                      setOnScanPerformers={setOnScanPerformers}
-                      setIsScanning={setIsScanning}
-                    />
-                  </>
-                )}
+                <Toolbar
+                  mode={mode}
+                  subMode={subMode}
+                  onModeChange={handleModeChange}
+                  onSubModeChange={handleSubModeChange}
+                  onHandyConnect={handleHandyConnect}
+                  onHandyDisconnect={handleHandyDisconnect}
+                  handyCode={handyCode}
+                  handyConnected={handyConnected}
+                  basePath={basePath}
+                  onFolderDeleted={handleFolderDeleted}
+                  onScanPerformers={onScanPerformers}
+                  onUploadFolder={() => setShowUploadImport(true)}
+                  isScanning={isScanning}
+                  onThemeChange={onThemeChange}
+                  currentThemeId={currentThemeId}
+                />
+                <MainPage
+                  mode={mode}
+                  subMode={subMode}
+                  basePath={basePath}
+                  handyIntegration={handyIntegration}
+                  handyCode={handyCode}
+                  handyConnected={handyConnected}
+                  onFolderAdded={handleFolderAdded}
+                  setOnScanPerformers={setOnScanPerformers}
+                  setIsScanning={setIsScanning}
+                />
               </>
             } />
           </Routes >
@@ -610,11 +602,36 @@ function AppContent() {
 
 // Main App component with providers
 function App() {
+  const [themeId, setThemeId] = useState(getStoredThemeId());
+  const currentTheme = getThemeById(themeId);
+
+  const handleThemeChange = (newId) => {
+    setThemeId(newId);
+    setStoredThemeId(newId);
+  };
+
+  // Inject CSS custom properties from the MUI theme so gradient strings,
+  // inline styles, and template literals can reference them via var(--xxx)
+  useEffect(() => {
+    const root = document.documentElement;
+    const p = currentTheme.palette;
+    // Set data-theme attribute so CSS files can target with [data-theme="xxx"]
+    root.setAttribute('data-theme', themeId);
+    root.style.setProperty('--primary-main', p.primary.main);
+    root.style.setProperty('--primary-light', p.primary.light);
+    root.style.setProperty('--primary-dark', p.primary.dark);
+    root.style.setProperty('--secondary-main', p.secondary.main);
+    root.style.setProperty('--bg-default', p.background.default);
+    root.style.setProperty('--bg-paper', p.background.paper);
+    root.style.setProperty('--text-primary', p.text.primary);
+    root.style.setProperty('--text-secondary', p.text.secondary);
+  }, [currentTheme, themeId]);
+
   return (
     <Provider store={store}>
-      <ThemeProvider theme={theme}>
+      <ThemeProvider theme={currentTheme}>
         <CssBaseline />
-        <AppContent />
+        <AppContent onThemeChange={handleThemeChange} currentThemeId={themeId} />
       </ThemeProvider>
     </Provider>
   );

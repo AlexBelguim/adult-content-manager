@@ -41,14 +41,14 @@ import { usePerformerData } from '../hooks/usePerformerData';
 
 // Gradient button style
 const gradientButtonStyle = {
-  background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)',
+  background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
   color: '#fff',
   fontWeight: 'bold',
   textTransform: 'none',
-  boxShadow: '0 3px 5px 2px rgba(255, 105, 135, .3)',
+  boxShadow: '0 3px 5px 2px rgba(126, 87, 194, .3)',
   '&:hover': {
-    background: 'linear-gradient(45deg, #FE6B8B 20%, #FF8E53 80%)',
-    boxShadow: '0 3px 10px 2px rgba(255, 105, 135, .4)',
+    background: 'linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%)',
+    boxShadow: '0 3px 10px 2px rgba(126, 87, 194, .4)',
   },
   '&:disabled': {
     background: '#444',
@@ -164,7 +164,7 @@ function HashManagementPage({
       setProcessingActions(prev => new Set(prev).add(actionKey));
       const newTab = window.open('about:blank', '_blank');
       if (newTab) {
-        newTab.document.write(`<html><head><title>Loading...</title><style>body{background:#1E1E1E;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}</style></head><body><div style="text-align:center"><div style="width:40px;height:40px;border:4px solid #444;border-top-color:#FF8E53;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>Processing...</div><style>@keyframes spin{to{transform:rotate(360deg)}}</style></body></html>`);
+        newTab.document.write(`<html><head><title>Loading...</title><style>body{background:#1E1E1E;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}</style></head><body><div style="text-align:center"><div style="width:40px;height:40px;border:4px solid #444;border-top-color:#b085f5;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>Processing...</div><style>@keyframes spin{to{transform:rotate(360deg)}}</style></body></html>`);
       }
       try {
         const response = await fetch('/api/hashes/check', {
@@ -196,7 +196,7 @@ function HashManagementPage({
     setProcessingActions(prev => new Set(prev).add(actionKey));
     const newTab = window.open('about:blank', '_blank');
     if (newTab) {
-      newTab.document.write(`<html><head><title>Loading...</title><style>body{background:#1E1E1E;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}</style></head><body><div style="text-align:center"><div style="width:40px;height:40px;border:4px solid #444;border-top-color:#FF8E53;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>Checking...</div><style>@keyframes spin{to{transform:rotate(360deg)}}</style></body></html>`);
+      newTab.document.write(`<html><head><title>Loading...</title><style>body{background:#1E1E1E;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}</style></head><body><div style="text-align:center"><div style="width:40px;height:40px;border:4px solid #444;border-top-color:#b085f5;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>Checking...</div><style>@keyframes spin{to{transform:rotate(360deg)}}</style></body></html>`);
     }
     try {
       const response = await fetch('/api/hashes/check', {
@@ -277,7 +277,7 @@ function HashManagementPage({
     <Box sx={{ p: 3, height: '100vh', overflow: 'auto', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
       {/* Header */}
       <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-light, #b085f5) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
           Hash-Based Duplicate Detection
         </Typography>
         <Typography variant="body2" sx={{ color: '#666' }}>
@@ -293,7 +293,7 @@ function HashManagementPage({
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress sx={{ color: '#FF8E53' }} />
+          <CircularProgress sx={{ color: 'primary.main' }} />
         </Box>
       ) : (
         <>
@@ -340,8 +340,8 @@ function HashManagementPage({
                       '& .MuiOutlinedInput-root': {
                         color: '#fff',
                         '& fieldset': { borderColor: '#444' },
-                        '&:hover fieldset': { borderColor: '#FF8E53' },
-                        '&.Mui-focused fieldset': { borderColor: '#FF8E53' }
+                        '&:hover fieldset': { bordercolor: 'primary.main' },
+                        '&.Mui-focused fieldset': { bordercolor: 'primary.main' }
                       },
                       '& .MuiInputBase-input::placeholder': { color: '#666' }
                     }}
@@ -357,7 +357,7 @@ function HashManagementPage({
                     value={locationFilter}
                     onChange={(e) => setLocationFilter(e.target.value)}
                     sx={{
-                      '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' }, '&:hover fieldset': { borderColor: '#FF8E53' } },
+                      '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' }, '&:hover fieldset': { bordercolor: 'primary.main' } },
                       '& .MuiSelect-icon': { color: '#888' }
                     }}
                   >
@@ -376,7 +376,7 @@ function HashManagementPage({
                     value={hashStatusFilter}
                     onChange={(e) => setHashStatusFilter(e.target.value)}
                     sx={{
-                      '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' }, '&:hover fieldset': { borderColor: '#FF8E53' } },
+                      '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' }, '&:hover fieldset': { bordercolor: 'primary.main' } },
                       '& .MuiSelect-icon': { color: '#888' }
                     }}
                   >
@@ -392,7 +392,7 @@ function HashManagementPage({
                   variant="outlined"
                   startIcon={<RefreshIcon />}
                   onClick={loadPerformers}
-                  sx={{ borderColor: '#444', color: '#aaa', '&:hover': { borderColor: '#FF8E53', color: '#FF8E53' } }}
+                  sx={{ borderColor: '#444', color: '#aaa', '&:hover': { bordercolor: 'primary.main', color: 'primary.main' } }}
                 >
                   Refresh List
                 </Button>
@@ -423,7 +423,7 @@ function HashManagementPage({
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ bgcolor: '#252525', color: '#aaa', borderBottom: '1px solid #333' }}>
-                          <TableSortLabel active={orderBy === 'canonical_name'} direction={orderBy === 'canonical_name' ? order : 'asc'} onClick={() => handleSort('canonical_name')} sx={{ '&.Mui-active': { color: '#FF8E53' }, '& .MuiTableSortLabel-icon': { color: '#FF8E53 !important' } }}>
+                          <TableSortLabel active={orderBy === 'canonical_name'} direction={orderBy === 'canonical_name' ? order : 'asc'} onClick={() => handleSort('canonical_name')} sx={{ '&.Mui-active': { color: 'primary.light' }, '& .MuiTableSortLabel-icon': { color: '#b085f5 !important' } }}>
                             Performer
                           </TableSortLabel>
                         </TableCell>

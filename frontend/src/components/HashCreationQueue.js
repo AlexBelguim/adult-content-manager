@@ -59,7 +59,7 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
   const getStatusIcon = (status) => {
     switch (status) {
       case 'processing':
-        return <HourglassEmptyIcon sx={{ fontSize: 20, color: '#1976d2' }} />;
+        return <HourglassEmptyIcon sx={{ fontSize: 20, color: 'primary.main' }} />;
       case 'completed':
         return <CheckCircleIcon sx={{ fontSize: 20, color: '#4caf50' }} />;
       case 'error':
@@ -108,7 +108,7 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
       <Box
         sx={{
           p: 1.5,
-          bgcolor: '#1976d2',
+          bgcolor: 'primary.main',
           color: 'white',
           display: 'flex',
           alignItems: 'center',
@@ -145,7 +145,7 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
         <Box sx={{ maxHeight: 'calc(80vh - 60px)', overflow: 'auto' }}>
           {/* Active Jobs */}
           {activeJobs.length > 0 && activeJobs.map((activeJob) => (
-            <Box key={activeJob.id} sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#f5f5f5' }}>
+            <Box key={activeJob.id} sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#121212' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   {getStatusIcon(activeJob.status)}

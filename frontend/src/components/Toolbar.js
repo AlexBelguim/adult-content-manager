@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, ButtonGroup } from '@mui/material';
-import { Settings, Build, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science } from '@mui/icons-material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
-import TrueNASFixModal from './TrueNASFixModal';
+
 import './Toolbar.css';
 
 // Simple modal for video path input
@@ -93,13 +93,15 @@ function Toolbar({
   onFolderDeleted = null,
   onScanPerformers = null,
   onUploadFolder = null,
-  isScanning = false
+  isScanning = false,
+  onThemeChange = null,
+  currentThemeId = 'default'
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [localHandyCode, setLocalHandyCode] = useState(() => localStorage.getItem('handyConnectionCode') || handyCode || '');
   const [showSettings, setShowSettings] = useState(false);
-  const [showTrueNASFix, setShowTrueNASFix] = useState(false);
+
   const [showVideoPathModal, setShowVideoPathModal] = useState(false);
 
   const handleModeChange = (newMode) => {
@@ -127,13 +129,14 @@ function Toolbar({
 
   return (
     <AppBar position="sticky">
-      <MuiToolbar sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+      <MuiToolbar sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', minHeight: { xs: 56, sm: 64 }, py: { xs: 0.5, sm: 0 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <ButtonGroup variant="contained" aria-label="outlined primary button group" size="small">
             <Button 
               color={mode === 'gallery' ? 'primary' : 'inherit'} 
               onClick={() => handleModeChange('gallery')}
               startIcon={<Image />}
+              sx={{ fontSize: { xs: '0.7rem', sm: '0.8125rem' }, px: { xs: 1, sm: 2 } }}
             >
               Gallery
             </Button>
@@ -141,22 +144,11 @@ function Toolbar({
               color={mode === 'filter' ? 'primary' : 'inherit'} 
               onClick={() => handleModeChange('filter')}
               startIcon={<FilterList />}
+              sx={{ fontSize: { xs: '0.7rem', sm: '0.8125rem' }, px: { xs: 1, sm: 2 } }}
             >
               Filter
             </Button>
           </ButtonGroup>
-
-        {/* Scan button - HIDDEN
-        {mode === 'filter' && onScanPerformers && (
-          <button
-            className="scan-performers-btn"
-            onClick={onScanPerformers}
-            disabled={isScanning}
-          >
-            {isScanning ? '🔄 Scanning...' : '🔍 Scan Performers'}
-          </button>
-        )}
-        */}
 
         {/* Upload Folder button - only show in filter mode */}
         {mode === 'filter' && (
@@ -167,60 +159,67 @@ function Toolbar({
               onClick={() => navigate('/upload-queue')}
               startIcon={<FolderOpen />}
               size="small"
+              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
             >
               Upload Folder
             </Button>
+            <Tooltip title="Upload Folder">
+              <IconButton color="secondary" onClick={() => navigate('/upload-queue')} sx={{ display: { xs: 'inline-flex', sm: 'none' } }}>
+                <FolderOpen />
+              </IconButton>
+            </Tooltip>
             <Button
               variant="contained"
               onClick={() => navigate('/local-import')}
               startIcon={<Add />}
-              sx={{ background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)', color: 'white' }}
+              sx={{ background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)', color: 'white', display: { xs: 'none', sm: 'inline-flex' } }}
               size="small"
             >
               Local Import
             </Button>
+            <Tooltip title="Local Import">
+              <IconButton sx={{ color: '#66BB6A', display: { xs: 'inline-flex', sm: 'none' } }} onClick={() => navigate('/local-import')}>
+                <Add />
+              </IconButton>
+            </Tooltip>
           </>
         )}
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <Tooltip title="Scene Editor - Open Video File">
-            <IconButton color="inherit" onClick={() => setShowVideoPathModal(true)}>
+            <IconButton color="inherit" onClick={() => setShowVideoPathModal(true)} size="small">
               <Videocam />
             </IconButton>
           </Tooltip>
 
           <Tooltip title="Performer Management">
-            <IconButton color="inherit" onClick={() => window.open('/performer-management', '_blank')}>
+            <IconButton color="inherit" onClick={() => window.open('/performer-management', '_blank')} size="small">
               <People />
             </IconButton>
           </Tooltip>
 
           <Tooltip title="Hash-Based Duplicate Detection">
-            <IconButton color="inherit" onClick={() => window.open('/hash-management', '_blank')}>
+            <IconButton color="inherit" onClick={() => window.open('/hash-management', '_blank')} size="small">
               <Difference />
             </IconButton>
           </Tooltip>
 
           <Tooltip title="Pairwise Labeler - Train Image Preference Model">
-            <IconButton color="inherit" onClick={() => navigate('/pairwise')}>
+            <IconButton color="inherit" onClick={() => navigate('/pairwise')} size="small">
               <Science />
             </IconButton>
           </Tooltip>
 
           <Tooltip title="Keyboard Shortcuts Settings">
-            <IconButton color="inherit" onClick={() => setShowSettings(true)}>
+            <IconButton color="inherit" onClick={() => setShowSettings(true)} size="small">
               <Settings />
             </IconButton>
           </Tooltip>
 
-          <Tooltip title="TrueNAS Compatibility Fixes">
-            <IconButton color="inherit" onClick={() => setShowTrueNASFix(true)}>
-              <Build />
-            </IconButton>
-          </Tooltip>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 2, bgcolor: 'background.paper', p: 0.5, borderRadius: 1 }}>
+
+          <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1, ml: 1, bgcolor: 'background.paper', p: 0.5, borderRadius: 1 }}>
             <InputBase
               placeholder="Handy Code"
               value={localHandyCode}
@@ -248,12 +247,11 @@ function Toolbar({
         onClose={() => setShowSettings(false)}
         basePath={basePath}
         onFolderDeleted={onFolderDeleted}
+        onThemeChange={onThemeChange}
+        currentThemeId={currentThemeId}
       />
 
-      <TrueNASFixModal
-        open={showTrueNASFix}
-        onClose={() => setShowTrueNASFix(false)}
-      />
+
 
       <VideoPathModal
         open={showVideoPathModal}

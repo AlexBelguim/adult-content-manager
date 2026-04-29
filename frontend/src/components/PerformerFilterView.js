@@ -1185,7 +1185,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       p: 2,
-                      border: '1px solid #ddd',
+                      border: '1px solid rgba(255,255,255,0.15)',
                       borderRadius: 1,
                       bgcolor: 'background.paper',
                       minHeight: 48

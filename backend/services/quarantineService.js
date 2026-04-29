@@ -332,6 +332,34 @@ async function commitBatchAction(runId, action, selectedItems) {
       `).run(newCount, performerId);
 
       console.log(`Updated internal_duplicate_count for performer ${performerId}: ${newCount}`);
+
+      // Decrement current file counts for each deleted/quarantined file
+      // so filter percentages update immediately
+      let picsDeleted = 0, vidsDeleted = 0, funscriptVidsDeleted = 0;
+      for (const s of results.success) {
+        const ext = path.extname(s.filePath).toLowerCase();
+        if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+          picsDeleted++;
+        } else if (['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'].includes(ext)) {
+          if (s.filePath.includes(path.join('vids', 'funscript'))) {
+            funscriptVidsDeleted++;
+          } else {
+            vidsDeleted++;
+          }
+        }
+      }
+
+      if (picsDeleted > 0 || vidsDeleted > 0 || funscriptVidsDeleted > 0) {
+        db.prepare(`
+          UPDATE performers 
+          SET pics_count = MAX(0, pics_count - ?),
+              vids_count = MAX(0, vids_count - ?),
+              funscript_vids_count = MAX(0, funscript_vids_count - ?)
+          WHERE id = ?
+        `).run(picsDeleted, vidsDeleted, funscriptVidsDeleted, performerId);
+
+        console.log(`Updated file counts for performer ${performerId}: pics -${picsDeleted}, vids -${vidsDeleted}, funscript -${funscriptVidsDeleted}`);
+      }
     }
 
     // Update run metadata with action taken

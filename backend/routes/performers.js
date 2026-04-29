@@ -909,7 +909,6 @@ router.post('/:id/refresh-stats', async (req, res) => {
       UPDATE performers 
       SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
           funscript_files_count = ?, total_size_gb = ?,
-          pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
           last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
       WHERE id = ?
     `).run(
@@ -918,15 +917,22 @@ router.post('/:id/refresh-stats', async (req, res) => {
       stats.funscript_vids_count,
       stats.funscript_files_count,
       stats.total_size_gb,
-      stats.pics_count,      // Update original counts to match current counts
-      stats.vids_count,
-      stats.funscript_vids_count,
       now,
       picsPath,
       vidsPath,
       funscriptPath,
       id
     );
+
+    // Only set original counts if they are currently 0 or NULL (first-time baseline)
+    const current = db.prepare('SELECT pics_original_count, vids_original_count, funscript_vids_original_count FROM performers WHERE id = ?').get(id);
+    if (current && (!current.pics_original_count && !current.vids_original_count && !current.funscript_vids_original_count)) {
+      db.prepare(`
+        UPDATE performers 
+        SET pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?
+        WHERE id = ?
+      `).run(stats.pics_count, stats.vids_count, stats.funscript_vids_count, id);
+    }
 
     // Notify clients about the update
     const io = req.app.get('io');
@@ -981,7 +987,6 @@ router.post('/:id/refresh-stats-enhanced', async (req, res) => {
       UPDATE performers 
       SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
           funscript_files_count = ?, total_size_gb = ?,
-          pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
           last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
       WHERE id = ?
     `).run(
@@ -990,15 +995,22 @@ router.post('/:id/refresh-stats-enhanced', async (req, res) => {
       stats.funscript_vids_count,
       stats.funscript_files_count,
       stats.total_size_gb,
-      stats.pics_count,      // Update original counts to match current counts
-      stats.vids_count,
-      stats.funscript_vids_count,
       now,
       picsPath,
       vidsPath,
       funscriptPath,
       id
     );
+
+    // Only set original counts if they are currently 0 or NULL (first-time baseline)
+    const current = db.prepare('SELECT pics_original_count, vids_original_count, funscript_vids_original_count FROM performers WHERE id = ?').get(id);
+    if (current && (!current.pics_original_count && !current.vids_original_count && !current.funscript_vids_original_count)) {
+      db.prepare(`
+        UPDATE performers 
+        SET pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?
+        WHERE id = ?
+      `).run(stats.pics_count, stats.vids_count, stats.funscript_vids_count, id);
+    }
 
     res.send({ success: true, message: 'Stats refreshed using enhanced scanning', stats });
   } catch (err) {

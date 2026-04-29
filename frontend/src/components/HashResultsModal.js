@@ -387,7 +387,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
                 </Box>
                 <Box>
                   <Typography variant="caption" sx={{ color: '#888' }}>Selected</Typography>
-                  <Typography variant="h6" fontWeight="bold" sx={{ color: '#FF8E53' }}>{selectedItems.size}</Typography>
+                  <Typography variant="h6" fontWeight="bold" sx={{ color: 'primary.light' }}>{selectedItems.size}</Typography>
                 </Box>
                 <Box>
                   <Typography variant="caption" sx={{ color: '#888' }}>Exact Matches</Typography>

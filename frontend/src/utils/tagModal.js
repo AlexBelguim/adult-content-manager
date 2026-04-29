@@ -99,7 +99,7 @@ export function openTagModal({
   // Title
   const title = document.createElement('div');
   title.textContent = 'Assign Tags';
-  title.style.cssText = 'font-size: 1.25rem; font-weight: bold; margin-bottom: 18px; color: #1976d2; letter-spacing: 0.5px;';
+  title.style.cssText = 'font-size: 1.25rem; font-weight: bold; margin-bottom: 18px; color: #7e57c2; letter-spacing: 0.5px;';
   content.appendChild(title);
 
   // Add tag (all tags as buttons, filterable by input)
@@ -145,9 +145,9 @@ export function openTagModal({
       btn.textContent = tag;
       btn.disabled = isGenreTag;
       btn.style.cssText = `
-        background: ${isAssigned ? '#1976d2' : '#fff'};
-        color: ${isAssigned ? '#fff' : (isGenreTag ? '#888' : '#1976d2')};
-        border: 2px solid #1976d2;
+        background: ${isAssigned ? '#7e57c2' : '#fff'};
+        color: ${isAssigned ? '#fff' : (isGenreTag ? '#888' : '#7e57c2')};
+        border: 2px solid var(--primary-main, #7e57c2);
         border-radius: 16px;
         padding: 6px 18px;
         font-size: 1rem;

@@ -406,7 +406,7 @@ function HashResultsPage() {
   if (loading) {
     return (
       <Box sx={{ p: 3, height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <CircularProgress size={60} sx={{ color: '#FF8E53' }} />
+        <CircularProgress size={60} sx={{ color: 'primary.light' }} />
       </Box>
     );
   }
@@ -423,7 +423,7 @@ function HashResultsPage() {
           Back
         </Button>
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             Hash Comparison Results
           </Typography>
           <Typography variant="body2" sx={{ color: '#666' }}>
@@ -459,9 +459,9 @@ function HashResultsPage() {
                 onClick={handleRerunCheck}
                 disabled={rerunLoading}
                 sx={{
-                  borderColor: '#FF8E53',
-                  color: '#FF8E53',
-                  '&:hover': { borderColor: '#FE6B8B', bgcolor: 'rgba(255,142,83,0.1)' }
+                  bordercolor: 'primary.light',
+                  color: 'primary.light',
+                  '&:hover': { bordercolor: 'primary.main', bgcolor: 'rgba(255,142,83,0.1)' }
                 }}
               >
                 Rerun Check
@@ -841,7 +841,7 @@ function HashResultsPage() {
                   <Typography variant="caption" sx={{ color: '#666' }}>Active</Typography>
                 </Box>
                 <Box sx={{ p: 1.5, bgcolor: '#252525', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: '#FF8E53', fontWeight: 'bold' }}>{selectedItems.size}</Typography>
+                  <Typography variant="h5" sx={{ color: 'primary.light', fontWeight: 'bold' }}>{selectedItems.size}</Typography>
                   <Typography variant="caption" sx={{ color: '#666' }}>Selected</Typography>
                 </Box>
                 <Box sx={{ p: 1.5, bgcolor: '#252525', borderRadius: 1, textAlign: 'center' }}>
@@ -867,9 +867,9 @@ function HashResultsPage() {
                 valueLabelDisplay="auto"
                 valueLabelFormat={(val) => `${getSimilarityPercent(val)}%`}
                 sx={{
-                  color: '#FF8E53',
-                  '& .MuiSlider-thumb': { bgcolor: '#fff', border: '2px solid #FF8E53' },
-                  '& .MuiSlider-track': { bgcolor: '#FF8E53' },
+                  color: 'primary.light',
+                  '& .MuiSlider-thumb': { bgcolor: '#fff', border: '2px solid #b085f5' },
+                  '& .MuiSlider-track': { bgcolor: 'primary.light' },
                   '& .MuiSlider-rail': { bgcolor: '#444' },
                 }}
               />
@@ -884,7 +884,7 @@ function HashResultsPage() {
                 onChange={(e, v) => v && setSortBy(v)}
                 size="small"
                 fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: '#FF8E53' } } }}
+                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="exact">Exact</ToggleButton>
@@ -901,7 +901,7 @@ function HashResultsPage() {
                 onChange={(e, v) => { if (v) { setGroupFilter(v); setDisplayPage(1); } }}
                 size="small"
                 fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: '#FF8E53' } } }}
+                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="pairs">Pairs</ToggleButton>
@@ -918,7 +918,7 @@ function HashResultsPage() {
                 onChange={(e, v) => { if (v) { setMediaFilter(v); setDisplayPage(1); } }}
                 size="small"
                 fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: '#FF8E53' } } }}
+                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="pics">Pics</ToggleButton>
@@ -929,7 +929,7 @@ function HashResultsPage() {
             {/* Select All Active */}
             <Box sx={{ mb: 3, pt: 2, borderTop: '1px solid #333' }}>
               <FormControlLabel
-                control={<Checkbox checked={selectAll} onChange={(e) => handleSelectAll(e.target.checked, filteredItems)} sx={{ color: '#666', '&.Mui-checked': { color: '#FF8E53' } }} />}
+                control={<Checkbox checked={selectAll} onChange={(e) => handleSelectAll(e.target.checked, filteredItems)} sx={{ color: '#666', '&.Mui-checked': { color: 'primary.light' } }} />}
                 label={<Typography variant="body2" sx={{ color: '#aaa' }}>Select All Active ({filteredActiveGroups.length})</Typography>}
               />
             </Box>
@@ -983,7 +983,7 @@ function HashResultsPage() {
         <Grid item xs={12} md={9}>
           {committing ? (
             <Paper sx={{ p: 6, textAlign: 'center', bgcolor: '#1E1E1E', border: '1px solid #333', borderRadius: 2, minHeight: '50vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <CircularProgress size={60} sx={{ color: '#FF8E53', mb: 3 }} />
+              <CircularProgress size={60} sx={{ color: 'primary.light', mb: 3 }} />
               <Typography variant="h5" sx={{ color: '#fff', mb: 1 }}>Processing Deletion...</Typography>
               <Typography variant="body2" sx={{ color: '#888' }}>Unmounting media to release file locks...</Typography>
             </Paper>

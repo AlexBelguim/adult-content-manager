@@ -40,6 +40,7 @@ router.get('/genres', async (req, res) => {
 
       // Recursive directory scan for origin counts
       let originCounts = { pics: 0, vids: 0, funscripts: 0 };
+      let totalSizeBytes = 0;
       async function countFilesRecursive(dirPath) {
         try {
           const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -56,6 +57,11 @@ router.get('/genres', async (req, res) => {
               } else if (ext === '.funscript') {
                 originCounts.funscripts++;
               }
+              // Get file size during scan (no extra I/O since we already stat implicitly)
+              try {
+                const stat = await fs.stat(fullPath);
+                totalSizeBytes += stat.size;
+              } catch (e) { /* skip */ }
             }
           }
         } catch (e) {
@@ -63,6 +69,9 @@ router.get('/genres', async (req, res) => {
         }
       }
       await countFilesRecursive(genrePath);
+
+      // Convert bytes to GB with 2 decimal places
+      const sizeGB = (totalSizeBytes / (1024 * 1024 * 1024)).toFixed(2);
 
       // Get virtual counts from database (fast)
       const virtualCounts = { pics: 0, vids: 0, funscripts: 0 };
@@ -89,7 +98,7 @@ router.get('/genres', async (req, res) => {
         pics: originCounts.pics + virtualCounts.pics,
         vids: originCounts.vids + virtualCounts.vids,
         funscripts: originCounts.funscripts + virtualCounts.funscripts,
-        size: '0', // Skip size calculation in fast mode
+        size: sizeGB,
         originCounts,
         virtualCounts
       });

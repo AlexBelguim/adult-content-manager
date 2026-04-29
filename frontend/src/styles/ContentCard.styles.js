@@ -1,5 +1,6 @@
-// Main label styles for origin counts
-import { Padding } from "@mui/icons-material";
+// ContentCard.styles.js
+// All style objects for ContentCard component - theme-aware
+
 // Main label styles for origin counts
 export const chipLabelOriginPicsSx = { color: '#90caf9', fontWeight: 500 };
 export const chipLabelOriginVidsSx = { color: '#ef9a9a', fontWeight: 500 };
@@ -26,8 +27,6 @@ export const chipLabelVirtualSx = {
   display: 'inline-block',
   textAlign: 'right'
 };
-// ContentCard.styles.js
-// All style objects for ContentCard component
 
 export const cardSx = {
   height: '100%',
@@ -76,9 +75,9 @@ export const statsBoxSx = {
   width: '100%'
 };
 
-export const chipPicsSx = {
-  bgcolor: '#23272f',
-  color: '#90caf9',
+// Use theme-aware bg instead of hardcoded color
+const chipBaseSx = {
+  bgcolor: 'rgba(255,255,255,0.05)',
   fontWeight: 400,
   px: 1,
   height: 24,
@@ -89,44 +88,10 @@ export const chipPicsSx = {
   minWidth: 0
 };
 
-export const chipVidsSx = {
-  bgcolor: '#23272f',
-  color: '#90caf9',
-  fontWeight: 400,
-  px: 1,
-  height: 24,
-  fontSize: 13,
-  borderRadius: 2,
-  width: '100%',
-  justifyContent: 'flex-start',
-  minWidth: 0
-};
-
-export const chipFunscriptsSx = {
-  bgcolor: '#23272f',
-  color: '#90caf9',
-  fontWeight: 400,
-  px: 1,
-  height: 24,
-  fontSize: 13,
-  borderRadius: 2,
-  width: '100%',
-  justifyContent: 'flex-start',
-  minWidth: 0
-};
-
-export const chipTotalSx = {
-  bgcolor: '#23272f',
-  color: '#90caf9',
-  fontWeight: 400,
-  px: 1,
-  height: 24,
-  fontSize: 13,
-  borderRadius: 2,
-  width: '100%',
-  justifyContent: 'flex-start',
-  minWidth: 0
-};
+export const chipPicsSx = { ...chipBaseSx, color: '#90caf9' };
+export const chipVidsSx = { ...chipBaseSx, color: '#ef9a9a' };
+export const chipFunscriptsSx = { ...chipBaseSx, color: '#a5d6a7' };
+export const chipTotalSx = { ...chipBaseSx, color: 'text.primary' };
 
 export const sizeBoxSx = {
   display: 'flex',

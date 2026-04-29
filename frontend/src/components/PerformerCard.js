@@ -35,6 +35,12 @@ import { ensureFlag } from '../utils/countryFlags';
 import FlagEmoji from './FlagEmoji';
 import ThumbnailSlideshow from './ThumbnailSlideshow';
 import { buildCachedImageUrl } from '../utils/thumbnailCacheManager';
+import { getStoredThemeId } from '../theme';
+import GamerEdgeCard from './cardLayouts/GamerEdgeCard';
+import GamerCard from './cardLayouts/GamerCard';
+import TokyoNightCard from './cardLayouts/TokyoNightCard';
+import CinematicCard from './cardLayouts/CinematicCard';
+import CleanSplitCard from './cardLayouts/CleanSplitCard';
 
 function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDelete, onRate, mode, basePath, onProgressClick, onOpenHash, onOpenThumbnailSelector }) {
   const [thumbnail, setThumbnail] = useState('placeholder-image.jpg');
@@ -392,8 +398,137 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
     setRatingAnchor(null);
   };
 
+  // --- Smart scan handler (extracted so themed cards can reuse it) ---
+  const handleSmartScan = async (e) => {
+    e.stopPropagation();
+    setSmartScanLoading(true);
+    try {
+      const res = await fetch(`/api/performers/${performer.id}/smart-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ basePath })
+      });
+      const data = await res.json();
+      if (data.matches && data.matches.length > 0) {
+        setSmartScanMatch(data.matches[0]);
+        setSmartScanDialogOpen(true);
+      } else {
+        alert(`Scanned! Updated stats.\nPhotos: ${data.stats.pics_count}\nVideos: ${data.stats.vids_count}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Scan failed: " + err.message);
+    } finally {
+      setSmartScanLoading(false);
+    }
+  };
+
+  // --- Image error fallback ---
+  const onImageError = (e) => {
+    e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzQ1IiBoZWlnaHQ9IjM1MCIgdmlld0JveD0iMCAwIDM0NSAzNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzNDUiIGhlaWdodD0iMzUwIiBmaWxsPSIjMzMzIi8+Cjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjY2IiBmb250LXNpemU9IjI0Ij5ObyBJbWFnZTwvdGV4dD4KPC9zdmc+';
+  };
+
+  // --- Themed card rendering ---
+  const themeId = getStoredThemeId();
+  const themedLayouts = {
+    gamerEdge: GamerEdgeCard,
+    gamer: GamerCard,
+    tokyoNight: TokyoNightCard,
+    cinematic: CinematicCard,
+    cleanSplit: CleanSplitCard,
+  };
+
+  const ThemedLayout = themedLayouts[themeId];
+  if (ThemedLayout) {
+    const cardProps = {
+      performer, mode, thumbnail, imageLoaded, stats,
+      picsPercentage, vidsPercentage, funscriptPercentage,
+      daysSinceImport, ratingValue, formatRating,
+      onClick, onSettings, onDelete, onProgressClick,
+      onOpenHash, basePath,
+      handleDeleteClick, handleRatingBadgeClick,
+      handleThumbnailMouseDown, handleThumbnailMouseUp, handleThumbnailMouseLeave,
+      smartScanLoading, handleSmartScan,
+      onError: onImageError
+    };
+
+    return (
+      <>
+        <ThemedLayout cardProps={cardProps} />
+
+        {/* Rating Popover */}
+        <Popover
+          open={Boolean(ratingAnchor)}
+          anchorEl={ratingAnchor}
+          onClose={handleRatingPanelClose}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          onClick={(e) => e.stopPropagation()}
+          PaperProps={{ sx: { backgroundColor: 'rgba(30,30,30,0.95)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.12)', px: 2, py: 1.5, borderRadius: '12px' } }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Rating value={ratingValue} precision={0.5} max={5} onChange={handleRatingChange} disabled={ratingSaving}
+              sx={{ color: '#ffeb3b', '& .MuiRating-iconEmpty': { color: 'rgba(255,255,255,0.25)' } }} />
+            {ratingSaving ? <CircularProgress size={20} sx={{ color: '#ffeb3b' }} /> : (
+              <Tooltip title="Clear rating"><span>
+                <IconButton size="small" sx={{ color: '#ffeb3b', padding: 0, width: '28px', height: '28px' }}
+                  onClick={handleRatingClear} disabled={ratingValue === null}><ClearIcon fontSize="small" /></IconButton>
+              </span></Tooltip>
+            )}
+          </Box>
+        </Popover>
+
+        {/* Delete/Move Dialog */}
+        <Dialog open={deleteDialogOpen} onClose={(e, reason) => { if (reason === 'backdropClick' || reason === 'escapeKeyDown') { e?.stopPropagation(); e?.preventDefault(); } handleDeleteCancel(e); }}
+          maxWidth="md" fullWidth onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+          sx={{ zIndex: 9999, '& .MuiBackdrop-root': { backgroundColor: 'rgba(0,0,0,0.8)' }, '& .MuiDialog-paper': { zIndex: 10000 } }}>
+          <DialogTitle onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}>Performer Actions: {performer.name}</DialogTitle>
+          <DialogContent onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}>
+            <Typography variant="body1" gutterBottom sx={{ mb: 3 }}>What would you like to do with this performer?</Typography>
+            <Box sx={{ border: '2px solid #2196f3', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'rgba(33,150,243,0.1)' }}>
+              <Typography variant="h6" sx={{ color: '#2196f3', mb: 1 }}>🔄 Move Back to "Before Filter Performer"</Typography>
+              <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Move this performer back to the "before filter performer" folder for re-filtering.</Typography>
+              <Box sx={{ mt: 2 }}><Button variant="contained" color="primary" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleMoveToBeforeFilter(); }} disabled={deleting} fullWidth>{deleting ? 'Moving...' : 'Move to Before Filter Performer'}</Button></Box>
+            </Box>
+            <Box sx={{ border: '2px solid #f44336', borderRadius: 2, p: 2, backgroundColor: 'rgba(244,67,54,0.1)' }}>
+              <Typography variant="h6" sx={{ color: '#f44336', mb: 1 }}>🗑️ Completely Delete Performer</Typography>
+              <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Permanently delete all database records and optionally remove all files.</Typography>
+              <Alert severity="warning" sx={{ mb: 2 }}>This action cannot be undone!</Alert>
+              <FormControlLabel control={<Checkbox checked={deleteFromSystem} onChange={(e) => { e.stopPropagation(); setDeleteFromSystem(e.target.checked); }} color="error" onClick={(e) => e.stopPropagation()} />}
+                label={<Box><Typography variant="body2">Also delete all files from computer</Typography><Typography variant="caption" color="text.secondary">This will permanently remove the performer folder.</Typography></Box>}
+                onClick={(e) => e.stopPropagation()} />
+              <Box sx={{ mt: 2 }}><Button variant="contained" color="error" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleCompleteDelete(); }} disabled={deleting} fullWidth>{deleting ? 'Deleting...' : 'Permanently Delete'}</Button></Box>
+            </Box>
+          </DialogContent>
+          <DialogActions><Button onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteCancel(e); }}>Cancel</Button></DialogActions>
+        </Dialog>
+
+        {/* Smart Scan Dialog */}
+        <Dialog open={smartScanDialogOpen} onClose={() => setSmartScanDialogOpen(false)} onClick={(e) => e.stopPropagation()}>
+          <DialogTitle>Possible Duplicate Found</DialogTitle>
+          <DialogContent>
+            <Typography>We found a match for <strong>{performer.name}</strong>:</Typography>
+            <Box sx={{ my: 2, p: 2, border: '1px solid #444', borderRadius: 1 }}>
+              <Typography variant="h6" color="primary">{smartScanMatch?.name}</Typography>
+              <Typography variant="caption" sx={{ color: '#aaa' }}>Files: {(smartScanMatch?.pics_count || 0) + (smartScanMatch?.vids_count || 0)} | Folder: {smartScanMatch?.moved_to_after ? 'After Filter' : 'Before Filter'}</Typography>
+            </Box>
+            <Typography>Do you want to <strong>MERGE</strong> {performer.name} into {smartScanMatch?.name}?</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSmartScanDialogOpen(false)}>Cancel</Button>
+            <Button variant="contained" color="secondary" startIcon={<AutoFixHighIcon />}
+              onClick={async () => { setSmartScanLoading(true); try { const res = await fetch('/api/performers/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceId: performer.id, targetId: smartScanMatch.id }) }); const data = await res.json(); if (data.success) { setSmartScanDialogOpen(false); if (onDelete) onDelete(performer.id, false, 'move'); } else { alert('Merge failed: ' + data.error); } } catch (err) { alert('Merge failed: ' + err.message); } finally { setSmartScanLoading(false); } }}
+            >Yes, Merge Them</Button>
+          </DialogActions>
+        </Dialog>
+      </>
+    );
+  }
+
+  // ──── DEFAULT THEME LAYOUT (original) ────
   return (
     <Box
+      className="performer-card"
       key={`${performer.id}-${thumbnail}`}
       onClick={onClick}
       onContextMenu={(e) => {
@@ -543,7 +678,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
 
       {/* Rating overlay - gallery mode */}
       {mode === 'gallery' && (
-        <Box sx={{
+        <Box className="rating-badge" sx={{
           position: 'absolute',
           top: '10px',
           left: '10px',
@@ -623,7 +758,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
       }}>
         {/* Card inner header - only in filter mode or at bottom in gallery mode */}
         {mode === 'filter' && (
-          <Box sx={{
+          <Box className="card-header" sx={{
             padding: '12px',
             background: 'rgba(35, 35, 35, 0.8)',
             margin: '10px 10px 0 10px',
@@ -638,7 +773,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
               marginBottom: '5px'
             }}>
               <Box sx={{ display: 'flex', flexDirection: 'column', maxWidth: '80%' }}>
-                <Typography sx={{
+                <Typography className="performer-name" sx={{
                   margin: 0,
                   fontSize: '1.1rem',
                   fontWeight: 'bold',
@@ -790,7 +925,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                         }
                       }}
                     >
-                      <SettingsIcon />
+                      <SettingsIcon className="settings-icon" />
                     </IconButton>
                   )}
 
@@ -899,7 +1034,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                       '& svg': { width: '18px', height: '18px' }
                     }}
                   >
-                    {smartScanLoading ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon />}
+                    {smartScanLoading ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon className="scan-icon" />}
                   </IconButton>
 
                   <IconButton
@@ -930,7 +1065,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                       }
                     }}
                   >
-                    <RefreshIcon />
+                    <RefreshIcon className="refresh-icon" />
                   </IconButton>
                 </Box>
               </Box>
@@ -978,7 +1113,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
 
         {/* Info section at bottom for gallery mode */}
         {mode === 'gallery' && (
-          <Box sx={{
+          <Box className="card-info-section" sx={{
             padding: '12px',
             background: 'rgba(35, 35, 35, 0.9)',
             margin: '0 10px 10px 10px',
@@ -992,7 +1127,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
               alignItems: 'center',
               marginBottom: '5px'
             }}>
-              <Typography sx={{
+              <Typography className="performer-name" sx={{
                 margin: 0,
                 fontSize: '1.1rem',
                 fontWeight: 'bold',
@@ -1031,7 +1166,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                       }
                     }}
                   >
-                    <SettingsIcon />
+                    <SettingsIcon className="settings-icon" />
                   </IconButton>
                 )}
                 {mode === 'gallery' && onDelete && (
@@ -1055,7 +1190,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                       }
                     }}
                   >
-                    <DeleteIcon />
+                    <DeleteIcon className="delete-icon" />
                   </IconButton>
                 )}
 
@@ -1087,7 +1222,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                     }
                   }}
                 >
-                  <RefreshIcon />
+                  <RefreshIcon className="refresh-icon" />
                 </IconButton>
               </Box>
             </Box>
@@ -1168,7 +1303,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
 
         {/* Percentages at bottom - only show in filter mode */}
         {mode === 'filter' && (
-          <Box sx={{
+          <Box className="card-progress-section" sx={{
             padding: '12px',
             background: 'rgba(35, 35, 35, 0.8)',
             margin: '0 10px 15px 10px', // Increased bottom margin from 10px to 15px
@@ -1179,6 +1314,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
             gap: 1
           }}>
             <Box
+              className="progress-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 if (onProgressClick) {
@@ -1205,6 +1341,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
               Pics {picsPercentage}%
             </Box>
             <Box
+              className="progress-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 if (onProgressClick) {
@@ -1231,6 +1368,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
               Vids {vidsPercentage}%
             </Box>
             <Box
+              className="progress-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 if (onProgressClick) {

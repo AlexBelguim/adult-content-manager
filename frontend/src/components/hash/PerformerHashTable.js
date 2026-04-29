@@ -116,14 +116,14 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
   };
 
   const gradientButtonStyle = {
-    background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)',
+    background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
     color: '#fff',
     fontWeight: 'bold',
     textTransform: 'none',
-    boxShadow: '0 3px 5px 2px rgba(255, 105, 135, .3)',
+    boxShadow: '0 3px 5px 2px rgba(126, 87, 194, .3)',
     '&:hover': {
-      background: 'linear-gradient(45deg, #FE6B8B 20%, #FF8E53 80%)',
-      boxShadow: '0 3px 10px 2px rgba(255, 105, 135, .4)',
+      background: 'linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%)',
+      boxShadow: '0 3px 10px 2px rgba(126, 87, 194, .4)',
     },
     '&:disabled': {
       background: '#444',

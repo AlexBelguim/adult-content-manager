@@ -156,7 +156,7 @@ function PhoneFilterView({ basePath, handyIntegration, handyConnected }) {
         py: 2,
         px: 2,
         minHeight: '100vh',
-        bgcolor: '#f5f5f5'
+        bgcolor: '#121212'
       }}
     >
       {/* Header */}

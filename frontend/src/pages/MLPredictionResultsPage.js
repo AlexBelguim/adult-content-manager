@@ -164,7 +164,7 @@ function MLPredictionResultsPage() {
       <Box sx={{ 
         mb: 3, 
         p: 2, 
-        bgcolor: '#f5f5f5', 
+        bgcolor: '#121212', 
         borderRadius: 2,
         display: 'flex',
         gap: 3,
@@ -310,7 +310,7 @@ function MLPredictionResultsPage() {
                 >
                   <Box sx={{ 
                     position: 'relative', 
-                    bgcolor: '#f5f5f5', 
+                    bgcolor: '#121212', 
                     minHeight: 280,
                     maxHeight: 400,
                     display: 'flex', 
@@ -356,7 +356,7 @@ function MLPredictionResultsPage() {
                         fontSize: '0.65rem',
                         fontWeight: 'bold',
                         bgcolor: item.file_type === 'video' ? '#e3f2fd' : '#f3e5f5',
-                        color: item.file_type === 'video' ? '#1976d2' : '#7b1fa2',
+                        color: item.file_type === 'video' ? '#7e57c2' : '#7b1fa2',
                         boxShadow: 2
                       }}
                     />
@@ -379,7 +379,7 @@ function MLPredictionResultsPage() {
                   </Box>
 
                   {/* Filename */}
-                  <Box sx={{ p: 0.5, bgcolor: '#f5f5f5' }}>
+                  <Box sx={{ p: 0.5, bgcolor: '#121212' }}>
                     <Tooltip title={item.file_path}>
                       <Typography 
                         variant="caption" 

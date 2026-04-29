@@ -287,7 +287,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                   <Card
                     sx={{
                       position: 'relative',
-                      border: isSelected ? '3px solid #1976d2' : '1px solid rgba(255,255,255,0.1)',
+                      border: isSelected ? '3px solid var(--primary-main, #7e57c2)' : '1px solid rgba(255,255,255,0.1)',
                       boxShadow: isSelected ? 4 : 1,
                       bgcolor: 'background.paper',
                       height: '400px',

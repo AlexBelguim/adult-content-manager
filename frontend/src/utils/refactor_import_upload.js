@@ -13,8 +13,8 @@ function refactorFile(filePath) {
     // LocalImport uses green gradient: #4CAF50 -> #66BB6A
     content = content.replace(/background:\s*['"]linear-gradient\(45deg,\s*#4CAF50\s*30%,\s*#66BB6A\s*90%\)['"]/g, "background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)'");
     
-    // UploadQueue uses pink/orange gradient: #FE6B8B -> #FF8E53
-    content = content.replace(/background:\s*['"]linear-gradient\(45deg,\s*#FE6B8B\s*30%,\s*#FF8E53\s*90%\)['"]/g, "background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)'");
+    // UploadQueue uses pink/orange gradient: #7e57c2 -> #b085f5
+    content = content.replace(/background:\s*['"]linear-gradient\(45deg,\s*#7e57c2\s*30%,\s*#b085f5\s*90%\)['"]/g, "background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)'");
     
     // 3. Typography/colors
     // Replace hardcoded grays with text.secondary or text.disabled
@@ -50,8 +50,8 @@ function refactorFile(filePath) {
     content = content.replace(/boxShadow:\s*['"]0 3px 5px 2px rgba\(76, 175, 80, \.3\)['"]/g, "boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)'");
 
     // Upload queue interactions (orange/pink to primary)
-    content = content.replace(/borderColor:\s*['"]#FF8E53['"]/g, "borderColor: 'primary.main'");
-    content = content.replace(/color:\s*['"]#FF8E53['"]/g, "color: 'primary.main'");
+    content = content.replace(/borderColor:\s*['"]#b085f5['"]/g, "borderColor: 'primary.main'");
+    content = content.replace(/color:\s*['"]#b085f5['"]/g, "color: 'primary.main'");
     content = content.replace(/bgcolor:\s*['"]rgba\(255,\s*142,\s*83,\s*0\.2\)['"]/g, "bgcolor: 'action.selected'");
     content = content.replace(/bgcolor:\s*['"]rgba\(255,\s*142,\s*83,\s*0\.05\)['"]/g, "bgcolor: 'action.hover'");
     content = content.replace(/boxShadow:\s*['"]0 3px 5px 2px rgba\(255, 105, 135, \.3\)['"]/g, "boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)'");

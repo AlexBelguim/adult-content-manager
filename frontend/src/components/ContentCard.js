@@ -63,11 +63,11 @@ function ContentCard({ genre, onClick, basePath }) {
   const showBreakdown = origin.pics !== undefined && virtual.pics !== undefined;
 
   return (
-    <Card sx={cardSx}>
+    <Card className="content-card" sx={cardSx}>
       <CardActionArea onClick={handleClick} sx={cardActionAreaSx}>
         <CardContent sx={cardContentSx}>
           {/* Genre Icon */}
-          <Avatar sx={avatarSx}>
+          <Avatar className="genre-avatar" sx={avatarSx}>
             <Folder sx={{ fontSize: 28 }} />
           </Avatar>
 

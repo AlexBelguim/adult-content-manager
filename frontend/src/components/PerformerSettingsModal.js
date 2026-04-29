@@ -78,15 +78,15 @@ const darkModalStyles = {
     color: '#aaa'
   },
   gradientButton: {
-    background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)',
+    background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
     color: '#fff',
     fontWeight: 'bold',
     px: 3,
     py: 1.5,
     textTransform: 'none',
     '&:hover': {
-      background: 'linear-gradient(45deg, #FE6B8B 20%, #FF8E53 80%)',
-      boxShadow: '0 3px 10px rgba(255, 105, 135, .4)'
+      background: 'linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%)',
+      boxShadow: '0 3px 10px rgba(126, 87, 194, .4)'
     },
     '&:disabled': {
       background: '#444',
@@ -101,7 +101,7 @@ const darkModalStyles = {
     py: 1.5,
     textTransform: 'none',
     '&:hover': {
-      borderColor: '#FF8E53',
+      bordercolor: 'primary.light',
       bgcolor: 'rgba(255, 142, 83, 0.1)'
     }
   },
@@ -110,8 +110,8 @@ const darkModalStyles = {
     '& .MuiOutlinedInput-root': {
       color: '#fff',
       '& fieldset': { borderColor: '#444' },
-      '&:hover fieldset': { borderColor: '#FF8E53' },
-      '&.Mui-focused fieldset': { borderColor: '#FF8E53' }
+      '&:hover fieldset': { bordercolor: 'primary.light' },
+      '&.Mui-focused fieldset': { bordercolor: 'primary.light' }
     }
   }
 };
@@ -448,7 +448,7 @@ function PerformerSettingsModal({
               }
               .spinner {
                 border: 4px solid #333;
-                border-top: 4px solid #FF8E53;
+                border-top: 4px solid #b085f5;
                 border-radius: 50%;
                 width: 60px;
                 height: 60px;
@@ -702,7 +702,7 @@ function PerformerSettingsModal({
                 sx={{
                   fontWeight: 'bold',
                   mb: 1,
-                  background: 'linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)',
+                  background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent'
                 }}
@@ -728,7 +728,7 @@ function PerformerSettingsModal({
                           checked={renameFolderToo}
                           onChange={(e) => setRenameFolderToo(e.target.checked)}
                           size="small"
-                          sx={{ color: '#aaa', '&.Mui-checked': { color: '#FF8E53' } }}
+                          sx={{ color: '#aaa', '&.Mui-checked': { color: 'primary.light' } }}
                         />
                       }
                       label={<Typography variant="body2" sx={{ color: '#aaa' }}>Also rename folder</Typography>}
@@ -764,7 +764,7 @@ function PerformerSettingsModal({
                   <IconButton
                     size="small"
                     onClick={() => setIsEditingName(true)}
-                    sx={{ color: '#aaa', '&:hover': { color: '#FF8E53' } }}
+                    sx={{ color: '#aaa', '&:hover': { color: 'primary.light' } }}
                   >
                     <EditIcon fontSize="small" />
                   </IconButton>
@@ -824,8 +824,8 @@ function PerformerSettingsModal({
                       size="small"
                       sx={{
                         bgcolor: 'rgba(255, 142, 83, 0.2)',
-                        color: '#FF8E53',
-                        '& .MuiChip-deleteIcon': { color: '#FF8E53' }
+                        color: 'primary.light',
+                        '& .MuiChip-deleteIcon': { color: 'primary.light' }
                       }}
                     />
                   ))}

@@ -334,7 +334,7 @@ class FunscriptPlayer extends HTMLElement {
   renderTagAssignButton() {
     if (this.getAttribute('tagassign') !== 'true') return '';
     return `
-      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: #1976d2; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: var(--primary-main, #7e57c2); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
         🏷️
       </button>
     `;
@@ -4571,7 +4571,7 @@ class FunscriptImage extends HTMLElement {
   renderTagAssignButton() {
     if (this.getAttribute('tagassign') !== 'true') return '';
     return `
-      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: #1976d2; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: var(--primary-main, #7e57c2); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
         🏷️
       </button>
     `;

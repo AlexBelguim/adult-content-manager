@@ -261,7 +261,7 @@ function ThumbnailSelectorModal({ open, onClose, performer, onSave }) {
                   <Card
                     sx={{
                       position: 'relative',
-                      border: isSelected ? '3px solid #1976d2' : '1px solid #ddd',
+                      border: isSelected ? '3px solid var(--primary-main, #7e57c2)' : '1px solid rgba(255,255,255,0.15)',
                       boxShadow: isSelected ? 4 : 1
                     }}
                   >

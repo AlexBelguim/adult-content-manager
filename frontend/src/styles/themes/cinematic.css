@@ -1,0 +1,151 @@
+/* ══════════════════════════════════════════════════════════════════
+   CINEMATIC THEME  –  Style 6 from extras
+   Full-cover image, heavy gradient overlays, warm gold, film noir
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ─── Performer Card: Full-cover cinematic ───────────────────── */
+[data-theme="cinematic"] .performer-card {
+  border-radius: 8px !important;
+  border: none !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6) !important;
+}
+
+[data-theme="cinematic"] .performer-card:hover {
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 30px rgba(255, 213, 79, 0.06) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* Filter header: transparent over image */
+[data-theme="cinematic"] .performer-card .card-header {
+  background: transparent !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 16px !important;
+  box-shadow: none !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Gallery info section at bottom */
+[data-theme="cinematic"] .performer-card .card-info-section {
+  background: transparent !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 16px !important;
+  box-shadow: none !important;
+  border-top: none !important;
+}
+
+[data-theme="cinematic"] .performer-card .performer-name {
+  font-family: 'Playfair Display', Georgia, serif !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8) !important;
+  font-size: 1.1rem !important;
+}
+
+/* Rating badge: warm yellow pill */
+[data-theme="cinematic"] .performer-card .rating-badge {
+  background: rgba(0, 0, 0, 0.6) !important;
+  border: 1px solid rgba(255, 235, 59, 0.3) !important;
+  border-radius: 16px !important;
+  color: #ffeb3b !important;
+}
+
+/* Icon colors matching Style6 */
+[data-theme="cinematic"] .performer-card .settings-icon { color: #ffeb3b !important; }
+[data-theme="cinematic"] .performer-card .hash-icon { color: #29b6f6 !important; }
+[data-theme="cinematic"] .performer-card .scan-icon { color: #ce93d8 !important; }
+[data-theme="cinematic"] .performer-card .refresh-icon { color: #ef5350 !important; }
+
+/* Film-strip bar on hover */
+[data-theme="cinematic"] .performer-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 0%, #ffd54f 20%, #ffd54f 80%, transparent 100%);
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+[data-theme="cinematic"] .performer-card:hover::before {
+  opacity: 1;
+}
+
+/* Progress buttons: cinematic bordered pills */
+[data-theme="cinematic"] .progress-btn {
+  border-radius: 4px !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  font-weight: bold !important;
+}
+
+/* ─── Content Card ───────────────────────────────────────────── */
+[data-theme="cinematic"] .content-card {
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 213, 79, 0.06) !important;
+  background: #1a1514 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="cinematic"] .content-card:hover {
+  border-color: rgba(255, 213, 79, 0.2) !important;
+  box-shadow: 0 8px 40px rgba(255, 213, 79, 0.06) !important;
+}
+
+[data-theme="cinematic"] .content-card .genre-avatar {
+  background: linear-gradient(135deg, #ffd54f, #c8a415) !important;
+  color: #1a1a1a !important;
+}
+
+/* ─── Section titles ─────────────────────────────────────────── */
+[data-theme="cinematic"] .section-title {
+  font-family: 'Playfair Display', Georgia, serif !important;
+  color: #ffd54f !important;
+  font-style: italic !important;
+}
+
+/* ─── Modals ─────────────────────────────────────────────────── */
+[data-theme="cinematic"] .MuiDialog-paper {
+  border: 1px solid rgba(255, 213, 79, 0.1) !important;
+  background: #1a1514 !important;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6) !important;
+  border-radius: 10px !important;
+}
+
+/* ─── Filter controls ────────────────────────────────────────── */
+[data-theme="cinematic"] .filter-controls,
+[data-theme="cinematic"] .gallery-controls {
+  border-radius: 8px !important;
+  background: rgba(26, 21, 20, 0.7) !important;
+  border: 1px solid rgba(255, 213, 79, 0.06) !important;
+}
+
+/* ─── Warm vignette ──────────────────────────────────────────── */
+[data-theme="cinematic"] .gallery-container::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(13, 13, 13, 0.3) 100%);
+  z-index: 9999;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+[data-theme="cinematic"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 213, 79, 0.2);
+  border-radius: 2px;
+}
+[data-theme="cinematic"] ::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+
+/* ─── Unified Gallery ────────────────────────────────────────── */
+[data-theme="cinematic"] .unified-gallery-card {
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 213, 79, 0.06) !important;
+}
+[data-theme="cinematic"] .unified-gallery-card:hover {
+  box-shadow: 0 8px 32px rgba(255, 213, 79, 0.06) !important;
+}
