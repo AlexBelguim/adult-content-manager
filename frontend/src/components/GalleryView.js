@@ -35,7 +35,7 @@ import {
   Checkbox,
   Divider
 } from '@mui/material';
-import { ViewModule, ViewList, FilterList as FilterIcon, Close as CloseIcon, Fullscreen as FullscreenIcon } from '@mui/icons-material';
+import { ViewModule, ViewList, FilterList as FilterIcon, Close as CloseIcon, Fullscreen as FullscreenIcon, Star as StarIcon } from '@mui/icons-material';
 
 function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, cachedGenres, onGenresUpdate }) {
   const navigate = useNavigate();
@@ -267,7 +267,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
   const handleRatePerformer = async (performerId, rating) => {
     const normalized = rating === null || rating === undefined
       ? null
-      : Math.round(Math.min(5, Math.max(0, rating)) * 2) / 2;
+      : Math.round(Math.min(5, Math.max(0, rating)) * 100) / 100;
 
     const previousEntry = performers.find(p => p.id === performerId);
     const previousRating = previousEntry && previousEntry.performer_rating !== undefined && previousEntry.performer_rating !== null
@@ -736,6 +736,21 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                 onClick={() => setFilterModalOpen(true)}
               >
                 Filters
+              </Button>
+
+              <Button
+                variant="contained"
+                startIcon={<StarIcon />}
+                onClick={() => navigate('/group-rate')}
+                sx={{ 
+                  background: 'linear-gradient(45deg, #7c4dff, #00e5ff)',
+                  color: 'white',
+                  fontWeight: 'bold',
+                  borderRadius: '20px',
+                  boxShadow: '0 4px 15px rgba(124, 77, 255, 0.4)'
+                }}
+              >
+                Group Rate
               </Button>
 
               <IconButton

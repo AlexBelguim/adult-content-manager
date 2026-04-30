@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { loadShortcuts } from '../utils/settings';
 import BackgroundTaskQueue from './BackgroundTaskQueue';
 import '../utils/FunscriptPlayer.js'; // Register custom element
@@ -25,10 +26,12 @@ import {
   SportsEsports as GameIcon,
   KeyboardArrowLeft as PrevIcon,
   KeyboardArrowRight as NextIcon,
-  Upload as UploadIcon
+  Upload as UploadIcon,
+  AutoAwesome as SmartIcon
 } from '@mui/icons-material';
 
 function PerformerFilterView({ performer, onBack, onNext, onComplete, handyIntegration, handyConnected, initialTab }) {
+  const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(initialTab || 'pics'); // 'pics', 'vids', 'funscript_vids'
   const [files, setFiles] = useState([]);
   const [totalFiles, setTotalFiles] = useState(0);
@@ -49,6 +52,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
 
   // Missing ML variables definition (added to fix runtime errors)
   const [mlEnabled, setMlEnabled] = useState(false);
+  const [showSmartFilter, setShowSmartFilter] = useState(false);
   const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [predictions, setPredictions] = useState({});
   const [activeModel, setActiveModel] = useState(null);
@@ -63,6 +67,76 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   }, [initialTab]);
 
   // Load files for current tab with progressive loading
+  const fetchFiles = useCallback(async (controller) => {
+    setLoadingFiles(true);
+    setFiles([]);
+    setTotalFiles(0);
+    setHasMoreFiles(false);
+    setFilesLoaded(0);
+
+    try {
+      // Load FIRST file only (limit=1) to start filtering immediately
+      const response = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}&limit=1&offset=0`, {
+        signal: controller.signal
+      });
+      if (response.ok) {
+        const data = await response.json();
+
+        // Check if we were aborted
+        if (controller.signal.aborted) return;
+
+        // Check if response is paginated or legacy format
+        if (data.files && data.total !== undefined) {
+          // New paginated format
+          let filesList = data.files;
+
+          // If sorting by funscript count, sort client-side if not supported by backend
+          if (sortBy === 'funscript_count') {
+            filesList = [...filesList].sort((a, b) => {
+              return sortOrder === 'asc'
+                ? (a.funscript_count || 0) - (b.funscript_count || 0)
+                : (b.funscript_count || 0) - (a.funscript_count || 0);
+            });
+          }
+
+          setFiles(filesList);
+          setTotalFiles(data.total);
+          setHasMoreFiles(data.hasMore);
+          setCurrentIndex(0);
+          setFilesLoaded(1);
+
+          // Continue loading more files in background ONE AT A TIME
+          if (data.hasMore && !controller.signal.aborted) {
+            loadMoreFilesInBackground(1, controller);
+          }
+        } else {
+          // Legacy format - all files returned at once
+          let filesList = data;
+          if (sortBy === 'funscript_count') {
+            filesList = [...filesList].sort((a, b) => {
+              return sortOrder === 'asc'
+                ? (a.funscript_count || 0) - (b.funscript_count || 0)
+                : (b.funscript_count || 0) - (a.funscript_count || 0);
+            });
+          }
+          setFiles(filesList);
+          setTotalFiles(filesList.length);
+          setHasMoreFiles(false);
+          setCurrentIndex(0);
+          setFilesLoaded(filesList.length);
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Error loading files:', err);
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setLoadingFiles(false);
+      }
+    }
+  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]);
+
   useEffect(() => {
     // Cancel any previous loading
     if (abortController) {
@@ -72,85 +146,62 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
     const controller = new AbortController();
     setAbortController(controller);
 
-    const loadFiles = async () => {
-      setLoadingFiles(true);
-      setFiles([]);
-      setTotalFiles(0);
-      setHasMoreFiles(false);
-      setFilesLoaded(0);
-
-      try {
-        // Load FIRST file only (limit=1) to start filtering immediately
-        const response = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}&limit=1&offset=0`, {
-          signal: controller.signal
-        });
-        if (response.ok) {
-          const data = await response.json();
-
-          // Check if we were aborted
-          if (controller.signal.aborted) return;
-
-          // Check if response is paginated or legacy format
-          if (data.files && data.total !== undefined) {
-            // New paginated format
-            let filesList = data.files;
-
-            // If sorting by funscript count, sort client-side if not supported by backend
-            if (sortBy === 'funscript_count') {
-              filesList = [...filesList].sort((a, b) => {
-                return sortOrder === 'asc'
-                  ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                  : (b.funscript_count || 0) - (a.funscript_count || 0);
-              });
-            }
-
-            setFiles(filesList);
-            setTotalFiles(data.total);
-            setHasMoreFiles(data.hasMore);
-            setCurrentIndex(0);
-            setFilesLoaded(1);
-
-            // Continue loading more files in background ONE AT A TIME
-            if (data.hasMore && !controller.signal.aborted) {
-              loadMoreFilesInBackground(1, controller);
-            }
-          } else {
-            // Legacy format - all files returned at once
-            let filesList = data;
-            if (sortBy === 'funscript_count') {
-              filesList = [...filesList].sort((a, b) => {
-                return sortOrder === 'asc'
-                  ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                  : (b.funscript_count || 0) - (a.funscript_count || 0);
-              });
-            }
-            setFiles(filesList);
-            setTotalFiles(filesList.length);
-            setHasMoreFiles(false);
-            setCurrentIndex(0);
-            setFilesLoaded(filesList.length);
-          }
-        }
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          console.error('Error loading files:', err);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingFiles(false);
-        }
-      }
-    };
-
     if (performer?.id) {
-      loadFiles();
+      fetchFiles(controller);
     }
 
     // Cleanup: abort on unmount or when dependencies change
     return () => {
       controller.abort();
     };
-  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]);
+  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles, fetchFiles]);
+
+  // Lazy-load AI predictions only if enabled
+  useEffect(() => {
+    if (!mlEnabled || !files[currentIndex]) return;
+    
+    const currentFile = files[currentIndex];
+    if (predictions[currentFile.hash_id]) return;
+
+    const fetchAiPrediction = async () => {
+      try {
+        setLoadingPredictions(true);
+
+        // Check if model is loaded
+        const modelsRes = await fetch('/api/filter/models');
+        const modelsData = await modelsRes.json();
+        if (modelsData.success && (!modelsData.current || !modelsData.current.includes('binary_filtering'))) {
+          await fetch('/api/filter/load-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modelId: 'binary_filtering.pt' })
+          });
+        }
+
+        const response = await fetch('/api/filter/predict-quality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imagePath: currentFile.path })
+        });
+        const data = await response.json();
+        if (data.success) {
+          setPredictions(prev => ({
+            ...prev,
+            [currentFile.hash_id]: {
+              prediction: data.decision === 'delete' ? 1 : 0,
+              confidence: data.confidence / 100
+            }
+          }));
+        }
+      } catch (err) {
+        console.error('AI Prediction error:', err);
+      } finally {
+        setLoadingPredictions(false);
+      }
+    };
+
+    fetchAiPrediction();
+  }, [mlEnabled, currentIndex, files, predictions]);
 
 
 
@@ -993,24 +1044,36 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           sx={{ ml: 2 }}
         />
 
+        <Button
+          variant="contained"
+          startIcon={<SmartIcon />}
+          onClick={() => navigate(`/smart-filter/${performer.id}`)}
+          sx={{
+            ml: 2,
+            bgcolor: 'rgba(0, 217, 255, 0.1)',
+            color: '#00d9ff',
+            border: '1px solid #00d9ff',
+            '&:hover': { bgcolor: 'rgba(0, 217, 255, 0.2)' },
+            textTransform: 'none',
+            fontWeight: 'bold'
+          }}
+        >
+          Smart Filtering
+        </Button>
+
         <FormControlLabel
           control={
             <Switch
               checked={mlEnabled}
               onChange={(e) => setMlEnabled(e.target.checked)}
               size="small"
-              disabled={loadingFiles || loadingPredictions}
+              sx={{
+                '& .MuiSwitch-switchBase.Mui-checked': { color: '#00d9ff' },
+                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: '#00d9ff' }
+              }}
             />
           }
-          label={
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              🤖 ML Predictions
-              {loadingPredictions && <Typography variant="caption" color="text.secondary">(loading...)</Typography>}
-              {mlEnabled && !activeModel && !loadingPredictions && (
-                <Typography variant="caption" color="error">(no model)</Typography>
-              )}
-            </Box>
-          }
+          label={<Typography variant="caption" sx={{ color: mlEnabled ? '#00d9ff' : '#888', fontWeight: 'bold' }}>AI ASSISTANT</Typography>}
           sx={{ ml: 2 }}
         />
 
@@ -1021,9 +1084,8 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
         </Typography>
       </Box>
 
-      {/* Main Content: wrap in fragment to avoid adjacent JSX error */}
-      <>
-        {currentFile && (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {currentFile && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {/* Loading indicator for initial load */}
             {loadingFiles && files.length === 0 && (
@@ -1342,7 +1404,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
             </Typography>
           </Box>
         )}
-      </>
+      </Box>
     </Container>
   );
 }

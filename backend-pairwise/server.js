@@ -734,7 +734,7 @@ app.post('/api/train-binary', (req, res) => {
         return res.status(400).json({ error: 'Binary training already in progress' });
     }
 
-    const { performers, epochs, warmupEpochs, outputName, resumeModel } = req.body;
+    const { performers, epochs, warmupEpochs, outputName, resumeModel, modelType } = req.body;
 
     if (!performers || performers.length === 0) {
         return res.status(400).json({ error: 'No performers selected' });
@@ -765,12 +765,15 @@ app.post('/api/train-binary', (req, res) => {
         return res.status(400).json({ error: 'Not enough keep or delete images across selected performers' });
     }
 
-    const outName = (outputName || 'binary_model').replace(/[^a-zA-Z0-9_-]/g, '_') + '.pt';
-    addBinaryLog(`Starting binary training on ${performers.length} performers`);
+    const suffix = modelType === 'context' ? '_context' : '';
+    const outName = (outputName || 'binary_model').replace(/[^a-zA-Z0-9_-]/g, '_') + suffix + '.pt';
+    
+    addBinaryLog(`Starting ${modelType === 'context' ? 'CONTEXT-AWARE' : 'SIMPLE'} binary training on ${performers.length} performers`);
     addBinaryLog(`Keep dirs: ${keepDirs.length}, Delete dirs: ${deleteDirs.length}`);
     addBinaryLog(`Output: ${outName}, Epochs: ${epochs || 5}`);
 
-    const pythonScript = path.join(__dirname, 'python', 'train_binary.py');
+    const scriptName = modelType === 'context' ? 'train_context_binary.py' : 'train_binary.py';
+    const pythonScript = path.join(__dirname, 'python', scriptName);
     const python = process.platform === 'win32' ? 'python' : 'python3';
 
     const args = [
@@ -782,7 +785,7 @@ app.post('/api/train-binary', (req, res) => {
         '--output', outName
     ];
 
-    if (resumeModel) {
+    if (resumeModel && modelType !== 'context') { // Context model structure is different, don't resume from simple
         const resumePath = path.isAbsolute(resumeModel)
             ? resumeModel
             : path.join(__dirname, 'models', resumeModel);

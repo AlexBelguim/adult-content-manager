@@ -32,6 +32,9 @@ import PairwiseMobilePage from './pages/PairwiseMobilePage';
 import RankingInsightPage from './pages/RankingInsightPage';
 import PairwiseRefinePage from './pages/PairwiseRefinePage';
 import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
+import GroupRatePage from './pages/GroupRatePage';
+import SmartComparePage from './pages/SmartComparePage';
+import SmartFilterPage from './pages/SmartFilterPage';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
@@ -541,6 +544,15 @@ function AppContent({ onThemeChange, currentThemeId }) {
             } />
             <Route path="/auto-label" element={
               <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
+            } />
+            <Route path="/group-rate" element={
+              <GroupRatePage />
+            } />
+            <Route path="/smart-compare" element={
+              <SmartComparePage />
+            } />
+            <Route path="/smart-filter/:performerId" element={
+              <SmartFilterPage />
             } />
 
             <Route path="/thumbnail-selector/:performerId" element={

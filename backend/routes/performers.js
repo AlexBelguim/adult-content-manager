@@ -6,7 +6,83 @@ const merger = require('../services/merger');
 const db = require('../db');
 const fs = require('fs-extra');
 const path = require('path');
+const axios = require('axios');
 const { findPerformerByNameOrAlias, findFuzzyMatches } = require('../utils/performerMatcher');
+
+const AI_SERVER_URL = 'http://localhost:3344';
+
+/**
+ * Trigger a rebuild of the user's global calibration model in Python.
+ */
+async function triggerModelCalibration() {
+  try {
+    // 1. Fetch all ratings with their cached raw AI scores
+    const ratingsData = db.prepare(`
+      SELECT p.raw_ai_score, r.manual_star, r.confidence
+      FROM ratings r
+      JOIN performers p ON r.performer_id = p.id
+      WHERE p.raw_ai_score IS NOT NULL
+    `).all();
+
+    if (ratingsData.length === 0) {
+      console.log('[Calibration] No ratings with AI scores found yet.');
+      return;
+    }
+
+    console.log(`[Calibration] Sending ${ratingsData.length} ratings to Python for fitting...`);
+
+    // 2. Call Python server to fit the curve
+    const response = await axios.post(`${AI_SERVER_URL}/calibrate`, {
+      ratings: ratingsData
+    });
+
+    if (response.data.success) {
+      const { model } = response.data;
+      // 3. Cache the new model in DB for the Node backend to use or for state persistence
+      db.prepare(`
+        INSERT OR REPLACE INTO user_global_model (id, model_params, n_effective, updated_at)
+        VALUES (1, ?, ?, CURRENT_TIMESTAMP)
+      `).run(JSON.stringify(model), model.n_effective);
+      console.log('[Calibration] User global model recalibrated successfully.');
+      return model;
+    }
+  } catch (err) {
+    console.error('[Calibration] Failed to trigger model calibration:', err.message);
+  }
+}
+
+/**
+ * Trigger robust batch prediction from Python server
+ */
+async function getBatchPredictions(performerIds, manualRatings = {}, ranks = null) {
+  try {
+    if (!performerIds || performerIds.length === 0) return null;
+    const performers = db.prepare(`
+      SELECT id, raw_ai_score FROM performers 
+      WHERE id IN (${performerIds.map(() => '?').join(',')})
+    `).all(...performerIds);
+
+    // Get current global model from DB
+    const modelRow = db.prepare('SELECT model_params FROM user_global_model WHERE id = 1').get();
+    const model = modelRow ? JSON.parse(modelRow.model_params) : null;
+
+    const payload = {
+      performers,
+      manual_ratings: manualRatings,
+      ranks: ranks
+    };
+    if (model) payload.model = model;
+
+    const response = await axios.post(`${AI_SERVER_URL}/predict_batch`, payload);
+
+    if (response.data.success) {
+      return response.data.predictions;
+    }
+  } catch (err) {
+    console.error('[Calibration] Batch prediction failed:', err.message);
+  }
+  return null;
+}
 
 /**
  * Handle deleted file - either move to training folder or permanently delete
@@ -77,16 +153,18 @@ function normalizeRating(value) {
     throw new Error('Rating must be between 0 and 5');
   }
 
-  return Math.round(parsed * 2) / 2;
+  // Allow up to 2 decimal places for finer precision
+  return Math.round(parsed * 100) / 100;
 }
 
 // Get all performers
 router.get('/', (req, res) => {
   try {
     const performers = db.prepare(`
-      SELECT p.*, f.path as folder_path 
+      SELECT p.*, f.path as folder_path, r.manual_star, r.confidence, r.is_flagged
       FROM performers p 
       JOIN folders f ON p.folder_id = f.id
+      LEFT JOIN ratings r ON p.id = r.performer_id
     `).all();
     console.log('All performers query returned:', performers.length, 'performers');
     res.send(performers);
@@ -323,9 +401,10 @@ router.get('/filter', (req, res) => {
 router.get('/gallery', (req, res) => {
   try {
     const performers = db.prepare(`
-      SELECT p.*, f.path as folder_path 
+      SELECT p.*, f.path as folder_path, r.manual_star, r.confidence, r.is_flagged
       FROM performers p 
       JOIN folders f ON p.folder_id = f.id
+      LEFT JOIN ratings r ON p.id = r.performer_id
       WHERE p.moved_to_after = 1
     `).all();
 
@@ -337,23 +416,34 @@ router.get('/gallery', (req, res) => {
   }
 });
 
-router.post('/:id/rating', (req, res) => {
+router.post('/:id/rating', async (req, res) => {
   const { id } = req.params;
-  const { rating } = req.body;
+  const { rating, confidence = 1.0, is_flagged = 0 } = req.body;
 
   try {
     const normalized = normalizeRating(rating);
-    const result = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?').run(normalized, id);
-
-    if (!result.changes) {
-      return res.status(404).send({ error: 'Performer not found' });
-    }
+    
+    // Update both tables for backward compatibility and the new system
+    db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?').run(normalized, id);
+    
+    db.prepare(`
+      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, created_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(performer_id) DO UPDATE SET
+        manual_star = EXCLUDED.manual_star,
+        confidence = EXCLUDED.confidence,
+        is_flagged = EXCLUDED.is_flagged,
+        created_at = CURRENT_TIMESTAMP
+    `).run(id, normalized, confidence, is_flagged);
 
     // Notify clients about the update
     const io = req.app.get('io');
     if (io) {
       io.emit('performers_updated', { performerId: Number(id), type: 'rating_updated', rating: normalized });
     }
+
+    // Trigger asynchronous model rebuild (don't wait for it to finish for the response)
+    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
 
     res.send({
       success: true,
@@ -363,6 +453,70 @@ router.post('/:id/rating', (req, res) => {
   } catch (error) {
     console.error('Failed to save performer rating:', error);
     res.status(400).send({ error: error.message });
+  }
+});
+
+// Manually trigger model calibration
+router.post('/calibrate', async (req, res) => {
+  try {
+    const model = await triggerModelCalibration();
+    if (model) {
+      res.send({ success: true, model });
+    } else {
+      res.status(400).send({ success: false, error: 'No ratings found to calibrate' });
+    }
+  } catch (err) {
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Get the latest user global calibration model
+router.get('/calibration-model', (req, res) => {
+  try {
+    const row = db.prepare('SELECT model_params, n_effective, updated_at FROM user_global_model WHERE id = 1').get();
+    if (!row) {
+      return res.send({ success: false, message: 'No model found' });
+    }
+    res.send({ 
+      success: true, 
+      model: JSON.parse(row.model_params), 
+      n_effective: row.n_effective,
+      updated_at: row.updated_at
+    });
+  } catch (err) {
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Update raw AI score for a performer (cached for calibration)
+router.post('/:id/ai-score', (req, res) => {
+  const { id } = req.params;
+  const { score } = req.body;
+  try {
+    db.prepare('UPDATE performers SET raw_ai_score = ? WHERE id = ?').run(score, id);
+    res.send({ success: true, performerId: Number(id), score });
+  } catch (err) {
+    console.error('Failed to update AI score:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Predict batch stars
+router.post('/predict-batch', async (req, res) => {
+  try {
+    const { performers, performerIds, manualRatings, manual_ratings, ranks } = req.body;
+    
+    // Support both old 'performerIds' and new 'performers' payload
+    const finalIds = performers ? performers.map(p => p.id) : performerIds;
+    const finalManualRatings = manual_ratings || manualRatings || {};
+
+    const predictions = await getBatchPredictions(finalIds, finalManualRatings, ranks);
+    if (!predictions) {
+      return res.status(500).send({ success: false, error: 'Prediction failed or server unreachable' });
+    }
+    res.send({ success: true, predictions });
+  } catch (err) {
+    res.status(500).send({ success: false, error: err.message });
   }
 });
 
@@ -677,6 +831,152 @@ router.get('/:id/images', async (req, res) => {
 
     res.send({ pics: imagePaths, count: imagePaths.length });
   } catch (err) {
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Get random image files for performer (for group rating)
+router.get('/:id/random-pics', async (req, res) => {
+  const { id } = req.params;
+  const { count = 10 } = req.query;
+  const requestedCount = parseInt(count, 10);
+
+  try {
+    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
+    if (!performer) {
+      return res.status(404).send({ error: 'Performer not found' });
+    }
+
+    const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(performer.folder_id);
+    if (!folder) {
+      return res.status(404).send({ error: 'Folder not found' });
+    }
+
+    let picsPath;
+    if (performer.moved_to_after === 1) {
+      picsPath = path.join(folder.path, 'after filter performer', performer.name, 'pics');
+    } else {
+      picsPath = path.join(folder.path, 'before filter performer', performer.name, 'pics');
+    }
+
+    if (!await fs.pathExists(picsPath)) {
+      return res.send({ pics: [], count: 0 });
+    }
+
+    const pics = await fs.readdir(picsPath);
+    const imageFiles = pics.filter(file =>
+      ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(path.extname(file).toLowerCase())
+    );
+
+    if (imageFiles.length === 0) {
+      return res.send({ pics: [], count: 0 });
+    }
+
+    // Shuffle and pick requested number
+    const shuffled = imageFiles.sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, requestedCount);
+
+    const imagePaths = selected.map(file => ({
+      path: path.join(picsPath, file),
+      name: file
+    }));
+
+    res.send({ pics: imagePaths, count: imagePaths.length });
+  } catch (err) {
+    console.error('Error getting random pics:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Compare performers and auto-adjust ratings (Elo-like)
+router.post('/compare', async (req, res) => {
+  const { winnerId, loserId, draw = false } = req.body;
+
+  if (!winnerId || !loserId) {
+    return res.status(400).send({ error: 'winnerId and loserId are required' });
+  }
+
+  try {
+    // Join with ratings to get the new manual_star
+    const winner = db.prepare(`
+      SELECT p.id, r.manual_star as performer_rating 
+      FROM performers p 
+      LEFT JOIN ratings r ON p.id = r.performer_id 
+      WHERE p.id = ?
+    `).get(winnerId);
+    
+    const loser = db.prepare(`
+      SELECT p.id, r.manual_star as performer_rating 
+      FROM performers p 
+      LEFT JOIN ratings r ON p.id = r.performer_id 
+      WHERE p.id = ?
+    `).get(loserId);
+
+    if (!winner || !loser) {
+      return res.status(404).send({ error: 'Performer(s) not found' });
+    }
+
+    let rA = winner.performer_rating !== null ? winner.performer_rating : 2.5;
+    let rB = loser.performer_rating !== null ? loser.performer_rating : 2.5;
+
+    let kA = 0.4;
+    let kB = 0.4;
+
+    if (winner.performer_rating === null || winner.performer_rating === 2.5) kA = 0.8;
+    if (loser.performer_rating === null || loser.performer_rating === 2.5) kB = 0.8;
+
+    const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 5));
+    const expectedB = 1 - expectedA;
+
+    let scoreA = draw ? 0.5 : 1;
+    let scoreB = draw ? 0.5 : 0;
+
+    if (!draw && rB > rA + 1.0) {
+      kA *= 1.5;
+    }
+
+    let newRA = rA + kA * (scoreA - expectedA);
+    let newRB = rB + kB * (scoreB - expectedB);
+
+    newRA = Math.max(0, Math.min(5, Math.round(newRA * 100) / 100));
+    newRB = Math.max(0, Math.min(5, Math.round(newRB * 100) / 100));
+
+    // Update both performers table and ratings table
+    const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
+    const updateRating = db.prepare(`
+      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged)
+      VALUES (?, ?, 0.9, 0)
+      ON CONFLICT(performer_id) DO UPDATE SET
+        manual_star = EXCLUDED.manual_star,
+        confidence = MAX(confidence, 0.9), -- Comparisons slightly less confident than explicit ratings
+        is_flagged = 0,
+        created_at = CURRENT_TIMESTAMP
+    `);
+
+    updatePerformer.run(newRA, winnerId);
+    updateRating.run(winnerId, newRA);
+    
+    updatePerformer.run(newRB, loserId);
+    updateRating.run(loserId, newRB);
+
+    // Notify clients
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('performers_updated', { type: 'batch_rating_updated' });
+    }
+
+    // Trigger recalibration
+    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
+
+    res.send({
+      success: true,
+      results: [
+        { id: winnerId, oldRating: rA, newRating: newRA },
+        { id: loserId, oldRating: rB, newRating: newRB }
+      ]
+    });
+  } catch (err) {
+    console.error('Error in compare:', err);
     res.status(500).send({ error: err.message });
   }
 });

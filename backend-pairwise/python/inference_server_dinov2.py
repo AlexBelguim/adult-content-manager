@@ -271,8 +271,19 @@ def score_images():
 
 
 if __name__ == '__main__':
-    # Do NOT auto-load model. Wait for user.
-    print("🦕 DINOv2 Inference Server Ready (Waiting for model)...")
+    # Auto-load the latest model if available
+    models = find_models()
+    if models:
+        # Sort by modification time to get the latest
+        models.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        latest_model = models[0]
+        print(f"🦕 Auto-loading latest model: {latest_model.name}")
+        load_model(str(latest_model))
+    else:
+        print("⚠️  No models found in models directory. Please place a .pt model in 'backend-pairwise/models'.")
+        print("   Inference server will start, but you must load a model via API.")
+
+    print(f"🦕 DINOv2 Inference Server Ready")
     print(f"   Endpoint: http://localhost:3344/score")
     print(f"   Health:   http://localhost:3344/health")
     

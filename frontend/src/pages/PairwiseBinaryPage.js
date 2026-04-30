@@ -23,6 +23,7 @@ function PairwiseBinaryPage({ serverUrl }) {
     const [outputName, setOutputName] = useState('binary_model');
     const [trainingMode, setTrainingMode] = useState('new');
     const [resumeModel, setResumeModel] = useState('');
+    const [modelType, setModelType] = useState('simple');
     const logEndRef = useRef(null);
 
     // Binary server state
@@ -121,6 +122,7 @@ function PairwiseBinaryPage({ serverUrl }) {
                     epochs,
                     warmupEpochs,
                     outputName,
+                    modelType,
                     resumeModel: trainingMode === 'resume' ? resumeModel : null
                 })
             });
@@ -277,6 +279,21 @@ function PairwiseBinaryPage({ serverUrl }) {
                         <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>Train Binary Model</Typography>
 
                         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2, alignItems: 'center' }}>
+                            <ToggleButtonGroup
+                                value={modelType}
+                                exclusive
+                                onChange={(e, val) => val && setModelType(val)}
+                                size="small"
+                                sx={{ bgcolor: darkerBg }}
+                            >
+                                <ToggleButton value="simple" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#00d9ff' } }}>
+                                    Simple
+                                </ToggleButton>
+                                <ToggleButton value="context" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#9c27b0' } }}>
+                                    Context-Aware
+                                </ToggleButton>
+                            </ToggleButtonGroup>
+
                             <ToggleButtonGroup
                                 value={trainingMode}
                                 exclusive

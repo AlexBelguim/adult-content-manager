@@ -53,6 +53,29 @@ class DINOv2BinaryClassifier(nn.Module):
         logit = self.classifier(cls).squeeze(-1)
         return logit
 
+class DINOv2ContextBinaryClassifier(nn.Module):
+    def __init__(self, backbone_name='facebook/dinov2-large'):
+        super().__init__()
+        self.backbone = AutoModel.from_pretrained(backbone_name)
+        hidden_size = self.backbone.config.hidden_size
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_size * 2, 512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1)
+        )
+
+    def forward(self, pixel_values, context_embeddings):
+        outputs = self.backbone(pixel_values=pixel_values)
+        cls = outputs.last_hidden_state[:, 0, :]
+        combined = torch.cat([cls, context_embeddings], dim=1)
+        return self.classifier(combined).squeeze(-1)
+
+MODEL_TYPE = 'binary'
+CONTEXT_CACHE = {}
+
 
 # ─── Load ─────────────────────────────────────────────────────────────────────
 
@@ -81,14 +104,23 @@ def load_model(path=None):
         print(f'  Backbone: {backbone_name}')
         PROCESSOR = AutoImageProcessor.from_pretrained(backbone_name)
 
-        model = DINOv2BinaryClassifier(backbone_name)
         state = ckpt.get('model_state_dict', ckpt)
+        
+        global MODEL_TYPE
+        MODEL_TYPE = ckpt.get('model_type', 'binary')
+        
+        if MODEL_TYPE == 'context_binary':
+            model = DINOv2ContextBinaryClassifier(backbone_name)
+        else:
+            model = DINOv2BinaryClassifier(backbone_name)
+
         model.load_state_dict(state, strict=False)
         model = model.to(DEVICE)
         model.eval()
 
         MODEL = model
         MODEL_NAME = model_path.name
+        CONTEXT_CACHE.clear()
 
         val_acc = ckpt.get('val_acc', None)
         if val_acc:
@@ -105,6 +137,44 @@ def load_model(path=None):
 
 # ─── Inference ────────────────────────────────────────────────────────────────
 
+def get_performer_context(image_path: str) -> torch.Tensor:
+    """Gets the average embedding for the performer this image belongs to."""
+    p = Path(image_path)
+    # Assume folder structure is .../PerformerName/pics/image.jpg or .../PerformerName/image.jpg
+    perf_name = p.parent.name
+    if perf_name == 'pics' or perf_name == 'vids':
+        perf_name = p.parent.parent.name
+    
+    if perf_name in CONTEXT_CACHE:
+        return CONTEXT_CACHE[perf_name]
+    
+    # Not in cache, try to compute from sibling images (Keep baseline)
+    print(f"  Building context for {perf_name}...")
+    try:
+        perf_dir = p.parent
+        if p.parent.name == 'pics': perf_dir = p.parent.parent
+        
+        # Look for images in the same folder (limited to 10 for speed)
+        siblings = [str(f) for f in perf_dir.rglob('*') if f.suffix.lower() in IMAGE_EXTS][:10]
+        embeddings = []
+        for s in siblings:
+            try:
+                img = Image.open(s).convert('RGB')
+                inputs = PROCESSOR(images=img, return_tensors='pt').to(DEVICE)
+                out = MODEL.backbone(**inputs)
+                embeddings.append(out.last_hidden_state[:, 0, :].cpu())
+            except: continue
+        
+        if embeddings:
+            ctx = torch.mean(torch.stack(embeddings), dim=0).to(DEVICE)
+        else:
+            ctx = torch.zeros((1, MODEL.backbone.config.hidden_size)).to(DEVICE)
+            
+        CONTEXT_CACHE[perf_name] = ctx
+        return ctx
+    except:
+        return torch.zeros((1, MODEL.backbone.config.hidden_size)).to(DEVICE)
+
 @torch.no_grad()
 def score_image(path: str) -> float:
     """Score a single image. Returns 0-100 scale (100 = definitely keep)."""
@@ -112,7 +182,13 @@ def score_image(path: str) -> float:
         img = Image.open(path).convert('RGB')
         inputs = PROCESSOR(images=img, return_tensors='pt')
         pv = inputs['pixel_values'].to(DEVICE)
-        logit = MODEL(pv)
+        
+        if MODEL_TYPE == 'context_binary':
+            ctx = get_performer_context(path)
+            logit = MODEL(pv, ctx)
+        else:
+            logit = MODEL(pv)
+            
         prob = torch.sigmoid(logit).item()
         return round(prob * 100, 2)
     except Exception as e:

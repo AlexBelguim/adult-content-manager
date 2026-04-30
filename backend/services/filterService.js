@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
+const axios = require('axios');
 const { scanPerformerFolderEnhanced } = require('./importer');
 
 class FilterService {
@@ -944,6 +945,114 @@ class FilterService {
     this.statsCache.set(performerId, { stats, timestamp: Date.now() });
     
     return stats;
+  }
+  async getSmartBatch(performerId, options = {}) {
+    const { threshold = 50.0, modelId } = options;
+
+    // 1. Get 50 unfiltered images for this performer
+    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performerId);
+    if (!performer) throw new Error('Performer not found');
+
+    const folder = db.prepare('SELECT path FROM folders WHERE id = ?').get(performer.folder_id);
+    let performerPath = performer.moved_to_after === 1 ?
+      path.join(folder.path, 'after filter performer', performer.name) :
+      path.join(folder.path, 'before filter performer', performer.name);
+
+    const picsDir = path.join(performerPath, 'pics');
+    if (!await fs.pathExists(picsDir)) return { results: [] };
+
+    const allPics = await this.getFilesFromDirectory(picsDir, 'image');
+
+    // Fetch all filter actions to filter out already processed files
+    const actions = db.prepare('SELECT file_path FROM filter_actions WHERE performer_id = ?').all(performerId);
+    const actionSet = new Set(actions.map(a => a.file_path));
+
+    const unfiltered = allPics.filter(p => !actionSet.has(p.path)).slice(0, 50);
+
+    if (unfiltered.length === 0) return { results: [] };
+
+    // 2. Call Python AI Server
+    const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
+    try {
+      console.log(`[SmartBatch] Calling AI at ${AI_URL}/classify_batch for ${unfiltered.length} images`);
+      const response = await axios.post(`${AI_URL}/classify_batch`, {
+        images: unfiltered.map(p => p.path),
+        threshold,
+        modelId
+      }, { timeout: 120000 });
+
+      if (response.data.success) {
+        // Merge with local file info
+        let results = response.data.results.map(r => {
+          const local = unfiltered.find(u => u.path === r.path);
+          return { ...local, ...r };
+        });
+
+        // SORT BY SCORE DESCENDING (Keepers first)
+        results.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+        // If threshold is -1, it means "Dynamic Initial Threshold" (50/50 split)
+        let finalThreshold = threshold;
+        if (threshold === -1 && results.length > 0) {
+          const scores = results.map(r => r.score).sort((a, b) => a - b);
+          // Pick the median score
+          finalThreshold = scores[Math.floor(scores.length / 2)];
+          
+          // Re-evaluate decisions based on this median
+          results = results.map(r => ({
+            ...r,
+            decision: r.score >= finalThreshold ? 'keep' : 'delete'
+          }));
+        }
+
+        return { results, threshold: finalThreshold };
+      } else {
+        throw new Error(response.data.error || 'AI Server Error');
+      }
+    } catch (err) {
+      console.error('AI Server Error:', err.message);
+      // If AI server is down, return images with "keep" as default but mark as unpredicted
+      return {
+        results: unfiltered.map(u => ({ ...u, decision: 'keep', predicted: false, error: err.message })),
+        ai_error: err.message
+      };
+    }
+  }
+
+  async applySmartBatch(performerId, results, options = {}) {
+    console.log(`Applying smart batch for performer ${performerId} (${results.length} items)`);
+    const summary = { kept: 0, deleted: 0, errors: 0 };
+
+    for (const item of results) {
+      try {
+        await this.performFilterAction(performerId, item.path, item.decision, options);
+        if (item.decision === 'keep') summary.kept++;
+        else summary.deleted++;
+      } catch (err) {
+        console.error(`Error applying action to ${item.path}:`, err);
+        summary.errors++;
+      }
+    }
+
+    // Force stats refresh after batch
+    this.scheduleStatsRefresh(performerId);
+
+    return { success: true, summary };
+  }
+
+  async predictQuality(imagePath) {
+    const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
+    try {
+      const axios = require('axios');
+      const response = await axios.post(`${AI_URL}/classify`, {
+        image: imagePath
+      }, { timeout: 10000 });
+
+      return response.data;
+    } catch (err) {
+      console.error('AI Single-image error:', err.message);
+      throw err;
+    }
   }
 }
 

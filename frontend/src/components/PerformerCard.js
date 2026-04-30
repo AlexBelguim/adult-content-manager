@@ -157,8 +157,9 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
     if (value === null || value === undefined || !Number.isFinite(Number(value))) {
       return '—';
     }
-    const formatted = Number(value).toFixed(1);
-    return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
+    const val = Number(value);
+    if (val === Math.floor(val)) return val.toString();
+    return val.toFixed(2);
   };
 
   // If using live stats in gallery mode, map the field names but keep database size
@@ -468,7 +469,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
           PaperProps={{ sx: { backgroundColor: 'rgba(30,30,30,0.95)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.12)', px: 2, py: 1.5, borderRadius: '12px' } }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Rating value={ratingValue} precision={0.5} max={5} onChange={handleRatingChange} disabled={ratingSaving}
+            <Rating value={ratingValue} precision={0.1} max={5} onChange={handleRatingChange} disabled={ratingSaving}
               sx={{ color: '#ffeb3b', '& .MuiRating-iconEmpty': { color: 'rgba(255,255,255,0.25)' } }} />
             {ratingSaving ? <CircularProgress size={20} sx={{ color: '#ffeb3b' }} /> : (
               <Tooltip title="Clear rating"><span>

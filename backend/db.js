@@ -47,8 +47,28 @@ db.exec(`
     orientation TEXT,
     scraped_tags TEXT,
     scraped_at DATETIME,
+    performer_rating REAL,
+    raw_ai_score REAL, -- Cached global AI score for calibration
     FOREIGN KEY(folder_id) REFERENCES folders(id)
   );
+  
+  -- Personalized Rating System
+  CREATE TABLE IF NOT EXISTS ratings (
+    performer_id INTEGER PRIMARY KEY,
+    manual_star REAL,
+    confidence REAL DEFAULT 1.0,
+    is_flagged BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(performer_id) REFERENCES performers(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS user_global_model (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    model_params TEXT, -- JSON string of breakpoints and values
+    n_effective REAL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS content_genres (
     id INTEGER PRIMARY KEY,
     name TEXT,
@@ -778,4 +798,46 @@ for (const [key, value] of defaultSettings) {
   insertSetting.run(key, value);
 }
 
-module.exports = db;
+// Migration: Add raw_ai_score column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE performers ADD COLUMN raw_ai_score REAL;`);
+} catch (e) { }
+
+// Migration: Create ratings and user_global_model tables (redundant but safe)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ratings (
+    performer_id INTEGER PRIMARY KEY,
+    manual_star REAL,
+    confidence REAL DEFAULT 1.0,
+    is_flagged BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(performer_id) REFERENCES performers(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS user_global_model (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    model_params TEXT,
+    n_effective REAL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// One-time migration: Populate ratings from performers table
+try {
+  const count = db.prepare('SELECT COUNT(*) as count FROM ratings').get().count;
+  if (count === 0) {
+    console.log('Migrating existing performer ratings to new ratings table...');
+    // Mark as flagged and 0.3 confidence as requested
+    db.exec(`
+      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged)
+      SELECT id, performer_rating, 0.3, 1
+      FROM performers
+      WHERE performer_rating IS NOT NULL AND performer_rating > 0
+    `);
+    console.log('Migration complete.');
+  }
+} catch (err) {
+  console.log('Ratings migration error:', err.message);
+}
+
+module.exports = db;
