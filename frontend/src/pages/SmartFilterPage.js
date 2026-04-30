@@ -1,22 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Grid,
-  Card,
-  CardMedia,
-  CardContent,
-  IconButton,
-  CircularProgress,
-  Tooltip,
-  Paper,
-  Dialog,
-  DialogContent,
-  Slider,
-  Chip,
-  Fade,
-  LinearProgress
+import { 
+  Box, Typography, Button, IconButton, Chip, CircularProgress, 
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
+  Select, MenuItem, FormControl, InputLabel, AppBar, Toolbar, Container,
+  Grid, Card, CardMedia, CardContent, Tooltip, Paper, Slider, Fade, LinearProgress
 } from '@mui/material';
 import {
   CheckCircle as KeepIcon,
@@ -26,9 +13,9 @@ import {
   ArrowForward as NextIcon,
   AutoAwesome as MagicIcon,
   History as RestoreIcon,
-  SettingsSuggest as ModelIcon
+  SettingsSuggest as ModelIcon,
+  Settings as SettingsIcon
 } from '@mui/icons-material';
-import { Select, MenuItem, FormControl, InputLabel, AppBar, Toolbar, Container } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePath: propBasePath }) => {
