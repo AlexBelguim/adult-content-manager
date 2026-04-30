@@ -9,7 +9,7 @@ const path = require('path');
 const axios = require('axios');
 const { findPerformerByNameOrAlias, findFuzzyMatches } = require('../utils/performerMatcher');
 
-const AI_SERVER_URL = 'http://localhost:3344';
+const AI_SERVER_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
 
 /**
  * Trigger a rebuild of the user's global calibration model in Python.
@@ -54,7 +54,7 @@ async function triggerModelCalibration() {
 /**
  * Trigger robust batch prediction from Python server
  */
-async function getBatchPredictions(performerIds, manualRatings = {}, ranks = null) {
+async function getBatchPredictions(performerIds, manualRatings = {}, ranks = null, targetAiUrl = null) {
   try {
     if (!performerIds || performerIds.length === 0) return null;
     const performers = db.prepare(`
@@ -73,7 +73,8 @@ async function getBatchPredictions(performerIds, manualRatings = {}, ranks = nul
     };
     if (model) payload.model = model;
 
-    const response = await axios.post(`${AI_SERVER_URL}/predict_batch`, payload);
+    const url = targetAiUrl || AI_SERVER_URL;
+    const response = await axios.post(`${url}/predict_batch`, payload);
 
     if (response.data.success) {
       return response.data.predictions;
@@ -504,13 +505,16 @@ router.post('/:id/ai-score', (req, res) => {
 // Predict batch stars
 router.post('/predict-batch', async (req, res) => {
   try {
-    const { performers, performerIds, manualRatings, manual_ratings, ranks } = req.body;
+    const { performers, performerIds, manualRatings, manual_ratings, ranks, ai_server_url } = req.body;
+    
+    // Use the URL from the frontend settings if provided, otherwise fallback to env or default
+    const targetAiUrl = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
     
     // Support both old 'performerIds' and new 'performers' payload
     const finalIds = performers ? performers.map(p => p.id) : performerIds;
     const finalManualRatings = manual_ratings || manualRatings || {};
 
-    const predictions = await getBatchPredictions(finalIds, finalManualRatings, ranks);
+    const predictions = await getBatchPredictions(finalIds, finalManualRatings, ranks, targetAiUrl);
     if (!predictions) {
       return res.status(500).send({ success: false, error: 'Prediction failed or server unreachable' });
     }

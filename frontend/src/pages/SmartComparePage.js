@@ -290,7 +290,8 @@ function SmartComparePage() {
             performer_rating: p.performer_rating
           })),
           manual_ratings: manualRatings,
-          ranks: currentCompareList.map(p => p.id)
+          ranks: currentCompareList.map(p => p.id),
+          ai_server_url: inferenceUrl // Pass the custom URL to the backend
         })
       });
 
