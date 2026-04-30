@@ -15,7 +15,11 @@ import {
   DialogActions,
   TextField,
   CircularProgress,
-  Tooltip
+  Tooltip,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -148,6 +152,8 @@ function PerformerSettingsModal({
   const [aliasInput, setAliasInput] = useState('');
   const [savingAliases, setSavingAliases] = useState(false);
   const [scrapingData, setScrapingData] = useState(false);
+  const [availableScrapers, setAvailableScrapers] = useState([{ id: 'leakhaven', name: 'Leakhaven (Built-in)' }]);
+  const [selectedScraper, setSelectedScraper] = useState('leakhaven');
 
   // Hash actions state
   const [isCreatingHash, setIsCreatingHash] = useState(false);
@@ -180,6 +186,16 @@ function PerformerSettingsModal({
     if (open && performer?.id) {
       fetchSettings();
       setIsEditingName(false);
+      
+      // Fetch scrapers if we haven't already
+      if (availableScrapers.length === 1) {
+        fetch('/api/performers/scrapers/list')
+          .then(res => res.json())
+          .then(data => {
+            if (data.scrapers) setAvailableScrapers(data.scrapers);
+          })
+          .catch(err => console.error('Error fetching scrapers:', err));
+      }
     }
   }, [open, performer?.id, fetchSettings]);
 
@@ -334,7 +350,8 @@ function PerformerSettingsModal({
     try {
       const response = await fetch(`/api/performers/${performer.id}/scrape`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: selectedScraper })
       });
 
       if (response.ok) {
@@ -835,7 +852,7 @@ function PerformerSettingsModal({
                     </Typography>
                   )}
                 </Box>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Button
                     variant="contained"
                     onClick={handleSaveAliases}
@@ -845,6 +862,22 @@ function PerformerSettingsModal({
                   >
                     {savingAliases ? 'Saving...' : 'Save Aliases'}
                   </Button>
+                  <FormControl size="small" sx={{ width: 220 }}>
+                    <InputLabel id="scraper-select-label" sx={{ color: '#aaa' }}>Scraper</InputLabel>
+                    <Select
+                      labelId="scraper-select-label"
+                      value={selectedScraper}
+                      onChange={(e) => setSelectedScraper(e.target.value)}
+                      label="Scraper"
+                      sx={darkModalStyles.textField}
+                    >
+                      {availableScrapers.map(scraper => (
+                        <MenuItem key={scraper.id} value={scraper.id}>
+                          {scraper.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                   <Button
                     variant="outlined"
                     onClick={handleScrapeData}
@@ -852,7 +885,7 @@ function PerformerSettingsModal({
                     startIcon={scrapingData ? <CircularProgress size={20} /> : <SearchIcon />}
                     sx={darkModalStyles.outlinedButton}
                   >
-                    {scrapingData ? 'Scraping...' : 'Scrape from Leakshaven'}
+                    {scrapingData ? 'Scraping...' : 'Scrape'}
                   </Button>
                 </Box>
               </Box>

@@ -1,0 +1,143 @@
+name: Babepedia (Community)
+performerByName:
+  action: scrapeJson
+  queryURL: "https://www.babepedia.com/ajax-search.php?term={}"
+  scraper: performerSearch
+
+jsonScrapers:
+  performerSearch:
+    performer:
+      Name: "#.label"
+      URLs:
+        selector: "#.value"
+        postProcess:
+          - replace:
+              - regex: \s
+                with: "_"
+              - regex: ^
+                with: "https://www.babepedia.com/babe/"
+
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - babepedia.com/babe/
+    scraper: performerScraper
+
+xPathScrapers:
+  performerScraper:
+    performer:
+      Name: //h1[@id="babename"]
+      Aliases:
+        selector: //h2[@id="aka"][1]/text()
+        postProcess:
+          - replace:
+              - regex: \s-\s
+                with: ","
+      Age:
+        selector: //span[contains(@class, "label") and contains(text(), "Age")]/following-sibling::span
+        postProcess:
+          - replace:
+              - regex: "(?i).*?(\\d+)\\s*years?\\s*old.*"
+                with: "$1"
+      Birthdate:
+        selector: //span[contains(@class, "label") and contains(text(), "Born")]/following-sibling::span
+        concat: " "
+        postProcess:
+          - replace:
+              - regex: (\d+)(st|nd|rd|th)
+                with: $1
+          - parseDate: 2 of January 2006
+      Ethnicity:
+        selector: //span[contains(@class, "label") and contains(text(), "Ethnicity")]/following-sibling::span
+        postProcess:
+          - map:
+              Caucasian: White
+              Black: Black
+              Asian: Asian
+              Latin: Hispanic
+              Indian: Indian
+              Mixed: Mixed
+      EyeColor: //span[contains(@class, "label") and contains(text(), "Eye color")]/following-sibling::span
+      HairColor: //span[contains(@class, "label") and contains(text(), "Hair color")]/following-sibling::span
+      Country:
+        selector: //span[contains(@class, "label") and contains(text(), "Nationality")]/following-sibling::span//span[contains(@class, "fi-")]/@class | //span[contains(@class, "fi-")]/@class
+        postProcess:
+          - replace:
+              - regex: .*fi-([a-z]{2}).*
+                with: "$1"
+      Birthplace:
+        selector: //span[contains(@class, "label") and contains(text(), "Birthplace")]/following-sibling::span
+        postProcess:
+          - replace:
+              - regex: \s*\(.*?\)\s*
+                with: ""
+          - map:
+              United Kingdom: UK
+              United States: USA
+      Height:
+        selector: //span[contains(@class, "label") and contains(text(), "Height")]/following-sibling::span
+        postProcess:
+          - replace:
+              - regex: .*?(\d+'\d+").*?(\d+)\s*cm.*
+                with: "$1 ($2 cm)"
+      Weight:
+        selector: //span[contains(@class, "label") and contains(text(), "Weight")]/following-sibling::span
+        postProcess:
+          - replace:
+              - regex: .*?(\d+)\s*lbs.*?(\d+)\s*kg.*
+                with: "$1 lbs ($2 kg)"
+      BodyType:
+        selector: //span[contains(@class, "label") and contains(text(), "Body type")]/following-sibling::span
+      FakeTits:
+        selector: //span[contains(@class, "label") and contains(text(), "Boobs")]/following-sibling::span
+      Measurements:
+        selector: //span[contains(@class, "label") and contains(text(), "Measurements")]/following-sibling::span
+        postProcess:
+          - replace:
+              - regex: \sshow conversions
+                with: ""
+          - replace:
+              - regex: "(\\d+)-(\\d+)-(\\d+).*"
+                with: "$1-$2-$3"
+      CupSize:
+        selector: //span[contains(@class, "label") and contains(text(), "Bra/cup size")]/following-sibling::span
+        postProcess:
+          - replace:
+              - regex: \s*show conversions.*
+                with: ""
+      Orientation:
+        selector: //span[contains(@class, "label") and contains(text(), "Sexuality")]/following-sibling::span
+      PubicHair:
+        selector: //span[contains(@class, "label") and contains(text(), "Pubic hair")]/following-sibling::span
+      Tattoos:
+        selector: //span[contains(@class, "label") and contains(text(), "Tattoos")]/following-sibling::span
+        postProcess:
+          - map:
+              "": "None"
+      Piercings:
+        selector: //span[contains(@class, "label") and contains(text(), "Piercings")]/following-sibling::span
+        postProcess:
+          - map:
+              "": "None"
+      Tags:
+        selector: //span[contains(@class, "label") and (contains(text(), "Professions") or contains(text(), "Solo") or contains(text(), "Performances"))]/following-sibling::span | //div[@id="socialicons"]/a/@href
+        concat: ","
+        postProcess:
+          - replace:
+              - regex: "https?://\\S+"
+                with: ""
+              - regex: "\\d{4}-present.*"
+                with: ""
+              - regex: "(?i).*started around.*"
+                with: ""
+              - regex: "(?i).*years active.*"
+                with: ""
+              - regex: "^,+"
+                with: ""
+              - regex: ",+$"
+                with: ""
+              - regex: ",,"
+                with: ","
+          - map:
+              "None": ""
+              "none": ""

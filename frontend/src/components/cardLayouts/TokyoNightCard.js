@@ -6,6 +6,7 @@ import {
   Delete as DeleteIcon, Fingerprint as FingerprintIcon, AutoFixHigh as AutoFixHighIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
+import FlagEmoji from '../FlagEmoji';
 
 /**
  * Tokyo Night layout — Style 5 from extras:
@@ -17,6 +18,7 @@ export default function TokyoNightCard({ cardProps }) {
     performer, mode, thumbnail, stats,
     picsPercentage, vidsPercentage, funscriptPercentage,
     daysSinceImport, ratingValue, formatRating,
+    displayAge, countryFlag,
     onClick, onSettings, onDelete, onProgressClick,
     onOpenHash, basePath,
     handleDeleteClick, handleRatingBadgeClick,
@@ -24,6 +26,31 @@ export default function TokyoNightCard({ cardProps }) {
     smartScanLoading, handleSmartScan,
     onError
   } = cardProps;
+
+  // Age and flag badge component
+  const AgeFlagBadge = () => {
+    if (!performer.age && !countryFlag) return null;
+    
+    return (
+      <Box sx={{
+        position: 'absolute', top: 10, right: 10,
+        bgcolor: 'rgba(26,27,38,0.85)', borderRadius: 4, px: 1.5, py: 0.5,
+        display: 'flex', alignItems: 'center', gap: 1,
+        border: '1px solid #292e42', zIndex: 2
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+          {performer.age && (
+            <Typography sx={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#7aa2f7' }}>
+              {displayAge}
+            </Typography>
+          )}
+          {countryFlag && (
+            <FlagEmoji countryCode={countryFlag} size="1.2rem" />
+          )}
+        </Box>
+      </Box>
+    );
+  };
 
   const iconSx = {
     background: 'transparent', border: 'none', padding: 0, margin: 0,
@@ -47,6 +74,7 @@ export default function TokyoNightCard({ cardProps }) {
         <Box sx={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           <img src={thumbnail} alt={performer.name} onError={onError}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <AgeFlagBadge />
           <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 60%, #1a1b26 100%)' }} />
           <Box sx={{ position: 'absolute', bottom: 8, left: 12, right: 12 }}>
             <Typography fontWeight="bold" color="#c0caf5" fontSize="1.1rem" sx={{ textShadow: '0 2px 6px rgba(0,0,0,0.8)' }}>
@@ -121,6 +149,7 @@ export default function TokyoNightCard({ cardProps }) {
       <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <img src={thumbnail} alt={performer.name} onError={onError}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <AgeFlagBadge />
         {/* Rounded rating pill */}
         <Box onClick={handleRatingBadgeClick} sx={{
           position: 'absolute', top: 10, left: 10,

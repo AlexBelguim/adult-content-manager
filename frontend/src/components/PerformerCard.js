@@ -444,6 +444,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
       performer, mode, thumbnail, imageLoaded, stats,
       picsPercentage, vidsPercentage, funscriptPercentage,
       daysSinceImport, ratingValue, formatRating,
+      displayAge, countryFlag,
       onClick, onSettings, onDelete, onProgressClick,
       onOpenHash, basePath,
       handleDeleteClick, handleRatingBadgeClick,

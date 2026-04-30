@@ -338,6 +338,18 @@ try {
   db.exec(`ALTER TABLE performers ADD COLUMN performer_rating REAL;`);
 } catch (e) { }
 
+try {
+  db.exec(`ALTER TABLE performers ADD COLUMN pubic_hair TEXT;`);
+} catch (e) { }
+
+try {
+  db.exec(`ALTER TABLE performers ADD COLUMN tattoos TEXT;`);
+} catch (e) { }
+
+try {
+  db.exec(`ALTER TABLE performers ADD COLUMN piercings TEXT;`);
+} catch (e) { }
+
 // Add detailed measurement columns
 try {
   db.exec(`ALTER TABLE performers ADD COLUMN measurements_cup TEXT;`);

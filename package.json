@@ -20,6 +20,7 @@
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "fs-extra": "^11.3.0",
+    "js-yaml": "^4.1.1",
     "multer": "^2.0.1",
     "open": "^10.2.0",
     "puppeteer-core": "^24.23.0",

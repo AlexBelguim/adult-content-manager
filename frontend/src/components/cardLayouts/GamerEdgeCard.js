@@ -6,6 +6,7 @@ import {
   Delete as DeleteIcon, Fingerprint as FingerprintIcon, AutoFixHigh as AutoFixHighIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
+import FlagEmoji from '../FlagEmoji';
 
 const ACCENT = '#e94560';
 const CYAN = '#00d2ff';
@@ -20,6 +21,7 @@ export default function GamerEdgeCard({ cardProps }) {
     performer, mode, thumbnail, stats,
     picsPercentage, vidsPercentage, funscriptPercentage,
     daysSinceImport, ratingValue, formatRating,
+    displayAge, countryFlag,
     onClick, onSettings, onDelete, onProgressClick,
     onOpenHash, basePath,
     handleDeleteClick, handleRatingBadgeClick,
@@ -27,6 +29,35 @@ export default function GamerEdgeCard({ cardProps }) {
     smartScanLoading, handleSmartScan,
     onError
   } = cardProps;
+
+  // Age and flag badge component
+  const AgeFlagBadge = () => {
+    if (mode !== 'gallery' || (!performer.age && !countryFlag)) return null;
+    
+    return (
+      <Box sx={{
+        position: 'absolute', top: 10, right: 10,
+        bgcolor: 'rgba(15, 16, 21, 0.85)', color: '#fff', 
+        px: 1.5, py: 0.5, borderRadius: '4px',
+        display: 'flex', alignItems: 'center', gap: 1,
+        border: `1px solid ${CYAN}40`,
+        backdropFilter: 'blur(8px)',
+        zIndex: 2, transform: 'skewX(-10deg)',
+        boxShadow: `0 0 15px ${CYAN}20`
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, transform: 'skewX(10deg)' }}>
+          {performer.age && (
+            <Typography sx={{ fontWeight: 'bold', fontSize: '0.9rem', color: CYAN }}>
+              {displayAge}
+            </Typography>
+          )}
+          {countryFlag && (
+            <FlagEmoji countryCode={countryFlag} size="1.2rem" />
+          )}
+        </Box>
+      </Box>
+    );
+  };
 
   const iconSx = {
     background: 'transparent', border: 'none', padding: 0, margin: 0,
@@ -99,6 +130,7 @@ export default function GamerEdgeCard({ cardProps }) {
         <Box sx={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           <img src={thumbnail} alt={performer.name} onError={onError}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <AgeFlagBadge />
           {/* Progress tabs overlaid on bottom of image */}
           <Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', gap: '1px' }}>
             {[
@@ -130,6 +162,7 @@ export default function GamerEdgeCard({ cardProps }) {
       <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <img src={thumbnail} alt={performer.name} onError={onError}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <AgeFlagBadge />
         {/* Skewed rating badge */}
         <Box onClick={handleRatingBadgeClick} sx={{
           position: 'absolute', top: 10, left: 10,

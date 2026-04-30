@@ -6,6 +6,7 @@ import {
   Delete as DeleteIcon, Fingerprint as FingerprintIcon, AutoFixHigh as AutoFixHighIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
+import FlagEmoji from '../FlagEmoji';
 
 /**
  * Clean Split layout — Style 7 from extras:
@@ -17,6 +18,7 @@ export default function CleanSplitCard({ cardProps }) {
     performer, mode, thumbnail, stats,
     picsPercentage, vidsPercentage, funscriptPercentage,
     daysSinceImport, ratingValue, formatRating,
+    displayAge, countryFlag,
     onClick, onSettings, onDelete, onProgressClick,
     onOpenHash, basePath,
     handleDeleteClick, handleRatingBadgeClick,
@@ -24,6 +26,31 @@ export default function CleanSplitCard({ cardProps }) {
     smartScanLoading, handleSmartScan,
     onError
   } = cardProps;
+
+  // Age and flag badge component
+  const AgeFlagBadge = () => {
+    if (!performer.age && !countryFlag) return null;
+    
+    return (
+      <Box sx={{
+        position: 'absolute', top: 10, right: 10,
+        bgcolor: 'rgba(0,0,0,0.7)', borderRadius: 4, px: 1.5, py: 0.5,
+        display: 'flex', alignItems: 'center', gap: 1,
+        border: '1px solid rgba(255,255,255,0.1)', zIndex: 2
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+          {performer.age && (
+            <Typography sx={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#fff' }}>
+              {displayAge}
+            </Typography>
+          )}
+          {countryFlag && (
+            <FlagEmoji countryCode={countryFlag} size="1.2rem" />
+          )}
+        </Box>
+      </Box>
+    );
+  };
 
   const iconSx = {
     background: 'transparent', border: 'none', padding: 0, margin: 0,
@@ -46,6 +73,7 @@ export default function CleanSplitCard({ cardProps }) {
         <Box sx={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           <img src={thumbnail} alt={performer.name} onError={onError}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <AgeFlagBadge />
         </Box>
         {/* Info section below */}
         <Box sx={{ p: 1.5 }}>
@@ -116,6 +144,7 @@ export default function CleanSplitCard({ cardProps }) {
       <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <img src={thumbnail} alt={performer.name} onError={onError}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <AgeFlagBadge />
         {/* Rating pill */}
         <Box onClick={handleRatingBadgeClick} sx={{
           position: 'absolute', top: 10, left: 10, zIndex: 2,

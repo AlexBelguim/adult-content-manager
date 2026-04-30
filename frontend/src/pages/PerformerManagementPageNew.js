@@ -34,7 +34,11 @@ import {
   RadioGroup,
   FormControlLabel,
   Radio,
-  Badge
+  Badge,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -105,9 +109,21 @@ function PerformerManagementPage() {
   const [renamePerformer, setRenamePerformer] = useState(null);
   const [newPerformerName, setNewPerformerName] = useState('');
   const [renameFolderToo, setRenameFolderToo] = useState(true);
+  const [availableScrapers, setAvailableScrapers] = useState([{ id: 'leakhaven', name: 'Leakhaven (Built-in)' }]);
+  const [selectedScraper, setSelectedScraper] = useState('leakhaven');
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Fetch available scrapers
+    fetch('/api/performers/scrapers/list')
+      .then(res => res.json())
+      .then(data => {
+        if (data.scrapers) {
+          setAvailableScrapers(data.scrapers);
+        }
+      })
+      .catch(err => console.error('Error fetching scrapers:', err));
+
     // Initial load: try offline first
     loadPerformers(true);
 
@@ -432,7 +448,11 @@ function PerformerManagementPage() {
     if (!performer || !performer.id) return;
     setProcessing(true);
     try {
-      const response = await fetch(`/api/performers/${performer.id}/scrape`, { method: 'POST' });
+      const response = await fetch(`/api/performers/${performer.id}/scrape`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: selectedScraper })
+      });
       const data = await response.json();
       if (data.success) {
         // refresh performers to show scraped data
@@ -1390,25 +1410,75 @@ function PerformerManagementPage() {
                                 </Box>
                               </Grid>
                             )}
-                            {(performer.measurements_cup || performer.measurements_band_size) && (
+                            {performer.measurements_cup && (
+                              <Grid item xs={6} sm={4} md={3}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                    🍒 Cup Size:
+                                  </Typography>
+                                  <Typography variant="body2" color="textSecondary">
+                                    {performer.measurements_cup}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {performer.measurements && (
                               <Grid item xs={6} sm={4} md={3}>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                   <Typography variant="body2" sx={{ fontWeight: 500 }}>
                                     📐 Measurements:
                                   </Typography>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <Typography variant="body2" color="textSecondary">
-                                      {performer.measurements_band_size || '?'}{performer.measurements_cup || '?'}
-                                    </Typography>
-                                    {performer.measurements_fake !== null && performer.measurements_fake !== undefined && (
-                                      <Chip
-                                        label={performer.measurements_fake === 1 ? 'Fake' : 'Natural'}
-                                        size="small"
-                                        color={performer.measurements_fake === 1 ? 'warning' : 'success'}
-                                        sx={{ height: 20, fontSize: '0.65rem' }}
-                                      />
-                                    )}
-                                  </Box>
+                                  <Typography variant="body2" color="textSecondary">
+                                    {performer.measurements}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {performer.orientation && (
+                              <Grid item xs={6} sm={4} md={3}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                    🌈 Sexuality:
+                                  </Typography>
+                                  <Typography variant="body2" color="textSecondary">
+                                    {performer.orientation}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {performer.pubic_hair && (
+                              <Grid item xs={6} sm={4} md={3}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                    🪒 Grooming:
+                                  </Typography>
+                                  <Typography variant="body2" color="textSecondary">
+                                    {performer.pubic_hair}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {performer.tattoos && (
+                              <Grid item xs={6} sm={4} md={3}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                    🎨 Tattoos:
+                                  </Typography>
+                                  <Typography variant="body2" color="textSecondary">
+                                    {performer.tattoos}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {performer.piercings && (
+                              <Grid item xs={6} sm={4} md={3}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                    💎 Piercings:
+                                  </Typography>
+                                  <Typography variant="body2" color="textSecondary">
+                                    {performer.piercings}
+                                  </Typography>
                                 </Box>
                               </Grid>
                             )}
@@ -1621,13 +1691,14 @@ function PerformerManagementPage() {
 
       {/* Search and Tabs */}
       <Paper sx={{ mb: 2 }}>
-        <Box p={2}>
+        <Box p={2} display="flex" justifyContent="space-between" alignItems="center">
           <TextField
-            fullWidth
             variant="outlined"
             placeholder="Search performers by name or alias..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            size="small"
+            sx={{ width: 300, mr: 2 }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -1636,6 +1707,21 @@ function PerformerManagementPage() {
               )
             }}
           />
+          <FormControl size="small" sx={{ width: 250 }}>
+            <InputLabel id="scraper-select-label">Default Scraper</InputLabel>
+            <Select
+              labelId="scraper-select-label"
+              value={selectedScraper}
+              onChange={(e) => setSelectedScraper(e.target.value)}
+              label="Default Scraper"
+            >
+              {availableScrapers.map(scraper => (
+                <MenuItem key={scraper.id} value={scraper.id}>
+                  {scraper.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
         <Tabs value={currentTab} onChange={(e, newValue) => setCurrentTab(newValue)}>
           <Tab label={`All (${performers?.length || 0})`} />

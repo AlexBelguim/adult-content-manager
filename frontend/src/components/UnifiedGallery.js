@@ -1125,7 +1125,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                 )}
                 {performerData.orientation && (
                   <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Orientation:</Typography>
+                    <Typography variant="body2" color="text.secondary">Sexuality:</Typography>
                     <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.orientation}</Typography>
                   </Box>
                 )}
@@ -1133,7 +1133,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
             )}
 
             {/* Physical Attributes */}
-            {(performerData.height || performerData.weight || performerData.measurements || performerData.body_type) && (
+            {(performerData.height || performerData.weight || performerData.measurements || performerData.measurements_cup || performerData.body_type || performerData.pubic_hair) && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'success.main', borderBottom: 2, borderColor: 'success.main', pb: 0.5 }}>Physical Attributes</Typography>
                 {performerData.height && (
@@ -1154,17 +1154,29 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                     <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.measurements}</Typography>
                   </Box>
                 )}
+                {performerData.measurements_cup && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Cup Size:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.measurements_cup}</Typography>
+                  </Box>
+                )}
                 {performerData.body_type && (
                   <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Typography variant="body2" color="text.secondary">Body Type:</Typography>
                     <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.body_type}</Typography>
                   </Box>
                 )}
+                {performerData.pubic_hair && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Grooming:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.pubic_hair}</Typography>
+                  </Box>
+                )}
               </Box>
             )}
 
             {/* Appearance */}
-            {(performerData.hair_color || performerData.eye_color || performerData.ethnicity) && (
+            {(performerData.hair_color || performerData.eye_color || performerData.ethnicity || performerData.tattoos || performerData.piercings) && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'warning.main', borderBottom: 2, borderColor: 'warning.main', pb: 0.5 }}>Appearance</Typography>
                 {performerData.hair_color && (
@@ -1183,6 +1195,18 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Typography variant="body2" color="text.secondary">Ethnicity:</Typography>
                     <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.ethnicity}</Typography>
+                  </Box>
+                )}
+                {performerData.tattoos && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Tattoos:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.tattoos}</Typography>
+                  </Box>
+                )}
+                {performerData.piercings && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">Piercings:</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.piercings}</Typography>
                   </Box>
                 )}
               </Box>

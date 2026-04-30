@@ -1693,9 +1693,28 @@ router.put('/:id/aliases', (req, res) => {
   }
 });
 
-// Scrape performer data from leakshaven.com
+// Get available scrapers
+router.get('/scrapers/list', (req, res) => {
+  try {
+    const { getAvailableYamlScrapers } = require('../services/yamlScraperEngine');
+    const yamlScrapers = getAvailableYamlScrapers();
+    
+    // Add built-in leakhaven
+    const allScrapers = [
+      { id: 'leakhaven', name: 'Leakhaven (Built-in)' },
+      ...yamlScrapers.map(s => ({ id: s.id, name: s.name + ' (Community)' }))
+    ];
+    
+    res.send({ scrapers: allScrapers });
+  } catch (err) {
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Scrape performer data
 router.post('/:id/scrape', async (req, res) => {
   const { id } = req.params;
+  const { source = 'leakhaven' } = req.body;
 
   try {
     const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
@@ -1706,12 +1725,45 @@ router.post('/:id/scrape', async (req, res) => {
     // Parse existing aliases
     const existingAliases = performer.aliases ? JSON.parse(performer.aliases) : [];
 
-    // Scrape data using performer name and aliases
-    const { scrapeLeakshaven } = require('../services/scraperService');
-    const scrapedData = await scrapeLeakshaven(performer.name, existingAliases);
+    let scrapedData;
+    let workingAlias = performer.name;
+
+    if (source === 'leakhaven') {
+      const { scrapeLeakshaven } = require('../services/scraperService');
+      scrapedData = await scrapeLeakshaven(performer.name, existingAliases);
+      workingAlias = scrapedData.workingAlias || performer.name;
+    } else {
+      const { scrapeWithYaml } = require('../services/yamlScraperEngine');
+      const { normalizeScrapedPerformerData } = require('../utils/scraperNormalizer');
+      
+      // For YAML scrapers, try main name first, then aliases until one works
+      const namesToTry = [performer.name, ...existingAliases];
+      let foundData = false;
+      
+      for (const name of namesToTry) {
+        try {
+          const rawYamlResults = await scrapeWithYaml(source, name);
+          if (rawYamlResults && (rawYamlResults.Name || rawYamlResults.Birthdate)) {
+            scrapedData = normalizeScrapedPerformerData(rawYamlResults);
+            foundData = true;
+            workingAlias = name;
+            break;
+          }
+        } catch (e) {
+          console.log(`Failed to scrape ${name} with ${source}: ${e.message}`);
+        }
+      }
+      
+      if (!foundData) {
+         return res.status(404).send({ error: `No data found using scraper ${source}` });
+      }
+      
+      // Ensure hasContent is true since we found data
+      scrapedData.hasContent = true;
+    }
 
     // Merge scraped aliases with existing ones (avoiding duplicates)
-    const allAliases = [...new Set([...existingAliases, ...scrapedData.alsoKnownAs])];
+    const allAliases = [...new Set([...existingAliases, ...(scrapedData.alsoKnownAs || [])])];
 
     // Prepare scraped tags as JSON string
     const scrapedTagsJson = JSON.stringify(scrapedData.tags || []);
@@ -1723,7 +1775,6 @@ router.post('/:id/scrape', async (req, res) => {
 
     // Determine scraped status
     const scrapedStatus = scrapedData.hasContent ? 'scraped' : 'found_no_data';
-    const workingAlias = scrapedData.workingAlias || performer.name;
 
     db.prepare(`
       UPDATE performers 
@@ -1743,6 +1794,9 @@ router.post('/:id/scrape', async (req, res) => {
           ethnicity = ?,
           body_type = ?,
           orientation = ?,
+          pubic_hair = ?,
+          tattoos = ?,
+          piercings = ?,
           scraped_tags = ?,
           scraped_at = ?,
           scraped_status = ?,
@@ -1765,6 +1819,9 @@ router.post('/:id/scrape', async (req, res) => {
       scrapedData.physicalAttributes.ethnicity || null,
       scrapedData.physicalAttributes.bodyType || null,
       scrapedData.personalInfo.orientation || null,
+      scrapedData.physicalAttributes.pubic_hair || null,
+      scrapedData.physicalAttributes.tattoos || null,
+      scrapedData.physicalAttributes.piercings || null,
       scrapedTagsJson,
       now,
       scrapedStatus,

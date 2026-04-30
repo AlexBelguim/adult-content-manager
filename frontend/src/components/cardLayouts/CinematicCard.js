@@ -6,6 +6,7 @@ import {
   Delete as DeleteIcon, Fingerprint as FingerprintIcon, AutoFixHigh as AutoFixHighIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
+import FlagEmoji from '../FlagEmoji';
 
 /**
  * Cinematic layout — Style 6 from extras:
@@ -17,6 +18,7 @@ export default function CinematicCard({ cardProps }) {
     performer, mode, thumbnail, stats,
     picsPercentage, vidsPercentage, funscriptPercentage,
     daysSinceImport, ratingValue, formatRating,
+    displayAge, countryFlag,
     onClick, onSettings, onDelete, onProgressClick,
     onOpenHash, basePath,
     handleDeleteClick, handleRatingBadgeClick,
@@ -24,6 +26,31 @@ export default function CinematicCard({ cardProps }) {
     smartScanLoading, handleSmartScan,
     onError
   } = cardProps;
+
+  // Age and flag badge component
+  const AgeFlagBadge = () => {
+    if (!performer.age && !countryFlag) return null;
+    
+    return (
+      <Box sx={{
+        position: 'absolute', top: 12, right: 12,
+        bgcolor: 'rgba(0,0,0,0.6)', borderRadius: 4, px: 1.5, py: 0.5,
+        display: 'flex', alignItems: 'center', gap: 1,
+        border: '1px solid rgba(255,215,79,0.3)', zIndex: 2
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+          {performer.age && (
+            <Typography sx={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#ffd54f' }}>
+              {displayAge}
+            </Typography>
+          )}
+          {countryFlag && (
+            <FlagEmoji countryCode={countryFlag} size="1.2rem" />
+          )}
+        </Box>
+      </Box>
+    );
+  };
 
   const iconSx = {
     background: 'transparent', border: 'none', padding: 0, margin: 0,
@@ -46,6 +73,7 @@ export default function CinematicCard({ cardProps }) {
           style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', display: 'block' }} />
         {/* Heavy gradient overlay */}
         <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 25%, rgba(0,0,0,0.2) 60%, rgba(0,0,0,0.9) 100%)' }} />
+        <AgeFlagBadge />
         {/* All content overlaid */}
         <Box sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column', p: 2 }}>
           <Typography fontWeight="bold" color="#fff" fontSize="1.1rem" sx={{ textShadow: '0 2px 4px rgba(0,0,0,0.8)', mb: 0.5 }}>
@@ -115,6 +143,7 @@ export default function CinematicCard({ cardProps }) {
       <img src={thumbnail} alt={performer.name} onError={onError}
         style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', display: 'block' }} />
       <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.3) 35%, transparent 60%)' }} />
+      <AgeFlagBadge />
       {/* Rating pill */}
       <Box onClick={handleRatingBadgeClick} sx={{
         position: 'absolute', top: 12, left: 12, zIndex: 2,
