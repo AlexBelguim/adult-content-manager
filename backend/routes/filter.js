@@ -195,8 +195,8 @@ router.get('/models', async (req, res) => {
 
 // POST /api/filter/load-model - Proxy to AI server to load a specific model
 router.post('/load-model', async (req, res) => {
-  const { modelId } = req.body;
-  const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
+  const { modelId, ai_server_url } = req.body;
+  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
   try {
     const axios = require('axios');
     const response = await axios.post(`${AI_URL}/load_model`, { model_id: modelId });
@@ -208,7 +208,8 @@ router.post('/load-model', async (req, res) => {
 
 // POST /api/filter/unload-model - Proxy to AI server to unload current model
 router.post('/unload-model', async (req, res) => {
-  const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
+  const { ai_server_url } = req.body;
+  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
   try {
     const axios = require('axios');
     const response = await axios.post(`${AI_URL}/unload_model`);

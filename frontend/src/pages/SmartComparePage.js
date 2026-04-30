@@ -117,7 +117,10 @@ function SmartComparePage() {
         await fetch('/api/filter/load-model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelId: 'pairwise_rating.pt' })
+          body: JSON.stringify({ 
+            modelId: 'pairwise_rating.pt',
+            ai_server_url: inferenceUrl // Pass custom URL
+          })
         });
       } catch (err) {
         console.error('Failed to load pairwise model:', err);
@@ -136,7 +139,11 @@ function SmartComparePage() {
 
     // UNLOAD on leave to free VRAM
     return () => {
-      fetch('/api/filter/unload-model', { method: 'POST' }).catch(() => {});
+      fetch('/api/filter/unload-model', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_server_url: inferenceUrl })
+      }).catch(() => {});
     };
   }, []);
 

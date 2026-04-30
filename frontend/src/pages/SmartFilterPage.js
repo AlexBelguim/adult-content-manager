@@ -48,6 +48,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [selectedModel, setSelectedModel] = useState('');
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
+  const [inferenceUrl, setInferenceUrl] = useState(localStorage.getItem('pairwiseInferenceUrl') || 'http://localhost:3344');
+  const [showSettings, setShowSettings] = useState(false);
   const abortControllerRef = useRef(null);
   const holdTimerRef = useRef(null);
 
@@ -138,7 +140,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             await fetch('/api/filter/load-model', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ modelId: 'binary_filtering.pt' })
+              body: JSON.stringify({ 
+                modelId: 'binary_filtering.pt',
+                ai_server_url: inferenceUrl 
+              })
             });
             setSelectedModel('binary_filtering.pt');
           } else {
@@ -154,9 +159,13 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     // UNLOAD on leave and cancel requests
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
-      fetch('/api/filter/unload-model', { method: 'POST' }).catch(() => {});
+      fetch('/api/filter/unload-model', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_server_url: inferenceUrl })
+      }).catch(() => {});
     };
-  }, []);
+  }, [inferenceUrl]);
 
   const handleModelChange = async (event) => {
     const modelId = event.target.value;
@@ -338,6 +347,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 </Select>
               </FormControl>
             </Box>
+
+            <IconButton color="inherit" onClick={() => setShowSettings(true)}>
+              <SettingsIcon />
+            </IconButton>
             
             <Box sx={{ width: 100 }}>
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', lineHeight: 1 }}>
@@ -478,6 +491,37 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             alt="Preview"
           />
         </DialogContent>
+      </Dialog>
+
+      {/* AI Settings Dialog */}
+      <Dialog open={showSettings} onClose={() => setShowSettings(false)}>
+        <DialogTitle sx={{ bgcolor: '#1a1a2e', color: '#fff' }}>AI Settings</DialogTitle>
+        <DialogContent sx={{ bgcolor: '#1a1a2e', color: '#fff', pt: 2 }}>
+          <TextField
+            fullWidth
+            label="Inference Server URL"
+            value={inferenceUrl}
+            onChange={(e) => {
+              setInferenceUrl(e.target.value);
+              localStorage.setItem('pairwiseInferenceUrl', e.target.value);
+            }}
+            placeholder="http://localhost:3344"
+            variant="outlined"
+            sx={{
+              mt: 1,
+              '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' } },
+              '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' }
+            }}
+          />
+          <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'rgba(255,255,255,0.5)' }}>
+            Set your AI server address here (e.g., http://192.168.1.50:3344)
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ bgcolor: '#1a1a2e', p: 2 }}>
+          <Button onClick={() => setShowSettings(false)} sx={{ color: '#7c4dff' }}>
+            Close
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );
