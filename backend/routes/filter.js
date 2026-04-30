@@ -230,4 +230,36 @@ router.post('/predict-quality', async (req, res) => {
   }
 });
 
+// POST /api/filter/proxy-score - Proxy image scoring to AI server
+router.post('/proxy-score', async (req, res) => {
+  const { images, ai_server_url } = req.body;
+  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
+  try {
+    const axios = require('axios');
+    const response = await axios.post(`${AI_URL}/score`, { 
+      images,
+      app_base_url: `http://localhost:${process.env.PORT || 4069}`
+    });
+    res.send(response.data);
+  } catch (err) {
+    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
+  }
+});
+
+// POST /api/filter/proxy-classify - Proxy image classification to AI server
+router.post('/proxy-classify', async (req, res) => {
+  const { images, ai_server_url } = req.body;
+  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
+  try {
+    const axios = require('axios');
+    const response = await axios.post(`${AI_URL}/classify`, { 
+      images,
+      app_base_url: `http://localhost:${process.env.PORT || 4069}`
+    });
+    res.send(response.data);
+  } catch (err) {
+    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
+  }
+});
+
 module.exports = router;

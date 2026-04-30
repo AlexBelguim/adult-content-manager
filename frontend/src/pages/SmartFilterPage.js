@@ -161,7 +161,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       await fetch('/api/filter/load-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelId })
+        body: JSON.stringify({ 
+          modelId,
+          ai_server_url: inferenceUrl
+        })
       });
       // Refresh current batch with new model
       fetchBatch();

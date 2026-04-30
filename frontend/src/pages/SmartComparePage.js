@@ -382,10 +382,13 @@ function SmartComparePage() {
       if (allImages.length === 0) throw new Error("No images found to analyze");
 
       setAnalyzingStatus(`Analyzing ${allImages.length} images...`);
-      const response = await fetch(`${inferenceUrl}/score`, {
+      const response = await fetch('/api/filter/proxy-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images: allImages })
+        body: JSON.stringify({ 
+          images: allImages,
+          ai_server_url: inferenceUrl // Backend will use this
+        })
       });
 
       if (!response.ok) throw new Error('Inference server error');
