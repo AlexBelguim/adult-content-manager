@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+flask
+flask-cors
+torch
+torchvision
+transformers
+pillow
+pystray
+pyperclip
+pyngrok
+scikit-learn
+numpy
+scipy
