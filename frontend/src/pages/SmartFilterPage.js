@@ -246,8 +246,28 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   if (!isStarted) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 4, bgcolor: '#0a0a0f', p: 4, textAlign: 'center' }}>
-        <MagicIcon sx={{ fontSize: 100, color: '#00d9ff', filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.4))' }} />
+      <Box sx={{ 
+        height: '100vh', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        background: '#121212',
+        color: 'white',
+        textAlign: 'center',
+        position: 'relative'
+      }}>
+        {/* Settings Icon on Splash Screen */}
+        <IconButton 
+          onClick={() => setSettingsOpen(true)}
+          sx={{ position: 'absolute', top: 20, right: 20, color: 'rgba(255,255,255,0.5)' }}
+        >
+          <SettingsIcon />
+        </IconButton>
+
+        <Box sx={{ mb: 4, position: 'relative' }}>
+          <MagicIcon sx={{ fontSize: 100, color: '#00d9ff', filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.4))' }} />
+        </Box>
         <Box>
           <Typography variant="h3" sx={{ fontWeight: 900, mb: 1, color: '#fff' }}>AI SMART FILTER</Typography>
           <Typography variant="h6" sx={{ color: '#888', maxWidth: 600 }}>
