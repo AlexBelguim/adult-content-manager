@@ -1,4 +1,4 @@
-import os, sys, torch, time
+import os, sys, torch, time, requests, io
 from pathlib import Path
 from flask import Flask, request, jsonify
 from PIL import Image
