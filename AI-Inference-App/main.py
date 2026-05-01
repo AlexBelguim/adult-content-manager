@@ -180,9 +180,16 @@ class AIAppTray:
         self.icon.run()
 
 if __name__ == "__main__":
-    print(f"Starting AI System Tray...")
-    print(f"URL: {URL}")
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    app = AIAppTray()
-    try: app.run()
-    except KeyboardInterrupt: app.stop()
+    try:
+        print(f"Starting AI System Tray...")
+        print(f"URL: {URL}")
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        app = AIAppTray()
+        app.run()
+    except Exception as e:
+        print(f"\n❌ FATAL STARTUP ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        input("\nPress ENTER to close...")
+    except KeyboardInterrupt:
+        if 'app' in locals(): app.stop()

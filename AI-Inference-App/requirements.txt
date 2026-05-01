@@ -1,13 +1,11 @@
---extra-index-url https://download.pytorch.org/whl/cu124
 flask
 flask-cors
+requests
 torch
-torchvision
 transformers
 pillow
+fs-extra
 pystray
 pyperclip
 pyngrok
-scikit-learn
-numpy
-scipy
+tqdm

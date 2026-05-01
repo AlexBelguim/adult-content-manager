@@ -1,4 +1,11 @@
-import os, sys, torch, time, requests, io
+try:
+    import os, sys, torch, time, requests, io
+except ImportError:
+    import os, sys
+    print("📦 Installing missing dependencies (requests)...")
+    os.system(f"{sys.executable} -m pip install requests")
+    import requests, io
+
 from pathlib import Path
 from flask import Flask, request, jsonify
 from PIL import Image
