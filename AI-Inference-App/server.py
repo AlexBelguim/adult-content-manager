@@ -171,6 +171,7 @@ def classify_batch():
     data = request.json
     image_paths = data.get('images', [])
     threshold = data.get('threshold', 50.0)
+    app_base_url = data.get('app_base_url')
     
     if not image_paths: return jsonify({'error': 'No images'}), 400
     
@@ -186,9 +187,26 @@ def classify_batch():
         
         for p in batch_paths:
             try:
+                img = None
+                # 1. Local
                 if os.path.exists(p):
-                    imgs.append(Image.open(p).convert('RGB'))
+                    img = Image.open(p).convert('RGB')
+                # 2. Remote
+                elif app_base_url:
+                    clean_path = p.replace('\\', '/')
+                    if not clean_path.startswith('/'): clean_path = '/' + clean_path
+                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={clean_path}"
+                    resp = requests.get(url, timeout=5)
+                    if resp.status_code == 200:
+                        img = Image.open(io.BytesIO(resp.content)).convert('RGB')
+                    else:
+                        log(f"  ❌ Failed to fetch remote: {url} (Status: {resp.status_code})")
+                
+                if img:
+                    imgs.append(img)
                     valid_paths.append(p)
+                else:
+                    log(f"  ❌ Image not found: {p}")
             except Exception as e:
                 log(f"  ⚠️ Skipping {p}: {e}")
             
@@ -212,6 +230,10 @@ def classify_batch():
                 log(f"  ❌ Batch Error: {e}")
 
     log(f"✅ Classification completed in {time.time() - start_time:.2f}s")
+    
+    if not results:
+        return jsonify({"success": False, "error": "Failed to process any images. Check AI server logs."}), 500
+        
     return jsonify({'success': True, 'results': results})
 
 @app.route('/classify', methods=['POST'])
@@ -248,20 +270,6 @@ def classify_single():
 
 @app.route('/score', methods=['POST'])
 def score_images():
-    log("📥 RECEIVED SCORING REQUEST")
-    if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
-    
-    data = request.json
-    image_paths = data.get('images', [])
-    if not image_paths: return jsonify({'error': 'No images'}), 400
-    
-    log(f"🖼️  Processing {len(image_paths)} images...")
-    start_time = time.time()
-    results = []
-    
-    # REDUCED BATCH SIZE (4) - Critical for CPU stability/memory
-    batch_size = 4 
-    for i in range(0, len(image_paths), batch_size):
         batch_paths = image_paths[i:i+batch_size]
         imgs = []
         valid_paths = []
