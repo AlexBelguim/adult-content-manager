@@ -284,20 +284,52 @@ def classify_single():
 
 @app.route('/score', methods=['POST'])
 def score_images():
+    log("📥 RECEIVED SCORING REQUEST")
+    if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
+    
+    data = request.json
+    image_paths = data.get('images', [])
+    app_base_url = data.get('app_base_url')
+    
+    if not image_paths: return jsonify({'error': 'No images'}), 400
+    
+    log(f"🖼️  Processing {len(image_paths)} images...")
+    start_time = time.time()
+    results = []
+    
+    # Process in small batches
+    batch_size = 4 
+    for i in range(0, len(image_paths), batch_size):
         batch_paths = image_paths[i:i+batch_size]
         imgs = []
         valid_paths = []
         
         for p in batch_paths:
             try:
+                img = None
+                # 1. Local
                 if os.path.exists(p):
-                    imgs.append(Image.open(p).convert('RGB'))
+                    img = Image.open(p).convert('RGB')
+                # 2. Remote
+                elif app_base_url:
+                    clean_path = p.replace('\\', '/')
+                    if not clean_path.startswith('/'): clean_path = '/' + clean_path
+                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={clean_path}"
+                    resp = requests.get(url, timeout=5)
+                    if resp.status_code == 200:
+                        img = Image.open(io.BytesIO(resp.content)).convert('RGB')
+                    else:
+                        log(f"  ❌ Failed to fetch remote: {url} (Status: {resp.status_code})")
+                
+                if img:
+                    imgs.append(img)
                     valid_paths.append(p)
+                else:
+                    log(f"  ❌ Image not found: {p}")
             except Exception as e:
                 log(f"  ⚠️ Skipping {p}: {e}")
             
         if imgs:
-            log(f"  ⚡ Batch {i//batch_size + 1}: Inferencing {len(imgs)} images...")
             try:
                 with torch.no_grad():
                     inputs = PROCESSOR(images=imgs, return_tensors="pt")
@@ -313,9 +345,10 @@ def score_images():
                         results.append({'path': p, 'normalized': s})
             except Exception as e:
                 log(f"  ❌ Batch Error: {e}")
-    
-    log(f"✅ Request completed in {time.time() - start_time:.2f}s")
-    return jsonify({'success': True, 'results': results})
+
+    duration = time.time() - start_time
+    log(f"✅ Request completed in {duration:.2f}s")
+    return jsonify({'success': True, 'results': results, 'duration': duration})
 
 if __name__ == '__main__':
     # Models are now loaded dynamically by the frontend on mount
