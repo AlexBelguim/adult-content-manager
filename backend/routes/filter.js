@@ -232,13 +232,11 @@ router.post('/predict-quality', async (req, res) => {
 
 // POST /api/filter/proxy-score - Proxy image scoring to AI server
 router.post('/proxy-score', async (req, res) => {
-  const { images, ai_server_url } = req.body;
+  const { images, ai_server_url, app_base_url } = req.body;
   const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
   
-  // Determine our own address so the remote AI knows where to fetch images from
-  const protocol = req.protocol;
-  const host = req.headers.host; // This will be the TrueNAS IP:Port
-  const myBaseUrl = `${protocol}://${host}`;
+  // Use provided base URL or determine our own
+  const myBaseUrl = app_base_url || `${req.protocol}://${req.headers.host}`;
 
   try {
     const axios = require('axios');
@@ -254,12 +252,10 @@ router.post('/proxy-score', async (req, res) => {
 
 // POST /api/filter/proxy-classify - Proxy image classification to AI server
 router.post('/proxy-classify', async (req, res) => {
-  const { images, ai_server_url } = req.body;
+  const { images, ai_server_url, app_base_url } = req.body;
   const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
   
-  const protocol = req.protocol;
-  const host = req.headers.host;
-  const myBaseUrl = `${protocol}://${host}`;
+  const myBaseUrl = app_base_url || `${req.protocol}://${req.headers.host}`;
 
   try {
     const axios = require('axios');

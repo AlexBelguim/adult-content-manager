@@ -387,7 +387,8 @@ function SmartComparePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           images: allImages,
-          ai_server_url: inferenceUrl // Backend will use this
+          ai_server_url: inferenceUrl,
+          app_base_url: window.location.origin // Pass our real IP to the AI
         })
       });
 
