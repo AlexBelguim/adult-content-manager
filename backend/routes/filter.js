@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const filterService = require('../services/filterService');
+const { getAiServerUrl } = require('../utils/aiUrl');
 
 // Get filterable files for a performer
 router.get('/files/:performerId', async (req, res) => {
@@ -165,7 +166,7 @@ router.get('/smart-batch/:performerId', async (req, res) => {
     const result = await filterService.getSmartBatch(performerId, {
       threshold: threshold ? parseFloat(threshold) : 50.0,
       modelId,
-      ai_server_url: ai_server_url || process.env.AI_SERVER_URL,
+      ai_server_url: ai_server_url || getAiServerUrl(),
       app_base_url: myBaseUrl
     });
     res.send(result);
@@ -191,7 +192,7 @@ router.post('/apply-smart-batch', async (req, res) => {
 // GET /api/filter/models - Proxy to AI server to list models
 router.get('/models', async (req, res) => {
   const { ai_server_url } = req.query;
-  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
+  const AI_URL = ai_server_url || getAiServerUrl();
   try {
     const axios = require('axios');
     const response = await axios.get(`${AI_URL}/list_models`);
@@ -204,7 +205,7 @@ router.get('/models', async (req, res) => {
 // POST /api/filter/load-model - Proxy to AI server to load a specific model
 router.post('/load-model', async (req, res) => {
   const { modelId, ai_server_url } = req.body;
-  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
+  const AI_URL = ai_server_url || getAiServerUrl();
   try {
     const axios = require('axios');
     const response = await axios.post(`${AI_URL}/load_model`, { model_id: modelId });
@@ -217,7 +218,7 @@ router.post('/load-model', async (req, res) => {
 // POST /api/filter/unload-model - Proxy to AI server to unload current model
 router.post('/unload-model', async (req, res) => {
   const { ai_server_url } = req.body;
-  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
+  const AI_URL = ai_server_url || getAiServerUrl();
   try {
     const axios = require('axios');
     const response = await axios.post(`${AI_URL}/unload_model`);

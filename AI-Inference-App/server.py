@@ -8,6 +8,7 @@ try:
         import requests, io
 
     from pathlib import Path
+    from urllib.parse import quote
     from flask import Flask, request, jsonify
     from PIL import Image
     from transformers import AutoImageProcessor
@@ -209,7 +210,8 @@ def classify_batch():
                 elif app_base_url:
                     clean_path = p.replace('\\', '/')
                     if not clean_path.startswith('/'): clean_path = '/' + clean_path
-                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={clean_path}"
+                    encoded_path = quote(clean_path, safe='/')
+                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={encoded_path}"
                     resp = requests.get(url, timeout=5)
                     if resp.status_code == 200:
                         img = Image.open(io.BytesIO(resp.content)).convert('RGB')
@@ -314,7 +316,8 @@ def score_images():
                 elif app_base_url:
                     clean_path = p.replace('\\', '/')
                     if not clean_path.startswith('/'): clean_path = '/' + clean_path
-                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={clean_path}"
+                    encoded_path = quote(clean_path, safe='/')
+                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={encoded_path}"
                     resp = requests.get(url, timeout=5)
                     if resp.status_code == 200:
                         img = Image.open(io.BytesIO(resp.content)).convert('RGB')

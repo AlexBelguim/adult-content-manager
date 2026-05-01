@@ -205,8 +205,8 @@ function Toolbar({
             </IconButton>
           </Tooltip>
 
-          <Tooltip title="Pairwise Labeler - Train Image Preference Model">
-            <IconButton color="inherit" onClick={() => navigate('/pairwise')} size="small">
+          <Tooltip title="Taste Dashboard - System Health & AI">
+            <IconButton color="inherit" onClick={() => navigate('/taste-dashboard')} size="small">
               <Science />
             </IconButton>
           </Tooltip>

@@ -665,16 +665,18 @@ function updateEloScores(rankings) {
   }
   
   // Update database
+  // Each image was compared against (rankings.length - 1) other images in this batch
+  const pairsPerImage = rankings.length - 1;
   for (const r of rankings) {
     db.prepare(`
       UPDATE image_elo_scores 
       SET elo_score = ?, 
-          comparison_count = comparison_count + 1, 
+          comparison_count = comparison_count + ?, 
           wins = wins + ?,
           losses = losses + ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE image_path = ?
-    `).run(newScores[r.path], wins[r.path], losses[r.path], r.path);
+    `).run(newScores[r.path], pairsPerImage, wins[r.path], losses[r.path], r.path);
   }
 }
 

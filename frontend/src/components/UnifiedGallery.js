@@ -31,6 +31,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const pendingTagStatesRef = useRef(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [pairwiseScores, setPairwiseScores] = useState(null); // Map of path -> score
   const preferencesKey = useMemo(() => {
     if (!galleryType || !galleryName || !basePath) return null;
     return `unifiedGalleryPrefs:${galleryType}:${encodeURIComponent(basePath)}:${encodeURIComponent(galleryName)}`;
@@ -492,6 +493,34 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
   // Track if we need to refetch for duration sorting
   const [lastDurationFetch, setLastDurationFetch] = useState(null);
 
+  // Fetch pairwise ELO scores when needed for sorting
+  useEffect(() => {
+    if (sortBy !== 'pairwise_score' || !performerData?.id) return;
+    if (pairwiseScores) return; // Already loaded
+
+    const fetchScores = async () => {
+      try {
+        const res = await fetch(`/api/pairwise/image-rankings?performer_id=${performerData.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          const scoreMap = {};
+          (data.images || []).forEach(img => {
+            scoreMap[img.path] = img.score;
+          });
+          setPairwiseScores(scoreMap);
+        }
+      } catch (err) {
+        console.warn('[UnifiedGallery] Failed to fetch pairwise scores:', err);
+      }
+    };
+    fetchScores();
+  }, [sortBy, performerData, pairwiseScores]);
+
+  // Reset pairwise scores when performer changes
+  useEffect(() => {
+    setPairwiseScores(null);
+  }, [galleryName]);
+
   // Filter in frontend when toggling showTaggedMode or sorting changes  
   useEffect(() => {
     if (allContent) {
@@ -506,12 +535,25 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
           return;
         }
       }
-      let filteredContent = filterContent(allContent, showTaggedMode, activeFilters);
+
+      // Attach pairwise scores to pics if available
+      let dataWithScores = allContent;
+      if (pairwiseScores && Object.keys(pairwiseScores).length > 0) {
+        dataWithScores = {
+          ...allContent,
+          pics: allContent.pics.map(pic => ({
+            ...pic,
+            _pairwiseScore: pairwiseScores[pic.path] ?? null
+          }))
+        };
+      }
+
+      let filteredContent = filterContent(dataWithScores, showTaggedMode, activeFilters);
       filteredContent = sortContent(filteredContent, sortBy, sortOrder);
       setCurrentContent(filteredContent);
     }
     // eslint-disable-next-line
-  }, [showTaggedMode, allContent, sortBy, sortOrder, activeFilters]);
+  }, [showTaggedMode, allContent, sortBy, sortOrder, activeFilters, pairwiseScores]);
 
 
   // Fetch all files (physical + tagged) for the gallery
@@ -798,6 +840,8 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
           return item.videoRating ?? null;
         case 'funscript_rating':
           return item.funscriptRating ?? null;
+        case 'pairwise_score':
+          return item._pairwiseScore ?? null;
         default:
           return item.name || '';
       }
@@ -811,7 +855,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       if (typeof aVal === 'string') {
         compareValue = aVal.localeCompare(bVal);
       } else {
-        if (sortBy === 'video_rating' || sortBy === 'funscript_rating') {
+        if (sortBy === 'video_rating' || sortBy === 'funscript_rating' || sortBy === 'pairwise_score') {
           const transform = (val) => {
             if (val === null || val === undefined) {
               return sortOrder === 'asc' ? Number.POSITIVE_INFINITY : -1;
@@ -841,6 +885,10 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
 
   useEffect(() => {
     const allowedSorts = new Set(['name', 'size', 'date']);
+    // Pairwise ELO sort is always available on the Pics tab
+    if (currentTab === 0 && galleryType === 'performer') {
+      allowedSorts.add('pairwise_score');
+    }
     if (currentTab !== 0) {
       allowedSorts.add('duration');
       allowedSorts.add('video_rating');
@@ -1313,6 +1361,10 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                   <MenuItem key="v1" value="video_rating">Video Score (Low-High)</MenuItem>,
                   <MenuItem key="v2" value="video_rating-desc">Video Score (High-Low)</MenuItem>
                 ]}
+                {currentTab === 0 && galleryType === 'performer' && [
+                  <MenuItem key="elo1" value="pairwise_score">ELO Score (Low-High)</MenuItem>,
+                  <MenuItem key="elo2" value="pairwise_score-desc">ELO Score (High-Low)</MenuItem>
+                ]}
                 {currentTab === 2 && [
                   <MenuItem key="f1" value="funscript_rating">Funscript Score (Low-High)</MenuItem>,
                   <MenuItem key="f2" value="funscript_rating-desc">Funscript Score (High-Low)</MenuItem>,
@@ -1328,6 +1380,23 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
             >
               Filters{totalActiveFilters ? ` (${totalActiveFilters})` : ''}
             </Button>
+            {currentTab === 0 && galleryType === 'performer' && performerData?.id && (
+              <Button
+                variant="outlined"
+                color="secondary"
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    performerId: performerData.id,
+                    performerName: performerData.name || galleryName,
+                    basePath: basePath || ''
+                  });
+                  window.open(`/pairwise-rank?${params.toString()}`, '_blank');
+                }}
+                sx={{ ml: 0.5 }}
+              >
+                🏆 Rank Images
+              </Button>
+            )}
           </Box>
         </Box>
 

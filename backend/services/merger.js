@@ -452,6 +452,7 @@ class MergerService {
     const target = db.prepare('SELECT * FROM performers WHERE id = ?').get(targetId);
 
     if (!source || !target) throw new Error('Source or Target performer not found');
+    if (sourceId === targetId) throw new Error('Cannot merge a performer with itself');
 
     // Determine paths
     const getPath = (p) => {
@@ -463,26 +464,123 @@ class MergerService {
     const sourcePath = getPath(source);
     const targetPath = getPath(target);
 
-    if (!await fs.pathExists(sourcePath)) throw new Error('Source folder not found: ' + sourcePath);
-    await fs.ensureDir(targetPath);
-    await fs.ensureDir(path.join(targetPath, 'pics'));
-    await fs.ensureDir(path.join(targetPath, 'vids'));
-    await fs.ensureDir(path.join(targetPath, 'vids', 'funscript'));
+    console.log(`[Merge] Merging performer "${source.name}" (ID:${sourceId}) → "${target.name}" (ID:${targetId})`);
+    console.log(`[Merge] Source: ${sourcePath}`);
+    console.log(`[Merge] Target: ${targetPath}`);
 
-    // Merge
-    await this.mergeDirectory(path.join(sourcePath, 'pics'), path.join(targetPath, 'pics'));
-    await this.mergeDirectory(path.join(sourcePath, 'vids'), path.join(targetPath, 'vids'));
-    await this.mergeDirectory(path.join(sourcePath, 'vids', 'funscript'), path.join(targetPath, 'vids', 'funscript'));
+    // ── 1. Merge files on disk ──────────────────────────────
+    if (await fs.pathExists(sourcePath)) {
+      await fs.ensureDir(targetPath);
+      await fs.ensureDir(path.join(targetPath, 'pics'));
+      await fs.ensureDir(path.join(targetPath, 'vids'));
+      await fs.ensureDir(path.join(targetPath, 'vids', 'funscript'));
 
-    // Cleanup Source
-    await fs.remove(sourcePath);
+      await this.mergeDirectory(path.join(sourcePath, 'pics'), path.join(targetPath, 'pics'));
+      await this.mergeDirectory(path.join(sourcePath, 'vids'), path.join(targetPath, 'vids'));
+      await this.mergeDirectory(path.join(sourcePath, 'vids', 'funscript'), path.join(targetPath, 'vids', 'funscript'));
 
-    // Delete Source DB
-    db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(sourceId);
-    db.prepare('DELETE FROM tags WHERE performer_id = ?').run(sourceId);
-    db.prepare('DELETE FROM performers WHERE id = ?').run(sourceId);
+      // Remove empty source folder
+      await fs.remove(sourcePath);
+      console.log(`[Merge] Moved files and removed source folder`);
+    } else {
+      console.log(`[Merge] Source folder not found on disk (DB-only merge)`);
+    }
 
-    return { success: true, targetPath };
+    // ── 2. Merge DB records in a transaction ────────────────
+    const mergeTransaction = db.transaction(() => {
+      // Merge aliases: add source name + its aliases to target
+      let targetAliases = [];
+      try { targetAliases = JSON.parse(target.aliases || '[]'); } catch (_) {}
+      let sourceAliases = [];
+      try { sourceAliases = JSON.parse(source.aliases || '[]'); } catch (_) {}
+
+      const mergedAliases = [...new Set([
+        ...targetAliases,
+        ...sourceAliases,
+        source.name // Add source's name as an alias of target
+      ])].filter(a => a && a !== target.name); // Don't include target's own name
+
+      db.prepare('UPDATE performers SET aliases = ? WHERE id = ?')
+        .run(JSON.stringify(mergedAliases), targetId);
+
+      // Merge ratings: keep the higher-confidence one
+      const sourceRating = db.prepare('SELECT * FROM ratings WHERE performer_id = ?').get(sourceId);
+      const targetRating = db.prepare('SELECT * FROM ratings WHERE performer_id = ?').get(targetId);
+
+      if (sourceRating && !targetRating) {
+        // Move source rating to target
+        db.prepare('UPDATE ratings SET performer_id = ? WHERE performer_id = ?').run(targetId, sourceId);
+      } else if (sourceRating && targetRating) {
+        // Keep whichever has higher confidence, delete the other
+        if (sourceRating.confidence > targetRating.confidence) {
+          db.prepare('UPDATE ratings SET performer_id = ?, manual_star = ?, confidence = ? WHERE performer_id = ?')
+            .run(targetId, sourceRating.manual_star, sourceRating.confidence, targetId);
+        }
+        db.prepare('DELETE FROM ratings WHERE performer_id = ?').run(sourceId);
+      }
+
+      // Merge file hashes → point to target
+      db.prepare('UPDATE OR IGNORE performer_file_hashes SET performer_id = ? WHERE performer_id = ?')
+        .run(targetId, sourceId);
+      db.prepare('DELETE FROM performer_file_hashes WHERE performer_id = ?').run(sourceId);
+
+      // Merge hash runs
+      db.prepare('DELETE FROM hash_runs WHERE source_performer_id = ? OR target_performer_id = ?')
+        .run(sourceId, sourceId);
+
+      // Merge pairwise data → point to target
+      db.prepare('UPDATE pairwise_pairs SET performer_id = ? WHERE performer_id = ?')
+        .run(targetId, sourceId);
+      db.prepare('UPDATE OR IGNORE pairwise_image_scores SET performer_id = ? WHERE performer_id = ?')
+        .run(targetId, sourceId);
+      db.prepare('DELETE FROM pairwise_image_scores WHERE performer_id = ?').run(sourceId);
+      db.prepare('DELETE FROM pairwise_inference_results WHERE performer_id = ?').run(sourceId);
+      db.prepare('DELETE FROM pairwise_selected_performers WHERE performer_id = ?').run(sourceId);
+
+      // Merge content items + embeddings
+      db.prepare('DELETE FROM content_clip_embeddings WHERE content_item_id IN (SELECT id FROM content_items WHERE performer_id = ?)').run(sourceId);
+      db.prepare('DELETE FROM content_items WHERE performer_id = ?').run(sourceId);
+
+      // Cleanup remaining source references
+      db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(sourceId);
+      db.prepare('DELETE FROM tags WHERE performer_id = ?').run(sourceId);
+
+      // Fill in missing metadata on target from source
+      const metaFields = [
+        'age', 'born', 'birthplace', 'country_flag', 'height', 'weight',
+        'measurements', 'hair_color', 'eye_color', 'ethnicity', 'body_type',
+        'orientation', 'scraped_tags'
+      ];
+      for (const field of metaFields) {
+        if (!target[field] && source[field]) {
+          db.prepare(`UPDATE performers SET ${field} = ? WHERE id = ?`).run(source[field], targetId);
+        }
+      }
+
+      // Finally delete source performer
+      db.prepare('DELETE FROM performers WHERE id = ?').run(sourceId);
+    });
+
+    mergeTransaction();
+    console.log(`[Merge] Database records merged`);
+
+    // ── 3. Update target stats ──────────────────────────────
+    try {
+      const stats = await this.updatePerformerStats(targetId, targetPath);
+      console.log(`[Merge] Target stats updated:`, stats);
+    } catch (err) {
+      console.warn(`[Merge] Could not update stats:`, err.message);
+    }
+
+    return {
+      success: true,
+      message: `"${source.name}" merged into "${target.name}"`,
+      sourceId,
+      targetId,
+      targetName: target.name,
+      targetPath,
+      aliasAdded: source.name
+    };
   }
 }
 

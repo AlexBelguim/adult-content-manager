@@ -52,6 +52,9 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Optional auth middleware (enabled when APP_SECRET env var is set)
+app.use(require('./middleware/auth'));
+
 // Routes with error handling
 app.use('/api/folders', require('./routes/folders'));
 app.use('/api/performers', require('./routes/performers'));
@@ -80,6 +83,9 @@ app.use('/api/video-analysis', require('./routes/video-analysis')); // Video act
 app.use('/api/ranking', require('./routes/ranking')); // ELO ranking for preference learning
 app.use('/api/upload-queue', require('./routes/uploadQueue')); // Upload queue management
 app.use('/api/encode', require('./routes/encode')); // Media optimization (H.265/WebP conversion)
+app.use('/api/pairwise', require('./routes/pairwise')); // Pairwise image comparison & AI labeling
+app.use('/api/health', require('./routes/health')); // System health & diagnostics
+app.use('/api/training', require('./routes/training')); // AI training hub proxy
 
 // Fallback to React
 app.get('*', (req, res) => {

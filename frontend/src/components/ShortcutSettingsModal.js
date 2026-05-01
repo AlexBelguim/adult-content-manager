@@ -15,7 +15,8 @@ import {
   Chip,
   List,
   ListItem,
-  ListItemText
+  ListItemText,
+  TextField
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -36,6 +37,7 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
   const [recordingKey, setRecordingKey] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [saveDeletedForTraining, setSaveDeletedForTraining] = useState(false);
+  const [aiServerUrl, setAiServerUrl] = useState(localStorage.getItem('pairwiseInferenceUrl') || 'http://localhost:3344');
 
   // TrueNAS state
   const [trueNASStatus, setTrueNASStatus] = useState(null);
@@ -57,6 +59,17 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
           setSaveDeletedForTraining(data.value === 'true');
         })
         .catch(err => console.error('Error loading training setting:', err));
+
+      // Load AI server URL from DB
+      fetch('/api/settings/ai_server_url')
+        .then(res => res.json())
+        .then(data => {
+          if (data.value) {
+            setAiServerUrl(data.value);
+            localStorage.setItem('pairwiseInferenceUrl', data.value);
+          }
+        })
+        .catch(() => {});
 
       // Check TrueNAS status
       checkTrueNASStatus();
@@ -153,6 +166,18 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
       });
     } catch (err) {
       console.error('Error saving training setting:', err);
+    }
+    
+    // Save AI server URL
+    try {
+      await fetch('/api/settings/ai_server_url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: aiServerUrl })
+      });
+      localStorage.setItem('pairwiseInferenceUrl', aiServerUrl);
+    } catch (err) {
+      console.error('Error saving AI URL:', err);
     }
     
     if (success) {
@@ -463,6 +488,22 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
                 <strong>Path:</strong> {basePath || '{basePath}'}/deleted keep for training/<em>performer</em>/
               </Alert>
             )}
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* AI Server URL */}
+          <Box sx={{ mb: 3 }}>
+            <SectionTitle>🤖 AI Inference Server</SectionTitle>
+            <TextField
+              fullWidth
+              size="small"
+              value={aiServerUrl}
+              onChange={(e) => setAiServerUrl(e.target.value)}
+              placeholder="http://localhost:3344"
+              helperText="URL of your AI server (for training, smart filtering, and scoring). Saved when you click Save."
+              InputProps={{ sx: { fontFamily: 'monospace' } }}
+            />
           </Box>
 
           <Divider sx={{ my: 2 }} />

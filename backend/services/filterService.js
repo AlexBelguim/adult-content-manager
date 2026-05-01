@@ -15,6 +15,21 @@ class FilterService {
     this.statsCacheTimeout = 60 * 1000; // 1 minute cache for stats
   }
 
+  /**
+   * Get the base path from the database (first folder's path).
+   * Used as fallback when options.basePath isn't provided.
+   */
+  _getBasePath() {
+    try {
+      const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+      return folder?.path || null;
+    } catch (err) {
+      console.error('Error getting base path:', err);
+      return null;
+    }
+  }
+
+
   async getFilterableFiles(performerId, type = 'all', sortBy = 'name', sortOrder = 'asc', hideKept = false, limit = undefined, offset = 0) {
     const cacheKey = `${performerId}_${type}_${sortBy}_${sortOrder}_${hideKept}`;
     const now = Date.now();
@@ -545,7 +560,44 @@ class FilterService {
   }
 
   async deleteFile(filePath, options = {}) {
-    // Move to trash or delete permanently
+    // Check if we should save deleted files for training
+    const setting = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('save_deleted_for_training');
+    const saveForTraining = setting && setting.value === 'true';
+
+    if (saveForTraining && options.performerName) {
+      // Move to 'deleted keep for training' folder for AI model training data
+      const basePath = options.basePath || this._getBasePath();
+      if (basePath) {
+        const ext = path.extname(filePath).toLowerCase();
+        const isVideo = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'].includes(ext);
+        const subfolder = isVideo ? 'vids' : 'pics';
+        const destFolder = path.join(basePath, 'deleted keep for training', options.performerName, subfolder);
+        await fs.ensureDir(destFolder);
+
+        const fileName = path.basename(filePath);
+        let destPath = path.join(destFolder, fileName);
+
+        // If file already exists in destination, append timestamp
+        if (await fs.pathExists(destPath)) {
+          const nameWithoutExt = path.basename(fileName, ext);
+          destPath = path.join(destFolder, `${nameWithoutExt}_${Date.now()}${ext}`);
+        }
+
+        await fs.move(filePath, destPath, { overwrite: false });
+        console.log(`[FilterService] Saved to training: ${destPath}`);
+
+        // Mark file as deleted in hash database
+        db.prepare(`
+          UPDATE performer_file_hashes 
+          SET deleted_flag = 1 
+          WHERE file_path = ?
+        `).run(filePath);
+
+        return { success: true, message: 'File saved for training', destPath };
+      }
+    }
+
+    // Default: move to .trash
     const backupPath = path.join(path.dirname(filePath), '.trash', path.basename(filePath));
     await fs.ensureDir(path.dirname(backupPath));
     await fs.move(filePath, backupPath);
@@ -974,11 +1026,27 @@ class FilterService {
     // 2. Call Python AI Server
     const AI_URL = options.ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
     try {
-      console.log(`[SmartBatch] Calling AI at ${AI_URL}/classify_batch for ${unfiltered.length} images`);
+      const imagePaths = unfiltered.map(p => p.path);
+
+      // Auto-load model if not already loaded
+      try {
+        const healthRes = await axios.get(`${AI_URL}/health`, { timeout: 5000 });
+        if (!healthRes.data.model_loaded) {
+          console.log(`[SmartBatch] Model not loaded, auto-loading...`);
+          await axios.post(`${AI_URL}/load_model`, {}, { timeout: 60000 });
+          console.log(`[SmartBatch] Model loaded successfully`);
+        }
+      } catch (healthErr) {
+        console.warn(`[SmartBatch] Health check failed, attempting classify anyway: ${healthErr.message}`);
+      }
+
+      console.log(`[SmartBatch] Calling AI at ${AI_URL}/classify_batch`);
+      console.log(`[SmartBatch]   Images: ${imagePaths.length}, Threshold: ${threshold}`);
+      console.log(`[SmartBatch]   app_base_url: ${options.app_base_url}`);
+      
       const response = await axios.post(`${AI_URL}/classify_batch`, {
-        images: unfiltered.map(p => p.path),
-        threshold,
-        modelId,
+        images: imagePaths,
+        threshold: parseFloat(threshold),
         app_base_url: options.app_base_url
       }, { timeout: 120000 });
 
@@ -1008,10 +1076,15 @@ class FilterService {
 
         return { results, threshold: finalThreshold };
       } else {
+        console.error(`[SmartBatch] AI returned error: ${response.data.error}`);
         throw new Error(response.data.error || 'AI Server Error');
       }
     } catch (err) {
-      console.error('AI Server Error:', err.message);
+      console.error(`[SmartBatch] AI Server Error: ${err.message}`);
+      if (err.response) {
+        console.error(`[SmartBatch]   Status: ${err.response.status}`);
+        console.error(`[SmartBatch]   Data: ${JSON.stringify(err.response.data)}`);
+      }
       // If AI server is down, return images with "keep" as default but mark as unpredicted
       return {
         results: unfiltered.map(u => ({ ...u, decision: 'keep', predicted: false, error: err.message })),

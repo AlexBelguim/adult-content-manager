@@ -35,6 +35,8 @@ import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
 import GroupRatePage from './pages/GroupRatePage';
 import SmartComparePage from './pages/SmartComparePage';
 import SmartFilterPage from './pages/SmartFilterPage';
+import TasteDashboardPage from './pages/TasteDashboardPage';
+import PairwiseRankPage from './pages/PairwiseRankPage';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
@@ -553,6 +555,12 @@ function AppContent({ onThemeChange, currentThemeId }) {
             } />
             <Route path="/smart-filter/:performerId" element={
               <SmartFilterPage />
+            } />
+            <Route path="/taste-dashboard" element={
+              <TasteDashboardPage />
+            } />
+            <Route path="/pairwise-rank" element={
+              <PairwiseRankPage />
             } />
 
             <Route path="/thumbnail-selector/:performerId" element={

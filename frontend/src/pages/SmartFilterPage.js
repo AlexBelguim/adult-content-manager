@@ -35,10 +35,30 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [selectedModel, setSelectedModel] = useState('');
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
-  const [inferenceUrl, setInferenceUrl] = useState(localStorage.getItem('pairwiseInferenceUrl') || 'http://localhost:3344');
+  const [inferenceUrl, setInferenceUrl] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const abortControllerRef = useRef(null);
   const holdTimerRef = useRef(null);
+
+  // Load AI server URL from centralized settings BEFORE other effects use it
+  useEffect(() => {
+    let cancelled = false;
+    const loadUrl = async () => {
+      let url = 'http://localhost:3344';
+      try {
+        const res = await fetch('/api/settings/ai_server_url');
+        const data = await res.json();
+        if (data.value) url = data.value;
+      } catch (_) {
+        // Fallback to localStorage
+        const saved = localStorage.getItem('pairwiseInferenceUrl');
+        if (saved) url = saved;
+      }
+      if (!cancelled) setInferenceUrl(url);
+    };
+    loadUrl();
+    return () => { cancelled = true; };
+  }, []);
 
   const onBack = useCallback(() => {
     if (propOnBack) propOnBack();
@@ -65,7 +85,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   }, [performer, performerId]);
 
   const fetchBatch = useCallback(async (isPrefetch = false) => {
-    if (!performer?.id || !isStarted) return;
+    console.log(`[SmartFilter] fetchBatch called. isPrefetch=${isPrefetch}, performerId=${performer?.id}, isStarted=${isStarted}, inferenceUrl=${inferenceUrl}`);
+    if (!performer?.id || !isStarted) {
+      console.log('[SmartFilter] Skipping - performer or isStarted not ready');
+      return;
+    }
     
     if (isPrefetch) setLoadingNext(true);
     else setLoading(true);
@@ -82,14 +106,22 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         ai_server_url: inferenceUrl,
         app_base_url: window.location.origin
       });
+      console.log(`[SmartFilter] Fetching /api/filter/smart-batch/${performer.id}?${queryParams}`);
       const response = await fetch(`/api/filter/smart-batch/${performer.id}?${queryParams}`, {
         signal: abortControllerRef.current.signal
       });
       const data = await response.json();
+      console.log(`[SmartFilter] Got response: ${data.results?.length || 0} results, ai_error=${data.ai_error || 'none'}`);
       
+      // Warn if AI server failed (images returned with default "keep" and no predictions)
+      if (data.ai_error) {
+        console.warn('AI Server error:', data.ai_error);
+        alert(`⚠️ AI Server Error: ${data.ai_error}\n\nImages are shown without AI predictions. Check your Inference Server URL in settings.`);
+      }
+
       // Update threshold ONLY on the very first real batch fetch
       if (data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
-        setThreshold(data.threshold);
+        setThreshold(Math.round(data.threshold));
         setFirstBatchDone(true);
       }
 
@@ -97,28 +129,37 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setNextBatch(data.results || []);
         setLoadingNext(false);
       } else {
+        console.log(`[SmartFilter] Setting results (${(data.results || []).length} items) and loading=false`);
         setResults(data.results || []);
         setLoading(false);
         // Pre-fetch the next one
         fetchBatch(true);
       }
     } catch (err) {
-      if (err.name === 'AbortError') return;
-      console.error('Error fetching batch:', err);
+      if (err.name === 'AbortError') {
+        console.log('[SmartFilter] Request was aborted');
+        return;
+      }
+      console.error('[SmartFilter] Error fetching batch:', err);
       if (!isPrefetch) setLoading(false);
       setLoadingNext(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [performer?.id, isStarted, firstBatchDone, threshold]); 
+  }, [performer?.id, isStarted, firstBatchDone, threshold, inferenceUrl]); 
 
-  // Initial trigger - ONLY once when started or performer changes
+  // Initial trigger - when started or performer changes or fetchBatch updates
   useEffect(() => {
-    if (performer?.id && isStarted && results.length === 0 && !loading) {
+    if (performer?.id && isStarted && results.length === 0) {
+      console.log('[SmartFilter] Initial trigger firing');
       fetchBatch();
     }
-  }, [performer?.id, isStarted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [performer?.id, isStarted, fetchBatch]);
 
   useEffect(() => {
+    // Don't run until inferenceUrl is loaded from settings
+    if (!inferenceUrl) return;
+    
     const fetchModels = async () => {
       try {
         const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
@@ -259,7 +300,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       }}>
         {/* Settings Icon on Splash Screen */}
         <IconButton 
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => setShowSettings(true)}
           sx={{ position: 'absolute', top: 20, right: 20, color: 'rgba(255,255,255,0.5)' }}
         >
           <SettingsIcon />
@@ -369,7 +410,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             
             <Box sx={{ width: 100 }}>
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', lineHeight: 1 }}>
-                Sensitivity: {threshold}%
+                Keep Threshold: {threshold}%
               </Typography>
               <Slider 
                 value={threshold} 
@@ -454,9 +495,13 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 >
                   <CardMedia
                     component="img"
-                    height="180"
                     image={`/api/files/raw?path=${encodeURIComponent(item.path)}&thumbnail=true`}
-                    sx={{ objectFit: 'cover', opacity: item.decision === 'delete' ? 0.4 : 1 }}
+                    sx={{ 
+                      width: '100%',
+                      aspectRatio: '3/4',
+                      objectFit: 'cover', 
+                      opacity: item.decision === 'delete' ? 0.4 : 1 
+                    }}
                   />
                   
                   {/* Decision Overlay */}
@@ -468,14 +513,26 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                     {item.decision === 'keep' ? <KeepIcon fontSize="small" /> : <DeleteIcon fontSize="small" />}
                   </Box>
 
-                  {/* Probability Bar */}
+                  {/* Probability Bar + Score Text */}
                   {item.score !== undefined && (
                     <Box sx={{ position: 'absolute', bottom: 0, left: 0, width: '100%' }}>
+                      {/* Score text */}
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          position: 'absolute', bottom: 8, left: 6,
+                          color: '#fff', fontWeight: 'bold', fontSize: '0.7rem',
+                          textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                          lineHeight: 1
+                        }}
+                      >
+                        {Math.round(item.score)}%
+                      </Typography>
                        <LinearProgress 
                         variant="determinate" 
                         value={item.score} 
                         sx={{ 
-                          height: 4, bgcolor: 'rgba(255,255,255,0.1)',
+                          height: 6, bgcolor: 'rgba(255,255,255,0.1)',
                           '& .MuiLinearProgress-bar': {
                             bgcolor: item.score > 70 ? '#4caf50' : item.score > 30 ? '#ff9800' : '#f44336'
                           }
@@ -512,24 +569,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       <Dialog open={showSettings} onClose={() => setShowSettings(false)}>
         <DialogTitle sx={{ bgcolor: '#1a1a2e', color: '#fff' }}>AI Settings</DialogTitle>
         <DialogContent sx={{ bgcolor: '#1a1a2e', color: '#fff', pt: 2 }}>
-          <TextField
-            fullWidth
-            label="Inference Server URL"
-            value={inferenceUrl}
-            onChange={(e) => {
-              setInferenceUrl(e.target.value);
-              localStorage.setItem('pairwiseInferenceUrl', e.target.value);
-            }}
-            placeholder="http://localhost:3344"
-            variant="outlined"
-            sx={{
-              mt: 1,
-              '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' } },
-              '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' }
-            }}
-          />
-          <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'rgba(255,255,255,0.5)' }}>
-            Set your AI server address here (e.g., http://192.168.1.50:3344)
+          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 1 }}>AI Server</Typography>
+          <Typography variant="body2" sx={{ color: '#7c4dff', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+            Change in <span style={{ color: '#7c4dff', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
           </Typography>
         </DialogContent>
         <DialogActions sx={{ bgcolor: '#1a1a2e', p: 2 }}>

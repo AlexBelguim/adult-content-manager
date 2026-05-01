@@ -38,7 +38,9 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel
+  InputLabel,
+  Autocomplete,
+  Avatar
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -111,6 +113,9 @@ function PerformerManagementPage() {
   const [renameFolderToo, setRenameFolderToo] = useState(true);
   const [availableScrapers, setAvailableScrapers] = useState([{ id: 'leakhaven', name: 'Leakhaven (Built-in)' }]);
   const [selectedScraper, setSelectedScraper] = useState('leakhaven');
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeSource, setMergeSource] = useState(null);
+  const [mergeTarget, setMergeTarget] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -410,6 +415,37 @@ function PerformerManagementPage() {
     } catch (error) {
       console.error('Error merging performers:', error);
       alert('Failed to merge performers');
+    }
+  };
+
+  const handleMergeClick = (performer) => {
+    setMergeSource(performer);
+    setMergeTarget(null);
+    setMergeDialogOpen(true);
+  };
+
+  const handleMergeConfirm = async () => {
+    if (!mergeSource || !mergeTarget) return;
+    setProcessing(true);
+    try {
+      const response = await fetch('/api/performers/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceId: mergeSource.id, targetId: mergeTarget.id })
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert(`Successfully merged "${mergeSource.name}" into "${mergeTarget.name}"`);
+        setMergeDialogOpen(false);
+        await loadPerformers();
+      } else {
+        alert(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Error merging performers:', error);
+      alert('Failed to merge performers');
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -919,6 +955,15 @@ function PerformerManagementPage() {
                 </IconButton>
               </Tooltip>
             )}
+            <Tooltip title="Merge into another performer">
+              <IconButton
+                size="small"
+                onClick={() => handleMergeClick(performer)}
+                color="warning"
+              >
+                <MergeIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Tooltip title="Delete/Manage">
               <IconButton
                 size="small"
@@ -1935,6 +1980,99 @@ function PerformerManagementPage() {
             startIcon={processing ? <CircularProgress size={20} /> : null}
           >
             {processing ? 'Renaming...' : 'Rename'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Merge Dialog */}
+      <Dialog
+        open={mergeDialogOpen}
+        onClose={() => !processing && setMergeDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MergeIcon color="warning" />
+          Merge Performer
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Merge <strong>{mergeSource?.name}</strong> into another performer. All files, ratings,
+            aliases, and metadata will be combined. The source performer will be deleted.
+          </DialogContentText>
+
+          {mergeSource && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(255,152,0,0.08)', borderRadius: 1, border: '1px solid rgba(255,152,0,0.3)' }}>
+              <Typography variant="subtitle2" color="warning.main" gutterBottom>
+                Source (will be removed)
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Avatar
+                  src={mergeSource.thumbnail ? `/api/performers/${mergeSource.id}/thumbnail` : undefined}
+                  sx={{ width: 40, height: 40 }}
+                >{mergeSource.name[0]}</Avatar>
+                <Box>
+                  <Typography variant="body1" fontWeight={600}>{mergeSource.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    ID: {mergeSource.id} · {mergeSource.pics_count || 0} pics · {mergeSource.vids_count || 0} vids
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+          )}
+
+          <Autocomplete
+            options={(performers || []).filter(p => p.id !== mergeSource?.id)}
+            getOptionLabel={(option) => `${option.name} (ID: ${option.id})`}
+            value={mergeTarget}
+            onChange={(_, newValue) => setMergeTarget(newValue)}
+            renderOption={(props, option) => (
+              <li {...props} key={option.id}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Avatar
+                    src={option.thumbnail ? `/api/performers/${option.id}/thumbnail` : undefined}
+                    sx={{ width: 32, height: 32 }}
+                  >{option.name[0]}</Avatar>
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>{option.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {option.pics_count || 0} pics · {option.vids_count || 0} vids
+                    </Typography>
+                  </Box>
+                </Box>
+              </li>
+            )}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Target Performer (keep this one)"
+                placeholder="Search by name..."
+                variant="outlined"
+                fullWidth
+              />
+            )}
+          />
+
+          {mergeTarget && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              <strong>This cannot be undone.</strong> "{mergeSource?.name}" will be merged into
+              "{mergeTarget.name}". All files will be moved, and "{mergeSource?.name}" will be
+              added as an alias of "{mergeTarget.name}".
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMergeDialogOpen(false)} disabled={processing}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleMergeConfirm}
+            variant="contained"
+            color="warning"
+            disabled={processing || !mergeTarget}
+            startIcon={processing ? <CircularProgress size={20} /> : <MergeIcon />}
+          >
+            {processing ? 'Merging...' : 'Merge'}
           </Button>
         </DialogActions>
       </Dialog>

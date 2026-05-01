@@ -112,48 +112,35 @@ function GroupRatePage() {
     if (direction === 'down' && index === performers.length - 1) return;
 
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    const p1 = performers[index];
-    const p2 = performers[targetIndex];
+    const p1 = performers[index];   // the performer being moved
+    const p2 = performers[targetIndex]; // the performer in the target spot
 
-    // Swap ratings or bump
-    // To make it simple, we'll swap their ratings if they are different, 
-    // or adjust slightly if they are the same.
-    let r1 = p1.performer_rating || 0;
-    let r2 = p2.performer_rating || 0;
-
-    if (r1 === r2) {
-      if (direction === 'up') {
-        r1 = Math.min(5, r1 + 0.05);
-        r2 = Math.max(0, r2 - 0.05);
-      } else {
-        r1 = Math.max(0, r1 - 0.05);
-        r2 = Math.min(5, r2 + 0.05);
-      }
-    } else {
-      // Swap
-      [r1, r2] = [r2, r1];
-    }
+    // Moving UP means "I prefer p1 over p2" → p1 wins
+    // Moving DOWN means "I prefer p2 over p1" → p2 wins
+    const winnerId = direction === 'up' ? p1.id : p2.id;
+    const loserId = direction === 'up' ? p2.id : p1.id;
 
     setUpdatingId(p1.id);
     try {
-      await Promise.all([
-        fetch(`/api/performers/${p1.id}/rating`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rating: r1 })
-        }),
-        fetch(`/api/performers/${p2.id}/rating`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rating: r2 })
-        })
-      ]);
-      
-      // Update local state and re-sort
-      const newList = [...performers];
-      newList[index] = { ...p1, performer_rating: r1 };
-      newList[targetIndex] = { ...p2, performer_rating: r2 };
-      setPerformers(newList.sort((a, b) => (b.performer_rating || 0) - (a.performer_rating || 0)));
+      const res = await fetch('/api/performers/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ winnerId, loserId, draw: false })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        // Apply new ratings from the server response
+        const ratingMap = {};
+        for (const r of data.results) {
+          ratingMap[r.id] = r.newRating;
+        }
+
+        const newList = [...performers];
+        newList[index] = { ...p1, performer_rating: ratingMap[p1.id] ?? p1.performer_rating };
+        newList[targetIndex] = { ...p2, performer_rating: ratingMap[p2.id] ?? p2.performer_rating };
+        setPerformers(newList.sort((a, b) => (b.performer_rating || 0) - (a.performer_rating || 0)));
+      }
     } catch (err) {
       console.error('Error updating ratings:', err);
     } finally {
@@ -269,7 +256,7 @@ function GroupRatePage() {
             <IconButton onClick={fetchPerformers} sx={{ color: 'rgba(255,255,255,0.7)', ml: 1 }}>
               <Refresh />
             </IconButton>
-            <IconButton onClick={() => setShowSettings(true)} sx={{ color: 'rgba(255,255,255,0.7)' }}>
+            <IconButton onClick={() => window.location.href = '/taste-dashboard'} sx={{ color: 'rgba(255,255,255,0.7)' }} title="AI Settings (Taste Dashboard)">
               <Settings />
             </IconButton>
           </Box>
@@ -502,27 +489,7 @@ function GroupRatePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Settings Dialog */}
-      <Dialog open={showSettings} onClose={() => setShowSettings(false)} PaperProps={{ sx: { bgcolor: '#12121f', color: '#fff' } }}>
-        <DialogTitle>AI Settings</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <Typography variant="body2" gutterBottom>Inference Server URL</Typography>
-            <input 
-              type="text" 
-              defaultValue={inferenceUrl}
-              onBlur={(e) => handleSaveSettings(e.target.value)}
-              style={{ width: '100%', padding: '10px', background: '#222', border: '1px solid #444', color: '#fff', borderRadius: '4px' }}
-            />
-            <Typography variant="caption" sx={{ color: '#888', mt: 1, display: 'block' }}>
-              Run your DINOv2 inference server on this address (default: http://localhost:3344)
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowSettings(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      {/* Settings Dialog - removed, AI URL is now configured in Taste Dashboard */}
     </Box>
   );
 }

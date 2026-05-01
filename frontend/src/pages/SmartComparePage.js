@@ -186,6 +186,7 @@ function SmartComparePage() {
         const nextSelection = performSmartSelection(updatedPerformers, performerCount);
         setCompareList(nextSelection);
         setAiAnalysis(null);
+        setCalibratedStars({});
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         navigate('/group-rate');
@@ -200,20 +201,19 @@ function SmartComparePage() {
   const handleSaveRankings = async () => {
     try {
       setLoading(true);
-      // Process as a tournament: Each performer wins against everyone BELOW them in the list
-      for (let i = 0; i < compareList.length; i++) {
-        const winnerId = compareList[i].id;
-        const loserIds = compareList.slice(i + 1).map(p => p.id);
-        
-        if (loserIds.length > 0) {
-          for (const loserId of loserIds) {
-            await fetch('/api/performers/compare', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ winnerId, loserId, draw: false })
-            });
-          }
-        }
+      // Submit the full ordered ranking as a single batch request.
+      // compareList[0] = best (rank 1), compareList[last] = worst.
+      const res = await fetch('/api/performers/compare-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderedIds: compareList.map(p => p.id)
+        })
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        console.error('Batch compare failed:', data.error);
       }
 
       const updatedPerformers = await fetchPerformers();
@@ -221,6 +221,7 @@ function SmartComparePage() {
         const nextSelection = performSmartSelection(updatedPerformers, performerCount);
         setCompareList(nextSelection);
         setAiAnalysis(null);
+        setCalibratedStars({});
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         navigate('/group-rate');
@@ -242,12 +243,10 @@ function SmartComparePage() {
       const temp = next[index];
       next[index] = next[targetIndex];
       next[targetIndex] = temp;
-      
-      // Mark as dirty instead of immediate re-calculation
-      setIsOrderDirty(true);
-      
       return next;
     });
+    // Flag that order changed since the last AI analysis
+    setIsOrderDirty(true);
   };
 
   const handleApplyOrder = () => {
@@ -304,26 +303,9 @@ function SmartComparePage() {
 
       const data = await res.json();
       if (data.success && data.predictions) {
+        // Only update the displayed prediction stars — do NOT reorder the list.
+        // The user's manual ordering is preserved until they press "Save Rankings".
         setCalibratedStars(data.predictions);
-        
-        // UPDATE THE LIST: Merge the new stars into the current compareList
-        // Ensure we use the exact prediction value so it matches the gallery
-        setCompareList(prev => {
-          const next = prev.map(p => {
-            const newRating = data.predictions[p.id];
-            return {
-              ...p,
-              performer_rating: newRating !== undefined ? parseFloat(newRating.toFixed(2)) : p.performer_rating
-            };
-          });
-          
-          // AUTO-SORT: Sort by the new predicted ratings
-          return next.sort((a, b) => {
-            const starsA = data.predictions[a.id] || a.performer_rating || 0;
-            const starsB = data.predictions[b.id] || b.performer_rating || 0;
-            return starsB - starsA;
-          });
-        });
       }
     } catch (err) {
       console.error('Batch prediction failed:', err);
@@ -478,7 +460,7 @@ function SmartComparePage() {
                   animation: 'pulse 1.5s infinite'
                 }}
               >
-                Recalculate Stars
+                Re-ask AI
               </Button>
             )}
             <Box sx={{ width: 120 }}>
@@ -689,16 +671,11 @@ function SmartComparePage() {
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <Box>
-              <Typography variant="body2" gutterBottom sx={{ color: 'rgba(255,255,255,0.5)' }}>Inference Server URL</Typography>
-              <input 
-                type="text" 
-                defaultValue={inferenceUrl}
-                onBlur={(e) => {
-                  setInferenceUrl(e.target.value);
-                  localStorage.setItem('pairwiseInferenceUrl', e.target.value);
-                }}
-                style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '12px' }}
-              />
+              <Typography variant="body2" gutterBottom sx={{ color: 'rgba(255,255,255,0.5)' }}>AI Server</Typography>
+              <Typography variant="body2" sx={{ color: '#00e5ff', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+                Change in <span style={{ color: '#00e5ff', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
+              </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Typography variant="body2">Auto-advance (Endless Mode)</Typography>
@@ -724,6 +701,37 @@ function SmartComparePage() {
                 sx={{ borderColor: '#7c4dff', color: '#7c4dff', borderRadius: '12px' }}
               >
                 Recalibrate Global Model
+              </Button>
+            </Box>
+            <Divider sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
+            <Box>
+              <Typography variant="h6" gutterBottom sx={{ fontSize: '0.9rem', color: '#f50057' }}>Reset Rankings</Typography>
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 2 }}>
+                Reset all performer ratings back to 2.5 (neutral). Use this if your existing ratings were corrupted or you want a fresh start.
+              </Typography>
+              <Button 
+                fullWidth
+                variant="outlined" 
+                startIcon={<Refresh />}
+                onClick={async () => {
+                  if (!window.confirm('Reset ALL performer ratings to 2.5? This cannot be undone.')) return;
+                  if (!window.confirm('Are you really sure? All comparison history will be lost.')) return;
+                  try {
+                    const res = await fetch('/api/performers/reset-rankings', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                      alert(`Reset ${data.count} performers to rating 2.5`);
+                      fetchPerformers();
+                    } else {
+                      alert('Reset failed: ' + (data.error || 'Unknown error'));
+                    }
+                  } catch (err) {
+                    alert('Reset failed: ' + err.message);
+                  }
+                }}
+                sx={{ borderColor: '#f50057', color: '#f50057', borderRadius: '12px' }}
+              >
+                Reset All Rankings to 2.5
               </Button>
             </Box>
           </Box>

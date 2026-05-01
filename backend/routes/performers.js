@@ -457,6 +457,30 @@ router.post('/:id/rating', async (req, res) => {
   }
 });
 
+// Reset all performer rankings to neutral (2.5)
+router.post('/reset-rankings', (req, res) => {
+  try {
+    const transaction = db.transaction(() => {
+      db.prepare('UPDATE performers SET performer_rating = 2.5 WHERE performer_rating IS NOT NULL').run();
+      db.prepare('UPDATE ratings SET manual_star = 2.5').run();
+    });
+    transaction();
+
+    const count = db.prepare('SELECT COUNT(*) as count FROM performers WHERE performer_rating = 2.5').get();
+
+    // Notify clients
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('performers_updated', { type: 'batch_rating_updated' });
+    }
+
+    res.send({ success: true, count: count.count, message: 'All rankings reset to 2.5' });
+  } catch (err) {
+    console.error('Error resetting rankings:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
 // Manually trigger model calibration
 router.post('/calibrate', async (req, res) => {
   try {
@@ -923,24 +947,27 @@ router.post('/compare', async (req, res) => {
     let rA = winner.performer_rating !== null ? winner.performer_rating : 2.5;
     let rB = loser.performer_rating !== null ? loser.performer_rating : 2.5;
 
-    let kA = 0.4;
-    let kB = 0.4;
+    // Use symmetric K-factor so the system is zero-sum (ratings don't inflate).
+    // Higher K for unrated/default performers so they settle into position faster.
+    const isEitherNew = (winner.performer_rating === null || winner.performer_rating === 2.5) ||
+                        (loser.performer_rating === null || loser.performer_rating === 2.5);
+    let K = isEitherNew ? 0.6 : 0.3;
 
-    if (winner.performer_rating === null || winner.performer_rating === 2.5) kA = 0.8;
-    if (loser.performer_rating === null || loser.performer_rating === 2.5) kB = 0.8;
+    // Upset bonus: if the underdog wins, increase K so upsets matter more
+    if (!draw && rB > rA + 0.5) {
+      K *= 1.5;
+    }
 
-    const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 5));
+    // ELO expected score — divisor of 1.5 is correct for a 0-5 star scale.
+    // (Standard ELO uses 400 for a ~2000-point range; 1.5 ≈ 400 * (5/1333))
+    const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 1.5));
     const expectedB = 1 - expectedA;
 
     let scoreA = draw ? 0.5 : 1;
     let scoreB = draw ? 0.5 : 0;
 
-    if (!draw && rB > rA + 1.0) {
-      kA *= 1.5;
-    }
-
-    let newRA = rA + kA * (scoreA - expectedA);
-    let newRB = rB + kB * (scoreB - expectedB);
+    let newRA = rA + K * (scoreA - expectedA);
+    let newRB = rB + K * (scoreB - expectedB);
 
     newRA = Math.max(0, Math.min(5, Math.round(newRA * 100) / 100));
     newRB = Math.max(0, Math.min(5, Math.round(newRB * 100) / 100));
@@ -981,6 +1008,112 @@ router.post('/compare', async (req, res) => {
     });
   } catch (err) {
     console.error('Error in compare:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Batch compare: submit a full ordered ranking in one request
+// orderedIds[0] is the best (rank 1), orderedIds[last] is the worst
+router.post('/compare-batch', async (req, res) => {
+  const { orderedIds } = req.body;
+
+  if (!orderedIds || orderedIds.length < 2) {
+    return res.status(400).send({ error: 'Need at least 2 ordered performer IDs' });
+  }
+
+  try {
+    // Load all performers in one pass
+    const perfMap = {};
+    for (const id of orderedIds) {
+      const row = db.prepare(`
+        SELECT p.id, r.manual_star as performer_rating 
+        FROM performers p 
+        LEFT JOIN ratings r ON p.id = r.performer_id 
+        WHERE p.id = ?
+      `).get(id);
+      if (!row) {
+        return res.status(404).send({ error: `Performer ${id} not found` });
+      }
+      perfMap[id] = {
+        id: row.id,
+        rating: row.performer_rating !== null ? row.performer_rating : 2.5,
+        isNew: row.performer_rating === null || row.performer_rating === 2.5
+      };
+    }
+
+    // Process all pairwise comparisons and accumulate deltas
+    const deltas = {};
+    const wins = {};
+    const losses = {};
+    for (const id of orderedIds) {
+      deltas[id] = 0;
+      wins[id] = 0;
+      losses[id] = 0;
+    }
+
+    const anyNew = orderedIds.some(id => perfMap[id].isNew);
+    const baseK = anyNew ? 0.6 : 0.3;
+
+    for (let i = 0; i < orderedIds.length; i++) {
+      for (let j = i + 1; j < orderedIds.length; j++) {
+        const winnerId = orderedIds[i];
+        const loserId = orderedIds[j];
+        const rA = perfMap[winnerId].rating;
+        const rB = perfMap[loserId].rating;
+
+        let K = baseK;
+        // Upset bonus: underdog (lower rated) was ranked higher
+        if (rB > rA + 0.5) K *= 1.5;
+
+        const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 1.5));
+        const expectedB = 1 - expectedA;
+
+        deltas[winnerId] += K * (1 - expectedA);
+        deltas[loserId] += K * (0 - expectedB);
+        wins[winnerId]++;
+        losses[loserId]++;
+      }
+    }
+
+    // Apply all updates in a single transaction
+    const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
+    const updateRating = db.prepare(`
+      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged)
+      VALUES (?, ?, 0.9, 0)
+      ON CONFLICT(performer_id) DO UPDATE SET
+        manual_star = EXCLUDED.manual_star,
+        confidence = MAX(confidence, 0.9),
+        is_flagged = 0,
+        created_at = CURRENT_TIMESTAMP
+    `);
+
+    const results = [];
+    const transaction = db.transaction(() => {
+      for (const id of orderedIds) {
+        const oldRating = perfMap[id].rating;
+        let newRating = oldRating + deltas[id];
+        newRating = Math.max(0, Math.min(5, Math.round(newRating * 100) / 100));
+
+        updatePerformer.run(newRating, id);
+        updateRating.run(id, newRating);
+
+        results.push({ id, oldRating, newRating, wins: wins[id], losses: losses[id] });
+      }
+    });
+    transaction();
+
+    // Notify clients once
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('performers_updated', { type: 'batch_rating_updated' });
+    }
+
+    // Trigger recalibration once
+    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
+
+    res.send({ success: true, results });
+  } catch (err) {
+    console.error('Error in compare-batch:', err);
     res.status(500).send({ error: err.message });
   }
 });
