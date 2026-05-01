@@ -972,13 +972,14 @@ class FilterService {
     if (unfiltered.length === 0) return { results: [] };
 
     // 2. Call Python AI Server
-    const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
+    const AI_URL = options.ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
     try {
       console.log(`[SmartBatch] Calling AI at ${AI_URL}/classify_batch for ${unfiltered.length} images`);
       const response = await axios.post(`${AI_URL}/classify_batch`, {
         images: unfiltered.map(p => p.path),
         threshold,
-        modelId
+        modelId,
+        app_base_url: options.app_base_url
       }, { timeout: 120000 });
 
       if (response.data.success) {

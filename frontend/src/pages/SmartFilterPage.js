@@ -77,7 +77,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
     try {
       const targetThreshold = (!firstBatchDone && !isPrefetch) ? -1 : threshold;
-      const response = await fetch(`/api/filter/smart-batch/${performer.id}?threshold=${targetThreshold}`, {
+      const queryParams = new URLSearchParams({
+        threshold: targetThreshold,
+        ai_server_url: inferenceUrl,
+        app_base_url: window.location.origin
+      });
+      const response = await fetch(`/api/filter/smart-batch/${performer.id}?${queryParams}`, {
         signal: abortControllerRef.current.signal
       });
       const data = await response.json();
