@@ -1,16 +1,23 @@
 try:
-    import os, sys, torch, time, requests, io
-except ImportError:
-    import os, sys
-    print("📦 Installing missing dependencies (requests)...")
-    os.system(f"{sys.executable} -m pip install requests")
-    import requests, io
+    try:
+        import os, sys, torch, time, requests, io
+    except ImportError:
+        import os, sys
+        print("📦 Installing missing dependencies (requests)...")
+        os.system(f"{sys.executable} -m pip install requests")
+        import requests, io
 
-from pathlib import Path
-from flask import Flask, request, jsonify
-from PIL import Image
-from transformers import AutoImageProcessor
-from flask_cors import CORS
+    from pathlib import Path
+    from flask import Flask, request, jsonify
+    from PIL import Image
+    from transformers import AutoImageProcessor
+    from flask_cors import CORS
+except Exception as e:
+    print(f"\n❌ CRITICAL STARTUP ERROR: {e}")
+    import traceback
+    traceback.print_exc()
+    input("\nPress ENTER to close...")
+    sys.exit(1)
 from calibration import CalibrationEngine
 
 # Add current dir to path for model import
