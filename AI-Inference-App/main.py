@@ -106,13 +106,15 @@ class AIAppTray:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         
-        # Launch in a NEW VISIBLE CONSOLE to prevent piping/buffering hangs
+        # Launch via cmd /k to FORCE the window to stay open for debugging
+        cmd = ["cmd", "/k", sys.executable, str(SERVER_SCRIPT)]
+        
         self.server_process = subprocess.Popen(
-            [sys.executable, str(SERVER_SCRIPT)], 
+            cmd, 
             env=env,
             creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0
         )
-        print("🚀 AI Server launched in a new terminal window.")
+        print(f"🚀 AI Server launched: {' '.join(cmd)}")
         # No longer piping logs through the tray app to ensure maximum stability
         # You can see logs directly in the opened terminal window
         pass
