@@ -190,7 +190,8 @@ router.post('/apply-smart-batch', async (req, res) => {
 
 // GET /api/filter/models - Proxy to AI server to list models
 router.get('/models', async (req, res) => {
-  const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
+  const { ai_server_url } = req.query;
+  const AI_URL = ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
   try {
     const axios = require('axios');
     const response = await axios.get(`${AI_URL}/list_models`);

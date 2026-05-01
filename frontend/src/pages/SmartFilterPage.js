@@ -121,10 +121,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   useEffect(() => {
     const fetchModels = async () => {
       try {
-        const response = await fetch('/api/filter/models');
+        const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
         const data = await response.json();
         if (data.success) {
-          setAvailableModels(data.models);
+          setAvailableModels(data.models || []);
           const current = data.current || '';
           
           // If no model is loaded, or it's not the filtering one, load the filtering one
