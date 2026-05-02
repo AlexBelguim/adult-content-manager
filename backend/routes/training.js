@@ -183,7 +183,10 @@ router.get('/performer-stats', (req, res) => {
       const filter = filterCounts[p.id] || { kept: 0, deleted: 0 };
       const totalLabeled = filter.kept + filter.deleted;
       const totalOriginal = p.pics_original_count || p.pics_count || 0;
-      const labelProgress = totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0;
+      // If moved_to_after, filtering is 100% complete (all images sorted)
+      // Otherwise, use filter_actions count as progress indicator
+      const labelProgress = p.moved_to_after ? 1 :
+        (totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0);
 
       // Disk counts from pre-scan
       const keepOnDisk = keepDiskCounts[p.name] || 0;
