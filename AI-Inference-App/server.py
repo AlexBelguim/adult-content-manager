@@ -142,11 +142,175 @@ def api_unload_model():
 @app.route('/list_models', methods=['GET'])
 def api_list_models():
     models = find_models()
+    result = []
+    for m in models:
+        info = {
+            'filename': m.name,
+            'size_mb': round(m.stat().st_size / 1024**2, 1),
+            'modified': m.stat().st_mtime,
+            'type': 'unknown',
+            'backbone': None,
+            'val_acc': None,
+        }
+        try:
+            ckpt = torch.load(m, map_location='cpu', weights_only=False)
+            info['type'] = ckpt.get('model_type', 'unknown')
+            info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
+            info['val_acc'] = ckpt.get('val_acc')
+            config = ckpt.get('config', {})
+            info['epochs'] = config.get('epochs')
+            del ckpt  # free memory
+        except Exception as e:
+            info['error'] = str(e)
+        result.append(info)
+    result.sort(key=lambda x: x['modified'], reverse=True)
     return jsonify({
         "success": True,
-        "models": [m.name for m in models],
-        "current": MODEL_NAME
+        "models": result,
+        "current_loaded": MODEL_NAME,
+        "active_model_file": None  # frontend can track this
     })
+
+@app.route('/test_model', methods=['POST'])
+def api_test_model():
+    """Test a model on a random sample of keep/delete images and return accuracy."""
+    data = request.json or {}
+    model_id = data.get('model_id')
+    base_path = data.get('base_path', '')
+    sample_size = min(data.get('sample_size', 50), 200)
+    
+    if not model_id:
+        return jsonify({'success': False, 'error': 'model_id required'}), 400
+    
+    models_path = Path(__file__).parent / 'models'
+    target = models_path / model_id
+    if not target.exists():
+        return jsonify({'success': False, 'error': f'Model not found: {model_id}'}), 404
+    
+    log(f"🧪 Testing model: {model_id} (sample={sample_size})")
+    
+    import random, glob
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
+    
+    def scan_images(directory):
+        imgs = []
+        p = Path(directory)
+        if not p.exists(): return imgs
+        for f in p.rglob('*'):
+            if f.suffix.lower() in IMAGE_EXTS:
+                imgs.append(str(f))
+        return imgs
+    
+    keep_dir = Path(base_path) / 'after filter performer'
+    delete_dir = Path(base_path) / 'deleted keep for training'
+    
+    keep_imgs = scan_images(keep_dir)
+    delete_imgs = scan_images(delete_dir)
+    
+    if not keep_imgs or not delete_imgs:
+        return jsonify({'success': False, 'error': 'Need both keep and delete images for testing'}), 400
+    
+    # Sample
+    k_sample = random.sample(keep_imgs, min(sample_size, len(keep_imgs)))
+    d_sample = random.sample(delete_imgs, min(sample_size, len(delete_imgs)))
+    
+    # Load model temporarily
+    try:
+        ckpt = torch.load(target, map_location=DEVICE, weights_only=False)
+        config = ckpt.get('config', {})
+        model_name = config.get('model_name', 'facebook/dinov2-large')
+        model_type = ckpt.get('model_type', 'binary')
+        
+        from model_dinov2 import DinoV2PreferenceModel
+        
+        if model_type == 'binary':
+            from trainer import BinaryClassifier
+            test_model = BinaryClassifier(model_name)
+            test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
+        elif model_type == 'pairwise':
+            test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
+            test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
+        else:
+            return jsonify({'success': False, 'error': f'Testing not supported for type: {model_type}'}), 400
+        
+        test_model.to(DEVICE)
+        test_model.eval()
+        
+        processor = AutoImageProcessor.from_pretrained(model_name)
+        
+        # Test binary models
+        if model_type == 'binary':
+            correct = 0
+            total = 0
+            keep_scores = []
+            delete_scores = []
+            
+            with torch.no_grad():
+                for img_path, label in [(p, 1) for p in k_sample] + [(p, 0) for p in d_sample]:
+                    try:
+                        img = Image.open(img_path).convert('RGB')
+                        inp = processor(images=img, return_tensors='pt').to(DEVICE)
+                        logit = test_model(inp['pixel_values'])
+                        prob = torch.sigmoid(logit).item()
+                        pred = 1 if prob > 0.5 else 0
+                        if pred == label: correct += 1
+                        total += 1
+                        if label == 1: keep_scores.append(prob)
+                        else: delete_scores.append(prob)
+                    except: continue
+            
+            accuracy = correct / max(total, 1)
+            avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
+            avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
+            separation = avg_keep - avg_delete
+            
+            result = {
+                'accuracy': round(accuracy, 4),
+                'total_tested': total,
+                'correct': correct,
+                'avg_keep_score': round(avg_keep, 4),
+                'avg_delete_score': round(avg_delete, 4),
+                'separation': round(separation, 4),
+                'model_type': model_type,
+            }
+        else:
+            # Pairwise: test by scoring keep vs delete pairs
+            correct = 0
+            total = 0
+            pairs_tested = min(sample_size, len(k_sample), len(d_sample))
+            
+            with torch.no_grad():
+                for i in range(pairs_tested):
+                    try:
+                        keep_img = Image.open(k_sample[i]).convert('RGB')
+                        del_img = Image.open(d_sample[i]).convert('RGB')
+                        k_inp = processor(images=keep_img, return_tensors='pt').to(DEVICE)
+                        d_inp = processor(images=del_img, return_tensors='pt').to(DEVICE)
+                        k_score, d_score = test_model(k_inp['pixel_values'], d_inp['pixel_values'])
+                        if k_score.item() > d_score.item(): correct += 1
+                        total += 1
+                    except: continue
+            
+            result = {
+                'accuracy': round(correct / max(total, 1), 4),
+                'total_tested': total,
+                'correct': correct,
+                'model_type': model_type,
+            }
+        
+        # Cleanup
+        del test_model
+        del ckpt
+        torch.cuda.empty_cache()
+        
+        log(f"🧪 Test complete: {result['accuracy']:.1%} accuracy ({result['correct']}/{result['total_tested']})")
+        return jsonify({'success': True, 'results': result})
+        
+    except Exception as e:
+        log(f"❌ Test error: {e}")
+        import traceback; traceback.print_exc()
+        torch.cuda.empty_cache()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/calibrate', methods=['POST'])
 def calibrate():

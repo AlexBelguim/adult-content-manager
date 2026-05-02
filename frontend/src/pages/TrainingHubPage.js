@@ -24,6 +24,9 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import PersonIcon from '@mui/icons-material/Person';
+import ScienceIcon from '@mui/icons-material/Science';
+import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 const MODEL_TYPES = [
   {
@@ -66,6 +69,9 @@ export default function TrainingHubPage() {
   const [aiUrl, setAiUrl] = useState('http://localhost:3344');
   const [perfStats, setPerfStats] = useState(null);
   const [showPerfTable, setShowPerfTable] = useState(false);
+  const [modelList, setModelList] = useState([]);
+  const [testingModel, setTestingModel] = useState(null);
+  const [testResults, setTestResults] = useState({});
 
   // Load AI URL from settings
   useEffect(() => {
@@ -99,13 +105,17 @@ export default function TrainingHubPage() {
     } catch (e) {
       console.error('Failed to load data:', e);
     }
-    // Check AI health directly
+    // Check AI health + list models directly
     try {
       const h = await fetch(`${aiUrl}/health`).then(r => r.json());
       setAiHealth(h);
     } catch (_) {
       setAiHealth(null);
     }
+    try {
+      const m = await fetch(`${aiUrl}/list_models`).then(r => r.json());
+      if (m.models) setModelList(m.models);
+    } catch (_) {}
     setLoading(false);
   }, [aiUrl]);
 
@@ -427,6 +437,20 @@ export default function TrainingHubPage() {
               </Paper>
             </Grid>
 
+            {/* ── Model Arsenal ─────────────────────────────── */}
+            <Grid item xs={12}>
+              <ModelArsenal
+                models={modelList}
+                aiUrl={aiUrl}
+                aiHealth={aiHealth}
+                testingModel={testingModel}
+                setTestingModel={setTestingModel}
+                testResults={testResults}
+                setTestResults={setTestResults}
+                onModelLoaded={loadData}
+              />
+            </Grid>
+
             {/* ── Per-Performer Data Breakdown ──────────────── */}
             <Grid item xs={12}>
               <Paper sx={{
@@ -634,5 +658,243 @@ function PerformerTable({ performers }) {
         Showing {sorted.length} of {performers.length} performers · Quality = composite score (labels + pairs + disk data)
       </Typography>
     </Box>
+  );
+}
+
+function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, testResults, setTestResults, onModelLoaded }) {
+  const [expanded, setExpanded] = useState(true);
+  const [loadingModel, setLoadingModel] = useState(null);
+
+  const typeLabels = {
+    binary: { label: 'Binary (Keep/Delete)', color: '#4caf50', icon: '🎯' },
+    pairwise: { label: 'Pairwise (A vs B)', color: '#2196f3', icon: '⚖️' },
+    context_binary: { label: 'Context-Aware Binary', color: '#ff9800', icon: '🧠' },
+    unknown: { label: 'Unknown Type', color: '#9e9e9e', icon: '❓' },
+  };
+
+  // Group models by type
+  const grouped = {};
+  models.forEach(m => {
+    const t = m.type || 'unknown';
+    if (!grouped[t]) grouped[t] = [];
+    grouped[t].push(m);
+  });
+
+  const handleTest = async (model) => {
+    setTestingModel(model.filename);
+    try {
+      const settingsRes = await fetch('/api/settings/base_path');
+      const settingsData = await settingsRes.json();
+      const basePath = settingsData.value || '';
+      const res = await fetch(`${aiUrl}/test_model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: model.filename, base_path: basePath, sample_size: 50 })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestResults(prev => ({ ...prev, [model.filename]: data.results }));
+      } else {
+        setTestResults(prev => ({ ...prev, [model.filename]: { error: data.error } }));
+      }
+    } catch (e) {
+      setTestResults(prev => ({ ...prev, [model.filename]: { error: e.message } }));
+    }
+    setTestingModel(null);
+  };
+
+  const handleLoad = async (model) => {
+    setLoadingModel(model.filename);
+    try {
+      await fetch(`${aiUrl}/load_model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: model.filename })
+      });
+      if (onModelLoaded) onModelLoaded();
+    } catch (_) {}
+    setLoadingModel(null);
+  };
+
+  const handleDelete = async (model) => {
+    if (!window.confirm(`Delete model ${model.filename}? This cannot be undone.`)) return;
+    try {
+      await fetch(`${aiUrl}/delete_model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: model.filename })
+      });
+      if (onModelLoaded) onModelLoaded();
+    } catch (_) {}
+  };
+
+  const formatDate = (ts) => {
+    if (!ts) return '—';
+    return new Date(ts * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const AccuracyMeter = ({ value, label }) => {
+    const color = value >= 0.8 ? '#4caf50' : value >= 0.6 ? '#ff9800' : '#f44336';
+    return (
+      <Box sx={{ textAlign: 'center', minWidth: 60 }}>
+        <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+          <CircularProgress variant="determinate" value={value * 100} size={50}
+            sx={{ color, '& .MuiCircularProgress-circle': { strokeLinecap: 'round' } }} />
+          <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Typography variant="caption" sx={{ fontWeight: 900, color, fontSize: '0.7rem' }}>
+              {Math.round(value * 100)}%
+            </Typography>
+          </Box>
+        </Box>
+        <Typography variant="caption" sx={{ display: 'block', color: 'rgba(255,255,255,0.4)', fontSize: '0.6rem', mt: 0.3 }}>
+          {label}
+        </Typography>
+      </Box>
+    );
+  };
+
+  return (
+    <Paper sx={{ p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3, border: '1px solid rgba(139,92,246,0.15)' }}>
+      <Box onClick={() => setExpanded(!expanded)}
+        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <RocketLaunchIcon sx={{ color: '#8b5cf6' }} /> Model Arsenal
+          <Chip label={`${models.length} models`} size="small"
+            sx={{ ml: 1, bgcolor: 'rgba(139,92,246,0.12)', color: '#8b5cf6', fontWeight: 600 }} />
+        </Typography>
+        <IconButton sx={{ color: '#8b5cf6' }}>
+          {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+        </IconButton>
+      </Box>
+
+      <Collapse in={expanded}>
+        {models.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 4, color: 'rgba(255,255,255,0.3)' }}>
+            <ScienceIcon sx={{ fontSize: 48, mb: 1, opacity: 0.3 }} />
+            <Typography>No models found</Typography>
+            <Typography variant="caption">Train a model above to get started</Typography>
+          </Box>
+        ) : (
+          Object.entries(grouped).map(([type, typeModels]) => {
+            const tInfo = typeLabels[type] || typeLabels.unknown;
+            return (
+              <Box key={type} sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ color: tInfo.color, fontWeight: 800, mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {tInfo.icon} {tInfo.label}
+                  <Chip label={typeModels.length} size="small" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: `${tInfo.color}15`, color: tInfo.color }} />
+                </Typography>
+
+                <Grid container spacing={1.5}>
+                  {typeModels.map(m => {
+                    const isLoaded = aiHealth?.model === m.filename;
+                    const result = testResults[m.filename];
+                    const isTesting = testingModel === m.filename;
+                    const isLoadingThis = loadingModel === m.filename;
+
+                    return (
+                      <Grid item xs={12} sm={6} md={4} key={m.filename}>
+                        <Paper sx={{
+                          p: 2, bgcolor: isLoaded ? 'rgba(76,175,80,0.08)' : 'rgba(10,10,20,0.6)',
+                          borderRadius: 2, border: `1px solid ${isLoaded ? '#4caf5050' : 'rgba(255,255,255,0.06)'}`,
+                          transition: 'all 0.2s', '&:hover': { border: `1px solid ${tInfo.color}40` }
+                        }}>
+                          {/* Header */}
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                            <Box>
+                              <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', wordBreak: 'break-all' }}>
+                                {m.filename}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+                                {m.size_mb} MB · {formatDate(m.modified)}
+                              </Typography>
+                            </Box>
+                            {isLoaded && (
+                              <Chip label="ACTIVE" size="small" sx={{
+                                height: 20, fontSize: '0.6rem', fontWeight: 900,
+                                bgcolor: 'rgba(76,175,80,0.15)', color: '#4caf50', border: '1px solid #4caf5030'
+                              }} />
+                            )}
+                          </Box>
+
+                          {/* Metadata */}
+                          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
+                            {m.backbone && (
+                              <Chip label={m.backbone.split('/').pop()} size="small"
+                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)' }} />
+                            )}
+                            {m.val_acc != null && (
+                              <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small"
+                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />
+                            )}
+                            {m.epochs && (
+                              <Chip label={`${m.epochs} epochs`} size="small"
+                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.4)' }} />
+                            )}
+                          </Box>
+
+                          {/* Test Results */}
+                          {result && !result.error && (
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1, p: 1, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
+                              <AccuracyMeter value={result.accuracy} label="Accuracy" />
+                              {result.avg_keep_score != null && (
+                                <Box sx={{ flex: 1, fontSize: '0.65rem' }}>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                                    <Typography variant="caption" sx={{ color: '#4caf50', fontSize: '0.65rem' }}>Keep avg: {(result.avg_keep_score * 100).toFixed(0)}%</Typography>
+                                  </Box>
+                                  <LinearProgress variant="determinate" value={result.avg_keep_score * 100}
+                                    sx={{ height: 3, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.05)', mb: 0.5,
+                                      '& .MuiLinearProgress-bar': { bgcolor: '#4caf50', borderRadius: 2 } }} />
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                                    <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.65rem' }}>Delete avg: {(result.avg_delete_score * 100).toFixed(0)}%</Typography>
+                                  </Box>
+                                  <LinearProgress variant="determinate" value={result.avg_delete_score * 100}
+                                    sx={{ height: 3, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.05)',
+                                      '& .MuiLinearProgress-bar': { bgcolor: '#f44336', borderRadius: 2 } }} />
+                                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.6rem', mt: 0.3, display: 'block' }}>
+                                    Separation: {(result.separation * 100).toFixed(0)}% · {result.total_tested} images tested
+                                  </Typography>
+                                </Box>
+                              )}
+                            </Box>
+                          )}
+                          {result?.error && (
+                            <Alert severity="error" sx={{ py: 0, mb: 1, fontSize: '0.7rem' }}>{result.error}</Alert>
+                          )}
+
+                          {/* Actions */}
+                          <Box sx={{ display: 'flex', gap: 0.5, mt: 1 }}>
+                            <Button size="small" variant={isLoaded ? 'contained' : 'outlined'}
+                              disabled={isLoaded || isLoadingThis || !aiHealth}
+                              onClick={() => handleLoad(m)}
+                              sx={{ flex: 1, fontSize: '0.65rem', textTransform: 'none',
+                                borderColor: `${tInfo.color}40`, color: isLoaded ? '#fff' : tInfo.color,
+                                bgcolor: isLoaded ? `${tInfo.color}30` : 'transparent',
+                                '&:hover': { bgcolor: `${tInfo.color}20` } }}>
+                              {isLoadingThis ? <CircularProgress size={14} /> : isLoaded ? '✓ Active' : 'Activate'}
+                            </Button>
+                            <Button size="small" variant="outlined"
+                              disabled={isTesting || !aiHealth}
+                              onClick={() => handleTest(m)}
+                              sx={{ flex: 1, fontSize: '0.65rem', textTransform: 'none',
+                                borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)',
+                                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' } }}>
+                              {isTesting ? <CircularProgress size={14} /> : <><ScienceIcon sx={{ fontSize: 14, mr: 0.5 }} />Test</>}
+                            </Button>
+                            <IconButton size="small" onClick={() => handleDelete(m)}
+                              sx={{ color: 'rgba(255,255,255,0.15)', '&:hover': { color: '#f44336' } }}>
+                              <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Box>
+                        </Paper>
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              </Box>
+            );
+          })
+        )}
+      </Collapse>
+    </Paper>
   );
 }
