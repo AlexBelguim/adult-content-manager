@@ -230,6 +230,10 @@ def api_test_model():
         elif model_type == 'pairwise':
             test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
             test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
+        elif model_type == 'context_binary':
+            from trainer import ContextBinaryClassifier
+            test_model = ContextBinaryClassifier(model_name)
+            test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
         else:
             return jsonify({'success': False, 'error': f'Testing not supported for type: {model_type}'}), 400
         
@@ -273,7 +277,7 @@ def api_test_model():
                 'separation': round(separation, 4),
                 'model_type': model_type,
             }
-        else:
+        elif model_type == 'pairwise':
             # Pairwise: test by scoring keep vs delete pairs
             correct = 0
             total = 0
@@ -296,6 +300,57 @@ def api_test_model():
                 'total_tested': total,
                 'correct': correct,
                 'model_type': model_type,
+            }
+        elif model_type == 'context_binary':
+            # Context-aware binary: uses performer context embeddings from checkpoint
+            saved_contexts = ckpt.get('contexts', {})
+            hs = test_model.backbone.config.hidden_size
+            zero_ctx = torch.zeros(1, hs).to(DEVICE)
+            
+            correct = 0
+            total = 0
+            keep_scores = []
+            delete_scores = []
+            
+            # Build mapping: image path -> performer name (from directory structure)
+            def get_performer(path):
+                parts = Path(path).parts
+                for i, p in enumerate(parts):
+                    if p in ('pics',):
+                        if i > 0: return parts[i-1]
+                return None
+            
+            with torch.no_grad():
+                for img_path, label in [(p, 1) for p in k_sample] + [(p, 0) for p in d_sample]:
+                    try:
+                        perf = get_performer(img_path)
+                        ctx = saved_contexts.get(perf, zero_ctx.squeeze(0)).unsqueeze(0).to(DEVICE) if perf else zero_ctx
+                        
+                        img = Image.open(img_path).convert('RGB')
+                        inp = processor(images=img, return_tensors='pt').to(DEVICE)
+                        logit = test_model(inp['pixel_values'], ctx)
+                        prob = torch.sigmoid(logit).item()
+                        pred = 1 if prob > 0.5 else 0
+                        if pred == label: correct += 1
+                        total += 1
+                        if label == 1: keep_scores.append(prob)
+                        else: delete_scores.append(prob)
+                    except: continue
+            
+            accuracy = correct / max(total, 1)
+            avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
+            avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
+            separation = avg_keep - avg_delete
+            
+            result = {
+                'accuracy': round(accuracy, 4),
+                'total_tested': total,
+                'correct': correct,
+                'avg_keep_score': round(avg_keep, 4),
+                'avg_delete_score': round(avg_delete, 4),
+                'separation': round(separation, 4),
+                'model_type': model_type,
+                'contexts_used': len(saved_contexts),
             }
         
         # Cleanup

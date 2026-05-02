@@ -272,7 +272,7 @@ def train_binary(config):
             training_state['best_val_acc'] = best_acc
             torch.save({'model_state_dict': model.state_dict(), 'val_acc': val_acc,
                         'backbone': backbone, 'model_type': 'binary',
-                        'config': {'model_name': backbone}}, out_path)
+                        'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs}}, out_path)
             tlog(f"  ⭐ Saved best → {out_path.name} ({val_acc:.1%})")
 
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
@@ -347,7 +347,7 @@ def train_pairwise(config):
             training_state['best_val_acc'] = best_acc
             torch.save({'model_state_dict': model.state_dict(), 'val_acc': val_acc,
                         'backbone': backbone, 'model_type': 'pairwise',
-                        'config': {'model_name': backbone}}, out_path)
+                        'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs}}, out_path)
             tlog(f"  ⭐ Saved best → {out_path.name}")
 
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
@@ -475,7 +475,8 @@ def train_context_binary(config):
             training_state['best_val_acc'] = best_acc
             torch.save({'model_state_dict': model.state_dict(), 'val_acc': val_acc,
                         'backbone': backbone, 'model_type': 'context_binary',
-                        'config': {'model_name': backbone}}, out_path)
+                        'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
+                        'contexts': {k: v.cpu() for k, v in contexts.items()}}, out_path)
             tlog(f"  ⭐ Saved → {out_path.name}")
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
