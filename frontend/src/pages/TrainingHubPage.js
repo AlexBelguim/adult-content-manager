@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Paper, Grid, LinearProgress, Chip,
   AppBar, Toolbar, IconButton, Card, CardContent, Select, MenuItem,
-  FormControl, InputLabel, TextField, CircularProgress, Alert, Divider
+  FormControl, InputLabel, TextField, CircularProgress, Alert, Divider,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
+  Collapse
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SchoolIcon from '@mui/icons-material/School';
@@ -19,6 +21,9 @@ import TuneIcon from '@mui/icons-material/Tune';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import PersonIcon from '@mui/icons-material/Person';
 
 const MODEL_TYPES = [
   {
@@ -59,6 +64,8 @@ export default function TrainingHubPage() {
   const [startingTraining, setStartingTraining] = useState(false);
   const pollRef = useRef(null);
   const [aiUrl, setAiUrl] = useState('http://localhost:3344');
+  const [perfStats, setPerfStats] = useState(null);
+  const [showPerfTable, setShowPerfTable] = useState(false);
 
   // Load AI URL from settings
   useEffect(() => {
@@ -72,12 +79,17 @@ export default function TrainingHubPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [summaryRes, healthRes] = await Promise.all([
+      const [summaryRes, healthRes, perfRes] = await Promise.all([
         fetch('/api/training/data-summary'),
-        fetch(`/api/training/status?url=${encodeURIComponent(aiUrl)}`).catch(() => null)
+        fetch(`/api/training/status?url=${encodeURIComponent(aiUrl)}`).catch(() => null),
+        fetch('/api/training/performer-stats').catch(() => null)
       ]);
       const summary = await summaryRes.json();
       setDataSummary(summary);
+      if (perfRes) {
+        const pData = await perfRes.json();
+        setPerfStats(pData);
+      }
       if (healthRes) {
         const health = await healthRes.json();
         setTrainingStatus(health);
@@ -412,6 +424,50 @@ export default function TrainingHubPage() {
                 )}
               </Paper>
             </Grid>
+
+            {/* ── Per-Performer Data Breakdown ──────────────── */}
+            <Grid item xs={12}>
+              <Paper sx={{
+                p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3,
+                border: '1px solid rgba(139,92,246,0.15)'
+              }}>
+                <Box
+                  onClick={() => setShowPerfTable(!showPerfTable)}
+                  sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                >
+                  <Typography variant="h6" sx={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PersonIcon sx={{ color: '#8b5cf6' }} /> Per-Performer Training Data
+                    {perfStats?.summary && (
+                      <Chip label={`${perfStats.summary.withData}/${perfStats.summary.total} have data`}
+                        size="small" sx={{ ml: 1, bgcolor: 'rgba(139,92,246,0.12)', color: '#8b5cf6', fontWeight: 600 }} />
+                    )}
+                  </Typography>
+                  <IconButton sx={{ color: '#8b5cf6' }}>
+                    {showPerfTable ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  </IconButton>
+                </Box>
+
+                {/* Summary chips */}
+                {perfStats?.summary && (
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                    <Chip size="small" label={`Avg Quality: ${perfStats.summary.avgQuality}%`}
+                      sx={{ bgcolor: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }} />
+                    <Chip size="small" label={`Binary-Ready: ${perfStats.summary.readyForBinary}`}
+                      sx={{ bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />
+                    <Chip size="small" label={`Pairwise-Ready: ${perfStats.summary.readyForPairwise}`}
+                      sx={{ bgcolor: 'rgba(33,150,243,0.1)', color: '#2196f3' }} />
+                  </Box>
+                )}
+
+                <Collapse in={showPerfTable}>
+                  {perfStats?.performers?.length > 0 ? (
+                    <PerformerTable performers={perfStats.performers} />
+                  ) : (
+                    <Typography sx={{ mt: 2, color: 'rgba(255,255,255,0.4)' }}>No performer data available</Typography>
+                  )}
+                </Collapse>
+              </Paper>
+            </Grid>
           </Grid>
         )}
       </Box>
@@ -436,5 +492,145 @@ function StatCard({ label, value, ready, color }) {
         <CheckCircleIcon sx={{ display: 'block', mx: 'auto', mt: 0.5, fontSize: 16, color: '#4caf50' }} />
       )}
     </Paper>
+  );
+}
+
+function PerformerTable({ performers }) {
+  const [sortBy, setSortBy] = useState('quality');
+  const [sortDir, setSortDir] = useState('desc');
+  const [filter, setFilter] = useState('');
+
+  const handleSort = (col) => {
+    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortDir('desc'); }
+  };
+
+  const getVal = (p, col) => {
+    switch (col) {
+      case 'quality': return p.quality;
+      case 'name': return p.name.toLowerCase();
+      case 'images': return p.totalImages;
+      case 'kept': return p.filter.kept;
+      case 'deleted': return p.filter.deleted;
+      case 'pairs': return p.pairwise.total;
+      case 'progress': return p.filter.progress;
+      default: return 0;
+    }
+  };
+
+  const sorted = [...performers]
+    .filter(p => !filter || p.name.toLowerCase().includes(filter.toLowerCase()))
+    .sort((a, b) => {
+      const av = getVal(a, sortBy), bv = getVal(b, sortBy);
+      const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+  const qualityColor = (q) => q >= 70 ? '#4caf50' : q >= 40 ? '#ff9800' : q >= 15 ? '#ffeb3b' : 'rgba(255,255,255,0.2)';
+
+  const cols = [
+    { id: 'name', label: 'Performer' },
+    { id: 'quality', label: 'Quality' },
+    { id: 'images', label: 'Total Imgs' },
+    { id: 'progress', label: 'Label Progress' },
+    { id: 'kept', label: 'Kept' },
+    { id: 'deleted', label: 'Deleted' },
+    { id: 'pairs', label: 'Pairs' },
+    { id: 'disk', label: 'On Disk (K/D)' },
+  ];
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <TextField
+        placeholder="Search performers..."
+        value={filter} onChange={e => setFilter(e.target.value)}
+        size="small" fullWidth
+        sx={{ mb: 1, '& .MuiOutlinedInput-root': { color: '#fff', bgcolor: 'rgba(10,10,15,0.5)',
+          '& fieldset': { borderColor: 'rgba(255,255,255,0.1)' } },
+          '& .MuiInputBase-input::placeholder': { color: 'rgba(255,255,255,0.3)' } }}
+      />
+      <TableContainer sx={{ maxHeight: 500, bgcolor: 'transparent' }}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
+              {cols.map(c => (
+                <TableCell key={c.id} sx={{ bgcolor: '#0f0f1a', color: '#8b5cf6',
+                  fontWeight: 800, borderBottom: '1px solid rgba(139,92,246,0.2)', fontSize: '0.75rem' }}>
+                  <TableSortLabel
+                    active={sortBy === c.id} direction={sortBy === c.id ? sortDir : 'asc'}
+                    onClick={() => handleSort(c.id)}
+                    sx={{ color: '#8b5cf6 !important', '& .MuiTableSortLabel-icon': { color: '#8b5cf6 !important' } }}
+                  >
+                    {c.label}
+                  </TableSortLabel>
+                </TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {sorted.map(p => (
+              <TableRow key={p.id} sx={{ '&:hover': { bgcolor: 'rgba(139,92,246,0.05)' } }}>
+                <TableCell sx={{ color: '#fff', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {p.name}
+                  {p.movedToAfter && <Chip label="moved" size="small" sx={{ ml: 0.5, height: 16, fontSize: '0.6rem',
+                    bgcolor: 'rgba(76,175,80,0.12)', color: '#4caf50' }} />}
+                </TableCell>
+                <TableCell sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <Box sx={{ width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', bgcolor: `${qualityColor(p.quality)}20`,
+                    border: `2px solid ${qualityColor(p.quality)}`, fontSize: '0.7rem', fontWeight: 900,
+                    color: qualityColor(p.quality) }}>
+                    {p.quality}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ color: 'rgba(255,255,255,0.7)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {p.totalImages.toLocaleString()}
+                </TableCell>
+                <TableCell sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <LinearProgress variant="determinate" value={p.filter.progress}
+                      sx={{ flexGrow: 1, height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.05)',
+                        '& .MuiLinearProgress-bar': {
+                          bgcolor: p.filter.progress >= 80 ? '#4caf50' : p.filter.progress >= 40 ? '#ff9800' : '#f44336',
+                          borderRadius: 3 } }} />
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', minWidth: 32 }}>
+                      {p.filter.progress}%
+                    </Typography>
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ color: '#4caf50', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {p.filter.kept || '\u2014'}
+                </TableCell>
+                <TableCell sx={{ color: '#f44336', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {p.filter.deleted || '\u2014'}
+                </TableCell>
+                <TableCell sx={{ color: '#2196f3', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {p.pairwise.total || '\u2014'}
+                  {p.pairwise.total > 0 && (
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', display: 'block', fontSize: '0.6rem' }}>
+                      {p.pairwise.intra}i / {p.pairwise.inter}x
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  {p.disk.keep > 0 || p.disk.delete > 0 ? (
+                    <Typography variant="caption">
+                      <span style={{ color: '#4caf50' }}>{p.disk.keep}</span>
+                      {' / '}
+                      <span style={{ color: '#f44336' }}>{p.disk.delete}</span>
+                    </Typography>
+                  ) : (
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.2)' }}>{'\u2014'}</Typography>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'rgba(255,255,255,0.3)' }}>
+        Showing {sorted.length} of {performers.length} performers · Quality = composite score (labels + pairs + disk data)
+      </Typography>
+    </Box>
   );
 }

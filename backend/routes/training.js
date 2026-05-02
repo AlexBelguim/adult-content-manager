@@ -105,6 +105,120 @@ router.get('/data-summary', (req, res) => {
   }
 });
 
+// ── GET /api/training/performer-stats ────────────────────────
+// Per-performer breakdown of training data quality
+router.get('/performer-stats', (req, res) => {
+  try {
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    if (!folder) return res.json({ performers: [] });
+    const basePath = folder.path;
+    const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+
+    // Get all performers from DB
+    const performers = db.prepare(`
+      SELECT id, name, pics_count, pics_filtered, pics_original_count,
+             moved_to_after, ready_to_move, raw_ai_score
+      FROM performers ORDER BY name ASC
+    `).all();
+
+    // Get pairwise pair counts per performer
+    const pairCounts = {};
+    const pairRows = db.prepare(`
+      SELECT performer_id, COUNT(*) as cnt,
+        SUM(CASE WHEN type = 'intra' THEN 1 ELSE 0 END) as intra,
+        SUM(CASE WHEN type = 'inter' THEN 1 ELSE 0 END) as inter,
+        SUM(CASE WHEN type = 'both_bad' THEN 1 ELSE 0 END) as both_bad
+      FROM pairwise_pairs GROUP BY performer_id
+    `).all();
+    for (const r of pairRows) {
+      pairCounts[r.performer_id] = { total: r.cnt, intra: r.intra, inter: r.inter, bothBad: r.both_bad };
+    }
+
+    // Get filter action counts per performer (how many images already labeled)
+    const filterCounts = {};
+    const filterRows = db.prepare(`
+      SELECT performer_id,
+        SUM(CASE WHEN action = 'keep' THEN 1 ELSE 0 END) as kept,
+        SUM(CASE WHEN action = 'delete' THEN 1 ELSE 0 END) as deleted
+      FROM filter_actions GROUP BY performer_id
+    `).all();
+    for (const r of filterRows) {
+      filterCounts[r.performer_id] = { kept: r.kept, deleted: r.deleted };
+    }
+
+    // Count actual keep/delete images on disk for performers that have been moved
+    const afterDir = path.join(basePath, 'after filter performer');
+    const trainingDir = path.join(basePath, 'deleted keep for training');
+    const countPics = (dir) => {
+      try {
+        if (!fs.existsSync(dir)) return 0;
+        return fs.readdirSync(dir).filter(f =>
+          imageExts.includes(path.extname(f).toLowerCase())
+        ).length;
+      } catch { return 0; }
+    };
+
+    const result = performers.map(p => {
+      const pairs = pairCounts[p.id] || { total: 0, intra: 0, inter: 0, bothBad: 0 };
+      const filter = filterCounts[p.id] || { kept: 0, deleted: 0 };
+      const totalLabeled = filter.kept + filter.deleted;
+      const totalOriginal = p.pics_original_count || p.pics_count || 0;
+      const labelProgress = totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0;
+
+      // Disk counts (only for moved performers)
+      let keepOnDisk = 0, deleteOnDisk = 0;
+      if (p.moved_to_after) {
+        keepOnDisk = countPics(path.join(afterDir, p.name, 'pics'));
+        deleteOnDisk = countPics(path.join(trainingDir, p.name, 'pics'));
+      }
+
+      // Data quality score (0-100)
+      let quality = 0;
+      if (totalLabeled > 0) quality += 20;
+      if (totalLabeled >= 50) quality += 15;
+      if (totalLabeled >= 200) quality += 15;
+      if (pairs.total >= 10) quality += 15;
+      if (pairs.total >= 50) quality += 10;
+      if (filter.kept > 0 && filter.deleted > 0) quality += 15; // has both classes
+      if (keepOnDisk > 0 && deleteOnDisk > 0) quality += 10;
+
+      return {
+        id: p.id,
+        name: p.name,
+        totalImages: totalOriginal,
+        movedToAfter: !!p.moved_to_after,
+        aiScore: p.raw_ai_score,
+        filter: {
+          kept: filter.kept,
+          deleted: filter.deleted,
+          total: totalLabeled,
+          progress: Math.round(labelProgress * 100)
+        },
+        pairwise: pairs,
+        disk: { keep: keepOnDisk, delete: deleteOnDisk },
+        quality
+      };
+    });
+
+    // Sort by quality descending, then by name
+    result.sort((a, b) => b.quality - a.quality || a.name.localeCompare(b.name));
+
+    res.json({
+      performers: result,
+      summary: {
+        total: result.length,
+        withData: result.filter(p => p.quality > 0).length,
+        readyForBinary: result.filter(p => p.disk.keep > 0 && p.disk.delete > 0).length,
+        readyForPairwise: result.filter(p => p.pairwise.total >= 10).length,
+        avgQuality: result.length > 0 ? Math.round(result.reduce((s, p) => s + p.quality, 0) / result.length) : 0
+      }
+    });
+  } catch (err) {
+    console.error('[Training] Performer stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/training/export-pairs ──────────────────────────
 // Export pairwise training data (winner/loser paths)
 router.post('/export-pairs', (req, res) => {
