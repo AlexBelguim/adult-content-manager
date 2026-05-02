@@ -182,20 +182,22 @@ router.get('/performer-stats', (req, res) => {
       const pairs = pairCounts[p.id] || { total: 0, intra: 0, inter: 0, bothBad: 0 };
       const filter = filterCounts[p.id] || { kept: 0, deleted: 0 };
       
-      // Total "labeled" units = keep/delete actions + pair counts
-      // (Approximate: each pair involves images, helps progress)
-      const totalLabeled = filter.kept + filter.deleted + (pairs.total * 2); 
-      const totalOriginal = p.pics_original_count || p.pics_count || 0;
-      
-      // If moved_to_after, filtering is 100% complete (all images sorted)
-      // SQLite stores as 1/0, so we check explicitly
-      const isMoved = p.moved_to_after === 1 || p.moved_to_after === true;
-      const labelProgress = isMoved ? 1 :
-        (totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0);
-
       // Disk counts from pre-scan
       const keepOnDisk = keepDiskCounts[p.name] || 0;
       const deleteOnDisk = deleteDiskCounts[p.name] || 0;
+
+      // Real kept count is either DB actions or physical files on disk
+      // (Allows performers moved to 'after' to show all images as kept)
+      const realKept = Math.max(filter.kept, keepOnDisk);
+      const realDeleted = Math.max(filter.deleted, deleteOnDisk);
+      
+      const totalLabeled = realKept + realDeleted + (pairs.total * 2); 
+      const totalOriginal = p.pics_original_count || p.pics_count || 0;
+      
+      // If moved_to_after or disk matches/exceeds original, it's 100%
+      const isMoved = p.moved_to_after === 1 || p.moved_to_after === true;
+      const labelProgress = isMoved || (totalOriginal > 0 && realKept >= totalOriginal) ? 1 :
+        (totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0);
 
       // Data quality score (0-100)
       let quality = 0;
@@ -204,7 +206,7 @@ router.get('/performer-stats', (req, res) => {
       if (totalLabeled >= 200) quality += 15;
       if (pairs.total >= 10) quality += 15;
       if (pairs.total >= 50) quality += 10;
-      if (filter.kept > 0 && filter.deleted > 0) quality += 15; // has both classes
+      if (realKept > 0 && realDeleted > 0) quality += 15; // has both classes
       if (keepOnDisk > 0 && deleteOnDisk > 0) quality += 10;
 
       return {
@@ -214,8 +216,8 @@ router.get('/performer-stats', (req, res) => {
         movedToAfter: isMoved,
         aiScore: p.raw_ai_score,
         filter: {
-          kept: filter.kept,
-          deleted: filter.deleted,
+          kept: realKept,
+          deleted: realDeleted,
           total: totalLabeled,
           progress: Math.round(labelProgress * 100)
         },

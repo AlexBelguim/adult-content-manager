@@ -689,7 +689,7 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
       const res = await fetch(`${aiUrl}/test_model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: model.filename, base_path: basePath, sample_size: 50 })
+        body: JSON.stringify({ model_id: model.filename, base_path: basePath, sample_size: 100 })
       });
       const data = await res.json();
       if (data.success) {
