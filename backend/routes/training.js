@@ -146,17 +146,37 @@ router.get('/performer-stats', (req, res) => {
       filterCounts[r.performer_id] = { kept: r.kept, deleted: r.deleted };
     }
 
-    // Count actual keep/delete images on disk for performers that have been moved
-    const afterDir = path.join(basePath, 'after filter performer');
-    const trainingDir = path.join(basePath, 'deleted keep for training');
-    const countPics = (dir) => {
-      try {
-        if (!fs.existsSync(dir)) return 0;
-        return fs.readdirSync(dir).filter(f =>
-          imageExts.includes(path.extname(f).toLowerCase())
-        ).length;
-      } catch { return 0; }
-    };
+    // Disk scan is optional (slow on network drives) — use ?scan_disk=true
+    const scanDisk = req.query.scan_disk === 'true';
+    let keepDiskCounts = {}, deleteDiskCounts = {};
+    
+    if (scanDisk) {
+      const afterDir = path.join(basePath, 'after filter performer');
+      const trainingDir = path.join(basePath, 'deleted keep for training');
+      
+      const scanDirCounts = (baseDir) => {
+        const counts = {};
+        try {
+          if (!fs.existsSync(baseDir)) return counts;
+          const dirs = fs.readdirSync(baseDir, { withFileTypes: true })
+            .filter(d => d.isDirectory() && !d.name.startsWith('.'));
+          for (const d of dirs) {
+            const picsDir = path.join(baseDir, d.name, 'pics');
+            try {
+              if (fs.existsSync(picsDir)) {
+                counts[d.name] = fs.readdirSync(picsDir).filter(f =>
+                  imageExts.includes(path.extname(f).toLowerCase())
+                ).length;
+              }
+            } catch (_e) { /* skip */ }
+          }
+        } catch (_e) { /* skip */ }
+        return counts;
+      };
+      
+      keepDiskCounts = scanDirCounts(afterDir);
+      deleteDiskCounts = scanDirCounts(trainingDir);
+    }
 
     const result = performers.map(p => {
       const pairs = pairCounts[p.id] || { total: 0, intra: 0, inter: 0, bothBad: 0 };
@@ -165,12 +185,9 @@ router.get('/performer-stats', (req, res) => {
       const totalOriginal = p.pics_original_count || p.pics_count || 0;
       const labelProgress = totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0;
 
-      // Disk counts (only for moved performers)
-      let keepOnDisk = 0, deleteOnDisk = 0;
-      if (p.moved_to_after) {
-        keepOnDisk = countPics(path.join(afterDir, p.name, 'pics'));
-        deleteOnDisk = countPics(path.join(trainingDir, p.name, 'pics'));
-      }
+      // Disk counts from pre-scan
+      const keepOnDisk = keepDiskCounts[p.name] || 0;
+      const deleteOnDisk = deleteDiskCounts[p.name] || 0;
 
       // Data quality score (0-100)
       let quality = 0;

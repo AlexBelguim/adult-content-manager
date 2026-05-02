@@ -10,6 +10,12 @@ if (workbox) {
     workbox.core.skipWaiting();
     workbox.core.clientsClaim();
 
+    // NEVER cache API calls — always go to network
+    workbox.routing.registerRoute(
+        ({ url }) => url.pathname.startsWith('/api/'),
+        new workbox.strategies.NetworkOnly()
+    );
+
     // Cache the underlying font files with a cache-first strategy for 1 year.
     workbox.routing.registerRoute(
         ({ url }) => url.origin === 'https://fonts.gstatic.com',

@@ -78,22 +78,24 @@ export default function TrainingHubPage() {
   // Load data summary + AI health
   const loadData = useCallback(async () => {
     setLoading(true);
+    const safeJson = async (res) => {
+      if (!res || !res.ok) return null;
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return null;
+      try { return await res.json(); } catch (_) { return null; }
+    };
     try {
       const [summaryRes, healthRes, perfRes] = await Promise.all([
         fetch('/api/training/data-summary'),
         fetch(`/api/training/status?url=${encodeURIComponent(aiUrl)}`).catch(() => null),
         fetch('/api/training/performer-stats').catch(() => null)
       ]);
-      const summary = await summaryRes.json();
-      setDataSummary(summary);
-      if (perfRes) {
-        const pData = await perfRes.json();
-        setPerfStats(pData);
-      }
-      if (healthRes) {
-        const health = await healthRes.json();
-        setTrainingStatus(health);
-      }
+      const summary = await safeJson(summaryRes);
+      if (summary) setDataSummary(summary);
+      const pData = await safeJson(perfRes);
+      if (pData) setPerfStats(pData);
+      const health = await safeJson(healthRes);
+      if (health) setTrainingStatus(health);
     } catch (e) {
       console.error('Failed to load data:', e);
     }
