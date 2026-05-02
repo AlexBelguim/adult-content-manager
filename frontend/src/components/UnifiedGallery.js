@@ -961,7 +961,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
             <funscript-image
               src={item.url}
               mode="modal"
-              view="stretch"
+              view="contain"
               tagassign="true"
             ></funscript-image>
             <Box sx={{
@@ -1008,7 +1008,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
               src={item.url}
               type="video"
               mode="modal"
-              view="stretch"
+              view="contain"
               funscriptmode="true"
               filtermode="true"
               loopmode="true"
