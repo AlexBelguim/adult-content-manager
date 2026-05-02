@@ -421,4 +421,91 @@ router.get('/status', async (req, res) => {
   }
 });
 
+// ── POST /api/training/test-model ────────────────────────────
+// Relay test request with local data to AI server
+router.post('/test-model', async (req, res) => {
+  const { model_id, sample_size = 100 } = req.body;
+  const aiUrl = getAiServerUrl();
+
+  try {
+    const db = req.app.get('db');
+    const settings = await db.all('SELECT key, value FROM settings WHERE key = ?', ['base_path']);
+    const basePath = settings[0]?.value || '';
+    
+    if (!basePath) {
+      return res.status(400).json({ error: 'Base path not set in settings' });
+    }
+
+    const afterDir = path.join(basePath, 'after filter performer');
+    const trainingDir = path.join(basePath, 'deleted keep for training');
+
+    const scanImages = (dir) => {
+      if (!fs.existsSync(dir)) return [];
+      const images = [];
+      const performers = fs.readdirSync(dir);
+      for (const perf of performers) {
+        const perfPath = path.join(dir, perf);
+        if (!fs.statSync(perfPath).isDirectory()) continue;
+        
+        // Check pics folder or root
+        let picDir = path.join(perfPath, 'pics');
+        if (!fs.existsSync(picDir)) picDir = perfPath;
+        
+        const files = fs.readdirSync(picDir);
+        for (const f of files) {
+          if (/\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(f)) {
+            images.push({ path: path.join(picDir, f), performer: perf });
+          }
+        }
+      }
+      return images;
+    };
+
+    const keepPool = scanImages(afterDir);
+    const deletePool = scanImages(trainingDir);
+
+    if (keepPool.length === 0 || deletePool.length === 0) {
+      return res.status(400).json({ error: 'Not enough local labeled images found for testing' });
+    }
+
+    // Sample
+    const sampleCount = Math.min(sample_size / 2, keepPool.length, deletePool.length);
+    const sampledKeep = keepPool.sort(() => 0.5 - Math.random()).slice(0, sampleCount);
+    const sampledDelete = deletePool.sort(() => 0.5 - Math.random()).slice(0, sampleCount);
+
+    // Encode to base64
+    const packageImages = (list, label) => {
+      return list.map(img => {
+        try {
+          const data = fs.readFileSync(img.path);
+          const ext = path.extname(img.path).substring(1);
+          return {
+            data: `data:image/${ext};base64,${data.toString('base64')}`,
+            label: label,
+            performer: img.performer
+          };
+        } catch (e) { return null; }
+      }).filter(Boolean);
+    };
+
+    const payload = {
+      model_id,
+      images: [
+        ...packageImages(sampledKeep, 1),
+        ...packageImages(sampledDelete, 0)
+      ]
+    };
+
+    console.log(`[Training] Sending ${payload.images.length} images to AI server for testing...`);
+    const response = await axios.post(`${aiUrl}/test_model`, payload, {
+      timeout: 120000 // 2 minute timeout for testing
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('[Training] Test relay error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

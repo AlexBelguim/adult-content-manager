@@ -683,13 +683,10 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
   const handleTest = async (model) => {
     setTestingModel(model.filename);
     try {
-      const settingsRes = await fetch('/api/settings/base_path');
-      const settingsData = await settingsRes.json();
-      const basePath = settingsData.value || '';
-      const res = await fetch(`${aiUrl}/test_model`, {
+      const res = await fetch('/api/training/test-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: model.filename, base_path: basePath, sample_size: 100 })
+        body: JSON.stringify({ model_id: model.filename, sample_size: 100 })
       });
       const data = await res.json();
       if (data.success) {

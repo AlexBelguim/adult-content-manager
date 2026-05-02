@@ -204,54 +204,58 @@ def api_test_model():
     
     log(f"🧪 Testing model: {model_id} (sample={sample_size})")
     
-    import random, glob
+    import random, base64, io
+    from PIL import Image
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
     
-    def scan_images(directory):
-        imgs = []
-        p = Path(directory)
-        if not p.exists(): return imgs
-        for f in p.rglob('*'):
-            if f.suffix.lower() in IMAGE_EXTS:
-                imgs.append(str(f))
-        return imgs
+    # Check if images were provided in the request (Remote Testing)
+    provided_images = data.get('images') # Expected: [{'data': 'base64...', 'label': 1/0}, ...]
     
-    # Load checkpoint early to get type
-    try:
-        ckpt = torch.load(target, map_location=DEVICE, weights_only=False)
-        m_type = ckpt.get('model_type', 'unknown')
-        if m_type == 'unknown':
-            if 'pairwise' in model_id.lower(): m_type = 'pairwise'
-            elif 'context' in model_id.lower(): m_type = 'context_binary'
-            else: m_type = 'binary'
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'Failed to load model: {e}'}), 500
+    k_sample = []
+    d_sample = []
 
-    # Resolve paths - try local, then parent if relative
-    def resolve_path(p_str, folder):
-        p = Path(p_str) / folder
-        if p.exists(): return p
-        # Fallback to parent dir (common if running inside AI-Inference-App)
-        p = Path(__file__).parent.parent / folder
-        if p.exists(): return p
-        return Path(p_str) / folder # return original guess for error message
+    if provided_images:
+        log(f"📦 Received {len(provided_images)} images via API for testing")
+        for img_obj in provided_images:
+            if img_obj.get('label') == 1: k_sample.append(img_obj)
+            else: d_sample.append(img_obj)
+    else:
+        # Fallback to local disk scan (Legacy/Local mode)
+        def scan_images(directory):
+            imgs = []
+            p = Path(directory)
+            if not p.exists(): return imgs
+            for f in p.rglob('*'):
+                if f.suffix.lower() in IMAGE_EXTS:
+                    imgs.append(str(f))
+            return imgs
 
-    keep_dir = resolve_path(base_path, 'after filter performer')
-    delete_dir = resolve_path(base_path, 'deleted keep for training')
-    
-    log(f"🔎 Scanning: {keep_dir} and {delete_dir}")
-    
-    keep_imgs = scan_images(keep_dir)
-    delete_imgs = scan_images(delete_dir)
-    
-    if not keep_imgs:
-        return jsonify({'success': False, 'error': f'No images found in "{keep_dir}". Check your Base Path in settings.'}), 400
-    if not delete_imgs:
-        return jsonify({'success': False, 'error': f'No images found in "{delete_dir}". Check your Base Path in settings.'}), 400
-    
-    # Sample
-    k_sample = random.sample(keep_imgs, min(sample_size, len(keep_imgs)))
-    d_sample = random.sample(delete_imgs, min(sample_size, len(delete_imgs)))
+        # Resolve paths - try local, then parent if relative
+        def resolve_path(p_str, folder):
+            p = Path(p_str) / folder
+            if p.exists(): return p
+            p = Path(__file__).parent.parent / folder
+            if p.exists(): return p
+            return Path(p_str) / folder
+
+        keep_dir = resolve_path(base_path, 'after filter performer')
+        delete_dir = resolve_path(base_path, 'deleted keep for training')
+        
+        keep_imgs = scan_images(keep_dir)
+        delete_imgs = scan_images(delete_dir)
+        
+        if not keep_imgs or not delete_imgs:
+            return jsonify({'success': False, 'error': 'No local images found and no remote images provided.'}), 400
+        
+        # Sample local paths
+        k_paths = random.sample(keep_imgs, min(sample_size, len(keep_imgs)))
+        d_paths = random.sample(delete_imgs, min(sample_size, len(delete_imgs)))
+        k_sample = [{'path': p, 'label': 1} for p in k_paths]
+        d_sample = [{'path': p, 'label': 0} for p in d_paths]
+
+    # Combine for testing
+    test_samples = k_sample + d_sample
+    random.shuffle(test_samples)
     
     # Load model temporarily
     try:
@@ -280,6 +284,16 @@ def api_test_model():
         
         processor = AutoImageProcessor.from_pretrained(model_name)
         
+        # Helper to load image from sample object
+        def load_img(sample_obj):
+            if 'data' in sample_obj:
+                # Base64 data
+                img_data = base64.b64decode(sample_obj['data'].split(',')[-1])
+                return Image.open(io.BytesIO(img_data)).convert('RGB')
+            else:
+                # Local path
+                return Image.open(sample_obj['path']).convert('RGB')
+
         # Test binary models
         if model_type == 'binary':
             correct = 0
@@ -288,9 +302,10 @@ def api_test_model():
             delete_scores = []
             
             with torch.no_grad():
-                for img_path, label in [(p, 1) for p in k_sample] + [(p, 0) for p in d_sample]:
+                for sample in test_samples:
                     try:
-                        img = Image.open(img_path).convert('RGB')
+                        img = load_img(sample)
+                        label = sample['label']
                         inp = processor(images=img, return_tensors='pt').to(DEVICE)
                         logit = test_model(inp['pixel_values'])
                         prob = torch.sigmoid(logit).item()
@@ -319,13 +334,16 @@ def api_test_model():
             # Pairwise: test by scoring keep vs delete pairs
             correct = 0
             total = 0
-            pairs_tested = min(sample_size, len(k_sample), len(d_sample))
+            # Split samples back to pairs
+            ks = [s for s in test_samples if s['label'] == 1]
+            ds = [s for s in test_samples if s['label'] == 0]
+            pairs_tested = min(len(ks), len(ds))
             
             with torch.no_grad():
                 for i in range(pairs_tested):
                     try:
-                        keep_img = Image.open(k_sample[i]).convert('RGB')
-                        del_img = Image.open(d_sample[i]).convert('RGB')
+                        keep_img = load_img(ks[i])
+                        del_img = load_img(ds[i])
                         k_inp = processor(images=keep_img, return_tensors='pt').to(DEVICE)
                         d_inp = processor(images=del_img, return_tensors='pt').to(DEVICE)
                         k_score, d_score = test_model(k_inp['pixel_values'], d_inp['pixel_values'])
@@ -351,20 +369,23 @@ def api_test_model():
             delete_scores = []
             
             # Build mapping: image path -> performer name (from directory structure)
-            def get_performer(path):
-                parts = Path(path).parts
-                for i, p in enumerate(parts):
-                    if p in ('pics',):
-                        if i > 0: return parts[i-1]
+            def get_performer(sample):
+                if 'performer' in sample: return sample['performer']
+                if 'path' in sample:
+                    parts = Path(sample['path']).parts
+                    for i, p in enumerate(parts):
+                        if p in ('pics',):
+                            if i > 0: return parts[i-1]
                 return None
             
             with torch.no_grad():
-                for img_path, label in [(p, 1) for p in k_sample] + [(p, 0) for p in d_sample]:
+                for sample in test_samples:
                     try:
-                        perf = get_performer(img_path)
+                        perf = get_performer(sample)
                         ctx = saved_contexts.get(perf, zero_ctx.squeeze(0)).unsqueeze(0).to(DEVICE) if perf else zero_ctx
                         
-                        img = Image.open(img_path).convert('RGB')
+                        img = load_img(sample)
+                        label = sample['label']
                         inp = processor(images=img, return_tensors='pt').to(DEVICE)
                         logit = test_model(inp['pixel_values'], ctx)
                         prob = torch.sigmoid(logit).item()
