@@ -141,6 +141,14 @@ function TasteDashboardPage() {
           </Box>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => window.location.href = '/training-hub'}
+            sx={{ fontWeight: 700, borderColor: 'rgba(139,92,246,0.4)', color: '#8b5cf6' }}
+          >
+            🎓 Training Hub
+          </Button>
           <Chip
             icon={ai.online ? <CloudDone /> : <CloudOff />}
             label={ai.online ? `AI: ${ai.device}` : 'AI Offline'}

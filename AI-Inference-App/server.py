@@ -353,6 +353,31 @@ def score_images():
     log(f"✅ Request completed in {duration:.2f}s")
     return jsonify({'success': True, 'results': results, 'duration': duration})
 
+# ── Training Endpoints ────────────────────────────────────────────────────────
+from trainer import training_state, start_training
+
+@app.route('/train', methods=['POST'])
+def api_train():
+    """Start a training job in the background."""
+    data = request.json or {}
+    # Unload current inference model to free VRAM for training
+    global MODEL, PROCESSOR, MODEL_NAME
+    if MODEL is not None:
+        log("♻️ Unloading inference model to free VRAM for training...")
+        MODEL = None
+        PROCESSOR = None
+        MODEL_NAME = None
+        torch.cuda.empty_cache()
+
+    ok, msg = start_training(data)
+    status_code = 200 if ok else 409
+    return jsonify({'success': ok, 'message': msg}), status_code
+
+@app.route('/training_status', methods=['GET'])
+def api_training_status():
+    """Poll current training status."""
+    return jsonify(training_state)
+
 if __name__ == '__main__':
     # Models are now loaded dynamically by the frontend on mount
     log("🚀 AI Server starting on http://0.0.0.0:3344 (Idle - Waiting for model load)")
