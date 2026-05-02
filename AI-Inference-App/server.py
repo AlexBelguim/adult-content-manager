@@ -227,16 +227,27 @@ def api_test_model():
     except Exception as e:
         return jsonify({'success': False, 'error': f'Failed to load model: {e}'}), 500
 
-    keep_dir = Path(base_path) / 'after filter performer'
-    delete_dir = Path(base_path) / 'deleted keep for training'
+    # Resolve paths - try local, then parent if relative
+    def resolve_path(p_str, folder):
+        p = Path(p_str) / folder
+        if p.exists(): return p
+        # Fallback to parent dir (common if running inside AI-Inference-App)
+        p = Path(__file__).parent.parent / folder
+        if p.exists(): return p
+        return Path(p_str) / folder # return original guess for error message
+
+    keep_dir = resolve_path(base_path, 'after filter performer')
+    delete_dir = resolve_path(base_path, 'deleted keep for training')
+    
+    log(f"🔎 Scanning: {keep_dir} and {delete_dir}")
     
     keep_imgs = scan_images(keep_dir)
     delete_imgs = scan_images(delete_dir)
     
     if not keep_imgs:
-        return jsonify({'success': False, 'error': f'No images found in "after filter performer". Need labeled data to test.'}), 400
+        return jsonify({'success': False, 'error': f'No images found in "{keep_dir}". Check your Base Path in settings.'}), 400
     if not delete_imgs:
-        return jsonify({'success': False, 'error': f'No images found in "deleted keep for training". Need both classes to test.'}), 400
+        return jsonify({'success': False, 'error': f'No images found in "{delete_dir}". Check your Base Path in settings.'}), 400
     
     # Sample
     k_sample = random.sample(keep_imgs, min(sample_size, len(keep_imgs)))
