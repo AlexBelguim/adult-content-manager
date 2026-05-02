@@ -498,7 +498,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                     image={`/api/files/raw?path=${encodeURIComponent(item.path)}&thumbnail=true`}
                     sx={{ 
                       width: '100%',
-                      aspectRatio: '3/4',
+                      height: 280,
                       objectFit: 'cover', 
                       opacity: item.decision === 'delete' ? 0.4 : 1 
                     }}
