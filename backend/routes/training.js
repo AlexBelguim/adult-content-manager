@@ -181,11 +181,16 @@ router.get('/performer-stats', (req, res) => {
     const result = performers.map(p => {
       const pairs = pairCounts[p.id] || { total: 0, intra: 0, inter: 0, bothBad: 0 };
       const filter = filterCounts[p.id] || { kept: 0, deleted: 0 };
-      const totalLabeled = filter.kept + filter.deleted;
+      
+      // Total "labeled" units = keep/delete actions + pair counts
+      // (Approximate: each pair involves images, helps progress)
+      const totalLabeled = filter.kept + filter.deleted + (pairs.total * 2); 
       const totalOriginal = p.pics_original_count || p.pics_count || 0;
+      
       // If moved_to_after, filtering is 100% complete (all images sorted)
-      // Otherwise, use filter_actions count as progress indicator
-      const labelProgress = p.moved_to_after ? 1 :
+      // SQLite stores as 1/0, so we check explicitly
+      const isMoved = p.moved_to_after === 1 || p.moved_to_after === true;
+      const labelProgress = isMoved ? 1 :
         (totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0);
 
       // Disk counts from pre-scan
@@ -206,7 +211,7 @@ router.get('/performer-stats', (req, res) => {
         id: p.id,
         name: p.name,
         totalImages: totalOriginal,
-        movedToAfter: !!p.moved_to_after,
+        movedToAfter: isMoved,
         aiScore: p.raw_ai_score,
         filter: {
           kept: filter.kept,

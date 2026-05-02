@@ -154,7 +154,22 @@ def api_list_models():
         }
         try:
             ckpt = torch.load(m, map_location='cpu', weights_only=False)
-            info['type'] = ckpt.get('model_type', 'unknown')
+            m_type = ckpt.get('model_type', 'unknown')
+            
+            # Auto-detect type if unknown
+            if m_type == 'unknown':
+                if 'pairwise' in m.name.lower() or 'preference' in m.name.lower():
+                    m_type = 'pairwise'
+                elif 'context' in m.name.lower():
+                    m_type = 'context_binary'
+                elif 'binary' in m.name.lower() or 'filtering' in m.name.lower():
+                    m_type = 'binary'
+                # Check state dict keys as fallback
+                sd = ckpt.get('model_state_dict', {})
+                if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
+                elif any('head' in k for k in sd.keys()) and m_type == 'unknown': m_type = 'pairwise'
+            
+            info['type'] = m_type
             info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
             info['val_acc'] = ckpt.get('val_acc')
             config = ckpt.get('config', {})
@@ -201,14 +216,27 @@ def api_test_model():
                 imgs.append(str(f))
         return imgs
     
+    # Load checkpoint early to get type
+    try:
+        ckpt = torch.load(target, map_location=DEVICE, weights_only=False)
+        m_type = ckpt.get('model_type', 'unknown')
+        if m_type == 'unknown':
+            if 'pairwise' in model_id.lower(): m_type = 'pairwise'
+            elif 'context' in model_id.lower(): m_type = 'context_binary'
+            else: m_type = 'binary'
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Failed to load model: {e}'}), 500
+
     keep_dir = Path(base_path) / 'after filter performer'
     delete_dir = Path(base_path) / 'deleted keep for training'
     
     keep_imgs = scan_images(keep_dir)
     delete_imgs = scan_images(delete_dir)
     
-    if not keep_imgs or not delete_imgs:
-        return jsonify({'success': False, 'error': 'Need both keep and delete images for testing'}), 400
+    if not keep_imgs:
+        return jsonify({'success': False, 'error': f'No images found in "after filter performer". Need labeled data to test.'}), 400
+    if not delete_imgs:
+        return jsonify({'success': False, 'error': f'No images found in "deleted keep for training". Need both classes to test.'}), 400
     
     # Sample
     k_sample = random.sample(keep_imgs, min(sample_size, len(keep_imgs)))
@@ -216,10 +244,9 @@ def api_test_model():
     
     # Load model temporarily
     try:
-        ckpt = torch.load(target, map_location=DEVICE, weights_only=False)
         config = ckpt.get('config', {})
-        model_name = config.get('model_name', 'facebook/dinov2-large')
-        model_type = ckpt.get('model_type', 'binary')
+        model_name = config.get('model_name') or ckpt.get('backbone') or 'facebook/dinov2-large'
+        model_type = m_type
         
         from model_dinov2 import DinoV2PreferenceModel
         
