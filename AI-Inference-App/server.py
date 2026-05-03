@@ -509,19 +509,33 @@ def classify_batch():
                 with torch.no_grad():
                     inputs = PROCESSOR(images=imgs, return_tensors="pt")
                     pixel_values = inputs['pixel_values'].to(DEVICE)
+                    MODEL.eval()
                     raw_scores = MODEL.forward_single(pixel_values)
+                    
+                    # Sanitize raw scores to prevent NaN/Inf before sigmoid
+                    raw_scores = torch.nan_to_num(raw_scores, nan=0.0, posinf=10.0, neginf=-10.0)
+                    
                     normalized = torch.sigmoid(raw_scores) * 100
                     scores = normalized.cpu().numpy().flatten().tolist()
                     
+                    import math
                     for p, s in zip(valid_paths, scores):
-                        decision = "keep" if s >= threshold else "delete"
+                        # Ensure score is a valid float for JSON
+                        safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
+                        decision = "keep" if safe_score >= threshold else "delete"
                         results.append({
                             'path': p, 
-                            'score': s, 
+                            'score': float(safe_score), 
                             'decision': decision
                         })
+                log(f"  📦 Batch {i//batch_size + 1} complete ({len(imgs)} images)")
+            except torch.cuda.OutOfMemoryError:
+                log("  ❌ OOM Error during batch - clearing cache...")
+                torch.cuda.empty_cache()
+                continue
             except Exception as e:
                 log(f"  ❌ Batch Error: {e}")
+                continue
 
     log(f"✅ Classification completed in {time.time() - start_time:.2f}s")
     

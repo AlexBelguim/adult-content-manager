@@ -84,7 +84,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     }
   }, [performer, performerId]);
 
-  const fetchBatch = useCallback(async (isPrefetch = false) => {
+  const fetchBatch = useCallback(async (isPrefetch = false, overrideThreshold = null) => {
     console.log(`[SmartFilter] fetchBatch called. isPrefetch=${isPrefetch}, performerId=${performer?.id}, isStarted=${isStarted}, inferenceUrl=${inferenceUrl}`);
     if (!performer?.id || !isStarted) {
       console.log('[SmartFilter] Skipping - performer or isStarted not ready');
@@ -100,7 +100,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     abortControllerRef.current = new AbortController();
 
     try {
-      const targetThreshold = (!firstBatchDone && !isPrefetch) ? -1 : threshold;
+      const targetThreshold = overrideThreshold !== null ? overrideThreshold : ((!firstBatchDone && !isPrefetch) ? -1 : threshold);
       const queryParams = new URLSearchParams({
         threshold: targetThreshold,
         ai_server_url: inferenceUrl,
@@ -121,19 +121,25 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
       // Update threshold ONLY on the very first real batch fetch
       if (data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
-        setThreshold(Math.round(data.threshold));
+        const newThreshold = Math.round(data.threshold);
+        console.log(`[SmartFilter] Updating threshold from ${threshold} to ${newThreshold}`);
+        setThreshold(newThreshold);
         setFirstBatchDone(true);
-      }
-
-      if (isPrefetch) {
+        
+        // Use the FRESH threshold for pre-fetch
+        console.log(`[SmartFilter] Starting pre-fetch with fresh threshold: ${newThreshold}`);
+        fetchBatch(true, newThreshold);
+      } else if (isPrefetch) {
         setNextBatch(data.results || []);
         setLoadingNext(false);
       } else {
         console.log(`[SmartFilter] Setting results (${(data.results || []).length} items) and loading=false`);
         setResults(data.results || []);
         setLoading(false);
-        // Pre-fetch the next one
-        fetchBatch(true);
+        // Pre-fetch the next one (if not already done by threshold update block)
+        if (!isPrefetch) {
+          fetchBatch(true, threshold);
+        }
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -348,14 +354,16 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     );
   }
 
-  if (!performer) {
-    return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: '#0a0a0f' }}>
-        <Typography variant="h6" sx={{ color: '#f44336' }}>Performer not found</Typography>
-        <Button onClick={onBack} variant="outlined" sx={{ color: '#fff', borderColor: '#fff' }}>Back</Button>
-      </Box>
-    );
-  }
+  // Safety check for render crash
+  try {
+    if (!performer) {
+      return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: '#0a0a0f' }}>
+          <CircularProgress />
+          <Typography sx={{ color: '#888' }}>Loading Performer...</Typography>
+        </Box>
+      );
+    }
 
   const keepCount = results.filter(r => r.decision === 'keep').length;
   const deleteCount = results.filter(r => r.decision === 'delete').length;
@@ -514,7 +522,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                   </Box>
 
                   {/* Probability Bar + Score Text */}
-                  {item.score !== undefined && (
+                  {item.score !== undefined && !isNaN(item.score) && (
                     <Box sx={{ position: 'absolute', bottom: 0, left: 0, width: '100%' }}>
                       {/* Score text */}
                       <Typography 
@@ -530,7 +538,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                       </Typography>
                        <LinearProgress 
                         variant="determinate" 
-                        value={item.score} 
+                        value={Math.min(100, Math.max(0, item.score))} 
                         sx={{ 
                           height: 6, bgcolor: 'rgba(255,255,255,0.1)',
                           '& .MuiLinearProgress-bar': {
@@ -582,7 +590,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         </DialogActions>
       </Dialog>
     </Box>
-  );
+    );
+  } catch (renderError) {
+    console.error('[SmartFilter] RENDER CRASH:', renderError);
+    return (
+      <Box sx={{ p: 5, bgcolor: '#1a0a0a', minHeight: '100vh', color: '#ff4444', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography variant="h4">⚠️ Component Crash</Typography>
+        <Typography variant="body1" sx={{ mt: 2 }}>{renderError.message}</Typography>
+        <pre style={{ fontSize: '10px', opacity: 0.5, overflow: 'auto', maxWidth: '80vw', maxHeight: '50vh', mt: 2, bgcolor: 'black', p: 2 }}>{renderError.stack}</pre>
+        <Button onClick={() => window.location.reload()} variant="contained" sx={{ mt: 4 }}>Reload Page</Button>
+      </Box>
+    );
+  }
 };
 
 export default SmartFilterPage;

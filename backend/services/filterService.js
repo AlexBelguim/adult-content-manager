@@ -1032,8 +1032,8 @@ class FilterService {
       try {
         const healthRes = await axios.get(`${AI_URL}/health`, { timeout: 5000 });
         if (!healthRes.data.model_loaded) {
-          console.log(`[SmartBatch] Model not loaded, auto-loading...`);
-          await axios.post(`${AI_URL}/load_model`, {}, { timeout: 60000 });
+          console.log(`[SmartBatch] Model not loaded, auto-loading binary_filtering.pt...`);
+          await axios.post(`${AI_URL}/load_model`, { model_id: 'binary_filtering.pt' }, { timeout: 60000 });
           console.log(`[SmartBatch] Model loaded successfully`);
         }
       } catch (healthErr) {
