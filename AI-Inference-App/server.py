@@ -36,6 +36,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL = None
 PROCESSOR = None
 MODEL_NAME = None
+LOADED_MODEL_ID = None
 
 def log(msg):
     """Immediate flushing logger to bypass terminal buffering."""
@@ -60,8 +61,8 @@ def find_models():
     models_path = Path(__file__).parent / 'models'
     return list(models_path.glob('*.pt')) if models_path.exists() else []
 
-def load_model(checkpoint_path):
-    global MODEL, PROCESSOR, MODEL_NAME
+def load_model(checkpoint_path, model_id=None):
+    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID
     try:
         log(f"📦 Loading checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
@@ -90,6 +91,7 @@ def load_model(checkpoint_path):
         )
         
         log(f"✅ Model loaded successfully on {DEVICE}")
+        LOADED_MODEL_ID = model_id
         return True, "Success"
     except Exception as e:
         log(f"❌ Error loading model: {e}")
@@ -102,6 +104,7 @@ def health():
         'device': str(DEVICE), 
         'model_loaded': MODEL is not None,
         'model_name': MODEL_NAME,
+        'current_model': LOADED_MODEL_ID,
         'vram_allocated': f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.2f} MB" if torch.cuda.is_available() else "0 MB"
     })
 
@@ -125,16 +128,17 @@ def api_load_model():
         models.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         target = models[0]
         
-    success, msg = load_model(str(target))
+    success, msg = load_model(str(target), model_id=target.name)
     return jsonify({"success": success, "message": msg, "model": MODEL_NAME})
 
 @app.route('/unload_model', methods=['POST'])
 def api_unload_model():
-    global MODEL, PROCESSOR, MODEL_NAME
+    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID
     log("♻️ Unloading model to free resources...")
     MODEL = None
     PROCESSOR = None
     MODEL_NAME = None
+    LOADED_MODEL_ID = None
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return jsonify({"success": True, "message": "Model unloaded"})
@@ -183,7 +187,7 @@ def api_list_models():
         "success": True,
         "models": result,
         "current_loaded": MODEL_NAME,
-        "active_model_file": None  # frontend can track this
+        "active_model_file": LOADED_MODEL_ID
     })
 
 @app.route('/test_model', methods=['POST'])

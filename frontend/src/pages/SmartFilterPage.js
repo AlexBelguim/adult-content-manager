@@ -172,7 +172,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         const data = await response.json();
         if (data.success) {
           setAvailableModels(data.models || []);
-          const current = data.current || '';
+          const current = data.active_model_file || '';
           
           // If no model is loaded, or it's not the filtering one, load the filtering one
           if (!current.includes('binary_filtering')) {
@@ -405,9 +405,15 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                     '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#00d9ff' },
                   }}
                 >
-                  {availableModels.map(m => (
-                    <MenuItem key={m} value={m}>{m.replace('.pt', '').replace('_', ' ')}</MenuItem>
-                  ))}
+                  {availableModels.map(m => {
+                    const name = typeof m === 'string' ? m : (m.filename || '');
+                    if (!name) return null;
+                    return (
+                      <MenuItem key={name} value={name}>
+                        {name.replace('.pt', '').replace('_', ' ')}
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
               </FormControl>
             </Box>
