@@ -98,10 +98,40 @@ async function scanBeforeUploadFolder(basePath) {
 
     const performerPath = path.join(uploadPath, entry.name);
     const stats = await scanPerformerFolder(performerPath);
+
+    // Gather up to 6 preview image paths
+    const previewImages = [];
+    const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    try {
+      const picsPath = path.join(performerPath, 'pics');
+      if (await fs.pathExists(picsPath)) {
+        const pics = await fs.readdir(picsPath);
+        for (const pic of pics) {
+          if (previewImages.length >= 6) break;
+          if (imageExts.includes(path.extname(pic).toLowerCase())) {
+            previewImages.push(path.join(picsPath, pic));
+          }
+        }
+      }
+      // Also check root of performer folder for loose images
+      if (previewImages.length < 6) {
+        const rootFiles = await fs.readdir(performerPath);
+        for (const file of rootFiles) {
+          if (previewImages.length >= 6) break;
+          if (imageExts.includes(path.extname(file).toLowerCase())) {
+            previewImages.push(path.join(performerPath, file));
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore errors reading preview images
+    }
+
     performers.push({
       name: entry.name,
       path: performerPath,
-      stats
+      stats,
+      previewImages
     });
   }
 

@@ -525,7 +525,18 @@ function AppContent({ onThemeChange, currentThemeId }) {
               <UploadQueuePage basePath={basePath} />
             } />
             <Route path="/local-import" element={
-              <LocalImportPage basePath={basePath} />
+              <>
+                <Toolbar
+                  mode={mode} subMode={subMode}
+                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
+                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
+                  handyCode={handyCode} handyConnected={handyConnected}
+                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
+                  onScanPerformers={onScanPerformers} isScanning={isScanning}
+                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
+                />
+                <LocalImportPage basePath={basePath} />
+              </>
             } />
             <Route path="/tindersorting" element={
               <TinderSortingPage basePath={basePath} />

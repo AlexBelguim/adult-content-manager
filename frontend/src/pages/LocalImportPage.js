@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box,
     Typography,
@@ -14,12 +14,9 @@ import {
     Alert,
     Divider,
     Grid,
-    Card,
-    CardContent,
     Switch,
     FormControlLabel,
     Tooltip,
-    Fade,
     Checkbox,
     TextField
 } from '@mui/material';
@@ -55,6 +52,8 @@ function LocalImportPage({ basePath }) {
     const [createHashes, setCreateHashes] = useState(true);
     // name overrides: folderName -> custom performer name
     const [nameOverrides, setNameOverrides] = useState({});
+    // Track which performer's preview is expanded
+    const [expandedPreview, setExpandedPreview] = useState(null);
 
     const formatFileSize = (gb) => {
         if (!gb || gb === 0) return '0 B';
@@ -230,8 +229,8 @@ function LocalImportPage({ basePath }) {
     const queuedJobs = serverQueue;
 
     return (
-        <Box sx={{ p: 3, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
-            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <Box sx={{ p: 3, height: 'calc(100vh - 64px)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
+            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: (theme) => `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.primary.light} 90%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                 📂 Local Import
             </Typography>
 
@@ -254,8 +253,6 @@ function LocalImportPage({ basePath }) {
                         sx={{
                             p: 3,
                             height: '100%',
-                            
-                            
                             borderRadius: 2,
                             display: 'flex',
                             flexDirection: 'column'
@@ -281,7 +278,7 @@ function LocalImportPage({ basePath }) {
                                 sx={{
                                     borderColor: 'primary.main',
                                     color: 'primary.main',
-                                    '&:hover': { borderColor: '#66BB6A', bgcolor: 'action.hover' }
+                                    '&:hover': { borderColor: 'primary.light', bgcolor: 'action.hover' }
                                 }}
                             >
                                 {scanning ? 'Scanning...' : 'Scan'}
@@ -289,11 +286,11 @@ function LocalImportPage({ basePath }) {
                         </Box>
 
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                            Place performer folders in <code style={{ color: 'primary.main' }}>before upload/</code> then scan to import them.
+                            Place performer folders in <code style={{ color: 'inherit' }}>before upload/</code> then scan to import them.
                             Files are moved directly — no slow upload needed.
                         </Typography>
 
-                        {scanning && <LinearProgress sx={{ mb: 2, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }} />}
+                        {scanning && <LinearProgress sx={{ mb: 2 }} />}
 
                         {/* Performer list */}
                         <Box sx={{ flex: 1, overflow: 'auto', mb: 2 }}>
@@ -305,8 +302,9 @@ function LocalImportPage({ basePath }) {
                             ) : (
                                 <List sx={{ p: 0 }}>
                                     {performers.map((performer, index) => {
-                                        const totalFiles = (performer.stats?.pics_count || 0) + (performer.stats?.vids_count || 0) + (performer.stats?.funscript_files_count || 0);
                                         const isSelected = selectedPerformers.has(performer.name);
+                                        const isExpanded = expandedPreview === performer.name;
+                                        const previews = performer.previewImages || [];
                                         return (
                                             <React.Fragment key={performer.name}>
                                                 {index > 0 && <Divider sx={{ borderColor: 'divider' }} />}
@@ -316,60 +314,101 @@ function LocalImportPage({ basePath }) {
                                                         py: 1.5,
                                                         px: 1,
                                                         cursor: 'pointer',
-                                                        bgcolor: isSelected ? 'rgba(76, 175, 80, 0.08)' : 'transparent',
-                                                        borderLeft: isSelected ? '3px solid #4CAF50' : '3px solid transparent',
+                                                        bgcolor: isSelected ? (theme) => `${theme.palette.primary.main}14` : 'transparent',
+                                                        borderLeft: (theme) => isSelected ? `3px solid ${theme.palette.primary.main}` : '3px solid transparent',
                                                         transition: 'all 0.15s',
-                                                        '&:hover': { bgcolor: 'action.hover' }
+                                                        '&:hover': { bgcolor: 'action.hover' },
+                                                        flexDirection: 'column',
+                                                        alignItems: 'stretch'
                                                     }}
                                                 >
-                                                    <Checkbox
-                                                        checked={isSelected}
-                                                        sx={{ mr: 1, color: 'text.disabled', '&.Mui-checked': { color: 'primary.main' } }}
-                                                        size="small"
-                                                    />
-                                                    <ListItemText
-                                                        primary={
-                                                            <TextField
-                                                                value={nameOverrides[performer.name] ?? performer.name}
-                                                                onChange={e => setNameOverrides(prev => ({ ...prev, [performer.name]: e.target.value }))}
-                                                                onClick={e => e.stopPropagation()}
-                                                                size="small"
-                                                                variant="standard"
-                                                                inputProps={{ style: { fontSize: '0.875rem', fontWeight: 500,  padding: '2px 0' } }}
-                                                                sx={{
-                                                                    width: '100%',
-                                                                    '& .MuiInput-underline:before': { borderBottomColor: 'divider' },
-                                                                    '& .MuiInput-underline:hover:before': { borderBottomColor: '#777' },
-                                                                    '& .MuiInput-underline:after': { borderBottomColor: 'primary.main' },
-                                                                }}
-                                                            />
-                                                        }
-                                                        secondary={
-                                                            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
-                                                                {performer.stats?.pics_count > 0 && (
-                                                                    <Chip
-                                                                        icon={<ImageIcon sx={{ color: '#90caf9 !important', fontSize: '14px !important' }} />}
-                                                                        label={performer.stats.pics_count}
-                                                                        size="small"
-                                                                        sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'rgba(144, 202, 249, 0.1)', color: '#90caf9' }}
-                                                                    />
-                                                                )}
-                                                                {performer.stats?.vids_count > 0 && (
-                                                                    <Chip
-                                                                        icon={<MovieIcon sx={{ color: '#ce93d8 !important', fontSize: '14px !important' }} />}
-                                                                        label={performer.stats.vids_count}
-                                                                        size="small"
-                                                                        sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'rgba(206, 147, 216, 0.1)', color: '#ce93d8' }}
-                                                                    />
-                                                                )}
-                                                                <Chip
-                                                                    label={formatFileSize(performer.stats?.total_size_gb || 0)}
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                                                        <Checkbox
+                                                            checked={isSelected}
+                                                            sx={{ mr: 1, color: 'text.disabled', '&.Mui-checked': { color: 'primary.main' } }}
+                                                            size="small"
+                                                        />
+                                                        <ListItemText
+                                                            primary={
+                                                                <TextField
+                                                                    value={nameOverrides[performer.name] ?? performer.name}
+                                                                    onChange={e => setNameOverrides(prev => ({ ...prev, [performer.name]: e.target.value }))}
+                                                                    onClick={e => e.stopPropagation()}
                                                                     size="small"
-                                                                    sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'background.default', color: 'text.secondary' }}
+                                                                    variant="standard"
+                                                                    inputProps={{ style: { fontSize: '0.875rem', fontWeight: 500, padding: '2px 0' } }}
+                                                                    sx={{
+                                                                        width: '100%',
+                                                                        '& .MuiInput-underline:before': { borderBottomColor: 'divider' },
+                                                                        '& .MuiInput-underline:hover:before': { borderBottomColor: 'text.secondary' },
+                                                                        '& .MuiInput-underline:after': { borderBottomColor: 'primary.main' },
+                                                                    }}
                                                                 />
-                                                            </Box>
-                                                        }
-                                                    />
+                                                            }
+                                                            secondary={
+                                                                <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                                                    {performer.stats?.pics_count > 0 && (
+                                                                        <Chip
+                                                                            icon={<ImageIcon sx={{ color: 'info.main', fontSize: '14px !important' }} />}
+                                                                            label={performer.stats.pics_count}
+                                                                            size="small"
+                                                                            sx={{ height: 20, fontSize: '0.7rem', bgcolor: (theme) => `${theme.palette.info.main}1A`, color: 'info.main' }}
+                                                                        />
+                                                                    )}
+                                                                    {performer.stats?.vids_count > 0 && (
+                                                                        <Chip
+                                                                            icon={<MovieIcon sx={{ color: 'secondary.main', fontSize: '14px !important' }} />}
+                                                                            label={performer.stats.vids_count}
+                                                                            size="small"
+                                                                            sx={{ height: 20, fontSize: '0.7rem', bgcolor: (theme) => `${theme.palette.secondary.main}1A`, color: 'secondary.main' }}
+                                                                        />
+                                                                    )}
+                                                                    <Chip
+                                                                        label={formatFileSize(performer.stats?.total_size_gb || 0)}
+                                                                        size="small"
+                                                                        sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'background.default', color: 'text.secondary' }}
+                                                                    />
+                                                                    {previews.length > 0 && (
+                                                                        <Chip
+                                                                            icon={<ImageIcon sx={{ fontSize: '14px !important' }} />}
+                                                                            label={isExpanded ? 'Hide' : 'Preview'}
+                                                                            size="small"
+                                                                            onClick={(e) => { e.stopPropagation(); setExpandedPreview(isExpanded ? null : performer.name); }}
+                                                                            sx={{ height: 20, fontSize: '0.7rem', cursor: 'pointer', bgcolor: 'action.selected', color: 'text.primary' }}
+                                                                        />
+                                                                    )}
+                                                                </Box>
+                                                            }
+                                                        />
+                                                    </Box>
+                                                    {/* Preview images strip */}
+                                                    {isExpanded && previews.length > 0 && (
+                                                        <Box
+                                                            onClick={e => e.stopPropagation()}
+                                                            sx={{
+                                                                display: 'flex', gap: 0.5, mt: 1, ml: 5,
+                                                                overflowX: 'auto', pb: 0.5,
+                                                                '&::-webkit-scrollbar': { height: 4 },
+                                                                '&::-webkit-scrollbar-thumb': { bgcolor: 'divider', borderRadius: 2 }
+                                                            }}
+                                                        >
+                                                            {previews.map((imgPath, i) => (
+                                                                <Box
+                                                                    key={i}
+                                                                    component="img"
+                                                                    src={`/api/files/preview?path=${encodeURIComponent(imgPath)}`}
+                                                                    alt={`Preview ${i + 1}`}
+                                                                    sx={{
+                                                                        width: 70, height: 70, objectFit: 'cover',
+                                                                        borderRadius: 1, border: 1, borderColor: 'divider',
+                                                                        flexShrink: 0, cursor: 'pointer',
+                                                                        transition: 'transform 0.15s, border-color 0.15s',
+                                                                        '&:hover': { transform: 'scale(1.1)', borderColor: 'primary.main', zIndex: 1 }
+                                                                    }}
+                                                                />
+                                                            ))}
+                                                        </Box>
+                                                    )}
                                                 </ListItem>
                                             </React.Fragment>
                                         );
@@ -386,7 +425,7 @@ function LocalImportPage({ basePath }) {
                                         size="small"
                                         startIcon={<SelectAllIcon />}
                                         onClick={toggleAll}
-                                        sx={{ color: 'text.secondary', textTransform: 'none', '&:hover': {  } }}
+                                        sx={{ color: 'text.secondary', textTransform: 'none' }}
                                     >
                                         {selectedPerformers.size === performers.length ? 'Deselect All' : 'Select All'}
                                     </Button>
@@ -402,13 +441,13 @@ function LocalImportPage({ basePath }) {
                                                 checked={createHashes}
                                                 onChange={(e) => setCreateHashes(e.target.checked)}
                                                 size="small"
-                                                sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: 'primary.main' }, '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: 'primary.main' } }}
+                                                color="primary"
                                             />
                                         }
                                         label={
                                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                 <HashIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-                                                <Typography variant="body2" color="#ccc">Create Hashes</Typography>
+                                                <Typography variant="body2" color="text.secondary">Create Hashes</Typography>
                                             </Box>
                                         }
                                         sx={{ mb: 2, ml: 0 }}
@@ -423,10 +462,8 @@ function LocalImportPage({ basePath }) {
                                     disabled={importing || selectedPerformers.size === 0}
                                     sx={{
                                         py: 1.5,
-                                        background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)',
                                         fontWeight: 'bold',
-                                        boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)',
-                                        '&:disabled': { background: '#333' }
+                                        boxShadow: (theme) => `0 3px 5px 2px ${theme.palette.primary.main}4D`,
                                     }}
                                 >
                                     {importing ? 'Importing...' : `Import ${selectedPerformers.size} Performer${selectedPerformers.size !== 1 ? 's' : ''}`}
@@ -444,8 +481,6 @@ function LocalImportPage({ basePath }) {
                             height: '100%',
                             display: 'flex',
                             flexDirection: 'column',
-                            
-                            
                             borderRadius: 2
                         }}
                     >
@@ -466,7 +501,7 @@ function LocalImportPage({ basePath }) {
                                 <Button
                                     size="small"
                                     onClick={handleClearCompleted}
-                                    sx={{ color: 'text.secondary', '&:hover': {  bgcolor: 'background.default' } }}
+                                    sx={{ color: 'text.secondary', '&:hover': { bgcolor: 'background.default' } }}
                                 >
                                     Clear Completed
                                 </Button>
@@ -513,7 +548,7 @@ function LocalImportPage({ basePath }) {
                                                                 <Chip
                                                                     label="local"
                                                                     size="small"
-                                                                    sx={{ height: 18, fontSize: '0.65rem', bgcolor: 'rgba(76, 175, 80, 0.15)', color: 'primary.main' }}
+                                                                    sx={{ height: 18, fontSize: '0.65rem', bgcolor: (theme) => `${theme.palette.success.main}26`, color: 'success.main' }}
                                                                 />
                                                             )}
                                                             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -532,17 +567,17 @@ function LocalImportPage({ basePath }) {
                                                                     <LinearProgress
                                                                         variant="determinate"
                                                                         value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }}
+                                                                        sx={{ height: 6, borderRadius: 3 }}
                                                                     />
                                                                 </Box>
                                                             )}
                                                             {job.status === 'error' && (
-                                                                <Typography variant="caption" color="error">
+                                                                <Typography variant="caption" color="error.main">
                                                                     {job.error}
                                                                 </Typography>
                                                             )}
                                                             {job.status === 'completed' && (
-                                                                <Typography variant="caption" sx={{ color: '#66bb6a' }}>
+                                                                <Typography variant="caption" color="success.main">
                                                                     Completed at {formatTime(job.completedAt)}
                                                                 </Typography>
                                                             )}
@@ -561,7 +596,7 @@ function LocalImportPage({ basePath }) {
                                                                     console.error('Failed to remove job:', err);
                                                                 }
                                                             }}
-                                                            sx={{ color: 'text.disabled', '&:hover': { color: '#f44336' } }}
+                                                            sx={{ color: 'text.disabled', '&:hover': { color: 'error.main' } }}
                                                         >
                                                             <DeleteIcon />
                                                         </IconButton>
