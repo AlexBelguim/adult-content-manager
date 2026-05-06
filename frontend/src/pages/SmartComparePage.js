@@ -16,7 +16,9 @@ import {
   DialogActions,
   Slider,
   Card,
-  CardContent
+  CardContent,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import {
   ArrowBack,
@@ -36,6 +38,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 function SmartComparePage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const theme = useTheme();
+  const isSmall = useMediaQuery('(max-width:900px)');
+  const isLandscape = useMediaQuery('(max-height:500px) and (orientation:landscape)');
   const [performers, setPerformers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [randomPics, setRandomPics] = useState({});
@@ -84,8 +89,9 @@ function SmartComparePage() {
   }, [picsPerPerformer]);
 
   const performSmartSelection = useCallback((allPerformers, count = performerCount) => {
-    const unrated = allPerformers.filter(p => !p.performer_rating);
-    const rated = allPerformers.filter(p => p.performer_rating > 0);
+    // Use explicit null/undefined checks so that a 0-star rating is treated as "rated"
+    const unrated = allPerformers.filter(p => p.performer_rating === null || p.performer_rating === undefined);
+    const rated = allPerformers.filter(p => p.performer_rating !== null && p.performer_rating !== undefined);
 
     let selection = [];
     if (unrated.length > 0) {
@@ -424,21 +430,27 @@ function SmartComparePage() {
     }
   };
 
+  const avatarSz = isLandscape ? 60 : (isSmall ? 80 : 120);
+  const imgW = isLandscape ? 100 : (isSmall ? 120 : 160);
+  const imgH = isLandscape ? 140 : (isSmall ? 180 : 240);
+  const infoW = isLandscape ? 130 : (isSmall ? 160 : 220);
+  const voteW = isLandscape ? 120 : (isSmall ? 150 : 200);
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#0a0a0f', color: '#fff', pb: 12 }}>
-      <AppBar position="sticky" sx={{ bgcolor: 'rgba(15, 15, 26, 0.8)', backdropFilter: 'blur(10px)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <Toolbar sx={{ justifyContent: 'space-between' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', color: 'text.primary', pb: compareList.length === 2 ? 0 : (isLandscape ? 8 : 12) }}>
+      <AppBar position="sticky" color="default" elevation={0}>
+        <Toolbar sx={{ justifyContent: 'space-between', minHeight: isLandscape ? 48 : undefined, flexWrap: isSmall ? 'wrap' : 'nowrap', gap: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <IconButton onClick={() => navigate('/group-rate')} sx={{ color: '#fff' }}>
+            <IconButton onClick={() => navigate('/group-rate')} sx={{ color: 'text.primary' }}>
               <ArrowBack />
             </IconButton>
-            <Typography variant="h5" sx={{ fontWeight: 800, background: 'linear-gradient(45deg, #7c4dff, #00e5ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <Typography variant={isSmall ? 'h6' : 'h5'} sx={{ fontWeight: 800, color: 'primary.main' }}>
               SMART COMPARE
             </Typography>
             {globalModel ? (
-              <Box sx={{ px: 1.5, py: 0.5, bgcolor: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.2)', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Star sx={{ fontSize: 14, color: '#00e5ff' }} />
-                <Typography variant="caption" sx={{ color: '#00e5ff', fontWeight: 'bold' }}>MODEL ACTIVE</Typography>
+              <Box sx={{ px: 1.5, py: 0.5, bgcolor: `${theme.palette.secondary.main}18`, border: `1px solid ${theme.palette.secondary.main}40`, borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Star sx={{ fontSize: 14, color: 'secondary.main' }} />
+                <Typography variant="caption" sx={{ color: 'secondary.main', fontWeight: 'bold' }}>MODEL ACTIVE</Typography>
               </Box>
             ) : (
               <Box sx={{ px: 1.5, py: 0.5, bgcolor: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px' }}>
@@ -471,7 +483,7 @@ function SmartComparePage() {
                 size="small"
                 value={performerCount} min={2} max={10} 
                 onChange={(e, v) => setPerformerCount(v)} 
-                sx={{ color: '#7c4dff', py: 1 }}
+                sx={{ color: 'primary.main', py: 1 }}
               />
             </Box>
             <Box sx={{ width: 150 }}>
@@ -484,146 +496,279 @@ function SmartComparePage() {
                 min={1} 
                 max={51} 
                 onChange={(e, v) => setPicsPerPerformer(v)} 
-                sx={{ color: '#00e5ff', py: 1 }}
+                sx={{ color: 'secondary.main', py: 1 }}
               />
             </Box>
-            <IconButton onClick={() => setShowSettings(true)} sx={{ color: 'rgba(255,255,255,0.7)' }}>
+            <IconButton onClick={() => setShowSettings(true)} sx={{ color: 'text.secondary' }}>
               <Settings />
             </IconButton>
           </Box>
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ mt: 4 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <AnimatePresence mode="popLayout">
-            {compareList.map((performer, index) => (
-              <motion.div
-                key={performer.id}
-                layout
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.3 }}
-              >
-                <Paper
-                  sx={{
-                    p: 2,
-                    bgcolor: 'rgba(25, 25, 35, 0.6)',
-                    borderRadius: '24px',
-                    border: aiAnalysis?.winnerId === performer.id ? '2px solid #00e5ff' : '1px solid rgba(255,255,255,0.05)',
-                    boxShadow: aiAnalysis?.winnerId === performer.id ? '0 0 30px rgba(0, 229, 255, 0.1)' : 'none',
-                    backdropFilter: 'blur(12px)',
-                    position: 'relative',
-                    overflow: 'visible'
-                  }}
+      {/* ═══ DUEL MODE (1v1) ═══ */}
+      {compareList.length === 2 ? (
+        <Box sx={{ flex: 1, display: 'flex', height: isLandscape ? 'calc(100vh - 48px)' : 'calc(100vh - 64px)', overflow: 'hidden' }}>
+          {compareList.map((performer, index) => {
+            const pics = randomPics[performer.id] || [];
+            const isWinner = aiAnalysis?.winnerId === performer.id;
+            const aiScore = aiAnalysis?.scores?.[performer.id];
+
+            return (
+              <React.Fragment key={performer.id}>
+                {index === 1 && (
+                  /* VS Divider */
+                  <Box sx={{
+                    width: 4, bgcolor: 'divider', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', position: 'relative', flexShrink: 0
+                  }}>
+                    <Box sx={{
+                      position: 'absolute', bgcolor: 'background.paper', border: 2,
+                      borderColor: 'primary.main', borderRadius: '50%',
+                      width: isLandscape ? 32 : 44, height: isLandscape ? 32 : 44,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5,
+                      boxShadow: `0 0 12px ${theme.palette.primary.main}40`
+                    }}>
+                      <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 900, fontSize: isLandscape ? '0.65rem' : '0.8rem' }}>VS</Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Performer Column */}
+                <Box sx={{
+                  flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0,
+                  cursor: 'pointer', position: 'relative',
+                  transition: 'all 0.2s',
+                  '&:hover': { bgcolor: `${theme.palette.primary.main}08` },
+                  '&:active': { bgcolor: `${theme.palette.success.main}12` },
+                  ...(isWinner && { boxShadow: `inset 0 0 40px ${theme.palette.secondary.main}15` })
+                }}
+                  onClick={() => handleCompareVote(performer.id, compareList.filter(p => p.id !== performer.id).map(p => p.id))}
                 >
-                  {/* Rank & Reorder */}
-                  <Box sx={{ position: 'absolute', left: -15, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: 1, zIndex: 10 }}>
-                    <Box sx={{ width: 40, height: 40, bgcolor: index === 0 ? '#ff9800' : '#2a2a40', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem', boxShadow: '0 4px 15px rgba(0,0,0,0.5)' }}>
-                      {index + 1}
+                  {/* Performer Header */}
+                  <Box sx={{
+                    display: 'flex', alignItems: 'center', gap: isLandscape ? 1 : 1.5,
+                    px: isLandscape ? 1 : 2, py: isLandscape ? 0.5 : 1.5,
+                    borderBottom: 1, borderColor: 'divider',
+                    background: isWinner
+                      ? `linear-gradient(135deg, ${theme.palette.secondary.main}12, transparent)`
+                      : `linear-gradient(135deg, ${theme.palette.primary.main}08, transparent)`
+                  }}>
+                    <Box sx={{
+                      width: isLandscape ? 36 : 56, height: isLandscape ? 36 : 56,
+                      borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
+                      border: `2px solid ${isWinner ? theme.palette.secondary.main : theme.palette.primary.main}`,
+                      boxShadow: isWinner ? `0 0 12px ${theme.palette.secondary.main}50` : 'none'
+                    }}>
+                      <img src={`/api/files/raw?path=${encodeURIComponent(performer.thumbnail)}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </Box>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                      <IconButton size="small" onClick={() => handleInModalMove(index, 'up')} disabled={index === 0} sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff', '&:hover': { bgcolor: '#7c4dff' } }}>
-                        <ArrowUpward fontSize="small" />
-                      </IconButton>
-                      <IconButton size="small" onClick={() => handleInModalMove(index, 'down')} disabled={index === compareList.length - 1} sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff', '&:hover': { bgcolor: '#7c4dff' } }}>
-                        <ArrowDownward fontSize="small" />
-                      </IconButton>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant={isLandscape ? 'body2' : 'h6'} noWrap sx={{ fontWeight: 800 }}>
+                        {performer.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Rating value={performer.performer_rating || 0} precision={0.1} readOnly size="small" sx={{ color: 'warning.main', fontSize: isLandscape ? '0.75rem' : undefined }} />
+                        <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 'bold' }}>
+                          {(performer.performer_rating || 0).toFixed(2)}
+                        </Typography>
+                      </Box>
                     </Box>
+                    {/* AI Score Badge */}
+                    {aiScore !== undefined && (
+                      <Box sx={{
+                        px: 1, py: 0.5, borderRadius: 2, flexShrink: 0,
+                        bgcolor: `${isWinner ? theme.palette.secondary.main : theme.palette.primary.main}18`,
+                        border: `1px solid ${isWinner ? theme.palette.secondary.main : theme.palette.primary.main}40`,
+                        textAlign: 'center'
+                      }}>
+                        <Typography variant="caption" sx={{ color: isWinner ? 'secondary.main' : 'primary.main', fontWeight: 900, display: 'block', lineHeight: 1.2 }}>
+                          {scoreToStars(aiScore, performer.id)}★
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
+                          {aiScore.toFixed(0)}%
+                        </Typography>
+                      </Box>
+                    )}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => { e.stopPropagation(); fetchRandomPics(performer.id); }}
+                      sx={{ color: 'text.secondary', flexShrink: 0 }}
+                    >
+                      <Refresh fontSize="small" />
+                    </IconButton>
                   </Box>
 
-                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    {/* Performer Info */}
-                    <Box sx={{ width: 220, flexShrink: 0, textAlign: 'center' }}>
-                      <Box sx={{ width: 120, height: 120, borderRadius: '50%', margin: '0 auto 15px', overflow: 'hidden', border: '3px solid #7c4dff', boxShadow: '0 0 20px rgba(124, 77, 255, 0.3)' }}>
-                        <img src={`/api/files/raw?path=${encodeURIComponent(performer.thumbnail)}`} alt={performer.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      </Box>
-                      <Typography variant="h5" sx={{ fontWeight: 900 }}>{performer.name}</Typography>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 1, gap: 1 }}>
-                        <Rating value={performer.performer_rating || 0} precision={0.1} readOnly size="small" sx={{ color: '#ffc107' }} />
-                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#ffc107' }}>{(performer.performer_rating || 0).toFixed(2)}</Typography>
-                      </Box>
-                      <Button
-                        size="small"
-                        startIcon={<Refresh sx={{ fontSize: '14px' }} />}
-                        onClick={() => fetchRandomPics(performer.id)}
-                        sx={{ color: 'rgba(255,255,255,0.4)', mt: 1, fontSize: '0.7rem' }}
+                  {/* Scrollable Image Grid */}
+                  <Box
+                    onClick={(e) => e.stopPropagation()}
+                    sx={{
+                      flex: 1, overflowY: 'auto', p: 0.5,
+                      display: 'grid',
+                      gridTemplateColumns: isLandscape ? 'repeat(auto-fill, minmax(100px, 1fr))' : 'repeat(auto-fill, minmax(140px, 1fr))',
+                      gap: 0.5, alignContent: 'start',
+                      '&::-webkit-scrollbar': { width: 4 },
+                      '&::-webkit-scrollbar-thumb': { bgcolor: `${theme.palette.primary.main}40`, borderRadius: 2 }
+                    }}
+                  >
+                    {pics.length > 0 ? pics.map((pic, i) => (
+                      <Box
+                        key={i}
+                        sx={{
+                          aspectRatio: '3/4', borderRadius: 1.5, overflow: 'hidden',
+                          bgcolor: 'action.hover', cursor: 'pointer',
+                          border: `1px solid ${theme.palette.divider}`,
+                          transition: 'all 0.2s',
+                          '&:hover': { transform: 'scale(1.03)', boxShadow: `0 4px 16px ${theme.palette.primary.main}25`, zIndex: 2 }
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCompareVote(performer.id, compareList.filter(p => p.id !== performer.id).map(p => p.id));
+                        }}
                       >
-                        Refresh Photos
-                      </Button>
-                    </Box>
-
-                    {/* Image Strip */}
-                    <Box sx={{ flex: 1, display: 'flex', gap: 1, overflowX: 'auto', py: 1 }}>
-                      {(randomPics[performer.id] || Array(picsPerPerformer).fill(null)).map((pic, i) => (
-                        <Box key={i} sx={{ minWidth: 160, height: 240, borderRadius: '16px', bgcolor: 'rgba(0,0,0,0.3)', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
-                          {pic ? (
-                            <img src={`/api/files/raw?path=${encodeURIComponent(pic.path)}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                              <CircularProgress size={24} color="inherit" sx={{ opacity: 0.3 }} />
-                            </Box>
-                          )}
-                        </Box>
-                      ))}
-                    </Box>
-
-                    {/* AI & Vote */}
-                    <Box sx={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {aiAnalysis?.scores[performer.id] !== undefined && (
-                        <Box sx={{ p: 2, bgcolor: 'rgba(0, 229, 255, 0.05)', borderRadius: '20px', border: '1px solid rgba(0, 229, 255, 0.2)' }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                            <Typography variant="caption" sx={{ color: '#00e5ff', fontWeight: 'bold' }}>AI PREDICTION</Typography>
-                            <Typography variant="caption" sx={{ color: 'rgba(0, 229, 255, 0.6)', fontWeight: 'bold' }}>
-                              {aiAnalysis.scores[performer.id].toFixed(1)}%
-                            </Typography>
-                          </Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                            <Typography variant="h6" sx={{ color: '#00e5ff', fontWeight: 900 }}>{scoreToStars(aiAnalysis.scores[performer.id], performer.id)}</Typography>
-                            <Star sx={{ color: '#00e5ff', fontSize: 18 }} />
-                          </Box>
-                          <Rating value={parseFloat(scoreToStars(aiAnalysis.scores[performer.id], performer.id))} precision={0.1} readOnly size="small" sx={{ color: '#00e5ff' }} />
-                        </Box>
-                      )}
-
-                      {compareList.length === 2 && (
-                        <Button
-                          variant="contained"
-                          fullWidth
-                          onClick={() => handleCompareVote(performer.id, compareList.filter(p => p.id !== performer.id).map(p => p.id))}
-                          sx={{ 
-                            py: 2,
-                            borderRadius: '16px',
-                            background: aiAnalysis?.winnerId === performer.id ? 'linear-gradient(45deg, #00e5ff, #00b8d4)' : 'linear-gradient(45deg, #7c4dff, #6200ea)',
-                            fontWeight: 'bold',
-                            fontSize: '1rem',
-                            boxShadow: '0 8px 20px rgba(0,0,0,0.3)',
-                            '&:hover': { transform: 'scale(1.02)' },
-                            transition: 'all 0.2s'
-                          }}
-                        >
-                          PICK WINNER
-                        </Button>
-                      )}
-                    </Box>
+                        <img src={`/api/files/raw?path=${encodeURIComponent(pic.path)}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </Box>
+                    )) : Array(picsPerPerformer).fill(null).map((_, i) => (
+                      <Box key={i} sx={{ aspectRatio: '3/4', borderRadius: 1.5, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <CircularProgress size={20} color="primary" sx={{ opacity: 0.3 }} />
+                      </Box>
+                    ))}
                   </Box>
-                </Paper>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+
+                  {/* Pick overlay on hover */}
+                  <Box
+                    className="pick-overlay"
+                    sx={{
+                      position: 'absolute', bottom: 0, left: 0, right: 0,
+                      py: isLandscape ? 1 : 2,
+                      background: `linear-gradient(transparent, ${theme.palette.success.main}60)`,
+                      display: 'flex', justifyContent: 'center',
+                      opacity: 0, transition: 'opacity 0.2s', pointerEvents: 'none',
+                      '.MuiBox-root:hover > &': { opacity: 1 }
+                    }}
+                  >
+                    <Typography variant={isLandscape ? 'body1' : 'h6'} sx={{ color: '#fff', fontWeight: 700, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
+                      {index === 0 ? '← Pick' : 'Pick →'}
+                    </Typography>
+                  </Box>
+                </Box>
+              </React.Fragment>
+            );
+          })}
         </Box>
-      </Container>
+      ) : (
+        /* ═══ MULTI-COMPARE MODE (3+) ═══ */
+        <Container maxWidth="lg" sx={{ mt: isLandscape ? 1 : (isSmall ? 2 : 4), px: isLandscape ? 1 : undefined }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: isLandscape ? 1 : 2 }}>
+            <AnimatePresence mode="popLayout">
+              {compareList.map((performer, index) => (
+                <motion.div
+                  key={performer.id}
+                  layout
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Paper
+                    sx={{
+                      p: isLandscape ? 1 : 2,
+                      bgcolor: `${theme.palette.background.paper}cc`,
+                      borderRadius: '24px',
+                      border: aiAnalysis?.winnerId === performer.id ? `2px solid ${theme.palette.secondary.main}` : undefined,
+                      boxShadow: aiAnalysis?.winnerId === performer.id ? `0 0 30px ${theme.palette.secondary.main}20` : 'none',
+                      backdropFilter: 'blur(12px)',
+                      position: 'relative',
+                      overflow: 'visible'
+                    }}
+                  >
+                    {/* Rank & Reorder */}
+                    <Box sx={{ position: 'absolute', left: isLandscape ? -10 : -15, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: 0.5, zIndex: 10 }}>
+                      <Box sx={{ width: isLandscape ? 28 : 40, height: isLandscape ? 28 : 40, bgcolor: index === 0 ? 'warning.main' : 'action.hover', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: isLandscape ? '0.85rem' : '1.2rem', boxShadow: 3 }}>
+                        {index + 1}
+                      </Box>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                        <IconButton size="small" onClick={() => handleInModalMove(index, 'up')} disabled={index === 0} sx={{ bgcolor: 'action.hover', color: 'text.primary', '&:hover': { bgcolor: 'primary.main' } }}>
+                          <ArrowUpward fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" onClick={() => handleInModalMove(index, 'down')} disabled={index === compareList.length - 1} sx={{ bgcolor: 'action.hover', color: 'text.primary', '&:hover': { bgcolor: 'primary.main' } }}>
+                          <ArrowDownward fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', gap: isLandscape ? 1 : (isSmall ? 1.5 : 3), alignItems: 'center', flexWrap: isSmall && !isLandscape ? 'wrap' : 'nowrap' }}>
+                      {/* Performer Info */}
+                      <Box sx={{ width: infoW, flexShrink: 0, textAlign: 'center' }}>
+                        <Box sx={{ width: avatarSz, height: avatarSz, borderRadius: '50%', margin: '0 auto 8px', overflow: 'hidden', border: `3px solid ${theme.palette.primary.main}`, boxShadow: `0 0 20px ${theme.palette.primary.main}40` }}>
+                          <img src={`/api/files/raw?path=${encodeURIComponent(performer.thumbnail)}`} alt={performer.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </Box>
+                        <Typography variant={isLandscape ? 'body1' : (isSmall ? 'h6' : 'h5')} noWrap sx={{ fontWeight: 900 }}>{performer.name}</Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 1, gap: 1 }}>
+                          <Rating value={performer.performer_rating || 0} precision={0.1} readOnly size="small" sx={{ color: 'warning.main' }} />
+                          <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'warning.main' }}>{(performer.performer_rating || 0).toFixed(2)}</Typography>
+                        </Box>
+                        <Button
+                          size="small"
+                          startIcon={<Refresh sx={{ fontSize: '14px' }} />}
+                          onClick={() => fetchRandomPics(performer.id)}
+                          sx={{ color: 'rgba(255,255,255,0.4)', mt: 1, fontSize: '0.7rem' }}
+                        >
+                          Refresh Photos
+                        </Button>
+                      </Box>
+
+                      {/* Image Strip */}
+                      <Box sx={{ flex: 1, display: 'flex', gap: 1, overflowX: 'auto', py: 1 }}>
+                        {(randomPics[performer.id] || Array(picsPerPerformer).fill(null)).map((pic, i) => (
+                          <Box key={i} sx={{ minWidth: imgW, height: imgH, borderRadius: 2, bgcolor: 'action.hover', overflow: 'hidden', border: `1px solid ${theme.palette.divider}` }}>
+                            {pic ? (
+                              <img src={`/api/files/raw?path=${encodeURIComponent(pic.path)}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                                <CircularProgress size={24} color="inherit" sx={{ opacity: 0.3 }} />
+                              </Box>
+                            )}
+                          </Box>
+                        ))}
+                      </Box>
+
+                      {/* AI & Vote */}
+                      <Box sx={{ width: voteW, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {aiAnalysis?.scores[performer.id] !== undefined && (
+                          <Box sx={{ p: isLandscape ? 1 : 2, bgcolor: `${theme.palette.secondary.main}0d`, borderRadius: 3, border: `1px solid ${theme.palette.secondary.main}40` }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                              <Typography variant="caption" sx={{ color: 'secondary.main', fontWeight: 'bold' }}>AI PREDICTION</Typography>
+                              <Typography variant="caption" sx={{ color: 'secondary.main', opacity: 0.6, fontWeight: 'bold' }}>
+                                {aiAnalysis.scores[performer.id].toFixed(1)}%
+                              </Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                              <Typography variant={isLandscape ? 'body1' : 'h6'} sx={{ color: 'secondary.main', fontWeight: 900 }}>{scoreToStars(aiAnalysis.scores[performer.id], performer.id)}</Typography>
+                              <Star sx={{ color: 'secondary.main', fontSize: 18 }} />
+                            </Box>
+                            <Rating value={parseFloat(scoreToStars(aiAnalysis.scores[performer.id], performer.id))} precision={0.1} readOnly size="small" sx={{ color: 'secondary.main' }} />
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                  </Paper>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </Box>
+        </Container>
+      )}
 
       {/* Fixed Bottom Controls */}
-      <Box sx={{ position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, display: 'flex', gap: 2 }}>
-        <Paper sx={{ p: 1, borderRadius: '40px', bgcolor: 'rgba(15, 15, 26, 0.9)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', gap: 2, px: 3, boxShadow: '0 15px 40px rgba(0,0,0,0.6)' }}>
+      <Box sx={{ position: 'fixed', bottom: isLandscape ? 10 : 30, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, display: 'flex', gap: 1, maxWidth: '95vw' }}>
+        <Paper sx={{ p: 1, borderRadius: '40px', backdropFilter: 'blur(20px)', display: 'flex', gap: isLandscape ? 1 : 2, px: isLandscape ? 2 : 3, boxShadow: 6, alignItems: 'center' }}>
           <Button
             variant="text"
             startIcon={analyzing ? <CircularProgress size={20} color="inherit" /> : <Psychology />}
             onClick={handleAiAnalyze}
             disabled={analyzing}
-            sx={{ color: '#00e5ff', fontWeight: 'bold' }}
+            size={isLandscape ? 'small' : 'medium'}
+            sx={{ color: 'secondary.main', fontWeight: 'bold' }}
           >
             {analyzing ? analyzingStatus : "Ask AI"}
           </Button>
@@ -633,14 +778,10 @@ function SmartComparePage() {
               <Divider orientation="vertical" flexItem sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
               <Button
                 variant="contained"
+                color="primary"
                 onClick={handleSaveRankings}
-                sx={{ 
-                  borderRadius: '20px', 
-                  background: 'linear-gradient(45deg, #7c4dff, #00e5ff)', 
-                  fontWeight: 'bold',
-                  px: 4,
-                  boxShadow: '0 4px 15px rgba(124, 77, 255, 0.4)'
-                }}
+                size={isLandscape ? 'small' : 'medium'}
+                sx={{ fontWeight: 'bold', px: isLandscape ? 2 : 4 }}
               >
                 SAVE RANKINGS
               </Button>
@@ -651,14 +792,14 @@ function SmartComparePage() {
           <Button
             variant="text"
             onClick={() => handleCompareVote(null, null, true)}
-            sx={{ color: '#fff', opacity: 0.7, fontWeight: 'bold' }}
+            sx={{ color: 'text.secondary', fontWeight: 'bold' }}
           >
             Draw
           </Button>
           <Button
             variant="text"
             onClick={() => handleCompareVote(null, compareList.map(p => p.id), false)}
-            sx={{ color: '#f50057', fontWeight: 'bold' }}
+            sx={{ color: 'error.main', fontWeight: 'bold' }}
           >
             Skip / Next
           </Button>
@@ -666,13 +807,13 @@ function SmartComparePage() {
       </Box>
 
       {/* Settings Dialog */}
-      <Dialog open={showSettings} onClose={() => setShowSettings(false)} PaperProps={{ sx: { bgcolor: '#12121f', color: '#fff', borderRadius: '24px' } }}>
+      <Dialog open={showSettings} onClose={() => setShowSettings(false)}>
         <DialogTitle sx={{ fontWeight: 800 }}>Comparison Settings</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <Box>
-              <Typography variant="body2" gutterBottom sx={{ color: 'rgba(255,255,255,0.5)' }}>AI Server</Typography>
-              <Typography variant="body2" sx={{ color: '#00e5ff', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
+              <Typography variant="body2" gutterBottom sx={{ color: 'text.secondary' }}>AI Server</Typography>
+              <Typography variant="body2" sx={{ color: 'secondary.main', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
                 Change in <span style={{ color: '#00e5ff', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
               </Typography>
@@ -689,8 +830,8 @@ function SmartComparePage() {
             </Box>
             <Divider sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
             <Box>
-              <Typography variant="h6" gutterBottom sx={{ fontSize: '0.9rem', color: '#00e5ff' }}>Personal Calibration</Typography>
-              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ fontSize: '0.9rem', color: 'secondary.main' }}>Personal Calibration</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
                 Current model strength: {globalModel ? (globalModel.n_effective || 0).toFixed(1) : 0} ratings.
               </Typography>
               <Button 
@@ -698,15 +839,15 @@ function SmartComparePage() {
                 variant="outlined" 
                 startIcon={<AutoFixNormal />}
                 onClick={handleRecalibrate}
-                sx={{ borderColor: '#7c4dff', color: '#7c4dff', borderRadius: '12px' }}
+                sx={{ borderColor: 'primary.main', color: 'primary.main' }}
               >
                 Recalibrate Global Model
               </Button>
             </Box>
             <Divider sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
             <Box>
-              <Typography variant="h6" gutterBottom sx={{ fontSize: '0.9rem', color: '#f50057' }}>Reset Rankings</Typography>
-              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ fontSize: '0.9rem', color: 'error.main' }}>Reset Rankings</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
                 Reset all performer ratings back to 2.5 (neutral). Use this if your existing ratings were corrupted or you want a fresh start.
               </Typography>
               <Button 
@@ -729,7 +870,7 @@ function SmartComparePage() {
                     alert('Reset failed: ' + err.message);
                   }
                 }}
-                sx={{ borderColor: '#f50057', color: '#f50057', borderRadius: '12px' }}
+                sx={{ borderColor: 'error.main', color: 'error.main' }}
               >
                 Reset All Rankings to 2.5
               </Button>
@@ -737,7 +878,7 @@ function SmartComparePage() {
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 3 }}>
-          <Button onClick={() => setShowSettings(false)} sx={{ color: 'rgba(255,255,255,0.5)' }}>Close</Button>
+          <Button onClick={() => setShowSettings(false)} sx={{ color: 'text.secondary' }}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>
