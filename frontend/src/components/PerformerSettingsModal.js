@@ -134,7 +134,7 @@ function PerformerSettingsModal({
   const [settings, setSettings] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({ open: false, type: '', title: '', message: '' });
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isRescanning, setIsRescanning] = useState(false);
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteOption, setDeleteOption] = useState('blacklist');
   const [blacklistReason, setBlacklistReason] = useState('');
@@ -216,7 +216,7 @@ function PerformerSettingsModal({
         if (typeof onAddBackgroundTask === 'function') {
           onAddBackgroundTask({
             id: jobId,
-            title: 'Refreshing stats',
+            title: 'Syncing & refreshing',
             description: `${performer.name}`,
             status: 'processing',
             progress: 0,
@@ -256,29 +256,7 @@ function PerformerSettingsModal({
     }
   };
 
-  const handleRescanFiles = async () => {
-    if (!performer?.id || isRescanning) return;
 
-    setIsRescanning(true);
-    try {
-      const response = await fetch(`/api/performers/${performer.id}/rescan-files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      const result = await response.json();
-      if (response.ok) {
-        alert(result.message || 'File cache rebuilt successfully');
-      } else {
-        alert('Failed to rebuild cache: ' + (result.error || 'Unknown error'));
-      }
-    } catch (error) {
-      console.error('Error rescanning files:', error);
-      alert('Error rescanning files: ' + error.message);
-    } finally {
-      setIsRescanning(false);
-    }
-  };
 
   // Rename performer handler
   const handleRenamePerformer = async () => {
@@ -941,15 +919,15 @@ function PerformerSettingsModal({
 
             <Divider sx={{ my: 3, borderColor: '#333' }} />
 
-            {/* Stats Refresh Section */}
+            {/* Stats & Cache Sync Section */}
             <Box sx={darkModalStyles.section}>
               <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
                 <RefreshIcon sx={{ color: '#90caf9' }} />
-                Update Stats
+                Sync & Refresh
               </Typography>
               <Box sx={darkModalStyles.card}>
                 <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
-                  Manually scan the performer folder to update file counts, sizes, and thumbnail information.
+                  Scan the performer folder to update file counts, sizes, thumbnails, and rebuild the file cache. This also purges stale references to deleted files.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                   <Button
@@ -959,15 +937,7 @@ function PerformerSettingsModal({
                     startIcon={isRefreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
                     sx={darkModalStyles.gradientButton}
                   >
-                    {isRefreshing ? 'Refreshing...' : 'Refresh Stats'}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleRescanFiles}
-                    disabled={isRescanning}
-                    sx={darkModalStyles.outlinedButton}
-                  >
-                    {isRescanning ? 'Scanning...' : 'Build/Update File Cache'}
+                    {isRefreshing ? 'Syncing...' : 'Sync & Refresh'}
                   </Button>
                 </Box>
               </Box>

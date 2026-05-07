@@ -2456,53 +2456,95 @@ router.post('/:id/refresh-stats-async', async (req, res) => {
           progress: 10,
         });
 
-        // Scan folder
+        // Scan folder for stats
         const { scanPerformerFolderEnhanced } = require('../services/importer');
         const stats = await scanPerformerFolderEnhanced(performerPath);
+
+        backgroundTasks.set(jobId, {
+          ...backgroundTasks.get(jobId),
+          progress: 50,
+        });
+
+        // --- Rebuild file cache (purge stale files) ---
+        const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+        const videoExtensions = new Set(['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v']);
+        const allScannedFiles = [];
+
+        async function scanDirRecursive(dir) {
+          try {
+            const items = await fs.readdir(dir, { withFileTypes: true });
+            for (const item of items) {
+              if (item.name.startsWith('.') || item.name === '.trash') continue;
+              const fullPath = path.join(dir, item.name);
+              if (item.isDirectory()) {
+                await scanDirRecursive(fullPath);
+              } else if (item.isFile()) {
+                allScannedFiles.push({ path: fullPath, name: item.name });
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to scan directory:', dir, e.message);
+          }
+        }
+
+        await scanDirRecursive(performerPath);
+
+        const pics = allScannedFiles.filter(f => imageExtensions.has(path.extname(f.name).toLowerCase()));
+        const vids = allScannedFiles.filter(f => videoExtensions.has(path.extname(f.name).toLowerCase()));
 
         backgroundTasks.set(jobId, {
           ...backgroundTasks.get(jobId),
           progress: 80,
         });
 
-        // Update database
+        // Update database: stats + file cache in one transaction
         const picsPath = path.join(performerPath, 'pics');
         const vidsPath = path.join(performerPath, 'vids');
         const funscriptPath = path.join(vidsPath, 'funscript');
         const now = new Date().toISOString();
 
-        db.prepare(`
-          UPDATE performers 
-          SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
-              funscript_files_count = ?, total_size_gb = ?,
-              pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
-              last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
-          WHERE id = ?
-        `).run(
-          stats.pics_count,
-          stats.vids_count,
-          stats.funscript_vids_count,
-          stats.funscript_files_count,
-          stats.total_size_gb,
-          stats.pics_count,
-          stats.vids_count,
-          stats.funscript_vids_count,
-          now,
-          picsPath,
-          vidsPath,
-          funscriptPath,
-          id
-        );
+        const updateAll = db.transaction(() => {
+          // Update performer stats
+          db.prepare(`
+            UPDATE performers 
+            SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
+                funscript_files_count = ?, total_size_gb = ?,
+                pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
+                last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
+            WHERE id = ?
+          `).run(
+            stats.pics_count,
+            stats.vids_count,
+            stats.funscript_vids_count,
+            stats.funscript_files_count,
+            stats.total_size_gb,
+            stats.pics_count,
+            stats.vids_count,
+            stats.funscript_vids_count,
+            now,
+            picsPath,
+            vidsPath,
+            funscriptPath,
+            id
+          );
+
+          // Rebuild file cache (purges stale entries)
+          db.prepare('DELETE FROM performer_file_cache WHERE performer_id = ?').run(id);
+          db.prepare('INSERT INTO performer_file_cache (performer_id, type, data) VALUES (?, ?, ?)').run(id, 'pics', JSON.stringify(pics));
+          db.prepare('INSERT INTO performer_file_cache (performer_id, type, data) VALUES (?, ?, ?)').run(id, 'vids', JSON.stringify(vids));
+        });
+
+        updateAll();
 
         backgroundTasks.set(jobId, {
           ...backgroundTasks.get(jobId),
           status: 'completed',
           progress: 100,
           endTime: Date.now(),
-          result: { stats },
+          result: { stats, cacheRebuilt: true, picsCount: pics.length, vidsCount: vids.length },
         });
 
-        console.log(`Async refresh completed for ${performer.name}`);
+        console.log(`Async refresh completed for ${performer.name}: stats updated, cache rebuilt (${pics.length} pics, ${vids.length} vids)`);
       } catch (error) {
         console.error('Error in async refresh:', error);
         backgroundTasks.set(jobId, {
