@@ -198,8 +198,27 @@ function TasteDashboardPage() {
     setPushingData(false);
   };
 
-  const handleDownloadZip = () => {
-    window.open(`/api/training/export-zip?type=${selectedType}`, '_blank');
+  const handleDownloadZip = async () => {
+    setPushingData(true); // reuse loading state
+    try {
+      const res = await fetch(`/api/training/export-zip?type=${selectedType}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Download failed' }));
+        alert(`❌ ${err.error}`);
+        setPushingData(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `training_data_${selectedType}_${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) { alert(`Download failed: ${err.message}`); }
+    setPushingData(false);
   };
 
   const selectedModel = MODEL_TYPES.find(m => m.id === selectedType);
