@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { validateAndCreateStructure, scanBeforeFolder, scanAfterFolder, scanContentFolder, scanOrphanedPerformers, scanBeforeUploadFolder } = require('../services/fileScanner');
+const { validateAndCreateStructure, scanBeforeFolder, scanAfterFolder, scanContentFolder, scanOrphanedPerformers, scanBeforeUploadFolder, scanBeforeUploadPerformerDetails } = require('../services/fileScanner');
 const { importPerformer, getPerformerFiles } = require('../services/importer');
 const { uploadImportPerformer, uploadProgressMap } = require('../services/uploadImporter');
 const { addLocalImportToQueue } = require('../services/uploadQueue');
@@ -248,6 +248,33 @@ router.get('/scan-before-upload', async (req, res) => {
     });
   } catch (err) {
     console.error('Error scanning before upload folder:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scan specific performer in "before upload" for details (stats, previews)
+router.get('/scan-before-upload-details', async (req, res) => {
+  try {
+    const { performerName } = req.query;
+    if (!performerName) {
+      return res.status(400).json({ error: 'performerName is required' });
+    }
+
+    let basePath = req.query.basePath;
+    if (!basePath) {
+      const folders = db.prepare('SELECT * FROM folders').all();
+      if (!folders.length) return res.status(400).json({ error: 'No folders configured' });
+      basePath = folders[0].path;
+    }
+
+    const details = await scanBeforeUploadPerformerDetails(basePath, performerName);
+    res.json({
+      success: true,
+      stats: details.stats,
+      previewImages: details.previewImages
+    });
+  } catch (err) {
+    console.error('Error getting performer details:', err);
     res.status(500).json({ error: err.message });
   }
 });
