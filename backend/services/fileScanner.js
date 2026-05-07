@@ -119,33 +119,44 @@ async function scanBeforeUploadPerformerDetails(basePath, performerName) {
 
   const stats = await scanPerformerFolder(performerPath);
 
-  // Gather up to 30 preview image paths
+  // Gather up to 30 preview image paths recursively
   const previewImages = [];
   const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-  try {
-    const picsPath = path.join(performerPath, 'pics');
-    if (await fs.pathExists(picsPath)) {
-      const pics = await fs.readdir(picsPath);
-      for (const pic of pics) {
-        if (previewImages.length >= 30) break;
-        if (imageExts.includes(path.extname(pic).toLowerCase())) {
-          previewImages.push(path.join(picsPath, pic));
+  
+  async function findImages(dir) {
+    if (previewImages.length >= 30) return;
+    try {
+      const contents = await fs.readdir(dir, { withFileTypes: true });
+      
+      // Sort so 'pics' or 'images' directories are processed first
+      contents.sort((a, b) => {
+        const aIsPriority = a.isDirectory() && ['pics', 'images'].includes(a.name.toLowerCase());
+        const bIsPriority = b.isDirectory() && ['pics', 'images'].includes(b.name.toLowerCase());
+        if (aIsPriority && !bIsPriority) return -1;
+        if (!aIsPriority && bIsPriority) return 1;
+        return 0;
+      });
+
+      for (const item of contents) {
+        if (previewImages.length >= 30) return;
+        // Skip hidden folders or funscripts
+        if (item.name.startsWith('.') || item.name.toLowerCase().includes('funscript')) continue;
+        
+        const itemPath = path.join(dir, item.name);
+        if (item.isFile()) {
+          if (imageExts.includes(path.extname(item.name).toLowerCase())) {
+            previewImages.push(itemPath);
+          }
+        } else if (item.isDirectory()) {
+          await findImages(itemPath);
         }
       }
+    } catch (e) {
+      // Ignore errors traversing
     }
-    // Also check root of performer folder for loose images
-    if (previewImages.length < 30) {
-      const rootFiles = await fs.readdir(performerPath);
-      for (const file of rootFiles) {
-        if (previewImages.length >= 30) break;
-        if (imageExts.includes(path.extname(file).toLowerCase())) {
-          previewImages.push(path.join(performerPath, file));
-        }
-      }
-    }
-  } catch (e) {
-    // Ignore errors reading preview images
   }
+
+  await findImages(performerPath);
 
   return { stats, previewImages };
 }
