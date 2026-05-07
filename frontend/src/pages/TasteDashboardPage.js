@@ -60,11 +60,12 @@ function TasteDashboardPage() {
       try { return await res.json(); } catch (_) { return null; }
     };
     try {
-      const [healthRes, trainingRes, perfRes, statusRes] = await Promise.all([
+      const [healthRes, trainingRes, perfRes, statusRes, modelsRes] = await Promise.all([
         fetch('/api/health').then(r => r.json()),
         fetch('/api/training/data-summary').then(r => r.json()),
         fetch('/api/training/performer-stats').catch(() => null),
-        fetch(`/api/training/status?url=${encodeURIComponent(aiUrl)}`).catch(() => null)
+        fetch(`/api/training/status?url=${encodeURIComponent(aiUrl)}`).catch(() => null),
+        fetch(`/api/training/models?url=${encodeURIComponent(aiUrl)}`).catch(() => null)
       ]);
       setHealth(healthRes);
       setTraining(trainingRes);
@@ -72,18 +73,16 @@ function TasteDashboardPage() {
       if (pData) setPerfStats(pData);
       const sData = await safeJson(statusRes);
       if (sData) setTrainingStatus(sData);
+      const mData = await safeJson(modelsRes);
+      if (mData?.models) setModelList(mData.models);
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     }
-    // Direct AI health + model list
+    // AI health check (direct is fine — CORS enabled on AI server)
     try {
       const h = await fetch(`${aiUrl}/health`).then(r => r.json());
       setAiHealth(h);
     } catch (_) { setAiHealth(null); }
-    try {
-      const m = await fetch(`${aiUrl}/list_models`).then(r => r.json());
-      if (m.models) setModelList(m.models);
-    } catch (_) {}
     setLoading(false);
   };
 
@@ -140,7 +139,7 @@ function TasteDashboardPage() {
     if (trainingStatus?.active) {
       pollRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${aiUrl}/training_status`);
+          const res = await fetch(`/api/training/status?url=${encodeURIComponent(aiUrl)}`);
           const data = await res.json();
           setTrainingStatus(data);
           if (!data.active) { clearInterval(pollRef.current); fetchData(); }
@@ -153,26 +152,21 @@ function TasteDashboardPage() {
   const handleStartTraining = async () => {
     setStartingTraining(true);
     try {
-      const folderRes = await fetch('/api/folders');
-      const folders = await folderRes.json();
-      const basePath = folders?.[0]?.path || '';
-      let payload = { type: selectedType, epochs, batch_size: batchSize, backbone: 'facebook/dinov2-large' };
-      if (selectedType === 'binary' || selectedType === 'context_binary') {
-        payload.base_path = basePath;
-      } else if (selectedType === 'pairwise') {
-        const pairsRes = await fetch('/api/training/export-pairs', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
-        });
-        const pairsData = await pairsRes.json();
-        payload.pairs = pairsData.pairs;
-      }
-      const res = await fetch(`${aiUrl}/train`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      const res = await fetch('/api/training/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: selectedType,
+          epochs,
+          batch_size: batchSize,
+          backbone: 'facebook/dinov2-large',
+          ai_server_url: aiUrl
+        })
       });
       const result = await res.json();
       if (result.success) {
         setTrainingStatus({ active: true, type: selectedType, epoch: 0, total_epochs: epochs, phase: 'starting' });
-      } else { alert(`Failed: ${result.message}`); }
+      } else { alert(`Failed: ${result.error || result.message}`); }
     } catch (err) { alert(`Error: ${err.message}`); }
     setStartingTraining(false);
   };
@@ -637,7 +631,7 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
         </Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 1.5 }}>
           {typeModels.map(m => {
-            const isLoaded = aiHealth?.model === m.filename;
+            const isLoaded = aiHealth?.current_model === m.filename;
             const result = testResults[m.filename];
             const isTesting = testingModel === m.filename;
             const isLoadingThis = loadingModel === m.filename;

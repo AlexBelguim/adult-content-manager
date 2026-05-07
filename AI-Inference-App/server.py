@@ -263,6 +263,15 @@ def api_test_model():
     
     # Load model temporarily
     try:
+        ckpt = torch.load(target, map_location=DEVICE, weights_only=False)
+        m_type = ckpt.get('model_type', 'unknown')
+        if m_type == 'unknown':
+            if 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): m_type = 'pairwise'
+            elif 'context' in model_id.lower(): m_type = 'context_binary'
+            elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): m_type = 'binary'
+            sd = ckpt.get('model_state_dict', {})
+            if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
+
         config = ckpt.get('config', {})
         model_name = config.get('model_name') or ckpt.get('backbone') or 'facebook/dinov2-large'
         model_type = m_type

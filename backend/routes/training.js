@@ -344,7 +344,7 @@ router.post('/export-binary', async (req, res) => {
 // ── POST /api/training/start ─────────────────────────────────
 // Trigger training on the AI Inference App
 router.post('/start', async (req, res) => {
-  const { type = 'pairwise', epochs = 10, learning_rate, ai_server_url } = req.body;
+  const { type = 'pairwise', epochs = 10, batch_size = 16, backbone = 'facebook/dinov2-large', learning_rate, ai_server_url } = req.body;
   const aiUrl = ai_server_url || getAiServerUrl();
 
   try {
@@ -360,15 +360,16 @@ router.post('/start', async (req, res) => {
       const pairs = db.prepare(`
         SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
       `).all();
-      trainingPayload = { type: 'pairwise', pairs, epochs, learning_rate };
-    } else if (type === 'binary') {
-      // Delegate to export-binary and forward
+      trainingPayload = { type: 'pairwise', pairs, epochs, batch_size, backbone, learning_rate };
+    } else if (type === 'binary' || type === 'context_binary') {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
-        type: 'binary',
+        type,
         base_path: folder.path,
         epochs,
+        batch_size,
+        backbone,
         learning_rate
       };
     } else {
