@@ -49,6 +49,8 @@ function TasteDashboardPage() {
   const [showPerfTable, setShowPerfTable] = useState(false);
   const [testingModel, setTestingModel] = useState(null);
   const [testResults, setTestResults] = useState({});
+  const [pushingData, setPushingData] = useState(false);
+  const [aiTrainingData, setAiTrainingData] = useState(null);
   const pollRef = useRef(null);
 
   const fetchData = async () => {
@@ -78,11 +80,15 @@ function TasteDashboardPage() {
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     }
-    // AI health check (direct is fine — CORS enabled on AI server)
+    // AI health check + cached training data status
     try {
       const h = await fetch(`${aiUrl}/health`).then(r => r.json());
       setAiHealth(h);
     } catch (_) { setAiHealth(null); }
+    try {
+      const td = await fetch(`${aiUrl}/training_data_status`).then(r => r.json());
+      setAiTrainingData(td);
+    } catch (_) { setAiTrainingData(null); }
     setLoading(false);
   };
 
@@ -169,6 +175,31 @@ function TasteDashboardPage() {
       } else { alert(`Failed: ${result.error || result.message}`); }
     } catch (err) { alert(`Error: ${err.message}`); }
     setStartingTraining(false);
+  };
+
+  const handlePushData = async () => {
+    setPushingData(true);
+    try {
+      const res = await fetch('/api/training/push-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: selectedType, ai_server_url: aiUrl })
+      });
+      const result = await res.json();
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        // Refresh cached data status
+        try {
+          const td = await fetch(`${aiUrl}/training_data_status`).then(r => r.json());
+          setAiTrainingData(td);
+        } catch (_) {}
+      } else { alert(`❌ ${result.error}`); }
+    } catch (err) { alert(`Error: ${err.message}`); }
+    setPushingData(false);
+  };
+
+  const handleDownloadZip = () => {
+    window.open(`/api/training/export-zip?type=${selectedType}`, '_blank');
   };
 
   const selectedModel = MODEL_TYPES.find(m => m.id === selectedType);
@@ -494,6 +525,44 @@ function TasteDashboardPage() {
               </Box>
               {!aiHealth && <Alert severity="warning" sx={{ bgcolor: 'rgba(255,152,0,0.08)', color: '#ffb74d', py: 0.5 }}>AI server is offline. Start it to train.</Alert>}
               {selectedModel && <Alert severity="info" sx={{ bgcolor: 'rgba(33,150,243,0.08)', color: '#90caf9', py: 0.5 }}>{selectedModel.requirements}</Alert>}
+
+              {/* Data Transfer Section */}
+              <Box sx={{ mt: 2, p: 2, bgcolor: '#1a1a1a', borderRadius: 2, border: '1px solid #333' }}>
+                <Typography variant="subtitle2" sx={{ color: '#06b6d4', mb: 1, fontWeight: 800 }}>📦 Training Data Transfer</Typography>
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', mb: 1.5 }}>
+                  Your images are on TrueNAS. Push them to the AI server before training, or download a ZIP to transfer manually.
+                </Typography>
+
+                {/* Cached data status */}
+                {aiTrainingData && (
+                  <Box sx={{ mb: 1.5, p: 1.5, bgcolor: aiTrainingData.has_data ? 'rgba(76,175,80,0.06)' : 'rgba(255,152,0,0.06)',
+                    borderRadius: 1.5, border: `1px solid ${aiTrainingData.has_data ? '#4caf5030' : '#ff980030'}` }}>
+                    <Typography variant="caption" sx={{ color: aiTrainingData.has_data ? '#4caf50' : '#ff9800', fontWeight: 700, display: 'block' }}>
+                      {aiTrainingData.has_data ? '✅ AI Server has cached data' : '⚠️ No training data cached on AI server'}
+                    </Typography>
+                    {aiTrainingData.has_data && (
+                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+                        {aiTrainingData.keep} keep + {aiTrainingData.delete} delete images · {aiTrainingData.keep_performers?.length || 0} performers
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button variant="contained" size="small" disabled={!aiHealth || pushingData}
+                    onClick={handlePushData}
+                    sx={{ flex: 1, fontWeight: 700, textTransform: 'none',
+                      background: 'linear-gradient(135deg, #06b6d4, #0891b2)',
+                      '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)' } }}>
+                    {pushingData ? '📤 Pushing...' : '📤 Push to AI Server'}
+                  </Button>
+                  <Button variant="outlined" size="small" onClick={handleDownloadZip}
+                    sx={{ fontWeight: 700, textTransform: 'none', borderColor: '#444', color: '#ccc',
+                      '&:hover': { borderColor: '#666', bgcolor: 'rgba(255,255,255,0.04)' } }}>
+                    📥 Download ZIP
+                  </Button>
+                </Box>
+              </Box>
             </Box>
           </CollapsibleSection>
 

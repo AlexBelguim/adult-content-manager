@@ -660,6 +660,88 @@ def score_images():
 
 # ── Training Endpoints ────────────────────────────────────────────────────────
 from trainer import training_state, start_training
+import zipfile, shutil, json as json_module
+
+TRAINING_DATA_DIR = Path(__file__).parent / 'training_data'
+
+@app.route('/upload_training', methods=['POST'])
+def api_upload_training():
+    """Receive a ZIP of training images from the backend."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file in request'}), 400
+
+        f = request.files['file']
+        train_type = request.form.get('type', 'binary')
+
+        log(f"📦 Receiving training data ZIP ({train_type})...")
+
+        # Save to temp file
+        tmp_path = TRAINING_DATA_DIR / '_upload.zip'
+        TRAINING_DATA_DIR.mkdir(exist_ok=True)
+        f.save(str(tmp_path))
+
+        zip_size = tmp_path.stat().st_size
+        log(f"  📥 Received {zip_size / 1024 / 1024:.1f} MB")
+
+        # Clear old data and extract
+        for sub in ['keep', 'delete']:
+            sub_path = TRAINING_DATA_DIR / sub
+            if sub_path.exists():
+                shutil.rmtree(str(sub_path))
+
+        with zipfile.ZipFile(str(tmp_path), 'r') as zf:
+            zf.extractall(str(TRAINING_DATA_DIR))
+
+        tmp_path.unlink(missing_ok=True)
+
+        # Count extracted images
+        keep_count = sum(1 for _ in (TRAINING_DATA_DIR / 'keep').rglob('*') if _.is_file()) if (TRAINING_DATA_DIR / 'keep').exists() else 0
+        delete_count = sum(1 for _ in (TRAINING_DATA_DIR / 'delete').rglob('*') if _.is_file()) if (TRAINING_DATA_DIR / 'delete').exists() else 0
+
+        log(f"  ✅ Extracted: {keep_count} keep + {delete_count} delete images")
+
+        return jsonify({
+            'success': True,
+            'message': f'Received {keep_count + delete_count} images',
+            'keep': keep_count,
+            'delete': delete_count
+        })
+    except Exception as e:
+        log(f"❌ Upload error: {e}")
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/training_data_status', methods=['GET'])
+def api_training_data_status():
+    """Check what training data is cached locally."""
+    keep_dir = TRAINING_DATA_DIR / 'keep'
+    delete_dir = TRAINING_DATA_DIR / 'delete'
+    manifest_path = TRAINING_DATA_DIR / 'manifest.json'
+
+    keep_count = sum(1 for _ in keep_dir.rglob('*') if _.is_file()) if keep_dir.exists() else 0
+    delete_count = sum(1 for _ in delete_dir.rglob('*') if _.is_file()) if delete_dir.exists() else 0
+
+    manifest = {}
+    if manifest_path.exists():
+        try:
+            manifest = json_module.loads(manifest_path.read_text())
+        except: pass
+
+    # List performers
+    keep_performers = sorted([d.name for d in keep_dir.iterdir() if d.is_dir()]) if keep_dir.exists() else []
+    delete_performers = sorted([d.name for d in delete_dir.iterdir() if d.is_dir()]) if delete_dir.exists() else []
+
+    return jsonify({
+        'has_data': keep_count > 0 or delete_count > 0,
+        'keep': keep_count,
+        'delete': delete_count,
+        'keep_performers': keep_performers,
+        'delete_performers': delete_performers,
+        'manifest': manifest
+    })
+
 
 @app.route('/train', methods=['POST'])
 def api_train():
@@ -673,6 +755,19 @@ def api_train():
         PROCESSOR = None
         MODEL_NAME = None
         torch.cuda.empty_cache()
+
+    # If base_path is provided but doesn't exist locally, use cached training data
+    base_path = data.get('base_path', '')
+    if base_path and not Path(base_path).exists():
+        cached_keep = TRAINING_DATA_DIR / 'keep'
+        cached_delete = TRAINING_DATA_DIR / 'delete'
+        if cached_keep.exists() and cached_delete.exists():
+            log(f"📂 base_path '{base_path}' not local — using cached training data")
+            # Override: point to training_data dir which has keep/ and delete/ subdirs
+            data['base_path'] = str(TRAINING_DATA_DIR)
+            data['use_cached'] = True
+        else:
+            return jsonify({'success': False, 'message': 'base_path not accessible and no cached training data. Push data first.'}), 400
 
     ok, msg = start_training(data)
     status_code = 200 if ok else 409

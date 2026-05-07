@@ -11,6 +11,8 @@
  * - POST /api/training/export-binary — Export binary (keep/delete) data
  * - POST /api/training/start        — Trigger training on AI server
  * - GET  /api/training/models       — List available models on AI server
+ * - GET  /api/training/export-zip   — Download training data as ZIP
+ * - POST /api/training/push-data    — Push training data to AI server
  */
 const express = require('express');
 const router = express.Router();
@@ -18,8 +20,12 @@ const db = require('../db');
 const fs = require('fs-extra');
 const path = require('path');
 const axios = require('axios');
+const archiver = require('archiver');
+const os = require('os');
 
 const { getAiServerUrl } = require('../utils/aiUrl');
+
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'];
 
 // ── GET /api/training/data-summary ───────────────────────────
 // Summary of all available training data
@@ -505,6 +511,180 @@ router.post('/test-model', async (req, res) => {
     res.json(response.data);
   } catch (err) {
     console.error('[Training] Test relay error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Helper: collect training images ──────────────────────────
+function collectTrainingImages(basePath) {
+  const afterDir = path.join(basePath, 'after filter performer');
+  const trainingDir = path.join(basePath, 'deleted keep for training');
+
+  const scanPerformerDir = (baseDir, label) => {
+    const results = [];
+    if (!fs.existsSync(baseDir)) return results;
+    const dirs = fs.readdirSync(baseDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && !d.name.startsWith('.'));
+    for (const d of dirs) {
+      let picsDir = path.join(baseDir, d.name, 'pics');
+      if (!fs.existsSync(picsDir)) picsDir = path.join(baseDir, d.name);
+      if (!fs.existsSync(picsDir)) continue;
+      const files = fs.readdirSync(picsDir).filter(f =>
+        IMAGE_EXTS.includes(path.extname(f).toLowerCase())
+      );
+      for (const f of files) {
+        results.push({
+          absPath: path.join(picsDir, f),
+          zipPath: `${label}/${d.name}/${f}`,
+          label,
+          performer: d.name,
+          filename: f
+        });
+      }
+    }
+    return results;
+  };
+
+  const keep = scanPerformerDir(afterDir, 'keep');
+  const del = scanPerformerDir(trainingDir, 'delete');
+  return { keep, delete: del };
+}
+
+// ── GET /api/training/export-zip ─────────────────────────────
+// Download training data as a ZIP file
+router.get('/export-zip', async (req, res) => {
+  const type = req.query.type || 'binary';
+  try {
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
+
+    const images = collectTrainingImages(folder.path);
+    const keepCount = images.keep.length;
+    const deleteCount = images.delete.length;
+
+    if (keepCount === 0 && deleteCount === 0) {
+      return res.status(400).json({ error: 'No training images found' });
+    }
+
+    // Build manifest
+    const manifest = {
+      type,
+      created: new Date().toISOString(),
+      keep_count: keepCount,
+      delete_count: deleteCount,
+      total: keepCount + deleteCount
+    };
+
+    // Add pairwise data if relevant
+    if (type === 'pairwise') {
+      const pairs = db.prepare(`
+        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
+      `).all();
+      manifest.pairs = pairs;
+    }
+
+    // Stream ZIP
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="training_data_${type}_${Date.now()}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 1 } }); // fast compression
+    archive.on('error', err => { throw err; });
+    archive.pipe(res);
+
+    // Add manifest
+    archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+
+    // Add images
+    for (const img of [...images.keep, ...images.delete]) {
+      archive.file(img.absPath, { name: img.zipPath });
+    }
+
+    await archive.finalize();
+    console.log(`[Training] ZIP exported: ${keepCount} keep + ${deleteCount} delete images`);
+  } catch (err) {
+    console.error('[Training] Export ZIP error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/training/push-data ─────────────────────────────
+// Push training data to the AI server
+router.post('/push-data', async (req, res) => {
+  const { type = 'binary', ai_server_url } = req.body;
+  const aiUrl = ai_server_url || getAiServerUrl();
+
+  try {
+    // Check AI server is online
+    await axios.get(`${aiUrl}/health`, { timeout: 5000 });
+
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
+
+    const images = collectTrainingImages(folder.path);
+    const allImages = [...images.keep, ...images.delete];
+
+    if (allImages.length === 0) {
+      return res.status(400).json({ error: 'No training images found' });
+    }
+
+    // Build manifest
+    const manifest = {
+      type,
+      created: new Date().toISOString(),
+      keep_count: images.keep.length,
+      delete_count: images.delete.length
+    };
+
+    if (type === 'pairwise') {
+      manifest.pairs = db.prepare(`
+        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
+      `).all();
+    }
+
+    // Create temp ZIP
+    const tmpZip = path.join(os.tmpdir(), `training_push_${Date.now()}.zip`);
+    const output = fs.createWriteStream(tmpZip);
+    const archive = archiver('zip', { zlib: { level: 1 } });
+
+    await new Promise((resolve, reject) => {
+      output.on('close', resolve);
+      archive.on('error', reject);
+      archive.pipe(output);
+      archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+      for (const img of allImages) {
+        archive.file(img.absPath, { name: img.zipPath });
+      }
+      archive.finalize();
+    });
+
+    const zipSize = fs.statSync(tmpZip).size;
+    console.log(`[Training] ZIP created: ${(zipSize / 1024 / 1024).toFixed(1)} MB, pushing to ${aiUrl}...`);
+
+    // Upload to AI server
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('file', fs.createReadStream(tmpZip), { filename: 'training_data.zip' });
+    form.append('type', type);
+
+    const uploadRes = await axios.post(`${aiUrl}/upload_training`, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 600000 // 10 min for large uploads
+    });
+
+    // Cleanup temp file
+    fs.removeSync(tmpZip);
+
+    res.json({
+      success: true,
+      message: `Pushed ${allImages.length} images (${(zipSize / 1024 / 1024).toFixed(1)} MB) to AI server`,
+      keep: images.keep.length,
+      delete: images.delete.length,
+      aiResponse: uploadRes.data
+    });
+  } catch (err) {
+    console.error('[Training] Push error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

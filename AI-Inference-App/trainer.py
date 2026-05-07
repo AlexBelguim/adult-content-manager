@@ -187,11 +187,19 @@ def train_binary(config):
     warmup = config.get('warmup_epochs', 2)
     bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
+    use_cached = config.get('use_cached', False)
 
     tlog(f"📋 Binary Training | {epochs} epochs | backbone: {backbone}")
 
-    keep_dir = os.path.join(base_path, 'after filter performer')
-    delete_dir = os.path.join(base_path, 'deleted keep for training')
+    # Resolve keep/delete directories based on data layout
+    if use_cached or Path(os.path.join(base_path, 'keep')).exists():
+        keep_dir = os.path.join(base_path, 'keep')
+        delete_dir = os.path.join(base_path, 'delete')
+        tlog("  📂 Using cached training data layout")
+    else:
+        keep_dir = os.path.join(base_path, 'after filter performer')
+        delete_dir = os.path.join(base_path, 'deleted keep for training')
+        tlog("  📂 Using local folder layout")
 
     keep_imgs = []
     for pmap in scan_performer_dirs(keep_dir).values():
@@ -361,10 +369,19 @@ def train_context_binary(config):
     warmup = config.get('warmup_epochs', 2)
     bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
+    use_cached = config.get('use_cached', False)
 
     tlog(f"📋 Context-Aware Binary Training | {epochs} epochs")
-    keep_map = scan_performer_dirs(os.path.join(base_path, 'after filter performer'))
-    delete_map = scan_performer_dirs(os.path.join(base_path, 'deleted keep for training'))
+
+    # Resolve directories based on data layout
+    if use_cached or Path(os.path.join(base_path, 'keep')).exists():
+        keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+        delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+        tlog("  📂 Using cached training data layout")
+    else:
+        keep_map = scan_performer_dirs(os.path.join(base_path, 'after filter performer'))
+        delete_map = scan_performer_dirs(os.path.join(base_path, 'deleted keep for training'))
+        tlog("  📂 Using local folder layout")
     tlog(f"  Keep performers: {len(keep_map)} | Delete performers: {len(delete_map)}")
 
     if not keep_map or not delete_map:
