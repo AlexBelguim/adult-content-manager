@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
     Box,
     Typography,
@@ -32,6 +32,7 @@ import {
     PlayCircle as ProcessingIcon,
     CloudUpload as UploadingIcon,
     FolderOpen,
+    Folder,
     Image as ImageIcon,
     Movie as MovieIcon,
     Fingerprint as HashIcon,
@@ -40,7 +41,9 @@ import {
     SelectAll as SelectAllIcon,
     Close as CloseIcon,
     ChevronLeft as ChevronLeftIcon,
-    ChevronRight as ChevronRightIcon
+    ChevronRight as ChevronRightIcon,
+    Add as AddIcon,
+    CloudUpload as CloudUploadIcon
 } from '@mui/icons-material';
 
 function LocalImportPage({ basePath }) {
@@ -62,6 +65,39 @@ function LocalImportPage({ basePath }) {
     const [expandedPreview, setExpandedPreview] = useState(null);
     const [loadingDetails, setLoadingDetails] = useState(new Set());
     const [lightbox, setLightbox] = useState({ open: false, images: [], currentIndex: 0 });
+
+    // === Upload Folder state (merged from UploadQueuePage) ===
+    const [uploadPerformerName, setUploadPerformerName] = useState('');
+    const [uploadSelectedFiles, setUploadSelectedFiles] = useState([]);
+    const [uploadCreateHashes, setUploadCreateHashes] = useState(true);
+    const [uploadingJobs, setUploadingJobs] = useState([]);
+    const fileInputRef = useRef();
+    const jobFilesRef = useRef({});
+    const processingRef = useRef(false);
+    const [showUploadForm, setShowUploadForm] = useState(false);
+
+    const uploadFileStats = useMemo(() => {
+        const stats = { pics: 0, vids: 0, funscript: 0, other: 0, totalSize: 0 };
+        const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+        const videoExts = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'];
+        for (const file of uploadSelectedFiles) {
+            const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+            stats.totalSize += file.size;
+            if (imageExts.includes(ext)) stats.pics++;
+            else if (videoExts.includes(ext)) stats.vids++;
+            else if (ext === '.funscript') stats.funscript++;
+            else stats.other++;
+        }
+        return stats;
+    }, [uploadSelectedFiles]);
+
+    const formatUploadFileSize = (bytes) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
 
     const formatFileSize = (gb) => {
         if (!gb || gb === 0) return '0 B';
@@ -262,6 +298,171 @@ function LocalImportPage({ basePath }) {
         }
     };
 
+    // === Upload Folder handlers ===
+    const handleUploadFolderSelect = useCallback((event) => {
+        const files = Array.from(event.target.files || []);
+        const filteredFiles = files.filter(file =>
+            !file.name.startsWith('.') &&
+            !file.webkitRelativePath?.includes('/.') &&
+            file.size > 0
+        );
+        setUploadSelectedFiles(filteredFiles);
+        setError('');
+
+        if (filteredFiles.length > 0 && filteredFiles[0].webkitRelativePath) {
+            const folderPath = filteredFiles[0].webkitRelativePath;
+            let folderName = folderPath.split('/')[0];
+            if (folderName && !uploadPerformerName) {
+                folderName = folderName
+                    .replace(/Join Telegram.*$/i, '')
+                    .replace(/BY Telegram.*$/i, '')
+                    .replace(/on \[TELEGRAM\].*$/i, '')
+                    .replace(/\[TELEGRAM\].*$/i, '')
+                    .replace(/Onlyfans.*$/i, '')
+                    .replace(/Onlyefuns.*$/i, '')
+                    .replace(/([\/\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '')
+                    .replace(/@[a-zA-Z0-9_]+/g, ' ')
+                    .replace(/\(\d+\)/g, ' ')
+                    .replace(/#\d+/g, ' ')
+                    .replace(/\.com|\.net|\.org/gi, '')
+                    .replace(/[._-]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                setUploadPerformerName(folderName);
+            }
+        }
+    }, [uploadPerformerName]);
+
+    const processUploadJob = async (jobId) => {
+        setUploadingJobs(prev => prev.map(j =>
+            j.id === jobId ? { ...j, status: 'uploading' } : j
+        ));
+        const jobFiles = jobFilesRef.current[jobId];
+        const job = uploadingJobs.find(j => j.id === jobId);
+        if (!job || !jobFiles) {
+            setUploadingJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'error' } : j));
+            return;
+        }
+        const nameToUpload = job.performerName;
+        const totalFiles = job.totalFiles;
+        const MAX_BATCH_COUNT = 50;
+        const MAX_BATCH_SIZE = 200 * 1024 * 1024;
+        const batches = [];
+        let currentBatch = [], currentBatchSize = 0;
+        for (let i = 0; i < jobFiles.length; i++) {
+            const file = jobFiles[i];
+            if (currentBatch.length > 0 && (currentBatch.length >= MAX_BATCH_COUNT || currentBatchSize + file.size > MAX_BATCH_SIZE)) {
+                batches.push(currentBatch);
+                currentBatch = [];
+                currentBatchSize = 0;
+            }
+            currentBatch.push(file);
+            currentBatchSize += file.size;
+        }
+        if (currentBatch.length > 0) batches.push(currentBatch);
+        const totalBatches = batches.length;
+        const totalBytes = jobFiles.reduce((acc, file) => acc + file.size, 0);
+        let bytesUploadedSoFar = 0;
+        try {
+            for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+                const batchFiles = batches[batchIndex];
+                const isLastBatch = batchIndex === totalBatches - 1;
+                const batchSizeBytes = batchFiles.reduce((acc, f) => acc + f.size, 0);
+                let formData = new FormData();
+                formData.append('performerName', nameToUpload);
+                formData.append('basePath', basePath);
+                formData.append('uploadId', jobId);
+                formData.append('batchIndex', batchIndex);
+                formData.append('totalBatches', totalBatches);
+                formData.append('totalFiles', totalFiles);
+                formData.append('isLastBatch', isLastBatch);
+                batchFiles.forEach(file => formData.append('files', file, file.name));
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    let attempts = 0;
+                    const maxAttempts = 3;
+                    xhr.upload.addEventListener('progress', (event) => {
+                        if (event.lengthComputable) {
+                            const currentTotal = bytesUploadedSoFar + event.loaded;
+                            const overallPercent = totalBytes > 0 ? Math.round((currentTotal / totalBytes) * 100) : 0;
+                            setUploadingJobs(prev => prev.map(j =>
+                                j.id === jobId ? { ...j, progress: Math.min(overallPercent, 99), currentBatch: batchIndex + 1 } : j
+                            ));
+                        }
+                    });
+                    const attemptUpload = () => {
+                        attempts++;
+                        xhr.open('POST', `/api/folders/upload-import?uploadId=${jobId}&basePath=${encodeURIComponent(basePath)}&batchIndex=${batchIndex}`, true);
+                        xhr.onload = () => {
+                            if (xhr.status >= 200 && xhr.status < 300) resolve();
+                            else if (attempts < maxAttempts) setTimeout(attemptUpload, 3000 * attempts);
+                            else reject(new Error(`Upload failed: ${xhr.statusText}`));
+                        };
+                        xhr.onerror = () => {
+                            if (attempts < maxAttempts) setTimeout(attemptUpload, 3000 * attempts);
+                            else reject(new Error('Network Error'));
+                        };
+                        xhr.send(formData);
+                    };
+                    attemptUpload();
+                });
+                formData = null;
+                await new Promise(r => setTimeout(r, 100));
+                bytesUploadedSoFar += batchSizeBytes;
+            }
+            delete jobFilesRef.current[jobId];
+            await fetch('/api/upload-queue', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ performerName: nameToUpload, basePath, uploadId: jobId, totalFiles, createHashes: job.createHashes })
+            });
+            setUploadingJobs(prev => prev.filter(j => j.id !== jobId));
+            fetchQueueStatus();
+        } catch (error) {
+            console.error('Upload failed:', error);
+            setUploadingJobs(prev => prev.map(j =>
+                j.id === jobId ? { ...j, status: 'error', error: error.message } : j
+            ));
+        }
+    };
+
+    // Auto-process upload queue
+    useEffect(() => {
+        const processQueue = async () => {
+            if (processingRef.current) return;
+            const activeJob = uploadingJobs.find(j => j.status === 'uploading');
+            if (activeJob) return;
+            const nextJob = uploadingJobs.find(j => j.status === 'pending');
+            if (nextJob) {
+                processingRef.current = true;
+                try { await processUploadJob(nextJob.id); }
+                finally { processingRef.current = false; }
+            }
+        };
+        processQueue();
+    }, [uploadingJobs]);
+
+    const handleAddUploadToQueue = () => {
+        if (!uploadPerformerName.trim()) { setError('Please enter a performer name'); return; }
+        if (uploadSelectedFiles.length === 0) { setError('Please select files to upload'); return; }
+        const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const totalFiles = uploadSelectedFiles.length;
+        const localJob = {
+            id: uploadId, performerName: uploadPerformerName.trim(), totalFiles,
+            status: 'pending', progress: 0, currentBatch: 0,
+            totalBatches: Math.ceil(totalFiles / 50),
+            filesUploaded: 0, createHashes: uploadCreateHashes,
+            createdAt: new Date().toISOString()
+        };
+        jobFilesRef.current[uploadId] = Array.from(uploadSelectedFiles);
+        setUploadingJobs(prev => [...prev, localJob]);
+        setUploadPerformerName('');
+        setUploadSelectedFiles([]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setError('');
+        setShowUploadForm(false);
+    };
+
     const getStatusIcon = (status) => {
         switch (status) {
             case 'uploading': return <UploadingIcon color="info" />;
@@ -298,8 +499,8 @@ function LocalImportPage({ basePath }) {
         }
     };
 
-    // Only show local import jobs or all? Show all for continuity
-    const queuedJobs = serverQueue;
+    // Combine local uploading jobs with server queue
+    const queuedJobs = [...uploadingJobs, ...serverQueue];
 
     const paperStyles = {
         p: 3,
@@ -309,14 +510,20 @@ function LocalImportPage({ basePath }) {
         flexDirection: 'column',
         bgcolor: '#1E1E1E',
         border: '1px solid #333',
-        boxShadow: 'none'
+        boxShadow: 'none',
+        elevation: 0
     };
 
     return (
-        <Box sx={{ p: 3, height: 'calc(100vh - 64px)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
-            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: (theme) => `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.primary.light} 90%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.5px' }}>
-                📂 Local Import
-            </Typography>
+        <Box className="dp-page" sx={{ height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+            <Box sx={{ mb: 2 }}>
+                <Typography variant="h4" component="h1" className="dp-title">
+                    Local Import & Upload Queue
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#666' }}>
+                    Import local folders or view processing queue status.
+                </Typography>
+            </Box>
 
             {error && (
                 <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
@@ -329,9 +536,9 @@ function LocalImportPage({ basePath }) {
                 </Alert>
             )}
 
-            <Grid container spacing={3} sx={{ flex: 1, overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', gap: 3, flex: 1, overflow: 'hidden', alignItems: 'flex-start' }}>
                 {/* Queue List (Left Side) */}
-                <Grid item xs={12} md={3} sx={{ height: '100%', overflow: 'hidden' }}>
+                <Box sx={{ width: 280, minWidth: 280, flexShrink: 0, height: '100%', overflow: 'hidden' }}>
                     <Paper
                         elevation={0}
                         sx={paperStyles}
@@ -461,13 +668,77 @@ function LocalImportPage({ basePath }) {
                             )}
                         </Box>
                     </Paper>
-                </Grid>
+                </Box>
             
-                {/* Scan Panel (Right Side) */}
-                <Grid item xs={12} md={9} sx={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {/* Right Side */}
+                <Box sx={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+                    {/* Upload Folder Section */}
+                    <Paper elevation={0} sx={{ ...paperStyles, height: 'auto', mb: 2, p: 0 }}>
+                        <Box
+                            onClick={() => setShowUploadForm(!showUploadForm)}
+                            sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' } }}
+                        >
+                            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: 'rgba(156,39,176,0.15)', color: '#ce93d8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <CloudUploadIcon />
+                            </Box>
+                            <Typography variant="h6" fontWeight="bold" sx={{ flex: 1 }}>
+                                Upload Folder
+                            </Typography>
+                            {uploadingJobs.length > 0 && (
+                                <Chip label={`${uploadingJobs.length} uploading`} color="info" size="small" variant="outlined" />
+                            )}
+                            <Typography variant="body2" sx={{ color: '#666' }}>{showUploadForm ? '▲' : '▼'}</Typography>
+                        </Box>
+                        {showUploadForm && (
+                            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid #333' }}>
+                                <Typography variant="body2" color="text.secondary" sx={{ mb: 2, mt: 1 }}>
+                                    Select a folder from your computer to upload files to the server.
+                                </Typography>
+                                <TextField
+                                    fullWidth size="small" label="Performer Name" value={uploadPerformerName}
+                                    onChange={(e) => setUploadPerformerName(e.target.value)}
+                                    sx={{ mb: 2, '& .MuiOutlinedInput-root': { '& fieldset': { borderColor: '#444' }, '&:hover fieldset': { borderColor: 'primary.main' } } }}
+                                />
+                                <input type="file" ref={fileInputRef} style={{ display: 'none' }}
+                                    webkitdirectory="true" directory="true" multiple onChange={handleUploadFolderSelect}
+                                />
+                                <Button fullWidth variant="outlined" startIcon={<Folder />}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    sx={{ mb: 2, py: 1.5, borderColor: '#444', textTransform: 'none', justifyContent: 'flex-start', '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' } }}
+                                >
+                                    {uploadSelectedFiles.length > 0 ? `${uploadSelectedFiles.length} files selected` : 'Select Folder'}
+                                </Button>
+                                {uploadSelectedFiles.length > 0 && (
+                                    <Box sx={{ mb: 2, p: 1.5, bgcolor: '#252525', borderRadius: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                        <Chip icon={<ImageIcon sx={{ color: '#90caf9 !important' }} />} label={uploadFileStats.pics} size="small" sx={{ bgcolor: 'rgba(144, 202, 249, 0.1)', color: '#90caf9' }} />
+                                        <Chip icon={<MovieIcon sx={{ color: '#ce93d8 !important' }} />} label={uploadFileStats.vids} size="small" sx={{ bgcolor: 'rgba(206, 147, 216, 0.1)', color: '#ce93d8' }} />
+                                        {uploadFileStats.funscript > 0 && <Chip label={`${uploadFileStats.funscript} funscripts`} size="small" sx={{ bgcolor: 'rgba(255, 204, 128, 0.1)', color: '#ffcc80' }} />}
+                                        <Chip label={formatUploadFileSize(uploadFileStats.totalSize)} size="small" sx={{ bgcolor: '#1a1a1a', color: '#888' }} />
+                                    </Box>
+                                )}
+                                <Tooltip title="Automatically create perceptual hashes for duplicate detection" placement="right">
+                                    <FormControlLabel
+                                        control={<Switch checked={uploadCreateHashes} onChange={(e) => setUploadCreateHashes(e.target.checked)} size="small" color="primary" />}
+                                        label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><HashIcon fontSize="small" sx={{ color: '#888' }} /><Typography variant="body2" sx={{ color: '#888' }}>Create Hashes</Typography></Box>}
+                                        sx={{ mb: 2, ml: 0 }}
+                                    />
+                                </Tooltip>
+                                <Button fullWidth variant="contained" startIcon={<AddIcon />}
+                                    onClick={handleAddUploadToQueue}
+                                    disabled={!uploadPerformerName.trim() || uploadSelectedFiles.length === 0}
+                                    sx={{ py: 1.5, fontWeight: 'bold', background: 'linear-gradient(135deg, #9c27b0 0%, #ce93d8 100%)' }}
+                                >
+                                    Add to Upload Queue
+                                </Button>
+                            </Box>
+                        )}
+                    </Paper>
+
+                    {/* Scan Panel */}
                     <Paper
                         elevation={0}
-                        sx={paperStyles}
+                        sx={{ ...paperStyles, flex: 1 }}
                     >
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 2 }}>
                             <Box sx={{
@@ -630,7 +901,7 @@ function LocalImportPage({ basePath }) {
                                                                         alt={`Preview ${i + 1}`}
                                                                         onClick={(e) => openLightbox(previews, i, e)}
                                                                         sx={{
-                                                                            height: 64, width: 'auto', objectFit: 'cover',
+                                                                            height: 64, width: 64, objectFit: 'cover',
                                                                             borderRadius: 2, border: '2px solid transparent',
                                                                             flexShrink: 0, cursor: 'zoom-in',
                                                                             transition: 'all 0.2s ease',
@@ -704,9 +975,9 @@ function LocalImportPage({ basePath }) {
                             </Box>
                         )}
                     </Paper>
-                </Grid>
+                </Box>
 
-                </Grid>
+                </Box>
             {/* Fullscreen Lightbox */}
             <Modal 
                 open={lightbox.open} 

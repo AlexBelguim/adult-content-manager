@@ -976,16 +976,16 @@ function PerformerManagementPage() {
           </TableCell>
         </TableRow>
         <TableRow>
-          <TableCell colSpan={9} style={{ paddingBottom: 0, paddingTop: 0, backgroundColor: '#f9fafb' }}>
+          <TableCell colSpan={9} style={{ paddingBottom: 0, paddingTop: 0, backgroundColor: '#1a1a1a' }}>
             <Collapse in={isExpanded} timeout="auto" unmountOnExit>
               <Box sx={{ p: 2, width: '100%' }}>
                 <Grid container spacing={2.5} sx={{ width: '100%' }}>
                   {/* Row 1: 4 equal-height cards taking full width */}
                   {/* Basic Information Card - No path, no aliases */}
                   <Grid item xs={12} sm={6} md={3}>
-                    <Card variant="outlined" sx={{ height: '100%', borderLeft: '4px solid #3b82f6' }}>
+                    <Card variant="outlined" sx={{ height: '100%', borderLeft: '4px solid #3b82f6', bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#3b82f6' }}>
                       <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#1e40af', mb: 2 }}>
+                        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#60a5fa', mb: 2 }}>
                           📋 Basic Information
                         </Typography>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -993,7 +993,7 @@ function PerformerManagementPage() {
                             <Typography variant="body2" sx={{ fontWeight: 500, minWidth: '90px' }}>
                               🆔 ID:
                             </Typography>
-                            <Typography variant="body2" color="textSecondary">
+                            <Typography variant="body2" sx={{ color: '#888' }}>
                               {performer.id}
                             </Typography>
                           </Box>
@@ -1042,14 +1042,14 @@ function PerformerManagementPage() {
 
                   {/* Content Library Card - Vertical Stack */}
                   <Grid item xs={12} sm={6} md={3}>
-                    <Card variant="outlined" sx={{ height: '100%', borderLeft: '4px solid #8b5cf6' }}>
+                    <Card variant="outlined" sx={{ height: '100%', bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#8b5cf6' }}>
                       <CardContent>
                         <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#6d28d9', mb: 2 }}>
                           🎬 Content Library
                         </Typography>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                           {/*🖼️ Pictures */}
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: '#ede9fe', borderRadius: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: 'rgba(139,92,246,0.1)', borderRadius: 1 }}>
                             <Typography variant="body2" sx={{ fontWeight: 600, color: '#6d28d9' }}>
                               🖼️ Pictures
                             </Typography>
@@ -1065,7 +1065,7 @@ function PerformerManagementPage() {
                             </Box>
                           </Box>
                           {/*🎥 Videos */}
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: '#ddd6fe', borderRadius: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: 'rgba(139,92,246,0.08)', borderRadius: 1 }}>
                             <Typography variant="body2" sx={{ fontWeight: 600, color: '#6d28d9' }}>
                               🎥 Videos
                             </Typography>
@@ -1081,7 +1081,7 @@ function PerformerManagementPage() {
                             </Box>
                           </Box>
                           {/*🎮 Funscripts */}
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: '#c4b5fd', borderRadius: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: 'rgba(139,92,246,0.06)', borderRadius: 1 }}>
                             <Typography variant="body2" sx={{ fontWeight: 600, color: '#6d28d9' }}>
                               🎮 Funscripts
                             </Typography>
@@ -1116,7 +1116,7 @@ function PerformerManagementPage() {
                   {/* Filtering Progress Card */}
                   {!performer.blacklisted && performer.filterStats && (
                     <Grid item xs={12} sm={6} md={3}>
-                      <Card variant="outlined" sx={{ height: '100%', borderLeft: '4px solid #10b981' }}>
+                      <Card variant="outlined" sx={{ height: '100%', bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#10b981' }}>
                         <CardContent>
                           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#047857', mb: 2 }}>
                             🎚️ Filtering Progress
@@ -1176,7 +1176,7 @@ function PerformerManagementPage() {
                                 sx={{ Height: 8, borderRadius: 1 }}
                               />
                             </Box>
-                            <Box sx={{ mt: 1, p: 1.5, bgcolor: '#d1fae5', borderRadius: 1 }}>
+                            <Box sx={{ mt: 1, p: 1.5, bgcolor: 'rgba(16,185,129,0.1)', borderRadius: 1 }}>
                               <Typography variant="body2" sx={{ fontWeight: 500, color: '#047857' }}>
                                 ✅ Filter Actions: {performer.filterStats.totalActions || 0}
                               </Typography>
@@ -1198,13 +1198,13 @@ function PerformerManagementPage() {
                   {/* Hash Database Card - Compact */}
                   {performer.hasHashDB && (
                     <Grid item xs={12} sm={6} md={3}>
-                      <Card variant="outlined" sx={{ height: '100%', borderLeft: '4px solid #f59e0b' }}>
+                      <Card variant="outlined" sx={{ height: '100%', bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#f59e0b' }}>
                         <CardContent>
                           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#d97706', mb: 2 }}>
                             🔐 Hash Database
                           </Typography>
                           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: '#fef3c7', borderRadius: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: 'rgba(245,158,11,0.1)', borderRadius: 1 }}>
                               <Typography variant="body2" sx={{ fontWeight: 600, color: '#d97706' }}>
                                 📊 Total Files
                               </Typography>
@@ -1212,7 +1212,7 @@ function PerformerManagementPage() {
                                 {performer.hashStats.fileCount}
                               </Typography>
                             </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: '#fde68a', borderRadius: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, bgcolor: 'rgba(245,158,11,0.08)', borderRadius: 1 }}>
                               <Typography variant="body2" sx={{ fontWeight: 600, color: '#d97706' }}>
                                 🗑️ Deleted
                               </Typography>
@@ -1234,7 +1234,7 @@ function PerformerManagementPage() {
                   {/* Row 2: Aliases - Full Width */}
                   {performer.aliases && performer.aliases.length > 0 && (
                     <Grid item xs={12}>
-                      <Card variant="outlined" sx={{ borderLeft: '4px solid #06b6d4', width: '100%' }}>
+                      <Card variant="outlined" sx={{ bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#06b6d4', width: '100%' }}>
                         <CardContent>
                           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#0891b2', mb: 2 }}>
                             🏷️ Aliases
@@ -1328,7 +1328,7 @@ function PerformerManagementPage() {
 
                   {/* Row 3: Tags - Full Width */}
                   <Grid item xs={12}>
-                    <Card variant="outlined" sx={{ borderLeft: '4px solid #a855f7', width: '100%' }}>
+                    <Card variant="outlined" sx={{ bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#a855f7', width: '100%' }}>
                       <CardContent>
                         <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#7e22ce', mb: 2 }}>
                           🏷️ Tags {(() => {
@@ -1378,7 +1378,7 @@ function PerformerManagementPage() {
                   {/* Row 4: Scraped Performer Data - Full Width */}
                   {performer.hasScrapedData && (
                     <Grid item xs={12}>
-                      <Card variant="outlined" sx={{ borderLeft: '4px solid #ec4899', width: '100%' }}>
+                      <Card variant="outlined" sx={{ bgcolor: '#1E1E1E', border: '1px solid #333', borderLeftWidth: '4px', borderLeftColor: '#ec4899', width: '100%' }}>
                         <CardContent>
                           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#be185d', mb: 2 }}>
                             🔍 Scraped Performer Data
@@ -1591,11 +1591,11 @@ function PerformerManagementPage() {
 
   if (loading) {
     return (
-      <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+      <Box className="dp-page">
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-          <CircularProgress />
+          <CircularProgress sx={{ color: 'primary.main' }} />
         </Box>
-      </Container>
+      </Box>
     );
   }
 
@@ -1607,480 +1607,312 @@ function PerformerManagementPage() {
   ).length;
 
   return (
-    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Performer Management
-      </Typography>
+    <Box className="dp-page">
+      {/* Header */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" component="h1" className="dp-title">
+          Performer Management
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#666' }}>
+          Manage {summary?.total || 0} performers across all locations.
+        </Typography>
+      </Box>
 
-      {/* Summary Cards */}
-      {summary && (
-        <Box sx={{ mb: 3 }}>
-          <Grid container spacing={2}>
-            {/* First row - main stats */}
-            <Grid item xs={6} sm={4} md={2}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    Total Performers
-                  </Typography>
-                  <Typography variant="h4">{summary.total}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={4} md={2}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    Before Filter
-                  </Typography>
-                  <Typography variant="h4" color="warning.main">{summary.before}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={4} md={2}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    After Filter
-                  </Typography>
-                  <Typography variant="h4" color="success.main">{summary.after}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={4} md={2}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    Missing/Empty
-                  </Typography>
-                  <Typography variant="h4" color="error.main">{summary.missingOrEmpty}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={4} md={2}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    Blacklisted
-                  </Typography>
-                  <Typography variant="h4">{summary.blacklisted}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={4} md={2}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                  <Button
-                    variant="contained"
-                    startIcon={<RefreshIcon />}
-                    onClick={loadPerformers}
-                    size="medium"
-                    fullWidth
-                  >
-                    Reload All
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            {/* Check for Content Updates Button */}
-            <Grid item xs={12} sm={6} md={6}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                  <Badge badgeContent={unacknowledgedCount} color="error" max={99}>
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      startIcon={checkingUpdates ? <CircularProgress size={20} color="inherit" /> : unacknowledgedCount > 0 ? <NotificationsActiveIcon /> : <UpdateIcon />}
-                      onClick={handleCheckUpdates}
-                      size="medium"
-                      fullWidth
-                      disabled={checkingUpdates}
-                    >
-                      {checkingUpdates ? 'Checking for Updates...' : 'Check for Content Updates'}
-                    </Button>
-                  </Badge>
-                  {updateCheckResults && (
-                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
-                      Checked: {updateCheckResults.checked} | New: {updateCheckResults.newUpdates} | Errors: {updateCheckResults.errors}
-                    </Typography>
-                  )}
-                </CardContent>
-              </Card>
-            </Grid>
-
-            {/* Second row - secondary stats */}
-            <Grid item xs={6} sm={6} md={6}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    With Hash DB
-                  </Typography>
-                  <Typography variant="h5">{summary.withHashDB}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6} sm={6} md={6}>
-              <Card sx={{ Height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography color="textSecondary" variant="caption" gutterBottom display="block">
-                    Scraped
-                  </Typography>
-                  <Typography variant="h5">{summary.scraped}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-        </Box>
-      )}
-
-      {/* Search and Tabs */}
-      <Paper sx={{ mb: 2 }}>
-        <Box p={2} display="flex" justifyContent="space-between" alignItems="center">
-          <TextField
-            variant="outlined"
-            placeholder="Search performers by name or alias..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            size="small"
-            sx={{ width: 300, mr: 2 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              )
-            }}
-          />
-          <FormControl size="small" sx={{ width: 250 }}>
-            <InputLabel id="scraper-select-label">Default Scraper</InputLabel>
-            <Select
-              labelId="scraper-select-label"
-              value={selectedScraper}
-              onChange={(e) => setSelectedScraper(e.target.value)}
-              label="Default Scraper"
-            >
-              {availableScrapers.map(scraper => (
-                <MenuItem key={scraper.id} value={scraper.id}>
-                  {scraper.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Box>
-        <Tabs value={currentTab} onChange={(e, newValue) => setCurrentTab(newValue)}>
-          <Tab label={`All (${performers?.length || 0})`} />
-          <Tab label={`Before Filter (${grouped.before?.length || 0})`} />
-          <Tab label={`After Filter (${grouped.after?.length || 0})`} />
-          <Tab label={`Missing/Empty (${grouped['missing-or-empty']?.length || 0})`} />
-          <Tab label={`Blacklisted (${grouped.blacklisted?.length || 0})`} />
-        </Tabs>
-      </Paper>
-
-      {/* Performers Table */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Location</TableCell>
-              <TableCell align="center">Folder</TableCell>
-              <TableCell
-                align="center"
-                onClick={() => handleSort('hashdb')}
-                sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { backgroundColor: 'action.hover' } }}
-              >
-                <Box display="flex" alignItems="center" justifyContent="center">
-                  Hash DB
-                  {getSortIcon('hashdb')}
+      <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
+        {/* Left Panel: Stats & Filters */}
+        <Box sx={{ width: 280, minWidth: 280, flexShrink: 0 }}>
+          <Paper elevation={0} className="dp-sidebar">
+            {/* Stats */}
+            {summary && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle2" className="dp-section-label">Statistics</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                  <Box className="dp-stat-box">
+                    <Typography variant="h5" sx={{ color: '#fff', fontWeight: 'bold' }}>{summary.total}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>Total</Typography>
+                  </Box>
+                  <Box className="dp-stat-box">
+                    <Typography variant="h5" sx={{ color: '#ed6c02', fontWeight: 'bold' }}>{summary.before}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>Before</Typography>
+                  </Box>
+                  <Box className="dp-stat-box">
+                    <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 'bold' }}>{summary.after}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>After</Typography>
+                  </Box>
+                  <Box className="dp-stat-box">
+                    <Typography variant="h5" sx={{ color: '#f44336', fontWeight: 'bold' }}>{summary.missingOrEmpty}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>Missing</Typography>
+                  </Box>
+                  <Box className="dp-stat-box">
+                    <Typography variant="h5" sx={{ color: '#888', fontWeight: 'bold' }}>{summary.blacklisted}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>Blacklisted</Typography>
+                  </Box>
+                  <Box className="dp-stat-box">
+                    <Typography variant="h5" sx={{ color: '#29b6f6', fontWeight: 'bold' }}>{summary.withHashDB}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>With Hash</Typography>
+                  </Box>
                 </Box>
-              </TableCell>
-              <TableCell
-                align="center"
-                onClick={() => handleSort('scraped')}
-                sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { backgroundColor: 'action.hover' } }}
-              >
-                <Box display="flex" alignItems="center" justifyContent="center">
-                  Scraped
-                  {getSortIcon('scraped')}
-                </Box>
-              </TableCell>
-              <TableCell
-                onClick={() => handleSort('content')}
-                sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { backgroundColor: 'action.hover' } }}
-              >
-                <Box display="flex" alignItems="center">
-                  Content (P/V/F)
-                  {getSortIcon('content')}
-                </Box>
-              </TableCell>
-              <TableCell
-                onClick={() => handleSort('size')}
-                sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { backgroundColor: 'action.hover' } }}
-              >
-                <Box display="flex" alignItems="center">
-                  Size
-                  {getSortIcon('size')}
-                </Box>
-              </TableCell>
-              <TableCell
-                align="center"
-                onClick={() => handleSort('leakshaven')}
-                sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { backgroundColor: 'action.hover' } }}
-              >
-                <Box display="flex" alignItems="center" justifyContent="center">
-                  Leakshaven Update
-                  {getSortIcon('leakshaven')}
-                </Box>
-              </TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {performerList.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} align="center">
-                  <Typography color="textSecondary">No performers found</Typography>
-                </TableCell>
-              </TableRow>
-            ) : (
-              <>
-                {/* Render duplicate groups first */}
-                {Object.entries(duplicateGroups).map(([key, performers]) =>
-                  renderDuplicateGroup(performers)
-                )}
-
-                {/* Render non-duplicate performers */}
-                {performerList
-                  .filter(p => !p.hasDuplicates)
-                  .map(performer => renderPerformerRow(performer))
-                }
-              </>
+              </Box>
             )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+
+            {/* Search */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" className="dp-section-label">Search</Typography>
+              <TextField
+                fullWidth size="small" placeholder="Search performers..."
+                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                className="dp-textfield"
+                InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: '#666' }} /></InputAdornment> }}
+              />
+            </Box>
+
+            {/* Scraper Select */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" className="dp-section-label">Default Scraper</Typography>
+              <TextField select fullWidth size="small" value={selectedScraper}
+                onChange={(e) => setSelectedScraper(e.target.value)} className="dp-textfield">
+                {availableScrapers.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+              </TextField>
+            </Box>
+
+            {/* Tab Filters as buttons */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" className="dp-section-label">Filter</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                {[
+                  { label: `All (${performers?.length || 0})`, value: 0 },
+                  { label: `Before (${grouped.before?.length || 0})`, value: 1 },
+                  { label: `After (${grouped.after?.length || 0})`, value: 2 },
+                  { label: `Missing (${grouped['missing-or-empty']?.length || 0})`, value: 3 },
+                  { label: `Blacklisted (${grouped.blacklisted?.length || 0})`, value: 4 },
+                ].map(tab => (
+                  <Button key={tab.value} fullWidth size="small"
+                    onClick={() => setCurrentTab(tab.value)}
+                    sx={{
+                      justifyContent: 'flex-start', textTransform: 'none', py: 0.75,
+                      color: currentTab === tab.value ? 'primary.light' : '#888',
+                      bgcolor: currentTab === tab.value ? 'rgba(126,87,194,0.12)' : 'transparent',
+                      '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+                    }}
+                  >{tab.label}</Button>
+                ))}
+              </Box>
+            </Box>
+
+            {/* Actions */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Button fullWidth variant="outlined" startIcon={<RefreshIcon />}
+                onClick={() => loadPerformers()} className="dp-outline-btn">
+                Reload All
+              </Button>
+              <Badge badgeContent={unacknowledgedCount} color="error" max={99} sx={{ width: '100%' }}>
+                <Button fullWidth variant="outlined"
+                  startIcon={checkingUpdates ? <CircularProgress size={16} color="inherit" /> : unacknowledgedCount > 0 ? <NotificationsActiveIcon /> : <UpdateIcon />}
+                  onClick={handleCheckUpdates} disabled={checkingUpdates}
+                  sx={{ borderColor: unacknowledgedCount > 0 ? '#f44336' : '#444', color: unacknowledgedCount > 0 ? '#f44336' : '#aaa', '&:hover': { borderColor: 'primary.main', color: 'primary.main' } }}>
+                  {checkingUpdates ? 'Checking...' : 'Check Updates'}
+                </Button>
+              </Badge>
+              {updateCheckResults && (
+                <Typography variant="caption" sx={{ color: '#666', textAlign: 'center' }}>
+                  Checked: {updateCheckResults.checked} | New: {updateCheckResults.newUpdates} | Errors: {updateCheckResults.errors}
+                </Typography>
+              )}
+            </Box>
+          </Paper>
+        </Box>
+
+        {/* Right Panel: Performer Table */}
+        <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <Paper elevation={0} className="dp-panel">
+            <Box className="dp-panel-header">
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: '#fff' }}>
+                All Performers ({performerList.length})
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#666' }}>
+                Scraped: {summary?.scraped || 0}
+              </Typography>
+            </Box>
+
+            <TableContainer sx={{ maxHeight: 'calc(100vh - 280px)' }} className="dp-table dp-scroll">
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Location</TableCell>
+                    <TableCell align="center">Folder</TableCell>
+                    <TableCell align="center" onClick={() => handleSort('hashdb')}
+                      sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { color: '#fff' } }}>
+                      <Box display="flex" alignItems="center" justifyContent="center">Hash DB{getSortIcon('hashdb')}</Box>
+                    </TableCell>
+                    <TableCell align="center" onClick={() => handleSort('scraped')}
+                      sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { color: '#fff' } }}>
+                      <Box display="flex" alignItems="center" justifyContent="center">Scraped{getSortIcon('scraped')}</Box>
+                    </TableCell>
+                    <TableCell onClick={() => handleSort('content')}
+                      sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { color: '#fff' } }}>
+                      <Box display="flex" alignItems="center">Content{getSortIcon('content')}</Box>
+                    </TableCell>
+                    <TableCell onClick={() => handleSort('size')}
+                      sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { color: '#fff' } }}>
+                      <Box display="flex" alignItems="center">Size{getSortIcon('size')}</Box>
+                    </TableCell>
+                    <TableCell align="center" onClick={() => handleSort('leakshaven')}
+                      sx={{ cursor: 'pointer', userSelect: 'none', '&:hover': { color: '#fff' } }}>
+                      <Box display="flex" alignItems="center" justifyContent="center">Updates{getSortIcon('leakshaven')}</Box>
+                    </TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {performerList.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} align="center" sx={{ py: 4, color: '#666', borderBottom: 'none' }}>
+                        No performers found matching the current filters
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <>
+                      {Object.entries(duplicateGroups).map(([key, performers]) =>
+                        renderDuplicateGroup(performers)
+                      )}
+                      {performerList
+                        .filter(p => !p.hasDuplicates)
+                        .map(performer => renderPerformerRow(performer))
+                      }
+                    </>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Box>
+      </Box>
 
       {/* Delete/Action Dialog */}
-      <Dialog
-        open={deleteDialogOpen}
-        onClose={() => !processing && setDeleteDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
+      <Dialog open={deleteDialogOpen} onClose={() => !processing && setDeleteDialogOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: '#1E1E1E', border: '1px solid #333' } }}>
+        <DialogTitle sx={{ color: '#fff' }}>
           {selectedPerformer?.blacklisted === 1 ? 'Manage Blacklisted Performer' : 'Delete or Manage Performer'}
         </DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            What would you like to do with <strong>{selectedPerformer?.name}</strong>?
+          <DialogContentText sx={{ color: '#aaa' }}>
+            What would you like to do with <strong style={{ color: '#fff' }}>{selectedPerformer?.name}</strong>?
           </DialogContentText>
-
-          <RadioGroup
-            value={selectedDeleteOption}
-            onChange={(e) => setSelectedDeleteOption(e.target.value)}
-            sx={{ mt: 2 }}
-          >
+          <RadioGroup value={selectedDeleteOption} onChange={(e) => setSelectedDeleteOption(e.target.value)} sx={{ mt: 2 }}>
             {deleteOptions.map(option => (
-              <FormControlLabel
-                key={option}
-                value={option}
-                control={<Radio />}
-                label={getDeleteOptionLabel(option)}
-              />
+              <FormControlLabel key={option} value={option} control={<Radio sx={{ color: '#666', '&.Mui-checked': { color: 'primary.main' } }} />}
+                label={<Typography sx={{ color: '#ccc' }}>{getDeleteOptionLabel(option)}</Typography>} />
             ))}
           </RadioGroup>
-
           {selectedDeleteOption && (
             <Alert severity={selectedDeleteOption === 'delete-complete' ? 'error' : 'info'} sx={{ mt: 2 }}>
               {getDeleteOptionDescription(selectedDeleteOption)}
             </Alert>
           )}
-
           {selectedDeleteOption === 'blacklist' && (
-            <TextField
-              label="Reason (optional)"
-              multiline
-              rows={3}
-              fullWidth
-              value={blacklistReason}
-              onChange={(e) => setBlacklistReason(e.target.value)}
-              sx={{ mt: 2 }}
-              placeholder="e.g., Low quality content, unwanted performer, etc."
-            />
+            <TextField label="Reason (optional)" multiline rows={3} fullWidth value={blacklistReason}
+              onChange={(e) => setBlacklistReason(e.target.value)} sx={{ mt: 2 }} className="dp-textfield"
+              placeholder="e.g., Low quality content, unwanted performer, etc." />
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={processing}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteConfirm}
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={processing} sx={{ color: '#888' }}>Cancel</Button>
+          <Button onClick={handleDeleteConfirm} variant="contained"
             color={selectedDeleteOption === 'delete-complete' ? 'error' : 'primary'}
-            variant="contained"
             disabled={processing || !selectedDeleteOption}
-            startIcon={processing ? <CircularProgress size={20} /> : null}
-          >
+            startIcon={processing ? <CircularProgress size={20} /> : null}>
             {processing ? 'Processing...' : 'Confirm'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Rename Dialog */}
-      <Dialog
-        open={renameDialogOpen}
-        onClose={() => !processing && setRenameDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          Rename Performer
-        </DialogTitle>
+      <Dialog open={renameDialogOpen} onClose={() => !processing && setRenameDialogOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: '#1E1E1E', border: '1px solid #333' } }}>
+        <DialogTitle sx={{ color: '#fff' }}>Rename Performer</DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            Rename <strong>{renamePerformer?.name}</strong> to a new name.
+          <DialogContentText sx={{ color: '#aaa' }}>
+            Rename <strong style={{ color: '#fff' }}>{renamePerformer?.name}</strong> to a new name.
           </DialogContentText>
-
-          <TextField
-            autoFocus
-            margin="dense"
-            label="New Performer Name"
-            fullWidth
-            variant="outlined"
-            value={newPerformerName}
-            onChange={(e) => setNewPerformerName(e.target.value)}
-            sx={{ mt: 2 }}
-          />
-
+          <TextField autoFocus margin="dense" label="New Performer Name" fullWidth variant="outlined"
+            value={newPerformerName} onChange={(e) => setNewPerformerName(e.target.value)} sx={{ mt: 2 }} className="dp-textfield" />
           <FormControlLabel
-            control={
-              <Radio
-                checked={renameFolderToo}
-                onChange={(e) => setRenameFolderToo(e.target.checked)}
-              />
-            }
-            label="Also rename performer folders on disk"
-            sx={{ mt: 2 }}
-          />
-
+            control={<Radio checked={renameFolderToo} onChange={(e) => setRenameFolderToo(e.target.checked)} sx={{ color: '#666', '&.Mui-checked': { color: 'primary.main' } }} />}
+            label={<Typography sx={{ color: '#ccc' }}>Also rename performer folders on disk</Typography>} sx={{ mt: 2 }} />
           <Alert severity="info" sx={{ mt: 2 }}>
-            {renameFolderToo
-              ? 'This will rename both the database entry and the physical folders on disk.'
-              : 'This will only rename the database entry. Physical folders will keep their current names.'}
+            {renameFolderToo ? 'This will rename both the database entry and the physical folders on disk.' : 'This will only rename the database entry. Physical folders will keep their current names.'}
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRenameDialogOpen(false)} disabled={processing}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleRenameConfirm}
-            variant="contained"
-            disabled={processing || !newPerformerName.trim() || newPerformerName.trim() === renamePerformer?.name}
-            startIcon={processing ? <CircularProgress size={20} /> : null}
-          >
+          <Button onClick={() => setRenameDialogOpen(false)} disabled={processing} sx={{ color: '#888' }}>Cancel</Button>
+          <Button onClick={handleRenameConfirm} variant="contained" disabled={processing || !newPerformerName.trim() || newPerformerName.trim() === renamePerformer?.name}
+            startIcon={processing ? <CircularProgress size={20} /> : null}>
             {processing ? 'Renaming...' : 'Rename'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Merge Dialog */}
-      <Dialog
-        open={mergeDialogOpen}
-        onClose={() => !processing && setMergeDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <MergeIcon color="warning" />
-          Merge Performer
+      <Dialog open={mergeDialogOpen} onClose={() => !processing && setMergeDialogOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: '#1E1E1E', border: '1px solid #333' } }}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#fff' }}>
+          <MergeIcon color="warning" /> Merge Performer
         </DialogTitle>
         <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Merge <strong>{mergeSource?.name}</strong> into another performer. All files, ratings,
-            aliases, and metadata will be combined. The source performer will be deleted.
+          <DialogContentText sx={{ mb: 2, color: '#aaa' }}>
+            Merge <strong style={{ color: '#fff' }}>{mergeSource?.name}</strong> into another performer. All files, ratings, aliases, and metadata will be combined.
           </DialogContentText>
-
           {mergeSource && (
-            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(255,152,0,0.08)', borderRadius: 1, border: '1px solid rgba(255,152,0,0.3)' }}>
-              <Typography variant="subtitle2" color="warning.main" gutterBottom>
-                Source (will be removed)
-              </Typography>
+            <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(255,152,0,0.08)', borderRadius: 1, border: '1px solid rgba(255,152,0,0.3)' }}>
+              <Typography variant="subtitle2" color="warning.main" gutterBottom>Source (will be removed)</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Avatar
-                  src={mergeSource.thumbnail ? `/api/performers/${mergeSource.id}/thumbnail` : undefined}
-                  sx={{ width: 40, height: 40 }}
-                >{mergeSource.name[0]}</Avatar>
+                <Avatar src={mergeSource.thumbnail ? `/api/performers/${mergeSource.id}/thumbnail` : undefined} sx={{ width: 40, height: 40 }}>{mergeSource.name[0]}</Avatar>
                 <Box>
-                  <Typography variant="body1" fontWeight={600}>{mergeSource.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="body1" fontWeight={600} sx={{ color: '#fff' }}>{mergeSource.name}</Typography>
+                  <Typography variant="caption" sx={{ color: '#888' }}>
                     ID: {mergeSource.id} · {mergeSource.pics_count || 0} pics · {mergeSource.vids_count || 0} vids
                   </Typography>
                 </Box>
               </Box>
             </Box>
           )}
-
           <Autocomplete
             options={(performers || []).filter(p => p.id !== mergeSource?.id)}
             getOptionLabel={(option) => `${option.name} (ID: ${option.id})`}
-            value={mergeTarget}
-            onChange={(_, newValue) => setMergeTarget(newValue)}
+            value={mergeTarget} onChange={(_, newValue) => setMergeTarget(newValue)}
             renderOption={(props, option) => (
               <li {...props} key={option.id}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Avatar
-                    src={option.thumbnail ? `/api/performers/${option.id}/thumbnail` : undefined}
-                    sx={{ width: 32, height: 32 }}
-                  >{option.name[0]}</Avatar>
+                  <Avatar src={option.thumbnail ? `/api/performers/${option.id}/thumbnail` : undefined} sx={{ width: 32, height: 32 }}>{option.name[0]}</Avatar>
                   <Box>
                     <Typography variant="body2" fontWeight={500}>{option.name}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {option.pics_count || 0} pics · {option.vids_count || 0} vids
-                    </Typography>
+                    <Typography variant="caption" color="text.secondary">{option.pics_count || 0} pics · {option.vids_count || 0} vids</Typography>
                   </Box>
                 </Box>
               </li>
             )}
             renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Target Performer (keep this one)"
-                placeholder="Search by name..."
-                variant="outlined"
-                fullWidth
-              />
+              <TextField {...params} label="Target Performer (keep this one)" placeholder="Search by name..." variant="outlined" fullWidth className="dp-textfield" />
             )}
           />
-
           {mergeTarget && (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              <strong>This cannot be undone.</strong> "{mergeSource?.name}" will be merged into
-              "{mergeTarget.name}". All files will be moved, and "{mergeSource?.name}" will be
-              added as an alias of "{mergeTarget.name}".
+              <strong>This cannot be undone.</strong> "{mergeSource?.name}" will be merged into "{mergeTarget.name}".
             </Alert>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setMergeDialogOpen(false)} disabled={processing}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleMergeConfirm}
-            variant="contained"
-            color="warning"
-            disabled={processing || !mergeTarget}
-            startIcon={processing ? <CircularProgress size={20} /> : <MergeIcon />}
-          >
+          <Button onClick={() => setMergeDialogOpen(false)} disabled={processing} sx={{ color: '#888' }}>Cancel</Button>
+          <Button onClick={handleMergeConfirm} variant="contained" color="warning" disabled={processing || !mergeTarget}
+            startIcon={processing ? <CircularProgress size={20} /> : <MergeIcon />}>
             {processing ? 'Merging...' : 'Merge'}
           </Button>
         </DialogActions>
       </Dialog>
-    </Container>
+    </Box>
   );
 }
 
 export default PerformerManagementPage;
-
-
 

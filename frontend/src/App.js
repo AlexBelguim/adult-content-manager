@@ -24,6 +24,7 @@ import './styles/themes/gamer.css';
 import './styles/themes/tokyoNight.css';
 import './styles/themes/cinematic.css';
 import './styles/themes/cleanSplit.css';
+import './styles/darkPanel.css';
 import BatchQueuePage from './pages/BatchQueuePage';
 import UploadQueuePage from './pages/UploadQueuePage';
 import LocalImportPage from './pages/LocalImportPage';
@@ -522,7 +523,18 @@ function AppContent({ onThemeChange, currentThemeId }) {
             } />
 
             <Route path="/upload-queue" element={
-              <UploadQueuePage basePath={basePath} />
+              <>{/* Redirect to combined local-import page */}
+                <Toolbar
+                  mode={mode} subMode={subMode}
+                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
+                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
+                  handyCode={handyCode} handyConnected={handyConnected}
+                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
+                  onScanPerformers={onScanPerformers} isScanning={isScanning}
+                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
+                />
+                <LocalImportPage basePath={basePath} />
+              </>
             } />
             <Route path="/local-import" element={
               <>
@@ -542,7 +554,18 @@ function AppContent({ onThemeChange, currentThemeId }) {
               <TinderSortingPage basePath={basePath} />
             } />
             <Route path="/performer-management" element={
-              <PerformerManagementPage />
+              <>
+                <Toolbar
+                  mode={mode} subMode={subMode}
+                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
+                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
+                  handyCode={handyCode} handyConnected={handyConnected}
+                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
+                  onScanPerformers={onScanPerformers} isScanning={isScanning}
+                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
+                />
+                <PerformerManagementPage />
+              </>
             } />
             <Route path="/pairwise/*" element={
               <PairwisePage />
@@ -569,7 +592,18 @@ function AppContent({ onThemeChange, currentThemeId }) {
               <SmartFilterPage />
             } />
             <Route path="/taste-dashboard" element={
-              <TasteDashboardPage />
+              <>
+                <Toolbar
+                  mode={mode} subMode={subMode}
+                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
+                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
+                  handyCode={handyCode} handyConnected={handyConnected}
+                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
+                  onScanPerformers={onScanPerformers} isScanning={isScanning}
+                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
+                />
+                <TasteDashboardPage />
+              </>
             } />
             <Route path="/pairwise-rank" element={
               <PairwiseRankPage />

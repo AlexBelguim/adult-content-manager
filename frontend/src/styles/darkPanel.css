@@ -1,0 +1,239 @@
+/* ============================================================
+   Dark Panel Design System
+   Shared styles matching Hash Management / Hash Results pages
+   ============================================================ */
+
+/* Page container */
+.dp-page {
+  padding: 24px;
+  min-height: 100vh;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* Gradient page title */
+.dp-title {
+  font-weight: bold !important;
+  background: linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-light, #b085f5) 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  margin-bottom: 4px !important;
+}
+
+/* Sidebar panel (sticky left) */
+.dp-sidebar {
+  padding: 24px;
+  background-color: #1E1E1E;
+  border-radius: 8px;
+  border: 1px solid #333;
+  position: sticky;
+  top: 16px;
+}
+
+/* Main content panel */
+.dp-panel {
+  background-color: #1E1E1E;
+  border-radius: 8px;
+  border: 1px solid #333;
+  overflow: hidden;
+}
+
+/* Panel header bar */
+.dp-panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Stat box in sidebar */
+.dp-stat-box {
+  padding: 12px;
+  background-color: #252525;
+  border-radius: 4px;
+  text-align: center;
+}
+
+/* Section label */
+.dp-section-label {
+  color: #888 !important;
+  margin-bottom: 8px !important;
+}
+
+/* Dark text field */
+.dp-textfield .MuiOutlinedInput-root {
+  color: #fff;
+}
+.dp-textfield .MuiOutlinedInput-root fieldset {
+  border-color: #444;
+}
+.dp-textfield .MuiOutlinedInput-root:hover fieldset {
+  border-color: var(--primary-main, #7e57c2);
+}
+.dp-textfield .MuiOutlinedInput-root.Mui-focused fieldset {
+  border-color: var(--primary-main, #7e57c2);
+}
+.dp-textfield .MuiInputBase-input::placeholder {
+  color: #666;
+}
+.dp-textfield .MuiSelect-icon {
+  color: #888;
+}
+.dp-textfield .MuiInputLabel-root {
+  color: rgba(255,255,255,0.5);
+}
+
+/* Dark table styles */
+.dp-table .MuiTableCell-head {
+  background-color: #252525;
+  color: #aaa;
+  border-bottom: 1px solid #333;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.dp-table .MuiTableCell-body {
+  border-bottom: 1px solid #333;
+  color: #ccc;
+}
+.dp-table .MuiTableRow-root:hover {
+  background-color: rgba(255,255,255,0.03);
+}
+.dp-table .MuiTableSortLabel-root.Mui-active {
+  color: var(--primary-light, #b085f5) !important;
+}
+.dp-table .MuiTableSortLabel-icon {
+  color: var(--primary-light, #b085f5) !important;
+}
+
+/* Gradient button */
+.dp-gradient-btn {
+  background: linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%) !important;
+  color: #fff !important;
+  font-weight: bold !important;
+  text-transform: none !important;
+  box-shadow: 0 3px 5px 2px rgba(126, 87, 194, .3) !important;
+}
+.dp-gradient-btn:hover {
+  background: linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%) !important;
+  box-shadow: 0 3px 10px 2px rgba(126, 87, 194, .4) !important;
+}
+.dp-gradient-btn:disabled {
+  background: #444 !important;
+  color: #777 !important;
+  box-shadow: none !important;
+}
+
+/* Outline refresh button */
+.dp-outline-btn {
+  border-color: #444 !important;
+  color: #aaa !important;
+}
+.dp-outline-btn:hover {
+  border-color: var(--primary-main, #7e57c2) !important;
+  color: var(--primary-main, #7e57c2) !important;
+}
+
+/* Location chips */
+.dp-chip-before {
+  background-color: rgba(237, 108, 2, 0.15) !important;
+  color: #ed6c02 !important;
+  font-weight: bold !important;
+  font-size: 0.65rem !important;
+}
+.dp-chip-after {
+  background-color: rgba(76, 175, 80, 0.15) !important;
+  color: #4caf50 !important;
+  font-weight: bold !important;
+  font-size: 0.65rem !important;
+}
+.dp-chip-error {
+  background-color: rgba(244, 67, 54, 0.15) !important;
+  color: #f44336 !important;
+  font-weight: bold !important;
+  font-size: 0.65rem !important;
+}
+.dp-chip-default {
+  background-color: rgba(255,255,255,0.08) !important;
+  color: #888 !important;
+  font-weight: bold !important;
+  font-size: 0.65rem !important;
+}
+
+/* Collapsible section (matching hash results deleted/kept sections) */
+.dp-collapsible {
+  background-color: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.dp-collapsible-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.dp-collapsible-header:hover {
+  background-color: rgba(255,255,255,0.03);
+}
+
+/* Tabs in dark theme */
+.dp-tabs .MuiTab-root {
+  color: #888;
+  text-transform: none;
+  font-weight: 600;
+  min-height: 42px;
+}
+.dp-tabs .MuiTab-root.Mui-selected {
+  color: var(--primary-light, #b085f5);
+}
+.dp-tabs .MuiTabs-indicator {
+  background-color: var(--primary-main, #7e57c2);
+}
+
+/* Expanded row detail cards in dark theme */
+.dp-detail-card {
+  background-color: #1a1a1a !important;
+  border: 1px solid #333 !important;
+  border-left: 4px solid var(--primary-main, #7e57c2) !important;
+  border-radius: 4px !important;
+}
+.dp-detail-card .MuiCardContent-root {
+  color: #ccc;
+}
+
+/* Info row in detail cards */
+.dp-info-row {
+  padding: 8px 12px;
+  background-color: #252525;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Queue list items */
+.dp-queue-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #333;
+  transition: background-color 0.2s;
+}
+.dp-queue-item:hover {
+  background-color: rgba(255,255,255,0.03);
+}
+
+/* Scrollbar for dark panels */
+.dp-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.dp-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--primary-main, #7e57c2);
+  border-radius: 3px;
+}
+.dp-scroll::-webkit-scrollbar-track {
+  background-color: #1a1a1a;
+  border-radius: 3px;
+}

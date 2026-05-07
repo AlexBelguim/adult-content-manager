@@ -150,13 +150,12 @@ function Toolbar({
             </Button>
           </ButtonGroup>
 
-        {/* Upload Folder button - only show in filter mode */}
-        {mode === 'filter' && (
+        {/* Upload Folder button */}
           <>
             <Button
               variant="contained"
               color="secondary"
-              onClick={() => navigate('/upload-queue')}
+              onClick={() => navigate('/local-import')}
               startIcon={<FolderOpen />}
               size="small"
               sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
@@ -164,26 +163,11 @@ function Toolbar({
               Upload Folder
             </Button>
             <Tooltip title="Upload Folder">
-              <IconButton color="secondary" onClick={() => navigate('/upload-queue')} sx={{ display: { xs: 'inline-flex', sm: 'none' } }}>
+              <IconButton color="secondary" onClick={() => navigate('/local-import')} sx={{ display: { xs: 'inline-flex', sm: 'none' } }}>
                 <FolderOpen />
               </IconButton>
             </Tooltip>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/local-import')}
-              startIcon={<Add />}
-              sx={{ background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)', color: 'white', display: { xs: 'none', sm: 'inline-flex' } }}
-              size="small"
-            >
-              Local Import
-            </Button>
-            <Tooltip title="Local Import">
-              <IconButton sx={{ color: '#66BB6A', display: { xs: 'inline-flex', sm: 'none' } }} onClick={() => navigate('/local-import')}>
-                <Add />
-              </IconButton>
-            </Tooltip>
           </>
-        )}
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
