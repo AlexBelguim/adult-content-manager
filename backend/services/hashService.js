@@ -493,12 +493,21 @@ async function checkDuplicates(sourcePerformerId, targetPerformerId, runId) {
     for (const match of matches) {
       // Add file info
       if (!fileInfo.has(match.file_id_ref)) {
-        fileInfo.set(match.file_id_ref, { id: match.file_id_ref, path: match.file_path });
+        const sourceHash = sourceHashes.find(h => h.id === match.file_id_ref);
+        fileInfo.set(match.file_id_ref, { 
+          id: match.file_id_ref, 
+          path: match.file_path,
+          performer_id: sourceHash ? sourceHash.performer_id : sourcePerformerId
+        });
       }
       if (!fileInfo.has(match.candidate_id)) {
         const targetHash = [...sourceHashes, ...targetHashes].find(h => h.id === match.candidate_id);
         if (targetHash) {
-          fileInfo.set(match.candidate_id, { id: match.candidate_id, path: targetHash.file_path });
+          fileInfo.set(match.candidate_id, { 
+            id: match.candidate_id, 
+            path: targetHash.file_path,
+            performer_id: targetHash.performer_id
+          });
         }
       }
 
@@ -555,8 +564,22 @@ async function checkDuplicates(sourcePerformerId, targetPerformerId, runId) {
 
       if (groupFiles.length < 2) continue; // Skip single-file groups
 
-      // Sort by ID to have consistent ordering (lowest ID becomes the keeper)
-      groupFiles.sort((a, b) => a - b);
+      // Sort group files to determine the keeper
+      groupFiles.sort((a, b) => {
+        const fileA = fileInfo.get(a);
+        const fileB = fileInfo.get(b);
+        
+        // Priority 1: Target performer files (usually the 'After Filter' files)
+        if (sourcePerformerId !== targetPerformerId) {
+          const aIsTarget = fileA && fileA.performer_id === targetPerformerId;
+          const bIsTarget = fileB && fileB.performer_id === targetPerformerId;
+          if (aIsTarget && !bIsTarget) return -1;
+          if (!aIsTarget && bIsTarget) return 1;
+        }
+        
+        // Priority 2: Lowest ID (consistent ordering)
+        return a - b;
+      });
 
       const keeperId = groupFiles[0]; // Keep the first one
 
