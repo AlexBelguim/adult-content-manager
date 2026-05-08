@@ -458,8 +458,8 @@ router.get('/status', async (req, res) => {
 // ── POST /api/training/test-model ────────────────────────────
 // Relay test request with local data to AI server
 router.post('/test-model', async (req, res) => {
-  const { model_id, sample_size = 100 } = req.body;
-  const aiUrl = getAiServerUrl();
+  const { model_id, sample_size = 100, ai_server_url } = req.body;
+  const aiUrl = ai_server_url || getAiServerUrl();
 
   try {
     const db = req.app.get('db');
@@ -673,6 +673,140 @@ router.get('/export-zip', async (req, res) => {
   } catch (err) {
     console.error('[Training] Export ZIP error:', err.message);
     if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/training/export-manifest ──────────────────────────
+// Download only the manifest.json
+router.get('/export-manifest', async (req, res) => {
+  const type = req.query.type || 'binary';
+  try {
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
+
+    const images = collectTrainingImages(folder.path);
+    const manifest = {
+      type,
+      created: new Date().toISOString(),
+      keep_count: images.keep.length,
+      delete_count: images.delete.length,
+      total: images.keep.length + images.delete.length,
+      performer_ratings: collectPerformerRatings()
+    };
+
+    // Include pairwise data
+    try {
+      const pairs = db.prepare(`
+        SELECT winner, loser, performer_id, type FROM pairwise_pairs WHERE type != 'both_bad'
+      `).all();
+
+      const pathMap = {};
+      for (const img of [...images.keep, ...images.delete]) {
+        pathMap[img.absPath] = img.zipPath;
+        pathMap[img.absPath.replace(/\\/g, '/')] = img.zipPath;
+      }
+
+      manifest.pairwise_pairs = pairs.map(p => ({
+        winner: pathMap[p.winner] || pathMap[p.winner?.replace(/\\/g, '/')] || p.winner,
+        loser: pathMap[p.loser] || pathMap[p.loser?.replace(/\\/g, '/')] || p.loser,
+        performer_id: p.performer_id,
+        type: p.type
+      }));
+      manifest.pairwise_count = pairs.length;
+    } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
+
+    try {
+      const actions = db.prepare(`
+        SELECT performer_id, action, COUNT(*) as cnt
+        FROM filter_actions GROUP BY performer_id, action
+      `).all();
+      manifest.filter_actions = actions;
+    } catch (_) {}
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="training_manifest_${type}_${Date.now()}.json"`);
+    res.send(JSON.stringify(manifest, null, 2));
+  } catch (err) {
+    console.error('[Training] Export manifest error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/training/push-labels ───────────────────────────
+// Push only the manifest.json to the AI server
+router.post('/push-labels', async (req, res) => {
+  const { type = 'binary', ai_server_url } = req.body;
+  const aiUrl = ai_server_url || getAiServerUrl();
+
+  try {
+    await axios.get(`${aiUrl}/health`, { timeout: 5000 });
+
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
+
+    const images = collectTrainingImages(folder.path);
+    const allImages = [...images.keep, ...images.delete];
+
+    const manifest = {
+      type,
+      created: new Date().toISOString(),
+      keep_count: images.keep.length,
+      delete_count: images.delete.length,
+      performer_ratings: collectPerformerRatings()
+    };
+
+    try {
+      const pairs = db.prepare(`
+        SELECT winner, loser, performer_id, type FROM pairwise_pairs WHERE type != 'both_bad'
+      `).all();
+      const pathMap = {};
+      for (const img of allImages) {
+        pathMap[img.absPath] = img.zipPath;
+        pathMap[img.absPath.replace(/\\/g, '/')] = img.zipPath;
+      }
+      manifest.pairwise_pairs = pairs.map(p => ({
+        winner: pathMap[p.winner] || pathMap[p.winner?.replace(/\\/g, '/')] || p.winner,
+        loser: pathMap[p.loser] || pathMap[p.loser?.replace(/\\/g, '/')] || p.loser,
+        performer_id: p.performer_id,
+        type: p.type
+      }));
+      manifest.pairwise_count = pairs.length;
+    } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
+
+    const tmpZip = path.join(os.tmpdir(), `labels_push_${Date.now()}.zip`);
+    const output = fs.createWriteStream(tmpZip);
+    const archive = archiver('zip', { zlib: { level: 1 } });
+
+    await new Promise((resolve, reject) => {
+      output.on('close', resolve);
+      archive.on('error', reject);
+      archive.pipe(output);
+      archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+      archive.finalize();
+    });
+
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('file', fs.createReadStream(tmpZip), { filename: 'labels.zip' });
+    form.append('type', type);
+
+    const uploadRes = await axios.post(`${aiUrl}/upload_training`, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 60000
+    });
+
+    fs.removeSync(tmpZip);
+
+    res.json({
+      success: true,
+      message: `Pushed manifest with ${manifest.pairwise_count} pairs to AI server`,
+      aiResponse: uploadRes.data
+    });
+  } catch (err) {
+    console.error('[Training] Push labels error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -899,6 +1033,54 @@ router.post('/export-performer-pairs', (req, res) => {
   } catch (err) {
     console.error('[Training] Export performer pairs error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── AI Server Proxies (to support remote access via Tailscale) ───
+
+// GET /api/training/ai-health
+router.get('/ai-health', async (req, res) => {
+  const aiUrl = req.query.url || getAiServerUrl();
+  try {
+    const response = await axios.get(`${aiUrl}/health`, { timeout: 3000 });
+    res.json(response.data);
+  } catch (err) {
+    res.status(503).json({ error: 'AI server unreachable', message: err.message });
+  }
+});
+
+// GET /api/training/ai-data-status
+router.get('/ai-data-status', async (req, res) => {
+  const aiUrl = req.query.url || getAiServerUrl();
+  try {
+    const response = await axios.get(`${aiUrl}/training_data_status`, { timeout: 5000 });
+    res.json(response.data);
+  } catch (err) {
+    res.status(503).json({ error: 'AI server unreachable', message: err.message });
+  }
+});
+
+// POST /api/training/ai-load-model
+router.post('/ai-load-model', async (req, res) => {
+  const { url, model_id } = req.body;
+  const aiUrl = url || getAiServerUrl();
+  try {
+    const response = await axios.post(`${aiUrl}/load_model`, { model_id }, { timeout: 10000 });
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load model', message: err.message });
+  }
+});
+
+// POST /api/training/ai-delete-model
+router.post('/ai-delete-model', async (req, res) => {
+  const { url, model_id } = req.body;
+  const aiUrl = url || getAiServerUrl();
+  try {
+    const response = await axios.post(`${aiUrl}/delete_model`, { model_id }, { timeout: 5000 });
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete model', message: err.message });
   }
 });
 

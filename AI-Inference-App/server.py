@@ -796,13 +796,19 @@ def api_upload_training():
         zip_size = tmp_path.stat().st_size
         log(f"  📥 Received {zip_size / 1024 / 1024:.1f} MB")
 
-        # Clear old data and extract
-        for sub in ['keep', 'delete']:
-            sub_path = TRAINING_DATA_DIR / sub
-            if sub_path.exists():
-                shutil.rmtree(str(sub_path))
-
         with zipfile.ZipFile(str(tmp_path), 'r') as zf:
+            # Check if ZIP contains any images (keep/ or delete/ folders)
+            has_images = any(name.startswith(('keep/', 'delete/')) for name in zf.namelist())
+            
+            if has_images:
+                log("  🖼️ ZIP contains images, clearing existing data folders...")
+                for sub in ['keep', 'delete']:
+                    sub_path = TRAINING_DATA_DIR / sub
+                    if sub_path.exists():
+                        shutil.rmtree(str(sub_path))
+            else:
+                log("  🏷️ ZIP contains only metadata/manifest, preserving existing images.")
+
             zf.extractall(str(TRAINING_DATA_DIR))
 
         tmp_path.unlink(missing_ok=True)

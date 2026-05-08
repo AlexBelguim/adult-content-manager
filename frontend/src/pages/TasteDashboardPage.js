@@ -82,14 +82,14 @@ function TasteDashboardPage() {
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     }
-    // AI health check + cached training data status
+    // AI health check + cached training data status (via proxy to support remote access)
     try {
-      const h = await fetch(`${aiUrl}/health`).then(r => r.json());
-      setAiHealth(h);
+      const h = await fetch(`/api/training/ai-health?url=${encodeURIComponent(aiUrl)}`).then(r => r.json());
+      setAiHealth(h.error ? null : h);
     } catch (_) { setAiHealth(null); }
     try {
-      const td = await fetch(`${aiUrl}/training_data_status`).then(r => r.json());
-      setAiTrainingData(td);
+      const td = await fetch(`/api/training/ai-data-status?url=${encodeURIComponent(aiUrl)}`).then(r => r.json());
+      setAiTrainingData(td.error ? null : td);
     } catch (_) { setAiTrainingData(null); }
     setLoading(false);
   };
@@ -197,8 +197,8 @@ function TasteDashboardPage() {
         alert(`✅ ${result.message}`);
         // Refresh cached data status
         try {
-          const td = await fetch(`${aiUrl}/training_data_status`).then(r => r.json());
-          setAiTrainingData(td);
+          const td = await fetch(`/api/training/ai-data-status?url=${encodeURIComponent(aiUrl)}`).then(r => r.json());
+          setAiTrainingData(td.error ? null : td);
         } catch (_) {}
       } else { alert(`❌ ${result.error}`); }
     } catch (err) { alert(`Error: ${err.message}`); }
@@ -235,6 +235,50 @@ function TasteDashboardPage() {
       const a = document.createElement('a');
       a.href = url;
       a.download = `training_data_${selectedType}_${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) { alert(`Download failed: ${err.message}`); }
+    setPushingData(false);
+  };
+
+  const handlePushLabels = async () => {
+    setPushingData(true);
+    try {
+      const res = await fetch('/api/training/push-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: selectedType, ai_server_url: aiUrl })
+      });
+      const result = await res.json();
+      if (result.success) {
+        alert(`✅ Labels pushed: ${result.message}`);
+        // Refresh cached data status
+        try {
+          const td = await fetch(`${aiUrl}/training_data_status`).then(r => r.json());
+          setAiTrainingData(td);
+        } catch (_) {}
+      } else { alert(`❌ ${result.error}`); }
+    } catch (err) { alert(`Error: ${err.message}`); }
+    setPushingData(false);
+  };
+
+  const handleDownloadManifest = async () => {
+    setPushingData(true); // reuse loading state
+    try {
+      const res = await fetch(`/api/training/export-manifest?type=${selectedType}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Download failed' }));
+        alert(`❌ ${err.error}`);
+        setPushingData(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `training_manifest_${selectedType}_${Date.now()}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -313,9 +357,9 @@ function TasteDashboardPage() {
         <IconButton onClick={fetchData} sx={{ color: '#888' }}><Refresh /></IconButton>
       </Box>
 
-      <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
+      <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexDirection: { xs: 'column', lg: 'row' } }}>
         {/* Left Sidebar */}
-        <Box sx={{ width: 280, minWidth: 280, flexShrink: 0 }}>
+        <Box sx={{ width: { xs: '100%', lg: 280 }, minWidth: { lg: 280 }, flexShrink: 0, position: { lg: 'sticky' }, top: 16 }}>
           <Paper elevation={0} className="dp-sidebar">
             {/* Stats */}
             <Box sx={{ mb: 3 }}>
@@ -381,7 +425,7 @@ function TasteDashboardPage() {
         </Box>
 
         {/* Right Panel: Collapsible Sections */}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
           {/* Suggestions */}
           {suggestions.length > 0 && (
             <CollapsibleSection title="⚠️ Suggestions" count={suggestions.length} defaultOpen color="#ed6c02">
@@ -604,10 +648,22 @@ function TasteDashboardPage() {
                       '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)' } }}>
                     {pushingData ? '📤 Pushing...' : '📤 Push to AI Server'}
                   </Button>
-                  <Button variant="outlined" size="small" onClick={handleDownloadZip}
+                  <Button variant="outlined" size="small" onClick={handlePushLabels} disabled={!aiHealth || pushingData}
+                    sx={{ fontWeight: 700, textTransform: 'none', borderColor: '#444', color: '#8b5cf6',
+                      '&:hover': { borderColor: '#8b5cf6', bgcolor: 'rgba(139,92,246,0.04)' } }}>
+                    {pushingData ? '...' : '🏷️ Push Labels'}
+                  </Button>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                  <Button variant="outlined" size="small" fullWidth onClick={handleDownloadZip}
                     sx={{ fontWeight: 700, textTransform: 'none', borderColor: '#444', color: '#ccc',
                       '&:hover': { borderColor: '#666', bgcolor: 'rgba(255,255,255,0.04)' } }}>
                     📥 Download ZIP
+                  </Button>
+                  <Button variant="outlined" size="small" fullWidth onClick={handleDownloadManifest}
+                    sx={{ fontWeight: 700, textTransform: 'none', borderColor: '#444', color: '#ccc',
+                      '&:hover': { borderColor: '#666', bgcolor: 'rgba(255,255,255,0.04)' } }}>
+                    📄 JSON Manifest
                   </Button>
                 </Box>
               </Box>
@@ -760,7 +816,7 @@ function ModelArsenal({
     setTestingModel(model.filename);
     try {
       const res = await fetch('/api/training/test-model', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: model.filename, sample_size: 100 }) });
+        body: JSON.stringify({ model_id: model.filename, sample_size: 100, ai_server_url: aiUrl }) });
       const data = await res.json();
       setTestResults(prev => ({ ...prev, [model.filename]: data.success ? data.results : { error: data.error } }));
     } catch (e) { setTestResults(prev => ({ ...prev, [model.filename]: { error: e.message } })); }
@@ -768,12 +824,26 @@ function ModelArsenal({
   };
   const handleLoad = async (model) => {
     setLoadingModel(model.filename);
-    try { await fetch(`${aiUrl}/load_model`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: model.filename }) }); if (onModelLoaded) onModelLoaded(); } catch (_) {}
+    try { 
+      await fetch('/api/training/ai-load-model', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ url: aiUrl, model_id: model.filename }) 
+      }); 
+      if (onModelLoaded) onModelLoaded(); 
+    } catch (_) {}
     setLoadingModel(null);
   };
   const handleDelete = async (model) => {
     if (!window.confirm(`Delete model ${model.filename}?`)) return;
-    try { await fetch(`${aiUrl}/delete_model`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: model.filename }) }); if (onModelLoaded) onModelLoaded(); } catch (_) {}
+    try { 
+      await fetch('/api/training/ai-delete-model', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ url: aiUrl, model_id: model.filename }) 
+      }); 
+      if (onModelLoaded) onModelLoaded(); 
+    } catch (_) {}
   };
   const formatDate = (ts) => !ts ? '—' : new Date(ts * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
