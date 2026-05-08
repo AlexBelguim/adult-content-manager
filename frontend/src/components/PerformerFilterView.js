@@ -1100,6 +1100,8 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               textTransform: 'none',
               fontWeight: 'bold',
               whiteSpace: 'nowrap',
+              py: isMobile ? 1.5 : undefined, // Larger on mobile
+              px: isMobile ? 3 : undefined,
             }}
           >
             Swipe Mode
@@ -1404,69 +1406,71 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               </Box>
 
               {/* Action Buttons */}
-              {currentTab === 'funscript' ? (
-                <>
-                  <Button
-                    variant="contained"
-                    color="success"
-                    onClick={() => handleFilterAction('keep')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Keep Video ({shortcuts.keep?.toUpperCase() || 'K'})
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="error"
-                    onClick={() => handleFilterAction('delete')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Delete Video ({shortcuts.delete?.toUpperCase() || 'D'})
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleUndo}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="contained"
-                    color="success"
-                    onClick={() => handleFilterAction('keep')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Keep ({shortcuts.keep?.toUpperCase() || 'K'})
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="error"
-                    onClick={() => handleFilterAction('delete')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Delete ({shortcuts.delete?.toUpperCase() || 'D'})
-                  </Button>
-                  {currentTab === 'vids' && (
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {currentTab === 'funscript' ? (
+                  <>
                     <Button
                       variant="contained"
-                      color="secondary"
-                      onClick={() => handleFilterAction('move_to_funscript')}
-                      sx={{ px: 4, py: 2, minWidth: 160 }}
+                      color="success"
+                      onClick={() => handleFilterAction('keep')}
+                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
                     >
-                      Move to Funscript ({shortcuts.move_to_funscript?.toUpperCase() || 'F'})
+                      Keep Video ({shortcuts.keep?.toUpperCase() || 'K'})
                     </Button>
-                  )}
-                  <Button
-                    variant="outlined"
-                    onClick={handleUndo}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
-                  </Button>
-                </>
-              )}
+                    <Button
+                      variant="contained"
+                      color="error"
+                      onClick={() => handleFilterAction('delete')}
+                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
+                    >
+                      Delete Video ({shortcuts.delete?.toUpperCase() || 'D'})
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={handleUndo}
+                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
+                    >
+                      Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      onClick={() => handleFilterAction('keep')}
+                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
+                    >
+                      Keep ({shortcuts.keep?.toUpperCase() || 'K'})
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="error"
+                      onClick={() => handleFilterAction('delete')}
+                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
+                    >
+                      Delete ({shortcuts.delete?.toUpperCase() || 'D'})
+                    </Button>
+                    {currentTab === 'vids' && (
+                      <Button
+                        variant="contained"
+                        color="secondary"
+                        onClick={() => handleFilterAction('move_to_funscript')}
+                        sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 160, fontSize: isMobile ? '1.1rem' : undefined }}
+                      >
+                        Move to Funscript ({shortcuts.move_to_funscript?.toUpperCase() || 'F'})
+                      </Button>
+                    )}
+                    <Button
+                      variant="outlined"
+                      onClick={handleUndo}
+                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
+                    >
+                      Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
+                    </Button>
+                  </>
+                )}
+              </Box>
             </Box>
           </Box>
         )}

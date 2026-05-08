@@ -1,0 +1,91 @@
+[
+  {
+    "type": "binary",
+    "started_at": 1778254271.207208,
+    "finished_at": 1778270104.9760344,
+    "duration_s": 15833.8,
+    "epochs": 12,
+    "batch_size": 24,
+    "backbone": "facebook/dinov2-large",
+    "best_val_acc": 0.839300582847627,
+    "model_file": "binary_filtering.pt",
+    "epoch_history": [
+      {
+        "epoch": 1,
+        "train_loss": 0.5986677205688516,
+        "train_acc": 0.6793,
+        "val_acc": 0.7336
+      },
+      {
+        "epoch": 2,
+        "train_loss": 0.5227258546461522,
+        "train_acc": 0.7394,
+        "val_acc": 0.7252
+      },
+      {
+        "epoch": 3,
+        "train_loss": 0.5258296644183952,
+        "train_acc": 0.7392,
+        "val_acc": 0.776
+      },
+      {
+        "epoch": 4,
+        "train_loss": 0.373295587736746,
+        "train_acc": 0.8319,
+        "val_acc": 0.8052
+      },
+      {
+        "epoch": 5,
+        "train_loss": 0.26122827038273844,
+        "train_acc": 0.8936,
+        "val_acc": 0.831
+      },
+      {
+        "epoch": 6,
+        "train_loss": 0.20007571480958394,
+        "train_acc": 0.9233,
+        "val_acc": 0.8351
+      },
+      {
+        "epoch": 7,
+        "train_loss": 0.13133150424388512,
+        "train_acc": 0.9486,
+        "val_acc": 0.8293
+      },
+      {
+        "epoch": 8,
+        "train_loss": 0.11118454787253836,
+        "train_acc": 0.9584,
+        "val_acc": 0.821
+      },
+      {
+        "epoch": 9,
+        "train_loss": 0.080310364032056,
+        "train_acc": 0.9677,
+        "val_acc": 0.8276
+      },
+      {
+        "epoch": 10,
+        "train_loss": 0.08789220055389795,
+        "train_acc": 0.9636,
+        "val_acc": 0.8393
+      },
+      {
+        "epoch": 11,
+        "train_loss": 0.06525081307992084,
+        "train_acc": 0.9749,
+        "val_acc": 0.8301
+      },
+      {
+        "epoch": 12,
+        "train_loss": 0.06677419537428109,
+        "train_acc": 0.9728,
+        "val_acc": 0.8193
+      }
+    ],
+    "data": {
+      "keep": 0,
+      "delete": 0
+    }
+  }
+]

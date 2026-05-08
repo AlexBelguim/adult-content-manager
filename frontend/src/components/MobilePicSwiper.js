@@ -54,6 +54,24 @@ function MobilePicSwiper({
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // Reset animation state when file changes to prevent rubberbanding
+  useEffect(() => {
+    setExitAnimation(null);
+    setSwipeOffset({ x: 0, y: 0 });
+    setSwipeDecision(null);
+  }, [currentFile?.path]);
+
+  // Preload next images
+  useEffect(() => {
+    if (!files || files.length === 0) return;
+    
+    const nextFiles = files.slice(currentIndex + 1, currentIndex + 6);
+    nextFiles.forEach(file => {
+      const img = new Image();
+      img.src = `/api/files/raw?path=${encodeURIComponent(file.path)}`;
+    });
+  }, [files, currentIndex]);
+
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       (containerRef.current || document.documentElement).requestFullscreen().catch(e => console.log(e));
@@ -102,19 +120,13 @@ function MobilePicSwiper({
       setExitAnimation('right');
       setTimeout(() => {
         onAction('keep');
-        setExitAnimation(null);
-        setSwipeOffset({ x: 0, y: 0 });
-        setSwipeDecision(null);
-      }, 250);
-    } else if (isSwipe && swipeOffset.x < 0) {
+      }, 150); // Faster
+    } else if (isSwipe && swipeOffset.x < -20) { // Check velocity or offset
       // Swipe left → Delete
       setExitAnimation('left');
       setTimeout(() => {
         onAction('delete');
-        setExitAnimation(null);
-        setSwipeOffset({ x: 0, y: 0 });
-        setSwipeDecision(null);
-      }, 250);
+      }, 150); // Faster
     } else {
       // Snap back
       setSwipeOffset({ x: 0, y: 0 });
@@ -290,7 +302,7 @@ function MobilePicSwiper({
             justifyContent: 'center',
             transform: getCardTransform(),
             opacity: getCardOpacity(),
-            transition: isDragging ? 'none' : 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            transition: isDragging ? 'none' : 'all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.1)', // Faster and peppier
             willChange: 'transform',
             position: 'relative',
           }}
@@ -388,8 +400,8 @@ function MobilePicSwiper({
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
             color: '#aaa',
-            width: 44,
-            height: 44,
+            width: 56, // Larger
+            height: 56, // Larger
             '&:disabled': { opacity: 0.3 }
           }}
         >
@@ -398,23 +410,17 @@ function MobilePicSwiper({
 
         {/* Delete */}
         <IconButton
-          onClick={() => {
-            setExitAnimation('left');
-            setTimeout(() => {
-              onAction('delete');
-              setExitAnimation(null);
-            }, 250);
-          }}
+          onClick={() => onAction('delete')}
           sx={{
             bgcolor: 'rgba(244, 67, 54, 0.2)',
             border: '2px solid #f44336',
             color: '#f44336',
-            width: 56,
-            height: 56,
+            width: 72, // Larger
+            height: 72, // Larger
             '&:active': { bgcolor: 'rgba(244, 67, 54, 0.4)' }
           }}
         >
-          <Delete sx={{ fontSize: 28 }} />
+          <Delete sx={{ fontSize: 36 }} />
         </IconButton>
 
         {/* Undo */}
@@ -423,8 +429,8 @@ function MobilePicSwiper({
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
             color: '#ff9800',
-            width: 44,
-            height: 44,
+            width: 56, // Larger
+            height: 56, // Larger
           }}
         >
           <Undo />
@@ -432,23 +438,17 @@ function MobilePicSwiper({
 
         {/* Keep */}
         <IconButton
-          onClick={() => {
-            setExitAnimation('right');
-            setTimeout(() => {
-              onAction('keep');
-              setExitAnimation(null);
-            }, 250);
-          }}
+          onClick={() => onAction('keep')}
           sx={{
             bgcolor: 'rgba(76, 175, 80, 0.2)',
             border: '2px solid #4caf50',
             color: '#4caf50',
-            width: 56,
-            height: 56,
+            width: 72, // Larger
+            height: 72, // Larger
             '&:active': { bgcolor: 'rgba(76, 175, 80, 0.4)' }
           }}
         >
-          <CheckCircle sx={{ fontSize: 28 }} />
+          <CheckCircle sx={{ fontSize: 36 }} />
         </IconButton>
 
         {/* Next */}
@@ -458,8 +458,8 @@ function MobilePicSwiper({
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
             color: '#aaa',
-            width: 44,
-            height: 44,
+            width: 56, // Larger
+            height: 56, // Larger
             '&:disabled': { opacity: 0.3 }
           }}
         >

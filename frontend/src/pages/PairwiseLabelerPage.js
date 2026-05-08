@@ -25,6 +25,12 @@ function PairwiseLabelerPage({ serverUrl }) {
         return () => document.removeEventListener('fullscreenchange', onChange);
     }, []);
 
+    const isMobile = typeof window !== 'undefined' && (
+        ('ontouchstart' in window) ||
+        (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
+        (window.matchMedia && window.matchMedia('(hover: none)').matches)
+    );
+
     const toggleFullscreen = () => {
         if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(e => console.log(e));
@@ -205,10 +211,10 @@ function PairwiseLabelerPage({ serverUrl }) {
             >
                 <Button
                     variant="outlined"
-                    size="small"
+                    size={isMobile ? 'medium' : 'small'}
                     onClick={handleUndo}
                     startIcon={<SkipNext sx={{ transform: 'rotate(180deg)' }} />}
-                    sx={{ color: '#888', borderColor: '#333', mr: 2 }}
+                    sx={{ color: '#888', borderColor: '#333', mr: 2, height: isMobile ? 48 : 32 }}
                 >
                     Undo Last
                 </Button>
@@ -217,7 +223,8 @@ function PairwiseLabelerPage({ serverUrl }) {
                     value={pairType}
                     exclusive
                     onChange={(e, val) => val && setPairType(val)}
-                    size="small"
+                    size={isMobile ? 'medium' : 'small'}
+                    sx={{ height: isMobile ? 48 : 32 }}
                 >
                     <ToggleButton value="mixed" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
                         Mixed
@@ -232,9 +239,9 @@ function PairwiseLabelerPage({ serverUrl }) {
 
                 <Button
                     variant="outlined"
-                    size="small"
+                    size={isMobile ? 'medium' : 'small'}
                     onClick={() => setShowPerformerModal(true)}
-                    sx={{ color: '#888', borderColor: '#333' }}
+                    sx={{ color: '#888', borderColor: '#333', height: isMobile ? 48 : 32 }}
                 >
                     Select Performers ({selectedPerformers.length || 'All'})
                 </Button>
@@ -252,8 +259,8 @@ function PairwiseLabelerPage({ serverUrl }) {
                 </Box>
 
                 <Tooltip title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}>
-                    <IconButton size="small" onClick={toggleFullscreen} sx={{ color: '#aaa', ml: 1 }}>
-                        {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
+                    <IconButton onClick={toggleFullscreen} sx={{ color: '#aaa', ml: 1, p: isMobile ? 1.5 : 0.5 }}>
+                        {isFullscreen ? <FullscreenExit fontSize={isMobile ? 'medium' : 'small'} /> : <Fullscreen fontSize={isMobile ? 'medium' : 'small'} />}
                     </IconButton>
                 </Tooltip>
             </Paper>
