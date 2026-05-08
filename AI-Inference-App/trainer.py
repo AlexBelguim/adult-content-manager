@@ -189,10 +189,16 @@ class AgentOfTasteModel(nn.Module):
 # ── Datasets ─────────────────────────────────────────────────────────────────
 
 class BinaryDataset(Dataset):
-    def __init__(self, keep_imgs, delete_imgs, processor, augment=True):
+    def __init__(self, keep_imgs, delete_imgs, processor, augment=True, deduplicate=False):
         self.processor = processor
         self.augment = augment
-        self.samples = [(p, 1.0) for p in keep_imgs] + [(p, 0.0) for p in delete_imgs]
+        samples = [(p, 1.0) for p in keep_imgs] + [(p, 0.0) for p in delete_imgs]
+        if deduplicate:
+            # Deduplicate by path
+            d = {p: l for p, l in samples}
+            self.samples = list(d.items())
+        else:
+            self.samples = samples
         random.shuffle(self.samples)
         self.aug_t = T.Compose([
             T.RandomHorizontalFlip(0.5),
@@ -207,10 +213,14 @@ class BinaryDataset(Dataset):
         if self.augment: img = self.aug_t(img)
         inp = self.processor(images=img, return_tensors='pt')
         return {'pixel_values': inp['pixel_values'].squeeze(0),
-                'label': torch.tensor(label, dtype=torch.float32)}
+                'label': torch.tensor(label, dtype=torch.float32),
+                'path': path}
 
 class PairwiseDataset(Dataset):
-    def __init__(self, pairs, processor, augment=True):
+    def __init__(self, pairs, processor, augment=True, deduplicate=False):
+        if deduplicate:
+            # Deduplicate by (winner, loser) pair
+            pairs = list(set([(w, l) for w, l in pairs]))
         self.pairs = [(w, l) for w, l in pairs if Path(w).exists() and Path(l).exists()]
         self.processor = processor
         self.augment = augment
@@ -226,7 +236,7 @@ class PairwiseDataset(Dataset):
             wimg, limg = self.aug_t(wimg), self.aug_t(limg)
         wi = self.processor(images=wimg, return_tensors='pt')
         li = self.processor(images=limg, return_tensors='pt')
-        return {'winner': wi['pixel_values'].squeeze(0), 'loser': li['pixel_values'].squeeze(0)}
+        return {'winner': wi['pixel_values'].squeeze(0), 'loser': li['pixel_values'].squeeze(0), 'idx': idx}
 
 # ── Training Functions ───────────────────────────────────────────────────────
 
@@ -235,47 +245,68 @@ def train_binary(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 8)
-    warmup = config.get('warmup_epochs', 2)
     bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
 
     tlog(f"📋 Binary Training | {epochs} epochs | backbone: {backbone}")
 
-    # Resolve keep/delete directories based on data layout
     if use_cached or Path(os.path.join(base_path, 'keep')).exists():
         keep_dir = os.path.join(base_path, 'keep')
         delete_dir = os.path.join(base_path, 'delete')
-        tlog("  📂 Using cached training data layout")
     else:
         keep_dir = os.path.join(base_path, 'after filter performer')
         delete_dir = os.path.join(base_path, 'deleted keep for training')
-        tlog("  📂 Using local folder layout")
 
-    keep_imgs = []
-    for pmap in scan_performer_dirs(keep_dir).values():
-        keep_imgs.extend(pmap)
-    delete_imgs = []
-    for pmap in scan_performer_dirs(delete_dir).values():
-        delete_imgs.extend(pmap)
+    def scan_images(dir_path):
+        paths = []
+        if not os.path.exists(dir_path): return paths
+        for root, _, files in os.walk(dir_path):
+            for f in files:
+                if Path(f).suffix.lower() in IMAGE_EXTS:
+                    paths.append(os.path.join(root, f))
+        return paths
 
-    tlog(f"  Keep: {len(keep_imgs)} | Delete: {len(delete_imgs)}")
-    if not keep_imgs or not delete_imgs:
+    base_keep = scan_images(keep_dir)
+    base_delete = scan_images(delete_dir)
+    
+    # Integrate Human Corrections (Hard Examples)
+    hard_examples = config.get('hard_examples', [])
+    hard_keep = []
+    hard_delete = []
+    if config.get('use_hard_examples', True) and hard_examples:
+        tlog(f"  🧠 Integrating {len(hard_examples)} human corrections (Hard Examples)")
+        mult = config.get('hard_multiplier', 5)
+        for h in hard_examples:
+            p = h['file_path']
+            if not Path(p).exists(): continue
+            for _ in range(mult):
+                if h['corrected_label'] == 'keep': hard_keep.append(p)
+                else: hard_delete.append(p)
+
+    all_keep = base_keep + hard_keep
+    all_delete = base_delete + hard_delete
+    
+    config['_keep_count'] = len(all_keep)
+    config['_delete_count'] = len(all_delete)
+    tlog(f"  📊 Dataset: Keep={len(all_keep)}, Delete={len(all_delete)}")
+
+    if not all_keep or not all_delete:
         raise ValueError("Need both keep and delete images")
 
-    # Balance
-    mc = min(len(keep_imgs), len(delete_imgs))
-    keep_imgs = random.sample(keep_imgs, mc)
-    delete_imgs = random.sample(delete_imgs, mc)
-
     processor = AutoImageProcessor.from_pretrained(backbone)
-    ds = BinaryDataset(keep_imgs, delete_imgs, processor)
-    vs = max(1, int(len(ds) * 0.15))
-    train_ds, val_ds = random_split(ds, [len(ds)-vs, vs])
-    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+    
+    # Mining setup
+    mining_pool = [] # list of (path, label)
+    mining_mult = config.get('mining_multiplier', 4)
 
-    model = BinaryClassifier(backbone).to(device)
+    # Initial split
+    full_ds = BinaryDataset(all_keep, all_delete, processor, deduplicate=config.get('deduplicate', False))
+    vs = max(1, int(len(full_ds) * 0.15))
+    train_ds_base, val_ds = random_split(full_ds, [len(full_ds)-vs, vs])
+    
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+    model = BinaryClassifier(backbone_name=backbone).to(device)
     model.freeze_backbone()
     criterion = nn.BCEWithLogitsLoss()
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
@@ -283,7 +314,7 @@ def train_binary(config):
     best_acc = 0.0
     out_path = Path(__file__).parent / 'models' / 'binary_filtering.pt'
 
-    for epoch in range(1, epochs+1):
+    for epoch in range(1, epochs + 1):
         if epoch == warmup + 1:
             model.unfreeze_backbone()
             optimizer = torch.optim.AdamW([
@@ -293,14 +324,31 @@ def train_binary(config):
         training_state['epoch'] = epoch
         training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
 
-        model.train()
-        total_loss = correct = total = 0
+        # Create loader for this epoch (potentially with mining pool)
+        current_keep = [s[0] for s in train_ds_base.dataset.samples if s[1] == 1.0]
+        current_delete = [s[0] for s in train_ds_base.dataset.samples if s[1] == 0.0]
+        
+        if config.get('enable_mining') and mining_pool:
+            tlog(f"  ⛏️ Mining: adding {len(mining_pool)} previous failures (x{mining_mult})")
+            for p, l in mining_pool:
+                for _ in range(mining_mult):
+                    if l == 1.0: current_keep.append(p)
+                    else: current_delete.append(p)
+        
+        train_ds = BinaryDataset(current_keep, current_delete, processor, augment=True, deduplicate=False)
+        train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
         num_batches = len(train_loader)
         training_state['total_batches'] = num_batches
+
+        model.train()
+        total_loss = correct = total = 0
+        new_mining_pool = set()
+
         for bi, batch in enumerate(train_loader, 1):
             pv = batch['pixel_values'].to(device)
             labels = batch['label'].to(device)
             optimizer.zero_grad()
+            
             if scaler:
                 with torch.amp.autocast('cuda'):
                     logits = model(pv); loss = criterion(logits, labels)
@@ -308,13 +356,27 @@ def train_binary(config):
             else:
                 logits = model(pv); loss = criterion(logits, labels)
                 loss.backward(); optimizer.step()
+                
             total_loss += loss.item()
-            correct += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
+            preds = (torch.sigmoid(logits) > 0.5).float()
+            correct += (preds == labels).sum().item()
             total += labels.size(0)
+            
+            if config.get('enable_mining'):
+                failed = (preds != labels)
+                for i in range(failed.size(0)):
+                    if failed[i]:
+                        new_mining_pool.add((batch['path'][i], labels[i].item()))
+
             # Update batch progress
             training_state['batch'] = bi
             training_state['train_loss'] = total_loss / bi
             training_state['train_acc'] = correct / max(total, 1)
+
+        if config.get('enable_mining'):
+            mining_pool = list(new_mining_pool)
+            if mining_pool:
+                tlog(f"  🚩 Epoch {epoch} failures tracked: {len(mining_pool)}")
 
         # Validate
         model.eval()
@@ -358,17 +420,20 @@ def train_pairwise(config):
     if len(pairs) < 10:
         raise ValueError(f"Need at least 10 pairs, got {len(pairs)}")
 
-    from model_dinov2 import DinoV2PreferenceModel
-    processor = AutoImageProcessor.from_pretrained(backbone)
     pair_tuples = [(p['winner'], p['loser']) for p in pairs]
-    ds = PairwiseDataset(pair_tuples, processor)
-    tlog(f"  Valid pairs after path check: {len(ds)}")
-    if len(ds) < 5:
+
+    # Deduplicate if requested
+    if config.get('deduplicate', False):
+        pair_tuples = list(set(pair_tuples))
+    
+    processor = AutoImageProcessor.from_pretrained(backbone)
+    full_ds = PairwiseDataset(pair_tuples, processor, deduplicate=False)
+    tlog(f"  Valid pairs after path check: {len(full_ds)}")
+    if len(full_ds) < 5:
         raise ValueError("Too few valid pairs (images not found)")
 
-    vs = max(1, int(len(ds) * 0.15))
-    train_ds, val_ds = random_split(ds, [len(ds)-vs, vs])
-    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
+    vs = max(1, int(len(full_ds) * 0.15))
+    train_ds_base, val_ds = random_split(full_ds, [len(full_ds)-vs, vs])
     val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
 
     model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=True).to(device)
@@ -377,18 +442,35 @@ def train_pairwise(config):
     best_acc = 0.0
     out_path = Path(__file__).parent / 'models' / 'pairwise_preference.pt'
 
+    mining_pool = [] # list of indices into train_ds_base
+    mining_mult = config.get('mining_multiplier', 4)
+
     for epoch in range(1, epochs+1):
+        # Create loader with mining pool
+        current_pairs = [train_ds_base.dataset.pairs[i] for i in train_ds_base.indices]
+        if config.get('enable_mining') and mining_pool:
+            tlog(f"  ⛏️ Mining: adding {len(mining_pool)} previous failures (x{mining_mult})")
+            for pair in mining_pool:
+                for _ in range(mining_mult):
+                    current_pairs.append(pair)
+
+        train_ds = PairwiseDataset(current_pairs, processor, augment=True, deduplicate=False)
+        train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+
         if epoch == 3:
             for p in model.backbone.parameters(): p.requires_grad = True
             optimizer = torch.optim.AdamW([
                 {'params': model.head.parameters(), 'lr': 1e-3},
                 {'params': model.backbone.parameters(), 'lr': 1e-5}
             ])
+        
         training_state['epoch'] = epoch
         model.train()
         total_loss = 0
-        num_batches = len(train_loader)
-        training_state['total_batches'] = num_batches
+        new_mining_pool = set()
+
         for bi, batch in enumerate(train_loader, 1):
             w = batch['winner'].to(device)
             l = batch['loser'].to(device)
@@ -398,8 +480,24 @@ def train_pairwise(config):
             loss = criterion(sw, sl, target)
             loss.backward(); optimizer.step()
             total_loss += loss.item()
+            
+            if config.get('enable_mining'):
+                failed = (sw <= sl).squeeze()
+                if failed.dim() == 0: failed = failed.unsqueeze(0)
+                for i in range(failed.size(0)):
+                    if failed[i] and 'idx' in batch:
+                        # Map back to original index if possible, or just use the pair
+                        # Actually, tracking by index is hard when we mix multiple epochs.
+                        # We'll just store the failed pairs themselves.
+                        new_mining_pool.add(tuple(current_pairs[bi*bs - bs + i]))
+
             training_state['batch'] = bi
             training_state['train_loss'] = total_loss / bi
+
+        if config.get('enable_mining'):
+            mining_pool = list(new_mining_pool)
+            if mining_pool:
+                tlog(f"  🚩 Epoch {epoch} failures tracked: {len(mining_pool)}")
         # Validate
         model.eval()
         correct = total = 0

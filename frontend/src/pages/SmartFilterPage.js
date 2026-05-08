@@ -149,7 +149,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setLoadingNext(false);
       } else {
         console.log(`[SmartFilter] Setting results (${(data.results || []).length} items) and loading=false`);
-        setResults(data.results || []);
+        const resultsWithOriginal = (data.results || []).map(r => ({
+          ...r,
+          originalDecision: r.decision
+        }));
+        setResults(resultsWithOriginal);
         setLoading(false);
         if (modelType === 'binary') setFirstBatchDone(true);
       }
@@ -289,8 +293,15 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         body: JSON.stringify({
           performerId: performer.id,
           performerName: performer.name,
-          basePath,
-          results: results.map(r => ({ path: r.path, decision: r.decision }))
+          basePath: propBasePath || (performer ? performer.base_path : ''),
+          results: results.map(r => ({ path: r.path, decision: r.decision })),
+          corrections: results.filter(r => r.decision !== r.originalDecision).map(r => ({
+            path: r.path,
+            original_label: r.originalDecision,
+            corrected_label: r.decision,
+            model_type: modelType,
+            model_name: selectedModel
+          }))
         })
       });
       

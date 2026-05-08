@@ -118,6 +118,10 @@ router.get('/data-summary', (req, res) => {
         pairwise: pairwise.total_pairs >= 50,
         binary: binaryData.keep >= 20 && binaryData.delete >= 20,
         siamese: performerComparisons.total >= 20
+      },
+      hardExamples: {
+        binary: (db.prepare(`SELECT COUNT(*) as c FROM hard_examples WHERE model_type = 'binary' OR model_type IS NULL`).get() || {c:0}).c,
+        pairwise: (db.prepare(`SELECT COUNT(*) as c FROM hard_examples WHERE model_type = 'pairwise'`).get() || {c:0}).c
       }
     });
   } catch (err) {
@@ -394,6 +398,14 @@ router.post('/start', async (req, res) => {
         SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
       `).all();
       trainingPayload = { type: 'pairwise', pairs, epochs, batch_size, backbone, learning_rate };
+      
+      if (req.body.use_hard_examples) {
+        try {
+          const hard = db.prepare(`SELECT * FROM hard_examples WHERE model_type = 'pairwise'`).all();
+          trainingPayload.hard_examples = hard;
+        } catch (e) {}
+      }
+
     } else if (type === 'binary' || type === 'context_binary') {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
@@ -405,9 +417,22 @@ router.post('/start', async (req, res) => {
         backbone,
         learning_rate
       };
+      
+      if (req.body.use_hard_examples) {
+        try {
+          const hard = db.prepare(`SELECT * FROM hard_examples WHERE model_type = 'binary' OR model_type IS NULL`).all();
+          trainingPayload.hard_examples = hard;
+        } catch (e) {}
+      }
+
     } else {
       return res.status(400).json({ error: `Unknown training type: ${type}` });
     }
+
+    // Add mining/dedupe flags from body
+    trainingPayload.enable_mining = req.body.enable_mining;
+    trainingPayload.mining_multiplier = req.body.mining_multiplier || 4;
+    trainingPayload.deduplicate = req.body.deduplicate;
 
     // Send to AI server
     const response = await axios.post(`${aiUrl}/train`, trainingPayload, {

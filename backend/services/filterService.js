@@ -1108,6 +1108,22 @@ class FilterService {
         summary.errors++;
       }
     }
+    
+    // Save human corrections for hard example mining
+    if (options.corrections && options.corrections.length > 0) {
+      console.log(`[SmartBatch] Saving ${options.corrections.length} human corrections as hard examples`);
+      const stmt = db.prepare(`
+        INSERT INTO hard_examples (performer_id, file_path, original_label, corrected_label, model_type, model_name)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      for (const corr of options.corrections) {
+        try {
+          stmt.run(performerId, corr.path, corr.original_label, corr.corrected_label, corr.model_type, corr.model_name);
+        } catch (e) {
+          // Ignore unique constraint or other minor errors
+        }
+      }
+    }
 
     // Force stats refresh after batch
     this.scheduleStatsRefresh(performerId);

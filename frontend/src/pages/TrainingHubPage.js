@@ -72,6 +72,10 @@ export default function TrainingHubPage() {
   const [modelList, setModelList] = useState([]);
   const [testingModel, setTestingModel] = useState(null);
   const [testResults, setTestResults] = useState({});
+  const [useHardExamples, setUseHardExamples] = useState(true);
+  const [enableMining, setEnableMining] = useState(false);
+  const [miningMultiplier, setMiningMultiplier] = useState(4);
+  const [deduplicate, setDeduplicate] = useState(true);
 
   // Load AI URL from settings
   useEffect(() => {
@@ -144,7 +148,16 @@ export default function TrainingHubPage() {
       const folders = await folderRes.json();
       const basePath = folders?.[0]?.path || '';
 
-      let payload = { type: selectedType, epochs, batch_size: batchSize, backbone: 'facebook/dinov2-large' };
+      let payload = { 
+        type: selectedType, 
+        epochs, 
+        batch_size: batchSize, 
+        backbone: 'facebook/dinov2-large',
+        use_hard_examples: useHardExamples,
+        enable_mining: enableMining,
+        mining_multiplier: miningMultiplier,
+        deduplicate: deduplicate
+      };
 
       if (selectedType === 'binary' || selectedType === 'context_binary') {
         payload.base_path = basePath;
@@ -230,12 +243,14 @@ export default function TrainingHubPage() {
                 </Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={6} md={3}>
-                    <StatCard label="Pairwise Pairs" value={dataSummary?.pairwise?.totalPairs || 0}
+                    <StatCard label="Pairwise Pairs" 
+                      value={`${dataSummary?.pairwise?.totalPairs || 0} (${dataSummary?.hardExamples?.pairwise || 0} corr)`}
                       ready={dataSummary?.readyForTraining?.pairwise} color="#2196f3" />
                   </Grid>
                   <Grid item xs={6} md={3}>
-                    <StatCard label="Keep Images" value={dataSummary?.binary?.keep || 0}
-                      ready={(dataSummary?.binary?.keep || 0) >= 20} color="#4caf50" />
+                    <StatCard label="Keep Images" 
+                      value={`${dataSummary?.binary?.keep || 0} (${dataSummary?.hardExamples?.binary || 0} corr)`}
+                      ready={dataSummary?.readyForTraining?.binary} color="#4caf50" />
                   </Grid>
                   <Grid item xs={6} md={3}>
                     <StatCard label="Delete Images" value={dataSummary?.binary?.delete || 0}
@@ -321,6 +336,58 @@ export default function TrainingHubPage() {
                     sx={{ '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' } },
                           '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.5)' } }}
                   />
+                  
+                  <Box sx={{ p: 2, bgcolor: 'rgba(139,92,246,0.05)', borderRadius: 2, border: '1px solid rgba(139,92,246,0.1)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#8b5cf6', mb: 1, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <AutoAwesomeIcon fontSize="small" /> Advanced Training Logic
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Typography variant="body2">Use Human Corrections (Oversample)</Typography>
+                        <Button 
+                          size="small" 
+                          variant={useHardExamples ? "contained" : "outlined"}
+                          onClick={() => setUseHardExamples(!useHardExamples)}
+                          sx={{ minWidth: 80, height: 24, fontSize: '0.7rem' }}
+                        >
+                          {useHardExamples ? "ON" : "OFF"}
+                        </Button>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Typography variant="body2">Hard Example Mining (Recursive)</Typography>
+                        <Button 
+                          size="small" 
+                          variant={enableMining ? "contained" : "outlined"}
+                          onClick={() => setEnableMining(!enableMining)}
+                          sx={{ minWidth: 80, height: 24, fontSize: '0.7rem' }}
+                        >
+                          {enableMining ? "ON" : "OFF"}
+                        </Button>
+                      </Box>
+                      {enableMining && (
+                        <Box sx={{ pl: 2, mt: 1 }}>
+                          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>Failure Multiplier: {miningMultiplier}x</Typography>
+                          <Slider 
+                            value={miningMultiplier} 
+                            min={2} max={10} step={1}
+                            onChange={(_, v) => setMiningMultiplier(v)}
+                            sx={{ color: '#8b5cf6', py: 1 }}
+                          />
+                        </Box>
+                      )}
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+                        <Typography variant="body2">Deduplicate Data</Typography>
+                        <Button 
+                          size="small" 
+                          variant={deduplicate ? "contained" : "outlined"}
+                          onClick={() => setDeduplicate(!deduplicate)}
+                          sx={{ minWidth: 80, height: 24, fontSize: '0.7rem' }}
+                        >
+                          {deduplicate ? "ON" : "OFF"}
+                        </Button>
+                      </Box>
+                    </Box>
+                  </Box>
                   <Alert severity="info" sx={{ bgcolor: 'rgba(33,150,243,0.08)', color: '#90caf9' }}>
                     {selectedModel?.requirements}
                   </Alert>
