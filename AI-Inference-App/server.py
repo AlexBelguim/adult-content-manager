@@ -59,7 +59,7 @@ else:
 
 def find_models():
     models_path = Path(__file__).parent / 'models'
-    return list(models_path.glob('*.pt')) if models_path.exists() else []
+    return list(models_path.rglob('*.pt')) if models_path.exists() else []
 
 def load_model(checkpoint_path, model_id=None):
     global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID
@@ -116,7 +116,7 @@ def test():
 @app.route('/load_model', methods=['POST'])
 def api_load_model():
     data = request.json
-    model_id = data.get('model_id') # e.g. 'final_model.pt'
+    model_id = data.get('model_id') # e.g. 'binary/binary_filtering.pt' or 'final_model.pt'
     
     models_path = Path(__file__).parent / 'models'
     target = models_path / model_id if model_id else None
@@ -128,7 +128,9 @@ def api_load_model():
         models.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         target = models[0]
         
-    success, msg = load_model(str(target), model_id=target.name)
+    # Use relative path from models dir as the ID
+    rel_id = str(target.relative_to(models_path)).replace('\\', '/')
+    success, msg = load_model(str(target), model_id=rel_id)
     return jsonify({"success": success, "message": msg, "model": MODEL_NAME})
 
 @app.route('/unload_model', methods=['POST'])
@@ -146,10 +148,12 @@ def api_unload_model():
 @app.route('/list_models', methods=['GET'])
 def api_list_models():
     models = find_models()
+    models_path = Path(__file__).parent / 'models'
     result = []
     for m in models:
+        rel_path = str(m.relative_to(models_path)).replace('\\', '/')
         info = {
-            'filename': m.name,
+            'filename': rel_path,
             'size_mb': round(m.stat().st_size / 1024**2, 1),
             'modified': m.stat().st_mtime,
             'type': 'unknown',
