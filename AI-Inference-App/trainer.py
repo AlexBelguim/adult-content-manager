@@ -18,7 +18,10 @@ training_state = {
     'type': None,
     'epoch': 0,
     'total_epochs': 0,
+    'batch': 0,
+    'total_batches': 0,
     'train_loss': 0,
+    'train_acc': 0,
     'val_acc': 0,
     'best_val_acc': 0,
     'phase': 'idle',
@@ -26,8 +29,25 @@ training_state = {
     'error': None,
     'started_at': None,
     'finished_at': None,
+    'epoch_history': [],
     'log': []
 }
+
+HISTORY_PATH = Path(__file__).parent / 'training_history.json'
+
+def save_run_to_history(run_data):
+    """Append a training run record to the history file."""
+    history = []
+    if HISTORY_PATH.exists():
+        try:
+            import json as _json
+            history = _json.loads(HISTORY_PATH.read_text())
+        except: pass
+    history.append(run_data)
+    # Keep last 50 runs
+    history = history[-50:]
+    import json as _json
+    HISTORY_PATH.write_text(_json.dumps(history, indent=2))
 
 def tlog(msg):
     ts = time.strftime('%H:%M:%S')
@@ -244,7 +264,9 @@ def train_binary(config):
 
         model.train()
         total_loss = correct = total = 0
-        for batch in train_loader:
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+        for bi, batch in enumerate(train_loader, 1):
             pv = batch['pixel_values'].to(device)
             labels = batch['label'].to(device)
             optimizer.zero_grad()
@@ -258,6 +280,10 @@ def train_binary(config):
             total_loss += loss.item()
             correct += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
             total += labels.size(0)
+            # Update batch progress
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
+            training_state['train_acc'] = correct / max(total, 1)
 
         # Validate
         model.eval()
@@ -271,8 +297,11 @@ def train_binary(config):
                 vt += labels.size(0)
         val_acc = vc / max(vt, 1)
         train_acc = correct / max(total, 1)
-        training_state['train_loss'] = total_loss / len(train_loader)
         training_state['val_acc'] = val_acc
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / num_batches,
+            'train_acc': round(train_acc, 4), 'val_acc': round(val_acc, 4)
+        })
         tlog(f"  Epoch {epoch}/{epochs} | Train: {train_acc:.1%} | Val: {val_acc:.1%}")
 
         if val_acc > best_acc:
@@ -327,7 +356,9 @@ def train_pairwise(config):
         training_state['epoch'] = epoch
         model.train()
         total_loss = 0
-        for batch in train_loader:
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+        for bi, batch in enumerate(train_loader, 1):
             w = batch['winner'].to(device)
             l = batch['loser'].to(device)
             optimizer.zero_grad()
@@ -336,6 +367,8 @@ def train_pairwise(config):
             loss = criterion(sw, sl, target)
             loss.backward(); optimizer.step()
             total_loss += loss.item()
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
         # Validate
         model.eval()
         correct = total = 0
@@ -347,9 +380,11 @@ def train_pairwise(config):
                 correct += (sw > sl).sum().item()
                 total += sw.size(0)
         val_acc = correct / max(total, 1)
-        training_state['train_loss'] = total_loss / len(train_loader)
         training_state['val_acc'] = val_acc
-        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/len(train_loader):.4f} | Val Acc: {val_acc:.1%}")
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / num_batches, 'val_acc': round(val_acc, 4)
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/num_batches:.4f} | Val Acc: {val_acc:.1%}")
         if val_acc > best_acc:
             best_acc = val_acc
             training_state['best_val_acc'] = best_acc
@@ -458,7 +493,9 @@ def train_context_binary(config):
         training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
         model.train()
         total_loss = correct = total = 0
-        for batch in train_loader:
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+        for bi, batch in enumerate(train_loader, 1):
             pv = batch['pixel_values'].to(device)
             ctx = batch['context'].to(device)
             labels = batch['label'].to(device)
@@ -473,6 +510,9 @@ def train_context_binary(config):
             total_loss += loss.item()
             correct += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
             total += labels.size(0)
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
+            training_state['train_acc'] = correct / max(total, 1)
         model.eval()
         vc = vt = 0
         with torch.no_grad():
@@ -484,8 +524,11 @@ def train_context_binary(config):
                 vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
                 vt += labels.size(0)
         val_acc = vc / max(vt, 1)
-        training_state['train_loss'] = total_loss / len(train_loader)
         training_state['val_acc'] = val_acc
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / num_batches,
+            'train_acc': round(correct / max(total, 1), 4), 'val_acc': round(val_acc, 4)
+        })
         tlog(f"  Epoch {epoch}/{epochs} | Val Acc: {val_acc:.1%}")
         if val_acc > best_acc:
             best_acc = val_acc
@@ -516,10 +559,11 @@ def start_training(config):
 
     training_state.update({
         'active': True, 'type': train_type, 'epoch': 0,
-        'total_epochs': config.get('epochs', 8), 'train_loss': 0,
-        'val_acc': 0, 'best_val_acc': 0, 'phase': 'starting',
-        'message': f'Starting {train_type} training...', 'error': None,
-        'started_at': time.time(), 'finished_at': None, 'log': []
+        'total_epochs': config.get('epochs', 8), 'batch': 0, 'total_batches': 0,
+        'train_loss': 0, 'train_acc': 0, 'val_acc': 0, 'best_val_acc': 0,
+        'phase': 'starting', 'message': f'Starting {train_type} training...',
+        'error': None, 'started_at': time.time(), 'finished_at': None,
+        'epoch_history': [], 'log': []
     })
 
     def run():
@@ -529,6 +573,23 @@ def start_training(config):
             training_state['message'] = f"✅ Complete! Best acc: {result['best_val_acc']:.1%}"
             training_state['phase'] = 'complete'
             tlog(f"✅ Training complete: {result}")
+            # Save to history
+            save_run_to_history({
+                'type': train_type,
+                'started_at': training_state['started_at'],
+                'finished_at': time.time(),
+                'duration_s': round(time.time() - training_state['started_at'], 1),
+                'epochs': config.get('epochs', 8),
+                'batch_size': config.get('batch_size', 16),
+                'backbone': config.get('backbone', 'facebook/dinov2-large'),
+                'best_val_acc': result['best_val_acc'],
+                'model_file': result.get('model'),
+                'epoch_history': training_state.get('epoch_history', []),
+                'data': {
+                    'keep': config.get('_keep_count', 0),
+                    'delete': config.get('_delete_count', 0)
+                }
+            })
         except Exception as e:
             training_state['error'] = str(e)
             training_state['message'] = f"❌ Error: {e}"

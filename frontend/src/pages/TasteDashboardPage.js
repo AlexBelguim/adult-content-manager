@@ -222,7 +222,14 @@ function TasteDashboardPage() {
   };
 
   const selectedModel = MODEL_TYPES.find(m => m.id === selectedType);
-  const trainingProgress = trainingStatus?.active ? ((trainingStatus.epoch || 0) / (trainingStatus.total_epochs || 1)) * 100 : 0;
+  // Granular progress: epoch + batch fraction within epoch
+  const trainingProgress = trainingStatus?.active ? (() => {
+    const e = trainingStatus.epoch || 0;
+    const te = trainingStatus.total_epochs || 1;
+    const b = trainingStatus.batch || 0;
+    const tb = trainingStatus.total_batches || 1;
+    return ((e - 1 + b / tb) / te) * 100;
+  })() : (trainingStatus?.phase === 'complete' ? 100 : 0);
 
   if (loading) {
     return (
@@ -596,13 +603,41 @@ function TasteDashboardPage() {
                     color: trainingStatus.phase === 'complete' ? '#4caf50' : trainingStatus.phase === 'error' ? '#f44336' : '#ff9800', fontWeight: 700
                   }} />
                 </Box>
-                <LinearProgress variant="determinate" value={trainingProgress} sx={{ mb: 2, height: 8, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.05)',
-                  '& .MuiLinearProgress-bar': { background: 'linear-gradient(90deg, #8b5cf6, #06b6d4)', borderRadius: 4 } }} />
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5, textAlign: 'center' }}>
-                  <Box><Typography variant="caption" sx={{ color: '#888' }}>Epoch</Typography><Typography variant="h6" sx={{ fontWeight: 800, color: '#fff' }}>{trainingStatus.epoch}/{trainingStatus.total_epochs}</Typography></Box>
-                  <Box><Typography variant="caption" sx={{ color: '#888' }}>Val Accuracy</Typography><Typography variant="h6" sx={{ fontWeight: 800, color: '#4caf50' }}>{((trainingStatus.val_acc || 0) * 100).toFixed(1)}%</Typography></Box>
-                  <Box><Typography variant="caption" sx={{ color: '#888' }}>Best</Typography><Typography variant="h6" sx={{ fontWeight: 800, color: '#8b5cf6' }}>{((trainingStatus.best_val_acc || 0) * 100).toFixed(1)}%</Typography></Box>
+                {/* Progress bar */}
+                <Box sx={{ mb: 0.5 }}>
+                  <LinearProgress variant="determinate" value={Math.min(trainingProgress, 100)} sx={{ height: 10, borderRadius: 5, bgcolor: 'rgba(255,255,255,0.05)',
+                    '& .MuiLinearProgress-bar': { background: 'linear-gradient(90deg, #8b5cf6, #06b6d4)', borderRadius: 5 } }} />
                 </Box>
+                {trainingStatus.active && trainingStatus.total_batches > 0 && (
+                  <Typography variant="caption" sx={{ color: '#666', mb: 1.5, display: 'block' }}>
+                    Batch {trainingStatus.batch || 0}/{trainingStatus.total_batches} · {Math.round(trainingProgress)}% overall
+                  </Typography>
+                )}
+                {/* Metrics grid */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 1.5, textAlign: 'center', mt: 1.5 }}>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#888' }}>Epoch</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#fff' }}>{trainingStatus.epoch}/{trainingStatus.total_epochs}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#888' }}>Train Acc</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#ff9800' }}>{((trainingStatus.train_acc || 0) * 100).toFixed(1)}%</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#888' }}>Val Acc</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#4caf50' }}>{((trainingStatus.val_acc || 0) * 100).toFixed(1)}%</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#888' }}>Best</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#8b5cf6' }}>{((trainingStatus.best_val_acc || 0) * 100).toFixed(1)}%</Typography>
+                  </Box>
+                </Box>
+                {/* Loss display */}
+                {trainingStatus.train_loss > 0 && (
+                  <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block', textAlign: 'center' }}>
+                    Loss: {trainingStatus.train_loss.toFixed(4)}
+                  </Typography>
+                )}
                 {trainingStatus.message && <Typography variant="body2" sx={{ mt: 2, color: 'rgba(255,255,255,0.6)', fontStyle: 'italic' }}>{trainingStatus.message}</Typography>}
                 {trainingStatus.error && <Alert severity="error" sx={{ mt: 2, bgcolor: 'rgba(244,67,54,0.08)', color: '#ef9a9a' }}>{trainingStatus.error}</Alert>}
                 {trainingStatus.log?.length > 0 && (

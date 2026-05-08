@@ -782,6 +782,17 @@ def api_training_status():
     """Poll current training status."""
     return jsonify(training_state)
 
+@app.route('/training_history', methods=['GET'])
+def api_training_history():
+    """Return saved training run history."""
+    from trainer import HISTORY_PATH
+    if HISTORY_PATH.exists():
+        try:
+            return jsonify(json_module.loads(HISTORY_PATH.read_text()))
+        except:
+            return jsonify([])
+    return jsonify([])
+
 if __name__ == '__main__':
     # Models are now loaded dynamically by the frontend on mount
     log("🚀 AI Server starting on http://0.0.0.0:3344 (Idle - Waiting for model load)")
