@@ -525,7 +525,8 @@ def _get_performer_name(image_path):
 def classify_batch():
     """Binary classification (Keep/Delete) for Smart Filtering.
     Supports pairwise, binary, and context_binary model types."""
-    if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
+    if MODEL is None or PROCESSOR is None:
+        return jsonify({'error': 'Model not loaded (MODEL or PROCESSOR is None)'}), 500
     
     data = request.json
     image_paths = data.get('images', [])
@@ -621,7 +622,11 @@ def classify_batch():
                 with torch.no_grad():
                     inputs = PROCESSOR(images=imgs, return_tensors="pt")
                     pv = inputs['pixel_values'].to(DEVICE)
-                    logits = MODEL(pv)
+                    # Compatibility: use forward_single if present (e.g. for pairwise models loaded as binary type)
+                    if hasattr(MODEL, 'forward_single'):
+                        logits = MODEL.forward_single(pv)
+                    else:
+                        logits = MODEL(pv)
                     logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
                     scores = (torch.sigmoid(logits) * 100).cpu().tolist()
                     if not isinstance(scores, list): scores = [scores]

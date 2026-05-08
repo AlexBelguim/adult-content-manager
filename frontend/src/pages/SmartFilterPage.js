@@ -43,6 +43,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [firstBatchDone, setFirstBatchDone] = useState(false);
   const [inferenceUrl, setInferenceUrl] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [isLoadingModel, setIsLoadingModel] = useState(false);
+  const isFetchingRef = useRef(false);
   const abortControllerRef = useRef(null);
   const holdTimerRef = useRef(null);
 
@@ -100,6 +102,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     if (isPrefetch) setLoadingNext(true);
     else setLoading(true);
 
+    if (isLoadingModel || isFetchingRef.current) {
+      console.log('[SmartFilter] Skipping fetchBatch - already loading or model loading');
+      return;
+    }
+    isFetchingRef.current = true;
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -144,10 +152,6 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setResults(data.results || []);
         setLoading(false);
         if (modelType === 'binary') setFirstBatchDone(true);
-        // Pre-fetch the next one (if not already done by threshold update block)
-        if (!isPrefetch) {
-          fetchBatch(true, threshold);
-        }
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -157,18 +161,26 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       console.error('[SmartFilter] Error fetching batch:', err);
       if (!isPrefetch) setLoading(false);
       setLoadingNext(false);
+    } finally {
+      isFetchingRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [performer?.id, isStarted, firstBatchDone, threshold, inferenceUrl, modelType, selectedModel]); 
 
   // Initial trigger - when started or performer changes or fetchBatch updates
   useEffect(() => {
-    if (performer?.id && isStarted && results.length === 0) {
-      console.log('[SmartFilter] Initial trigger firing');
-      fetchBatch();
+    if (performer?.id && isStarted && results.length === 0 && !loading && !isLoadingModel && !isFetchingRef.current) {
+      if (nextBatch) {
+        console.log('[SmartFilter] Using prefetched nextBatch for results');
+        setResults(nextBatch);
+        setNextBatch(null);
+      } else {
+        console.log('[SmartFilter] Initial trigger firing fetchBatch');
+        fetchBatch();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [performer?.id, isStarted, fetchBatch]);
+  }, [performer?.id, isStarted, results.length, nextBatch, loading, isLoadingModel, fetchBatch]);
 
   useEffect(() => {
     // Don't run until inferenceUrl is loaded from settings
@@ -208,15 +220,27 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           }
           
           setSelectedModel(targetModel);
+          setIsLoadingModel(true);
           
-          await fetch('/api/filter/load-model', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              modelId: targetModel,
-              ai_server_url: inferenceUrl 
-            })
-          });
+          try {
+            await fetch('/api/filter/load-model', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                modelId: targetModel,
+                ai_server_url: inferenceUrl 
+              })
+            });
+          } finally {
+            setIsLoadingModel(false);
+            // If started, trigger a fresh fetch after model is loaded
+            if (isStarted) {
+              setResults([]);
+              setNextBatch(null);
+              setFirstBatchDone(false);
+              fetchBatch();
+            }
+          }
         }
       } catch (err) {
         console.error('Error fetching models:', err);
@@ -280,6 +304,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           // Prefetch the one after that
           fetchBatch(true);
         } else {
+          setResults([]); // Clear results to prevent seeing them while loading next
           fetchBatch();
         }
       }
