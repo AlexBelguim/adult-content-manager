@@ -51,6 +51,8 @@ function TasteDashboardPage() {
   const [testResults, setTestResults] = useState({});
   const [pushingData, setPushingData] = useState(false);
   const [aiTrainingData, setAiTrainingData] = useState(null);
+  const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
+  const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
   const pollRef = useRef(null);
 
   const fetchData = async () => {
@@ -92,7 +94,6 @@ function TasteDashboardPage() {
     setLoading(false);
   };
 
-  useEffect(() => {
     // Load AI URL from DB settings on mount
     fetch('/api/settings/ai_server_url')
       .then(r => r.json())
@@ -103,6 +104,11 @@ function TasteDashboardPage() {
         }
       })
       .catch(() => {});
+
+    // Load preferred models
+    fetch('/api/settings/preferred_binary_model').then(r => r.json()).then(d => d.value && setPreferredBinaryModel(d.value)).catch(() => {});
+    fetch('/api/settings/preferred_pairwise_model').then(r => r.json()).then(d => d.value && setPreferredPairwiseModel(d.value)).catch(() => {});
+
     fetchData();
   }, []);
 
@@ -196,6 +202,21 @@ function TasteDashboardPage() {
       } else { alert(`❌ ${result.error}`); }
     } catch (err) { alert(`Error: ${err.message}`); }
     setPushingData(false);
+  };
+
+  const handleSetPreferred = async (modelName, type) => {
+    const key = type === 'binary' ? 'preferred_binary_model' : 'preferred_pairwise_model';
+    try {
+      await fetch(`/api/settings/${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: modelName })
+      });
+      if (type === 'binary') setPreferredBinaryModel(modelName);
+      else setPreferredPairwiseModel(modelName);
+    } catch (err) {
+      alert('Failed to save preferred model: ' + err.message);
+    }
   };
 
   const handleDownloadZip = async () => {
@@ -652,9 +673,19 @@ function TasteDashboardPage() {
           {/* Model Arsenal */}
           <CollapsibleSection title="🚀 Model Arsenal" count={`${modelList.length} models`}>
             <Box sx={{ p: 2 }}>
-              <ModelArsenal models={modelList} aiUrl={aiUrl} aiHealth={aiHealth}
-                testingModel={testingModel} setTestingModel={setTestingModel}
-                testResults={testResults} setTestResults={setTestResults} onModelLoaded={fetchData} />
+              <ModelArsenal 
+                models={modelList} 
+                aiUrl={aiUrl} 
+                aiHealth={aiHealth}
+                testingModel={testingModel} 
+                setTestingModel={setTestingModel}
+                testResults={testResults} 
+                setTestResults={setTestResults} 
+                onModelLoaded={fetchData}
+                preferredBinary={preferredBinaryModel}
+                preferredPairwise={preferredPairwiseModel}
+                onSetPreferred={handleSetPreferred}
+              />
             </Box>
           </CollapsibleSection>
 
@@ -711,7 +742,10 @@ function CollapsibleSection({ title, count, defaultOpen = false, color, children
 export default TasteDashboardPage;
 
 // ── Model Arsenal sub-component ──
-function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, testResults, setTestResults, onModelLoaded }) {
+function ModelArsenal({ 
+  models, aiUrl, aiHealth, testingModel, setTestingModel, testResults, setTestResults, onModelLoaded,
+  preferredBinary, preferredPairwise, onSetPreferred
+}) {
   const [loadingModel, setLoadingModel] = useState(null);
   const typeLabels = {
     binary: { label: 'Binary', color: '#4caf50', icon: '🎯' },
@@ -764,15 +798,41 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                   <Box>
                     <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', wordBreak: 'break-all' }}>{m.filename}</Typography>
-                    <Typography variant="caption" sx={{ color: '#666' }}>{m.size_mb} MB · {formatDate(m.modified)}</Typography>
+                    <Typography variant="caption" sx={{ color: '#666' }}>{m.size_mb} MB · {formatDate(m.created_at || m.modified)}</Typography>
                   </Box>
                   {isLoaded && <Chip label="ACTIVE" size="small" sx={{ height: 20, fontSize: '0.6rem', fontWeight: 900, bgcolor: 'rgba(76,175,80,0.15)', color: '#4caf50' }} />}
                 </Box>
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                   {m.backbone && <Chip label={m.backbone.split('/').pop()} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: '#252525', color: '#888' }} />}
-                  {m.val_acc != null && <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />}
+                   {m.val_acc != null && <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />}
+                  {m.samples && <Chip label={`${m.samples} samples`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800' }} />}
                   {m.epochs && <Chip label={`${m.epochs} ep`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: '#252525', color: '#888' }} />}
                 </Box>
+                
+                {/* Epoch History Mini-Chart/List */}
+                {m.epoch_history && m.epoch_history.length > 0 && (
+                  <Box sx={{ mt: 1, mb: 1.5, p: 1, bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 1 }}>
+                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.6rem', textTransform: 'uppercase', display: 'block', mb: 0.5 }}>Training History</Typography>
+                    <Box sx={{ display: 'flex', gap: 0.5, overflowX: 'auto', pb: 0.5 }}>
+                      {m.epoch_history.slice(-6).map((eh, i) => (
+                        <Tooltip key={i} title={`Epoch ${eh.epoch}: Acc ${eh.val_acc?.toFixed(3)} | Loss ${eh.train_loss?.toFixed(4)}`}>
+                          <Box sx={{ 
+                            flex: 1, height: 20, minWidth: 15, 
+                            bgcolor: eh.val_acc >= 0.8 ? 'rgba(76,175,80,0.3)' : eh.val_acc >= 0.6 ? 'rgba(255,152,0,0.3)' : 'rgba(244,67,54,0.3)',
+                            borderRadius: '2px', position: 'relative'
+                          }}>
+                            <Box sx={{ 
+                              position: 'absolute', bottom: 0, left: 0, right: 0, 
+                              height: `${(eh.val_acc || 0) * 100}%`, 
+                              bgcolor: eh.val_acc >= 0.8 ? '#4caf50' : eh.val_acc >= 0.6 ? '#ff9800' : '#f44336',
+                              borderRadius: '1px'
+                            }} />
+                          </Box>
+                        </Tooltip>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
                 {result && !result.error && (
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1, p: 1, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
                     <Box sx={{ textAlign: 'center', minWidth: 50 }}>
@@ -796,6 +856,31 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                   <IconButton size="small" onClick={() => handleDelete(m)} sx={{ color: '#444', '&:hover': { color: '#f44336' } }}>
                     <DeleteOutline sx={{ fontSize: 16 }} />
                   </IconButton>
+                </Box>
+
+                {/* Preferred Selection Button */}
+                <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                  {['binary', 'pairwise', 'context_binary'].includes(type) && (
+                    <Button 
+                      fullWidth
+                      size="small" 
+                      variant={(type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? "contained" : "outlined"}
+                      onClick={() => onSetPreferred(m.filename, type === 'pairwise' ? 'pairwise' : 'binary')}
+                      startIcon={(type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? <CheckCircle /> : (type === 'pairwise' ? <Compare /> : <FilterAlt />)}
+                      sx={{ 
+                        fontSize: '0.65rem', 
+                        justifyContent: 'center',
+                        bgcolor: (type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? `${tInfo.color}20` : 'transparent',
+                        color: (type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? tInfo.color : '#888',
+                        borderColor: (type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? tInfo.color : 'rgba(255,255,255,0.1)',
+                        '&:hover': { bgcolor: `${tInfo.color}30`, borderColor: tInfo.color }
+                      }}
+                    >
+                      {(type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename 
+                        ? `Default ${tInfo.label} Model` 
+                        : `Use as Default ${tInfo.label}`}
+                    </Button>
+                  )}
                 </Box>
               </Paper>
             );

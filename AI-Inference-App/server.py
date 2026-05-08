@@ -180,6 +180,9 @@ def api_list_models():
             info['type'] = m_type
             info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
             info['val_acc'] = ckpt.get('val_acc')
+            info['samples'] = ckpt.get('samples')
+            info['created_at'] = ckpt.get('created_at')
+            info['epoch_history'] = ckpt.get('epoch_history')
             config = ckpt.get('config', {})
             info['epochs'] = config.get('epochs')
             del ckpt  # free memory

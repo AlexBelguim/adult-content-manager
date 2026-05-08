@@ -87,6 +87,19 @@ router.get('/data-summary', (req, res) => {
     const scoredImages = db.prepare('SELECT COUNT(*) as c FROM pairwise_image_scores').get().c;
     const rankedImages = db.prepare('SELECT COUNT(*) as c FROM image_elo_scores WHERE comparison_count > 0').get().c;
 
+    // Performer-level comparison pairs (for Siamese training)
+    let performerComparisons = { total: 0, singleDuels: 0, batchPairs: 0 };
+    try {
+      const pc = db.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN type = 'performer_rank' THEN 1 ELSE 0 END) as single_duels,
+          SUM(CASE WHEN type = 'performer_rank_batch' THEN 1 ELSE 0 END) as batch_pairs
+        FROM performer_comparisons
+      `).get();
+      performerComparisons = { total: pc.total, singleDuels: pc.single_duels, batchPairs: pc.batch_pairs };
+    } catch (_) { /* table might not exist yet */ }
+
     res.json({
       pairwise: {
         totalPairs: pairwise.total_pairs,
@@ -100,9 +113,11 @@ router.get('/data-summary', (req, res) => {
       ranking: {
         rankedImages,
       },
+      performerComparisons,
       readyForTraining: {
         pairwise: pairwise.total_pairs >= 50,
-        binary: binaryData.keep >= 20 && binaryData.delete >= 20
+        binary: binaryData.keep >= 20 && binaryData.delete >= 20,
+        siamese: performerComparisons.total >= 20
       }
     });
   } catch (err) {
@@ -722,6 +737,136 @@ router.post('/push-data', async (req, res) => {
     });
   } catch (err) {
     console.error('[Training] Push error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/training/performer-comparisons-summary ──────────
+// Summary stats for performer-level comparison pairs
+router.get('/performer-comparisons-summary', (req, res) => {
+  try {
+    const summary = db.prepare(`
+      SELECT
+        COUNT(*) as total_pairs,
+        COUNT(DISTINCT winner_id) + COUNT(DISTINCT loser_id) as performers_involved,
+        SUM(CASE WHEN type = 'performer_rank' THEN 1 ELSE 0 END) as single_duels,
+        SUM(CASE WHEN type = 'performer_rank_batch' THEN 1 ELSE 0 END) as batch_pairs,
+        SUM(CASE WHEN source = 'group_rate' THEN 1 ELSE 0 END) as from_group_rate,
+        SUM(CASE WHEN source = 'smart_compare' THEN 1 ELSE 0 END) as from_smart_compare,
+        MIN(created_at) as first_comparison,
+        MAX(created_at) as last_comparison
+      FROM performer_comparisons
+    `).get();
+
+    // Unique performer IDs involved
+    const uniquePerformers = db.prepare(`
+      SELECT COUNT(DISTINCT pid) as count FROM (
+        SELECT winner_id AS pid FROM performer_comparisons
+        UNION
+        SELECT loser_id AS pid FROM performer_comparisons
+      )
+    `).get();
+
+    // Top compared performers
+    const topPerformers = db.prepare(`
+      SELECT p.id, p.name, COUNT(*) as comparison_count
+      FROM (
+        SELECT winner_id AS pid FROM performer_comparisons
+        UNION ALL
+        SELECT loser_id AS pid FROM performer_comparisons
+      ) AS all_ids
+      JOIN performers p ON p.id = all_ids.pid
+      GROUP BY p.id
+      ORDER BY comparison_count DESC
+      LIMIT 10
+    `).all();
+
+    res.json({
+      ...summary,
+      uniquePerformers: uniquePerformers.count,
+      topPerformers,
+      readyForSiamese: summary.total_pairs >= 20
+    });
+  } catch (err) {
+    console.error('[Training] Performer comparisons summary error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/training/export-performer-pairs ────────────────
+// Export performer-level comparison pairs for Siamese model training
+// These are tagged as 'performer_rank' / 'performer_rank_batch'
+// and are distinct from image-level pairwise pairs
+router.post('/export-performer-pairs', (req, res) => {
+  try {
+    const { type, source, limit } = req.body;
+
+    let whereClause = '1=1';
+    const params = [];
+
+    if (type) {
+      whereClause += ' AND pc.type = ?';
+      params.push(type);
+    }
+    if (source) {
+      whereClause += ' AND pc.source = ?';
+      params.push(source);
+    }
+
+    let limitClause = '';
+    if (limit) {
+      limitClause = ' LIMIT ?';
+      params.push(parseInt(limit, 10));
+    }
+
+    const pairs = db.prepare(`
+      SELECT
+        pc.id,
+        pc.winner_id,
+        pc.loser_id,
+        pc.type,
+        pc.source,
+        pc.winner_rating_before,
+        pc.loser_rating_before,
+        pc.winner_rating_after,
+        pc.loser_rating_after,
+        pc.created_at,
+        pw.name AS winner_name,
+        pl.name AS loser_name,
+        pw.thumbnail AS winner_thumbnail,
+        pl.thumbnail AS loser_thumbnail
+      FROM performer_comparisons pc
+      JOIN performers pw ON pw.id = pc.winner_id
+      JOIN performers pl ON pl.id = pc.loser_id
+      WHERE ${whereClause}
+      ORDER BY pc.created_at DESC
+      ${limitClause}
+    `).all(...params);
+
+    // Build Siamese-ready training format
+    const trainingPairs = pairs.map(p => ({
+      winner_id: p.winner_id,
+      loser_id: p.loser_id,
+      winner_name: p.winner_name,
+      loser_name: p.loser_name,
+      type: p.type,
+      source: p.source,
+      rating_gap_before: Math.round((p.winner_rating_before - p.loser_rating_before) * 100) / 100,
+      rating_gap_after: Math.round((p.winner_rating_after - p.loser_rating_after) * 100) / 100,
+      created_at: p.created_at
+    }));
+
+    res.json({
+      success: true,
+      totalPairs: trainingPairs.length,
+      types: {
+        performer_rank: pairs.filter(p => p.type === 'performer_rank').length,
+        performer_rank_batch: pairs.filter(p => p.type === 'performer_rank_batch').length
+      },
+      pairs: trainingPairs
+    });
+  } catch (err) {
+    console.error('[Training] Export performer pairs error:', err);
     res.status(500).json({ error: err.message });
   }
 });

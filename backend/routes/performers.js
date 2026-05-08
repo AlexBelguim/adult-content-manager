@@ -992,6 +992,17 @@ router.post('/compare', async (req, res) => {
     updatePerformer.run(newRB, loserId);
     updateRating.run(loserId, newRB);
 
+    // Save comparison pair for Siamese model training
+    try {
+      db.prepare(`
+        INSERT INTO performer_comparisons
+          (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
+        VALUES (?, ?, 'performer_rank', ?, ?, ?, ?, 'group_rate')
+      `).run(winnerId, loserId, rA, rB, newRA, newRB);
+    } catch (compErr) {
+      console.error('Error saving performer comparison:', compErr.message);
+    }
+
     // Notify clients
     const io = req.app.get('io');
     if (io) {
@@ -1091,16 +1102,42 @@ router.post('/compare-batch', async (req, res) => {
     `);
 
     const results = [];
+    const insertComparison = db.prepare(`
+      INSERT INTO performer_comparisons
+        (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
+      VALUES (?, ?, 'performer_rank_batch', ?, ?, ?, ?, 'smart_compare')
+    `);
+
     const transaction = db.transaction(() => {
+      // Compute new ratings first
+      const newRatings = {};
       for (const id of orderedIds) {
         const oldRating = perfMap[id].rating;
         let newRating = oldRating + deltas[id];
         newRating = Math.max(0, Math.min(5, Math.round(newRating * 100) / 100));
+        newRatings[id] = newRating;
 
         updatePerformer.run(newRating, id);
         updateRating.run(id, newRating);
 
         results.push({ id, oldRating, newRating, wins: wins[id], losses: losses[id] });
+      }
+
+      // Save all pairwise comparison pairs for Siamese training
+      try {
+        for (let i = 0; i < orderedIds.length; i++) {
+          for (let j = i + 1; j < orderedIds.length; j++) {
+            const wId = orderedIds[i];
+            const lId = orderedIds[j];
+            insertComparison.run(
+              wId, lId,
+              perfMap[wId].rating, perfMap[lId].rating,
+              newRatings[wId], newRatings[lId]
+            );
+          }
+        }
+      } catch (compErr) {
+        console.error('Error saving batch comparison pairs:', compErr.message);
       }
     });
     transaction();

@@ -3,7 +3,8 @@ import {
   Box, Typography, Button, IconButton, Chip, CircularProgress, 
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel, AppBar, Toolbar, Container,
-  Grid, Card, CardMedia, CardContent, Tooltip, Paper, Slider, Fade, LinearProgress
+  Grid, Card, CardMedia, CardContent, Tooltip, Paper, Slider, Fade, LinearProgress,
+  ToggleButton, ToggleButtonGroup
 } from '@mui/material';
 import {
   CheckCircle as KeepIcon,
@@ -14,8 +15,11 @@ import {
   AutoAwesome as MagicIcon,
   History as RestoreIcon,
   SettingsSuggest as ModelIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  FilterAlt,
+  Compare
 } from '@mui/icons-material';
+import { ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePath: propBasePath }) => {
@@ -33,6 +37,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [batchCount, setBatchCount] = useState(0);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
+  const [modelType, setModelType] = useState('binary'); // 'binary' or 'pairwise'
+  const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
+  const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
   const [inferenceUrl, setInferenceUrl] = useState('');
@@ -100,9 +107,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     abortControllerRef.current = new AbortController();
 
     try {
-      const targetThreshold = overrideThreshold !== null ? overrideThreshold : ((!firstBatchDone && !isPrefetch) ? -1 : threshold);
+      const targetThreshold = modelType === 'binary' ? 50 : (overrideThreshold !== null ? overrideThreshold : ((!firstBatchDone && !isPrefetch) ? -1 : threshold));
       const queryParams = new URLSearchParams({
         threshold: targetThreshold,
+        modelId: selectedModel,
         ai_server_url: inferenceUrl,
         app_base_url: window.location.origin
       });
@@ -119,8 +127,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         alert(`⚠️ AI Server Error: ${data.ai_error}\n\nImages are shown without AI predictions. Check your Inference Server URL in settings.`);
       }
 
-      // Update threshold ONLY on the very first real batch fetch
-      if (data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
+      // Update threshold ONLY on the very first real batch fetch, and ONLY for pairwise
+      if (modelType !== 'binary' && data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
         const newThreshold = Math.round(data.threshold);
         console.log(`[SmartFilter] Updating threshold from ${threshold} to ${newThreshold}`);
         setThreshold(newThreshold);
@@ -136,6 +144,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         console.log(`[SmartFilter] Setting results (${(data.results || []).length} items) and loading=false`);
         setResults(data.results || []);
         setLoading(false);
+        if (modelType === 'binary') setFirstBatchDone(true);
         // Pre-fetch the next one (if not already done by threshold update block)
         if (!isPrefetch) {
           fetchBatch(true, threshold);
@@ -151,7 +160,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       setLoadingNext(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [performer?.id, isStarted, firstBatchDone, threshold, inferenceUrl]); 
+  }, [performer?.id, isStarted, firstBatchDone, threshold, inferenceUrl, modelType, selectedModel]); 
 
   // Initial trigger - when started or performer changes or fetchBatch updates
   useEffect(() => {
@@ -168,26 +177,37 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     
     const fetchModels = async () => {
       try {
+        // 1. Fetch preferences from backend
+        const [binPref, pairPref] = await Promise.all([
+          fetch('/api/settings/preferred_binary_model').then(r => r.json()),
+          fetch('/api/settings/preferred_pairwise_model').then(r => r.json())
+        ]);
+        
+        const pBin = binPref.value || 'binary_filtering.pt';
+        const pPair = pairPref.value || 'pairwise_preference.pt';
+        
+        setPreferredBinaryModel(pBin);
+        setPreferredPairwiseModel(pPair);
+
+        // 2. Fetch available models from AI server
         const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
         const data = await response.json();
         if (data.success) {
-          setAvailableModels(data.models || []);
-          const current = data.active_model_file || '';
+          const models = data.models || [];
+          setAvailableModels(models);
           
-          // If no model is loaded, or it's not the filtering one, load the filtering one
-          if (!current.includes('binary_filtering')) {
-            await fetch('/api/filter/load-model', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                modelId: 'binary_filtering.pt',
-                ai_server_url: inferenceUrl 
-              })
-            });
-            setSelectedModel('binary_filtering.pt');
-          } else {
-            setSelectedModel(current);
-          }
+          // Load the model for the current type
+          const targetModel = modelType === 'binary' ? pBin : pPair;
+          setSelectedModel(targetModel);
+          
+          await fetch('/api/filter/load-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              modelId: targetModel,
+              ai_server_url: inferenceUrl 
+            })
+          });
         }
       } catch (err) {
         console.error('Error fetching models:', err);
@@ -204,25 +224,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         body: JSON.stringify({ ai_server_url: inferenceUrl })
       }).catch(() => {});
     };
-  }, [inferenceUrl]);
+  }, [inferenceUrl, modelType]);
 
-  const handleModelChange = async (event) => {
-    const modelId = event.target.value;
-    setSelectedModel(modelId);
-    try {
-      await fetch('/api/filter/load-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          modelId,
-          ai_server_url: inferenceUrl
-        })
-      });
-      // Refresh current batch with new model
-      fetchBatch();
-    } catch (err) {
-      console.error('Error loading model:', err);
-    }
+  const handleModeChange = async (event, newMode) => {
+    if (!newMode || newMode === modelType) return;
+    
+    setModelType(newMode);
+    // Note: useEffect handles the actual model loading when modelType changes
+    
+    // Reset first batch state to allow threshold recalculation for pairwise
+    setFirstBatchDone(false);
+    setResults([]);
+    setNextBatch(null);
   };
 
   const handleToggleDecision = (index) => {
@@ -392,46 +405,56 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           </Box>
 
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <Box sx={{ minWidth: 150 }}>
-              <FormControl fullWidth size="small">
-                <InputLabel sx={{ color: '#888' }}>AI Model</InputLabel>
-                <Select
-                  value={selectedModel}
-                  label="AI Model"
-                  onChange={handleModelChange}
-                  sx={{ 
+            <ToggleButtonGroup
+              value={modelType}
+              exclusive
+              onChange={handleModeChange}
+              size="small"
+              sx={{ 
+                bgcolor: 'rgba(0,0,0,0.2)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                '& .MuiToggleButton-root': {
+                  color: 'rgba(255,255,255,0.5)',
+                  px: 2,
+                  py: 0.5,
+                  fontSize: '0.7rem',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase',
+                  '&.Mui-selected': {
                     color: '#fff',
-                    '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(0, 217, 255, 0.2)' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#00d9ff' },
-                  }}
-                >
-                  {availableModels.map(m => {
-                    const name = typeof m === 'string' ? m : (m.filename || '');
-                    if (!name) return null;
-                    return (
-                      <MenuItem key={name} value={name}>
-                        {name.replace('.pt', '').replace('_', ' ')}
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
-            </Box>
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' }
+                  }
+                }
+              }}
+            >
+              <ToggleButton value="binary" sx={{ gap: 1 }}>
+                <FilterAlt sx={{ fontSize: 16 }} /> Binary
+              </ToggleButton>
+              <ToggleButton value="pairwise" sx={{ gap: 1 }}>
+                <Compare sx={{ fontSize: 16 }} /> Pairwise
+              </ToggleButton>
+            </ToggleButtonGroup>
 
             <IconButton color="inherit" onClick={() => setShowSettings(true)}>
               <SettingsIcon />
             </IconButton>
             
-            <Box sx={{ width: 100 }}>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', lineHeight: 1 }}>
-                Keep Threshold: {threshold}%
+            <Box sx={{ width: 120 }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', lineHeight: 1, textTransform: 'uppercase', fontWeight: 'bold' }}>
+                {modelType}: {modelType === 'binary' ? 'Fixed 50%' : `${threshold}%`}
               </Typography>
               <Slider 
-                value={threshold} 
+                value={modelType === 'binary' ? 50 : threshold} 
                 onChange={(e, v) => setThreshold(v)} 
                 onChangeCommitted={() => fetchBatch()}
                 size="small" 
-                sx={{ color: '#00d9ff', py: 1 }} 
+                disabled={modelType === 'binary'}
+                sx={{ 
+                  color: modelType === 'binary' ? 'rgba(255,255,255,0.2)' : '#00d9ff', 
+                  py: 1,
+                  '& .MuiSlider-thumb': { display: modelType === 'binary' ? 'none' : 'block' }
+                }} 
               />
             </Box>
 
