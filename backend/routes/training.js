@@ -566,7 +566,7 @@ router.get('/export-zip', async (req, res) => {
       return res.status(400).json({ error: 'No training images found' });
     }
 
-    // Build manifest
+    // Build manifest with ALL training data
     const manifest = {
       type,
       created: new Date().toISOString(),
@@ -575,13 +575,37 @@ router.get('/export-zip', async (req, res) => {
       total: keepCount + deleteCount
     };
 
-    // Add pairwise data if relevant
-    if (type === 'pairwise') {
+    // Always include pairwise data — remap absolute paths to ZIP-relative paths
+    try {
       const pairs = db.prepare(`
-        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
+        SELECT winner, loser, performer_id, type FROM pairwise_pairs WHERE type != 'both_bad'
       `).all();
-      manifest.pairs = pairs;
-    }
+
+      // Build lookup: absolute path → zip path
+      const pathMap = {};
+      for (const img of [...images.keep, ...images.delete]) {
+        pathMap[img.absPath] = img.zipPath;
+        // Also map with forward slashes for cross-platform matching
+        pathMap[img.absPath.replace(/\\/g, '/')] = img.zipPath;
+      }
+
+      manifest.pairwise_pairs = pairs.map(p => ({
+        winner: pathMap[p.winner] || pathMap[p.winner?.replace(/\\/g, '/')] || p.winner,
+        loser: pathMap[p.loser] || pathMap[p.loser?.replace(/\\/g, '/')] || p.loser,
+        performer_id: p.performer_id,
+        type: p.type
+      }));
+      manifest.pairwise_count = pairs.length;
+    } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
+
+    // Include filter action stats
+    try {
+      const actions = db.prepare(`
+        SELECT performer_id, action, COUNT(*) as cnt
+        FROM filter_actions GROUP BY performer_id, action
+      `).all();
+      manifest.filter_actions = actions;
+    } catch (_) {}
 
     // Stream ZIP
     res.setHeader('Content-Type', 'application/zip');
@@ -627,7 +651,7 @@ router.post('/push-data', async (req, res) => {
       return res.status(400).json({ error: 'No training images found' });
     }
 
-    // Build manifest
+    // Build manifest with ALL training data
     const manifest = {
       type,
       created: new Date().toISOString(),
@@ -635,11 +659,24 @@ router.post('/push-data', async (req, res) => {
       delete_count: images.delete.length
     };
 
-    if (type === 'pairwise') {
-      manifest.pairs = db.prepare(`
-        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
+    // Always include pairwise data with remapped paths
+    try {
+      const pairs = db.prepare(`
+        SELECT winner, loser, performer_id, type FROM pairwise_pairs WHERE type != 'both_bad'
       `).all();
-    }
+      const pathMap = {};
+      for (const img of allImages) {
+        pathMap[img.absPath] = img.zipPath;
+        pathMap[img.absPath.replace(/\\/g, '/')] = img.zipPath;
+      }
+      manifest.pairwise_pairs = pairs.map(p => ({
+        winner: pathMap[p.winner] || pathMap[p.winner?.replace(/\\/g, '/')] || p.winner,
+        loser: pathMap[p.loser] || pathMap[p.loser?.replace(/\\/g, '/')] || p.loser,
+        performer_id: p.performer_id,
+        type: p.type
+      }));
+      manifest.pairwise_count = pairs.length;
+    } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
 
     // Create temp ZIP
     const tmpZip = path.join(os.tmpdir(), `training_push_${Date.now()}.zip`);

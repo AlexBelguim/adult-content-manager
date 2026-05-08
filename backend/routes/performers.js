@@ -162,7 +162,8 @@ function normalizeRating(value) {
 router.get('/', (req, res) => {
   try {
     const performers = db.prepare(`
-      SELECT p.*, f.path as folder_path, r.manual_star, r.confidence, r.is_flagged
+      SELECT p.*, f.path as folder_path, r.manual_star, r.confidence, r.is_flagged,
+             COALESCE(r.comparison_count, 0) as comparison_count
       FROM performers p 
       JOIN folders f ON p.folder_id = f.id
       LEFT JOIN ratings r ON p.id = r.performer_id
@@ -975,12 +976,13 @@ router.post('/compare', async (req, res) => {
     // Update both performers table and ratings table
     const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
     const updateRating = db.prepare(`
-      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged)
-      VALUES (?, ?, 0.9, 0)
+      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, comparison_count)
+      VALUES (?, ?, 0.9, 0, 1)
       ON CONFLICT(performer_id) DO UPDATE SET
         manual_star = EXCLUDED.manual_star,
         confidence = MAX(confidence, 0.9), -- Comparisons slightly less confident than explicit ratings
         is_flagged = 0,
+        comparison_count = COALESCE(comparison_count, 0) + 1,
         created_at = CURRENT_TIMESTAMP
     `);
 
@@ -1078,12 +1080,13 @@ router.post('/compare-batch', async (req, res) => {
     // Apply all updates in a single transaction
     const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
     const updateRating = db.prepare(`
-      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged)
-      VALUES (?, ?, 0.9, 0)
+      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, comparison_count)
+      VALUES (?, ?, 0.9, 0, 1)
       ON CONFLICT(performer_id) DO UPDATE SET
         manual_star = EXCLUDED.manual_star,
         confidence = MAX(confidence, 0.9),
         is_flagged = 0,
+        comparison_count = COALESCE(comparison_count, 0) + 1,
         created_at = CURRENT_TIMESTAMP
     `);
 

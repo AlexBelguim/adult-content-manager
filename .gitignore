@@ -76,3 +76,5 @@ backend-pairwise/models/
 # Standalone ML / vision projects (separate repos)
 # ===========================================
 vision-llm-pairwise/
+# AI training data (large binary files)
+AI-Inference-App/training_data/

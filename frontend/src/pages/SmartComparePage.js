@@ -88,25 +88,65 @@ function SmartComparePage() {
     }
   }, [picsPerPerformer]);
 
-  const performSmartSelection = useCallback((allPerformers, count = performerCount) => {
-    // Use explicit null/undefined checks so that a 0-star rating is treated as "rated"
-    const unrated = allPerformers.filter(p => p.performer_rating === null || p.performer_rating === undefined);
-    const rated = allPerformers.filter(p => p.performer_rating !== null && p.performer_rating !== undefined);
+  const CALIBRATION_THRESHOLD = 5; // Performers need at least this many comparisons before proximity pairing
 
-    let selection = [];
-    if (unrated.length > 0) {
-      const numUnrated = Math.min(unrated.length, count === 2 ? 1 : 2);
-      selection = [...unrated].sort(() => 0.5 - Math.random()).slice(0, numUnrated);
-      
-      if (selection.length < count && rated.length > 0) {
-        const remaining = count - selection.length;
-        const selectedRated = [...rated].sort(() => 0.5 - Math.random()).slice(0, remaining);
-        selection = [...selection, ...selectedRated];
+  const performSmartSelection = useCallback((allPerformers, count = performerCount) => {
+    // Split into calibrating (< threshold comparisons) and established
+    const calibrating = allPerformers.filter(p => (p.comparison_count || 0) < CALIBRATION_THRESHOLD);
+    const established = allPerformers.filter(p => (p.comparison_count || 0) >= CALIBRATION_THRESHOLD);
+
+    // Sort all by current rating (descending) for proximity picking
+    const sortedAll = [...allPerformers].sort((a, b) => (b.performer_rating || 0) - (a.performer_rating || 0));
+    const sortedEstablished = [...established].sort((a, b) => (b.performer_rating || 0) - (a.performer_rating || 0));
+
+    // ── PHASE 1: Calibrating performers exist → pair them for rapid placement ──
+    if (calibrating.length > 0) {
+      // Pick 1 calibrating performer at random
+      const picked = calibrating[Math.floor(Math.random() * calibrating.length)];
+
+      if (sortedAll.length < count) {
+        return [...sortedAll].sort(() => 0.5 - Math.random());
       }
-    } else {
-      selection = [...allPerformers].sort(() => 0.5 - Math.random()).slice(0, count);
+
+      // Pair against opponents from different tiers for rapid calibration.
+      // Split the full sorted list into roughly equal tiers and pick one from each.
+      const tiersNeeded = count - 1;
+      const tierSize = Math.max(1, Math.floor(sortedAll.length / (tiersNeeded + 1)));
+      const opponents = [];
+
+      for (let t = 0; t < tiersNeeded; t++) {
+        const tierStart = t * tierSize;
+        const tierEnd = Math.min((t + 1) * tierSize, sortedAll.length);
+        const tierMembers = sortedAll.slice(tierStart, tierEnd).filter(p => p.id !== picked.id);
+        if (tierMembers.length > 0) {
+          opponents.push(tierMembers[Math.floor(Math.random() * tierMembers.length)]);
+        }
+      }
+
+      // Fill any remaining slots from unused performers
+      while (opponents.length < tiersNeeded) {
+        const remaining = sortedAll.filter(p => p.id !== picked.id && !opponents.find(o => o.id === p.id));
+        if (remaining.length === 0) break;
+        opponents.push(remaining[Math.floor(Math.random() * remaining.length)]);
+      }
+
+      return [picked, ...opponents].sort(() => 0.5 - Math.random());
     }
-    return selection;
+
+    // ── PHASE 2: All performers are established → proximity pairing ──
+    if (sortedEstablished.length <= count) {
+      return [...sortedEstablished].sort(() => 0.5 - Math.random());
+    }
+
+    // Pick a random anchor position, then take a contiguous window of `count`
+    // performers from the sorted list. This guarantees they are close neighbors
+    // in rating (typically within ±2 positions of each other).
+    const maxAnchor = sortedEstablished.length - count;
+    const anchorIndex = Math.floor(Math.random() * (maxAnchor + 1));
+    const selection = sortedEstablished.slice(anchorIndex, anchorIndex + count);
+
+    // Shuffle to avoid position bias in the UI
+    return selection.sort(() => 0.5 - Math.random());
   }, [performerCount]);
 
   useEffect(() => {
@@ -571,6 +611,20 @@ function SmartComparePage() {
                         <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 'bold' }}>
                           {(performer.performer_rating || 0).toFixed(2)}
                         </Typography>
+                        <Box sx={{
+                          px: 0.75, py: 0.25, borderRadius: '8px', ml: 0.5,
+                          bgcolor: (performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? `${theme.palette.warning.main}20` : 'rgba(255,255,255,0.06)',
+                          border: `1px solid ${(performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? theme.palette.warning.main + '50' : 'rgba(255,255,255,0.1)'}`
+                        }}>
+                          <Typography variant="caption" sx={{
+                            fontSize: '0.6rem', fontWeight: 'bold',
+                            color: (performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? 'warning.main' : 'text.secondary'
+                          }}>
+                            {(performer.comparison_count || 0) < CALIBRATION_THRESHOLD
+                              ? `${performer.comparison_count || 0}/${CALIBRATION_THRESHOLD}`
+                              : `${performer.comparison_count || 0} duels`}
+                          </Typography>
+                        </Box>
                       </Box>
                     </Box>
                     {/* AI Score Badge */}
@@ -706,6 +760,21 @@ function SmartComparePage() {
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 1, gap: 1 }}>
                           <Rating value={performer.performer_rating || 0} precision={0.1} readOnly size="small" sx={{ color: 'warning.main' }} />
                           <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'warning.main' }}>{(performer.performer_rating || 0).toFixed(2)}</Typography>
+                        </Box>
+                        <Box sx={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          px: 1, py: 0.25, borderRadius: '10px', mt: 0.5, mx: 'auto',
+                          bgcolor: (performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? `${theme.palette.warning.main}18` : 'rgba(255,255,255,0.05)',
+                          border: `1px solid ${(performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? theme.palette.warning.main + '40' : 'rgba(255,255,255,0.08)'}`
+                        }}>
+                          <Typography variant="caption" sx={{
+                            fontSize: '0.65rem', fontWeight: 'bold',
+                            color: (performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? 'warning.main' : 'text.secondary'
+                          }}>
+                            {(performer.comparison_count || 0) < CALIBRATION_THRESHOLD
+                              ? `⚡ Calibrating ${performer.comparison_count || 0}/${CALIBRATION_THRESHOLD}`
+                              : `${performer.comparison_count || 0} duels`}
+                          </Typography>
                         </Box>
                         <Button
                           size="small"

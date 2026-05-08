@@ -200,6 +200,15 @@ function GroupRatePage() {
                         {(performer.performer_rating || 0).toFixed(2)}
                       </Typography>
                     </Box>
+                    <Typography variant="caption" sx={{
+                      mt: 0.5, display: 'block', textAlign: 'center',
+                      fontSize: '0.6rem', fontWeight: 'bold',
+                      color: (performer.comparison_count || 0) < 5 ? 'warning.main' : 'text.disabled'
+                    }}>
+                      {(performer.comparison_count || 0) < 5
+                        ? `⚡ ${performer.comparison_count || 0}/5`
+                        : `${performer.comparison_count || 0} duels`}
+                    </Typography>
                   </Box>
 
                   <Divider orientation="vertical" flexItem />
