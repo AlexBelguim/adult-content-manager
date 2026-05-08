@@ -37,6 +37,8 @@ MODEL = None
 PROCESSOR = None
 MODEL_NAME = None
 LOADED_MODEL_ID = None
+LOADED_MODEL_TYPE = 'pairwise'
+CONTEXT_STAR_CACHE = {}  # performer_name → predicted star rating
 
 def log(msg):
     """Immediate flushing logger to bypass terminal buffering."""
@@ -62,39 +64,55 @@ def find_models():
     return list(models_path.rglob('*.pt')) if models_path.exists() else []
 
 def load_model(checkpoint_path, model_id=None):
-    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID
+    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
     try:
         log(f"📦 Loading checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
         
         config = checkpoint.get('config', {})
-        MODEL_NAME = config.get('model_name', "facebook/dinov2-large")
+        MODEL_NAME = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
+        model_type = checkpoint.get('model_type', 'pairwise')
         
-        log(f"🦕 Architecture: {MODEL_NAME} (Device: {DEVICE})")
+        # Auto-detect from filename if model_type is missing
+        if model_type == 'unknown' and model_id:
+            if 'context' in model_id.lower(): model_type = 'context_binary'
+            elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): model_type = 'binary'
+            elif 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): model_type = 'pairwise'
         
-        # Initialize model
-        MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True)
+        log(f"🦕 Architecture: {MODEL_NAME} | Type: {model_type} (Device: {DEVICE})")
         
-        # Load state dict
-        # We use strict=False because some checkpoints might omit frozen backbone weights
+        # Initialize the correct model class based on type
+        if model_type == 'binary':
+            from trainer import BinaryClassifier
+            MODEL = BinaryClassifier(MODEL_NAME)
+        elif model_type == 'context_binary':
+            from trainer import ContextBinaryClassifier
+            MODEL = ContextBinaryClassifier(MODEL_NAME)
+        else:
+            MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True)
+        
+        # Load state dict (strict=False: some checkpoints omit frozen backbone weights)
         MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
         MODEL.to(DEVICE)
         MODEL.eval()
+        LOADED_MODEL_TYPE = model_type
+        CONTEXT_STAR_CACHE.clear()
         
         # Load processor
-        PROCESSOR = AutoImageProcessor.from_pretrained(
-            MODEL_NAME,
-            do_resize=True,
-            size={"shortest_edge": 518},
-            do_center_crop=True,
-            crop_size={"height": 518, "width": 518}
-        )
+        PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
+        
+        val_acc = checkpoint.get('val_acc')
+        if val_acc: log(f"  Val accuracy at save: {val_acc*100:.1f}%")
+        if model_type == 'context_binary':
+            mae = checkpoint.get('val_star_mae')
+            if mae: log(f"  Star prediction MAE: {mae:.2f}")
         
         log(f"✅ Model loaded successfully on {DEVICE}")
         LOADED_MODEL_ID = model_id
         return True, "Success"
     except Exception as e:
         log(f"❌ Error loading model: {e}")
+        import traceback; traceback.print_exc()
         return False, str(e)
 
 @app.route('/health', methods=['GET'])
@@ -135,12 +153,14 @@ def api_load_model():
 
 @app.route('/unload_model', methods=['POST'])
 def api_unload_model():
-    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID
+    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
     log("♻️ Unloading model to free resources...")
     MODEL = None
     PROCESSOR = None
     MODEL_NAME = None
     LOADED_MODEL_ID = None
+    LOADED_MODEL_TYPE = 'pairwise'
+    CONTEXT_STAR_CACHE.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return jsonify({"success": True, "message": "Model unloaded"})
@@ -476,9 +496,35 @@ def predict_batch():
         log(f"❌ Prediction Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+def _load_image(p, app_base_url=None):
+    """Load an image from local path or remote URL. Returns PIL Image or None."""
+    try:
+        if os.path.exists(p):
+            return Image.open(p).convert('RGB')
+        elif app_base_url:
+            clean_path = p.replace('\\', '/')
+            if not clean_path.startswith('/'): clean_path = '/' + clean_path
+            encoded_path = quote(clean_path, safe='/')
+            url = f"{app_base_url.rstrip('/')}/api/files/raw?path={encoded_path}"
+            resp = requests.get(url, timeout=5)
+            if resp.status_code == 200:
+                return Image.open(io.BytesIO(resp.content)).convert('RGB')
+    except Exception:
+        pass
+    return None
+
+def _get_performer_name(image_path):
+    """Extract performer name from folder structure."""
+    p = Path(image_path)
+    name = p.parent.name
+    if name in ('pics', 'vids'):
+        name = p.parent.parent.name
+    return name
+
 @app.route('/classify_batch', methods=['POST'])
 def classify_batch():
-    """Binary classification (Keep/Delete) for Smart Filtering."""
+    """Binary classification (Keep/Delete) for Smart Filtering.
+    Supports pairwise, binary, and context_binary model types."""
     if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
     
     data = request.json
@@ -488,74 +534,133 @@ def classify_batch():
     
     if not image_paths: return jsonify({'error': 'No images'}), 400
     
-    log(f"🧠 SMART FILTERING {len(image_paths)} images (Threshold: {threshold})...")
+    log(f"🧠 SMART FILTERING {len(image_paths)} images (Type: {LOADED_MODEL_TYPE}, Threshold: {threshold})...")
     start_time = time.time()
     results = []
+    import math
     
-    batch_size = 4
-    for i in range(0, len(image_paths), batch_size):
-        batch_paths = image_paths[i:i+batch_size]
-        imgs = []
-        valid_paths = []
+    # ── Context-Aware: Two-pass inference ──────────────────────────
+    if LOADED_MODEL_TYPE == 'context_binary':
+        # Group images by performer
+        performer_images = {}  # performer_name → [paths]
+        for p in image_paths:
+            perf = _get_performer_name(p)
+            performer_images.setdefault(perf, []).append(p)
         
-        for p in batch_paths:
-            try:
-                img = None
-                # 1. Local
-                if os.path.exists(p):
-                    img = Image.open(p).convert('RGB')
-                # 2. Remote
-                elif app_base_url:
-                    clean_path = p.replace('\\', '/')
-                    if not clean_path.startswith('/'): clean_path = '/' + clean_path
-                    encoded_path = quote(clean_path, safe='/')
-                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={encoded_path}"
-                    resp = requests.get(url, timeout=5)
-                    if resp.status_code == 200:
-                        img = Image.open(io.BytesIO(resp.content)).convert('RGB')
-                    else:
-                        log(f"  ❌ Failed to fetch remote: {url} (Status: {resp.status_code})")
-                
+        log(f"  Context-aware mode: {len(performer_images)} performers detected")
+        
+        # Pass 1: Predict star rating per performer (sample up to 100 images)
+        for perf, paths in performer_images.items():
+            if perf in CONTEXT_STAR_CACHE:
+                continue
+            sample_paths = paths[:100]
+            star_preds = []
+            for i in range(0, len(sample_paths), 4):
+                batch_p = sample_paths[i:i+4]
+                imgs = [_load_image(p, app_base_url) for p in batch_p]
+                imgs = [im for im in imgs if im is not None]
+                if not imgs: continue
+                try:
+                    with torch.no_grad():
+                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                        pv = inputs['pixel_values'].to(DEVICE)
+                        stars = MODEL.predict_stars(pv)
+                        star_preds.extend(stars.cpu().tolist())
+                except: continue
+            
+            avg_stars = sum(star_preds) / max(len(star_preds), 1) if star_preds else 2.5
+            CONTEXT_STAR_CACHE[perf] = avg_stars
+            log(f"  ⭐ {perf}: predicted {avg_stars:.2f} stars ({len(star_preds)} images sampled)")
+        
+        # Pass 2: Keep/Delete classification with star context
+        for i in range(0, len(image_paths), 4):
+            batch_paths = image_paths[i:i+4]
+            imgs = []
+            valid_paths = []
+            batch_stars = []
+            for p in batch_paths:
+                img = _load_image(p, app_base_url)
                 if img:
                     imgs.append(img)
                     valid_paths.append(p)
-                else:
-                    log(f"  ❌ Image not found: {p}")
+                    perf = _get_performer_name(p)
+                    batch_stars.append(CONTEXT_STAR_CACHE.get(perf, 2.5))
+            if not imgs: continue
+            try:
+                with torch.no_grad():
+                    inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                    pv = inputs['pixel_values'].to(DEVICE)
+                    star_tensor = torch.tensor(batch_stars, dtype=torch.float32).to(DEVICE)
+                    logits = MODEL.classify_with_stars(pv, star_tensor)
+                    logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
+                    scores = (torch.sigmoid(logits) * 100).cpu().tolist()
+                    for p, s, star in zip(valid_paths, scores, batch_stars):
+                        safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
+                        decision = "keep" if safe_score >= threshold else "delete"
+                        results.append({
+                            'path': p, 'score': float(safe_score), 'decision': decision,
+                            'predicted_stars': round(star, 2),
+                            'performer': _get_performer_name(p)
+                        })
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache(); continue
             except Exception as e:
-                log(f"  ⚠️ Skipping {p}: {e}")
-            
-        if imgs:
+                log(f"  ❌ Batch Error: {e}"); continue
+    
+    # ── Binary model: direct classification ───────────────────────
+    elif LOADED_MODEL_TYPE == 'binary':
+        for i in range(0, len(image_paths), 4):
+            batch_paths = image_paths[i:i+4]
+            imgs = []
+            valid_paths = []
+            for p in batch_paths:
+                img = _load_image(p, app_base_url)
+                if img: imgs.append(img); valid_paths.append(p)
+            if not imgs: continue
+            try:
+                with torch.no_grad():
+                    inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                    pv = inputs['pixel_values'].to(DEVICE)
+                    logits = MODEL(pv)
+                    logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
+                    scores = (torch.sigmoid(logits) * 100).cpu().tolist()
+                    if not isinstance(scores, list): scores = [scores]
+                    for p, s in zip(valid_paths, scores):
+                        safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
+                        decision = "keep" if safe_score >= threshold else "delete"
+                        results.append({'path': p, 'score': float(safe_score), 'decision': decision})
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache(); continue
+            except Exception as e:
+                log(f"  ❌ Batch Error: {e}"); continue
+    
+    # ── Pairwise model (default): single-score path ───────────────
+    else:
+        for i in range(0, len(image_paths), 4):
+            batch_paths = image_paths[i:i+4]
+            imgs = []
+            valid_paths = []
+            for p in batch_paths:
+                img = _load_image(p, app_base_url)
+                if img: imgs.append(img); valid_paths.append(p)
+            if not imgs: continue
             try:
                 with torch.no_grad():
                     inputs = PROCESSOR(images=imgs, return_tensors="pt")
                     pixel_values = inputs['pixel_values'].to(DEVICE)
                     MODEL.eval()
                     raw_scores = MODEL.forward_single(pixel_values)
-                    
-                    # Sanitize raw scores to prevent NaN/Inf before sigmoid
                     raw_scores = torch.nan_to_num(raw_scores, nan=0.0, posinf=10.0, neginf=-10.0)
-                    
                     normalized = torch.sigmoid(raw_scores) * 100
                     scores = normalized.cpu().numpy().flatten().tolist()
-                    
-                    import math
                     for p, s in zip(valid_paths, scores):
-                        # Ensure score is a valid float for JSON
                         safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
                         decision = "keep" if safe_score >= threshold else "delete"
-                        results.append({
-                            'path': p, 
-                            'score': float(safe_score), 
-                            'decision': decision
-                        })
-                log(f"  📦 Batch {i//batch_size + 1} complete ({len(imgs)} images)")
+                        results.append({'path': p, 'score': float(safe_score), 'decision': decision})
             except torch.cuda.OutOfMemoryError:
-                log("  ❌ OOM Error during batch - clearing cache...")
-                torch.cuda.empty_cache()
-                continue
+                torch.cuda.empty_cache(); continue
             except Exception as e:
-                log(f"  ❌ Batch Error: {e}")
-                continue
+                log(f"  ❌ Batch Error: {e}"); continue
 
     log(f"✅ Classification completed in {time.time() - start_time:.2f}s")
     

@@ -565,6 +565,23 @@ function collectTrainingImages(basePath) {
   return { keep, delete: del };
 }
 
+// ── Helper: collect performer star ratings ───────────────────
+function collectPerformerRatings() {
+  const ratings = {};
+  try {
+    const rows = db.prepare(`
+      SELECT p.name, r.manual_star
+      FROM performers p
+      JOIN ratings r ON r.performer_id = p.id
+      WHERE r.manual_star IS NOT NULL
+    `).all();
+    for (const row of rows) {
+      ratings[row.name] = row.manual_star;
+    }
+  } catch (_) { /* ratings table may not exist */ }
+  return ratings;
+}
+
 // ── GET /api/training/export-zip ─────────────────────────────
 // Download training data as a ZIP file
 router.get('/export-zip', async (req, res) => {
@@ -587,7 +604,8 @@ router.get('/export-zip', async (req, res) => {
       created: new Date().toISOString(),
       keep_count: keepCount,
       delete_count: deleteCount,
-      total: keepCount + deleteCount
+      total: keepCount + deleteCount,
+      performer_ratings: collectPerformerRatings()
     };
 
     // Always include pairwise data — remap absolute paths to ZIP-relative paths
@@ -671,7 +689,8 @@ router.post('/push-data', async (req, res) => {
       type,
       created: new Date().toISOString(),
       keep_count: images.keep.length,
-      delete_count: images.delete.length
+      delete_count: images.delete.length,
+      performer_ratings: collectPerformerRatings()
     };
 
     // Always include pairwise data with remapped paths

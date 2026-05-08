@@ -100,24 +100,55 @@ class BinaryClassifier(nn.Module):
         return self.classifier(out.last_hidden_state[:, 0, :]).squeeze(-1)
 
 class ContextBinaryClassifier(nn.Module):
+    """Two-headed context-aware classifier.
+    Head 1 (Star Predictor): image_embedding → predicted star rating (0-5)
+    Head 2 (Keep/Delete):    image_embedding + star_rating → keep/delete logit
+    Training: both heads train simultaneously with real star ratings from DB.
+    Inference: Head 1 runs first on a batch → average → feeds into Head 2.
+    """
     def __init__(self, backbone_name='facebook/dinov2-large'):
         super().__init__()
         self.backbone = AutoModel.from_pretrained(backbone_name)
         hs = self.backbone.config.hidden_size
-        self.classifier = nn.Sequential(
-            nn.Linear(hs * 2, 512), nn.ReLU(), nn.Dropout(0.3),
+        # Head 1: Star Predictor (image → star rating 0-5)
+        self.star_head = nn.Sequential(
+            nn.Linear(hs, 256), nn.ReLU(), nn.Dropout(0.2), nn.Linear(256, 1)
+        )
+        nn.init.zeros_(self.star_head[-1].bias)
+        # Head 2: Keep/Delete (image + normalized star rating → logit)
+        self.action_head = nn.Sequential(
+            nn.Linear(hs + 1, 512), nn.ReLU(), nn.Dropout(0.3),
             nn.Linear(512, 256), nn.ReLU(), nn.Linear(256, 1)
         )
-        nn.init.zeros_(self.classifier[-1].bias)
+        nn.init.zeros_(self.action_head[-1].bias)
     def freeze_backbone(self):
         for p in self.backbone.parameters(): p.requires_grad = False
     def unfreeze_backbone(self):
         for p in self.backbone.parameters(): p.requires_grad = True
-    def forward(self, pixel_values, context_emb):
+    def _backbone_cls(self, pixel_values):
+        """Shared backbone forward — returns CLS token."""
         out = self.backbone(pixel_values=pixel_values)
-        cls = out.last_hidden_state[:, 0, :]
-        combined = torch.cat([cls, context_emb], dim=1)
-        return self.classifier(combined).squeeze(-1)
+        return out.last_hidden_state[:, 0, :]
+    def forward(self, pixel_values, star_rating):
+        """Full forward: returns (predicted_stars, action_logit).
+        star_rating: ground-truth stars used as input to Head 2 during training."""
+        cls = self._backbone_cls(pixel_values)
+        predicted_stars = torch.clamp(self.star_head(cls).squeeze(-1), 0.0, 5.0)
+        star_norm = (star_rating / 5.0).view(-1, 1)
+        combined = torch.cat([cls, star_norm], dim=1)
+        action_logit = self.action_head(combined).squeeze(-1)
+        return predicted_stars, action_logit
+    def predict_stars(self, pixel_values):
+        """Head 1 only — predict star rating per image (inference Pass 1)."""
+        cls = self._backbone_cls(pixel_values)
+        return torch.clamp(self.star_head(cls).squeeze(-1), 0.0, 5.0)
+    def classify_with_stars(self, pixel_values, star_rating):
+        """Head 2 only — keep/delete given a known star rating (inference Pass 2)."""
+        cls = self._backbone_cls(pixel_values)
+        star_norm = (star_rating / 5.0).view(-1, 1)
+        combined = torch.cat([cls, star_norm], dim=1)
+        return self.action_head(combined).squeeze(-1)
+
 
 class AgentOfTasteModel(nn.Module):
     """Multi-head model: aesthetic + preference + action heads."""
@@ -397,7 +428,10 @@ def train_pairwise(config):
 
 
 def train_context_binary(config):
-    """Train context-aware binary classifier."""
+    """Train context-aware binary classifier with star rating heads.
+    Head 1 learns to predict performer star ratings from images.
+    Head 2 learns keep/delete decisions contextualized by star rating.
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 8)
@@ -406,9 +440,9 @@ def train_context_binary(config):
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
 
-    tlog(f"📋 Context-Aware Binary Training | {epochs} epochs")
+    tlog(f"📋 Context-Aware Binary Training | {epochs} epochs | backbone: {backbone}")
 
-    # Resolve directories based on data layout
+    # 1. Resolve directories
     if use_cached or Path(os.path.join(base_path, 'keep')).exists():
         keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
         delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
@@ -422,52 +456,52 @@ def train_context_binary(config):
     if not keep_map or not delete_map:
         raise ValueError("Need both keep and delete performer directories")
 
+    # 2. Load performer star ratings from manifest or config
+    star_ratings = config.get('performer_ratings', {})
+    manifest_path = Path(base_path) / 'manifest.json'
+    if not star_ratings and manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            star_ratings = manifest.get('performer_ratings', {})
+            tlog(f"  ⭐ Loaded {len(star_ratings)} star ratings from manifest")
+        except: pass
+
+    # Default unknown performers to 2.5 (neutral)
+    all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
+    for p in all_performers:
+        if p not in star_ratings:
+            star_ratings[p] = 2.5
+    rated_count = sum(1 for v in star_ratings.values() if v != 2.5)
+    tlog(f"  Performers with real ratings: {rated_count}/{len(all_performers)}")
+
+    # 3. Build dataset
     processor = AutoImageProcessor.from_pretrained(backbone)
-    model = ContextBinaryClassifier(backbone).to(device)
-
-    # Compute performer contexts from keep images
-    training_state['phase'] = 'computing contexts'
-    tlog("  Computing performer context embeddings...")
-    model.eval()
-    contexts = {}
-    with torch.no_grad():
-        for name, paths in keep_map.items():
-            embs = []
-            for p in random.sample(paths, min(15, len(paths))):
-                try:
-                    img = Image.open(p).convert('RGB')
-                    inp = processor(images=img, return_tensors='pt').to(device)
-                    out = model.backbone(**inp)
-                    embs.append(out.last_hidden_state[:, 0, :].cpu())
-                except: continue
-            if embs:
-                contexts[name] = torch.mean(torch.stack(embs), dim=0).squeeze(0)
-    tlog(f"  Built contexts for {len(contexts)} performers")
-
-    # Build dataset
-    all_samples = []
+    all_samples = []  # (path, performer_name, star_rating, label)
     for perf, imgs in keep_map.items():
-        if perf in contexts:
-            for p in imgs: all_samples.append((p, perf, 1.0))
+        stars = star_ratings.get(perf, 2.5)
+        for p in imgs: all_samples.append((p, perf, stars, 1.0))
     for perf, imgs in delete_map.items():
-        if perf in contexts:
-            for p in imgs: all_samples.append((p, perf, 0.0))
+        stars = star_ratings.get(perf, 2.5)
+        for p in imgs: all_samples.append((p, perf, stars, 0.0))
     random.shuffle(all_samples)
+    tlog(f"  Total samples: {len(all_samples)}")
 
     class CtxDS(Dataset):
         def __init__(self, samples):
             self.samples = samples
-            self.aug = T.Compose([T.RandomHorizontalFlip(0.5), T.ColorJitter(0.08,0.08,0.05,0.02)])
+            self.aug = T.Compose([T.RandomHorizontalFlip(0.5),
+                                  T.RandomResizedCrop(224, scale=(0.85, 1.0)),
+                                  T.ColorJitter(0.08, 0.08, 0.05, 0.02)])
         def __len__(self): return len(self.samples)
         def __getitem__(self, idx):
-            path, perf, label = self.samples[idx]
+            path, perf, stars, label = self.samples[idx]
             try: img = Image.open(path).convert('RGB')
             except: return self.__getitem__((idx+1) % len(self))
             img = self.aug(img)
             inp = processor(images=img, return_tensors='pt')
-            ctx = contexts.get(perf, torch.zeros(model.backbone.config.hidden_size))
             return {'pixel_values': inp['pixel_values'].squeeze(0),
-                    'context': ctx, 'label': torch.tensor(label, dtype=torch.float32)}
+                    'star_rating': torch.tensor(stars, dtype=torch.float32),
+                    'label': torch.tensor(label, dtype=torch.float32)}
 
     ds = CtxDS(all_samples)
     vs = max(1, int(len(ds) * 0.15))
@@ -475,69 +509,108 @@ def train_context_binary(config):
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
 
+    # 4. Model setup
+    model = ContextBinaryClassifier(backbone).to(device)
     model.freeze_backbone()
-    criterion = nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.AdamW(model.classifier.parameters(), lr=1e-3)
+    criterion_stars = nn.MSELoss()
+    criterion_action = nn.BCEWithLogitsLoss()
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    optimizer = torch.optim.AdamW([
+        {'params': model.star_head.parameters(), 'lr': 1e-3},
+        {'params': model.action_head.parameters(), 'lr': 1e-3},
+    ])
     best_acc = 0.0
     out_path = Path(__file__).parent / 'models' / 'context_binary.pt'
+    out_path.parent.mkdir(exist_ok=True)
 
+    # 5. Training loop
     for epoch in range(1, epochs+1):
         if epoch == warmup + 1:
             model.unfreeze_backbone()
             optimizer = torch.optim.AdamW([
-                {'params': model.classifier.parameters(), 'lr': 1e-3},
-                {'params': model.backbone.parameters(), 'lr': 1e-5}
+                {'params': model.star_head.parameters(), 'lr': 1e-3},
+                {'params': model.action_head.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5},
             ])
         training_state['epoch'] = epoch
         training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
         model.train()
         total_loss = correct = total = 0
+        star_loss_sum = action_loss_sum = 0
         num_batches = len(train_loader)
         training_state['total_batches'] = num_batches
+
         for bi, batch in enumerate(train_loader, 1):
             pv = batch['pixel_values'].to(device)
-            ctx = batch['context'].to(device)
+            stars_gt = batch['star_rating'].to(device)
             labels = batch['label'].to(device)
             optimizer.zero_grad()
+
             if scaler:
                 with torch.amp.autocast('cuda'):
-                    logits = model(pv, ctx); loss = criterion(logits, labels)
+                    pred_stars, action_logit = model(pv, stars_gt)
+                    loss_s = criterion_stars(pred_stars, stars_gt)
+                    loss_a = criterion_action(action_logit, labels)
+                    loss = loss_s + loss_a
                 scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
             else:
-                logits = model(pv, ctx); loss = criterion(logits, labels)
+                pred_stars, action_logit = model(pv, stars_gt)
+                loss_s = criterion_stars(pred_stars, stars_gt)
+                loss_a = criterion_action(action_logit, labels)
+                loss = loss_s + loss_a
                 loss.backward(); optimizer.step()
+
             total_loss += loss.item()
-            correct += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
+            star_loss_sum += loss_s.item()
+            action_loss_sum += loss_a.item()
+            correct += ((torch.sigmoid(action_logit) > 0.5).float() == labels).sum().item()
             total += labels.size(0)
             training_state['batch'] = bi
             training_state['train_loss'] = total_loss / bi
             training_state['train_acc'] = correct / max(total, 1)
+
+        # Validate
         model.eval()
         vc = vt = 0
+        val_star_err = val_star_n = 0
         with torch.no_grad():
             for batch in val_loader:
                 pv = batch['pixel_values'].to(device)
-                ctx = batch['context'].to(device)
+                stars_gt = batch['star_rating'].to(device)
                 labels = batch['label'].to(device)
-                logits = model(pv, ctx)
-                vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
+                pred_stars, action_logit = model(pv, stars_gt)
+                vc += ((torch.sigmoid(action_logit) > 0.5).float() == labels).sum().item()
                 vt += labels.size(0)
+                val_star_err += (pred_stars - stars_gt).abs().sum().item()
+                val_star_n += stars_gt.size(0)
+
         val_acc = vc / max(vt, 1)
+        val_mae = val_star_err / max(val_star_n, 1)
         training_state['val_acc'] = val_acc
         training_state['epoch_history'].append({
             'epoch': epoch, 'train_loss': total_loss / num_batches,
-            'train_acc': round(correct / max(total, 1), 4), 'val_acc': round(val_acc, 4)
+            'star_loss': round(star_loss_sum / num_batches, 4),
+            'action_loss': round(action_loss_sum / num_batches, 4),
+            'train_acc': round(correct / max(total, 1), 4),
+            'val_acc': round(val_acc, 4),
+            'val_star_mae': round(val_mae, 3)
         })
-        tlog(f"  Epoch {epoch}/{epochs} | Val Acc: {val_acc:.1%}")
+        tlog(f"  Epoch {epoch}/{epochs} | Val Acc: {val_acc:.1%} | Star MAE: {val_mae:.2f}")
+
         if val_acc > best_acc:
             best_acc = val_acc
             training_state['best_val_acc'] = best_acc
-            torch.save({'model_state_dict': model.state_dict(), 'val_acc': val_acc,
-                        'backbone': backbone, 'model_type': 'context_binary',
-                        'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
-                        'contexts': {k: v.cpu() for k, v in contexts.items()}}, out_path)
-            tlog(f"  ⭐ Saved → {out_path.name}")
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'val_acc': val_acc,
+                'val_star_mae': val_mae,
+                'backbone': backbone,
+                'model_type': 'context_binary',
+                'performer_ratings': star_ratings,
+                'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs}
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} ({val_acc:.1%})")
+
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
 

@@ -173,18 +173,17 @@ Image → DINOv2 → CLS → Head → logit → sigmoid × 100 → score
 ### Where It's Used
 
 Trained via `POST /train` with `type: 'binary'`. Can be tested via `POST /test_model`.
-**Not currently usable** through the main `/classify_batch` endpoint — that endpoint
-always loads a `DinoV2PreferenceModel`. Only usable if loaded manually through the
-pairwise backend's `inference_binary.py` server (port 3345).
+Fully supported by `/load_model` and `/classify_batch` — the server auto-detects
+`model_type: 'binary'` from the checkpoint and loads the correct class.
 
 ---
 
 ## 3. Context-Aware Binary Classifier
 
-**Status: NEEDS REIMPLEMENTATION** — The current code uses raw embedding averages
-as "context." The correct design uses the performer's star rating.
-
-### Correct Design (Two-Headed Architecture)
+**File:** `trainer.py` — `ContextBinaryClassifier`
+**Checkpoint type tag:** `model_type: 'context_binary'`
+**Saved to:** `models/context_binary.pt`
+**Status: FULLY IMPLEMENTED** — Two-headed architecture using performer star ratings.
 
 The context-aware model should understand **who** it's filtering for. A 5-star performer
 gets a lenient filter; a 2-star performer gets a strict filter. The model learns this
@@ -395,4 +394,4 @@ Image → DINOv2 → CLS token (1024-dim)
 | **Performer-aware?** | No | No | Yes (via star context) | Yes (via calibration curve) |
 | **Checkpoint tag** | `pairwise` | `binary` | `context_binary` | N/A (in-memory) |
 | **Saved to** | `pairwise_preference.pt` | `binary_filtering.pt` | `context_binary.pt` | Not persisted |
-| **Default for /classify_batch?** | ✅ Yes | ❌ No | ❌ No (needs wiring) | N/A |
+| **Default for /classify_batch?** | ✅ Yes | ✅ Yes | ✅ Yes | N/A |
