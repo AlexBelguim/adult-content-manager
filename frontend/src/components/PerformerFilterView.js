@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { loadShortcuts } from '../utils/settings';
 import BackgroundTaskQueue from './BackgroundTaskQueue';
+import MobilePicSwiper from './MobilePicSwiper';
 import '../utils/FunscriptPlayer.js'; // Register custom element
 import './FunscriptPlayerEmbed.css';
 import {
@@ -27,7 +28,8 @@ import {
   KeyboardArrowLeft as PrevIcon,
   KeyboardArrowRight as NextIcon,
   Upload as UploadIcon,
-  AutoAwesome as SmartIcon
+  AutoAwesome as SmartIcon,
+  SwipeRight as SwipeIcon
 } from '@mui/icons-material';
 
 function PerformerFilterView({ performer, onBack, onNext, onComplete, handyIntegration, handyConnected, initialTab }) {
@@ -56,6 +58,14 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [predictions, setPredictions] = useState({});
   const [activeModel, setActiveModel] = useState(null);
+  const [showMobileSwiper, setShowMobileSwiper] = useState(false);
+
+  // Detect mobile / touch device
+  const isMobile = typeof window !== 'undefined' && (
+    ('ontouchstart' in window) ||
+    (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
+    (window.matchMedia && window.matchMedia('(hover: none)').matches)
+  );
 
 
 
@@ -1077,6 +1087,25 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           sx={{ ml: 2 }}
         />
 
+        {/* Mobile Swipe Mode button - only on mobile and pics tab */}
+        {isMobile && currentTab === 'pics' && files.length > 0 && (
+          <Button
+            variant="contained"
+            startIcon={<SwipeIcon />}
+            onClick={() => setShowMobileSwiper(true)}
+            sx={{
+              ml: 2,
+              bgcolor: '#e91e63',
+              '&:hover': { bgcolor: '#c2185b' },
+              textTransform: 'none',
+              fontWeight: 'bold',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Swipe Mode
+          </Button>
+        )}
+
         <Typography variant="body2" sx={{ ml: 'auto' }}>
           {currentIndex + 1} of {files.length}
           {totalFiles > files.length && ` (${totalFiles} total)`}
@@ -1184,17 +1213,61 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               }}
             >
               {currentTab === 'pics' && (
-                <funscript-player
-                  key="pic-player"
-                  src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                  type="image"
-                  performer-id={performer.id}
-                  performer-name={performer.name}
-                  handy-connected={handyConnected ? 'true' : 'false'}
-                  mode="modal"
-                  tagassign="true"
-                  className="funscript-player-embed"
-                ></funscript-player>
+                isMobile ? (
+                  /* On mobile: show the image directly and open swipe mode on tap */
+                  <Box
+                    onClick={() => setShowMobileSwiper(true)}
+                    sx={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      position: 'relative',
+                    }}
+                  >
+                    <img
+                      src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
+                      alt={currentFile.name}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '100%',
+                        objectFit: 'contain',
+                      }}
+                    />
+                    <Box sx={{
+                      position: 'absolute',
+                      bottom: 12,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      bgcolor: 'rgba(0,0,0,0.6)',
+                      borderRadius: 2,
+                      px: 2,
+                      py: 0.5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                    }}>
+                      <SwipeIcon sx={{ fontSize: 16, color: '#e91e63' }} />
+                      <Typography variant="caption" sx={{ color: '#fff', fontSize: '0.7rem' }}>
+                        Tap to enter Swipe Mode
+                      </Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  <funscript-player
+                    key="pic-player"
+                    src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
+                    type="image"
+                    performer-id={performer.id}
+                    performer-name={performer.name}
+                    handy-connected={handyConnected ? 'true' : 'false'}
+                    mode="modal"
+                    tagassign="true"
+                    className="funscript-player-embed"
+                  ></funscript-player>
+                )
               )}
               {currentTab === 'vids' && (
                 <funscript-player
@@ -1405,6 +1478,22 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           </Box>
         )}
       </Box>
+
+      {/* Mobile Pic Swiper — fullscreen Tinder-like mode for pics on mobile */}
+      {showMobileSwiper && currentTab === 'pics' && currentFile && (
+        <MobilePicSwiper
+          files={files}
+          currentIndex={currentIndex}
+          onAction={(action) => handleFilterAction(action)}
+          onUndo={handleUndo}
+          onNavigate={(newIndex) => navigateWithFullscreen(newIndex)}
+          onClose={() => setShowMobileSwiper(false)}
+          currentFile={currentFile}
+          progress={progress}
+          shortcuts={shortcuts}
+          totalFiles={totalFiles}
+        />
+      )}
     </Container>
   );
 }

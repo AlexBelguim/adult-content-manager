@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box, Typography, Button, Paper, CircularProgress, Chip,
     ToggleButton, ToggleButtonGroup, Dialog, DialogTitle, DialogContent,
-    DialogActions, List, ListItem, ListItemButton, Checkbox, ListItemText, Tooltip
+    DialogActions, List, ListItem, ListItemButton, Checkbox, ListItemText, Tooltip,
+    IconButton
 } from '@mui/material';
-import { NavigateBefore, NavigateNext, SkipNext, Block, DriveFileMove } from '@mui/icons-material';
+import { NavigateBefore, NavigateNext, SkipNext, Block, DriveFileMove, Fullscreen, FullscreenExit } from '@mui/icons-material';
 
 function PairwiseLabelerPage({ serverUrl }) {
     const [pair, setPair] = useState(null);
@@ -14,6 +15,23 @@ function PairwiseLabelerPage({ serverUrl }) {
     const [performers, setPerformers] = useState([]);
     const [showPerformerModal, setShowPerformerModal] = useState(false);
     const [selectedPerformers, setSelectedPerformers] = useState([]);
+    const [chosenSide, setChosenSide] = useState(null); // 'left' or 'right' — flash feedback on tap
+    const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+
+    // Track fullscreen changes
+    useEffect(() => {
+        const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', onChange);
+        return () => document.removeEventListener('fullscreenchange', onChange);
+    }, []);
+
+    const toggleFullscreen = () => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(e => console.log(e));
+        } else {
+            document.exitFullscreen();
+        }
+    };
 
     // Fetch next pair
     const fetchNextPair = useCallback(async () => {
@@ -67,6 +85,9 @@ function PairwiseLabelerPage({ serverUrl }) {
     const handleChoice = async (winner) => {
         if (!pair) return;
 
+        // Flash visual feedback then clear
+        setChosenSide(winner);
+
         const winnerPath = winner === 'left' ? pair.left : pair.right;
         const loserPath = winner === 'left' ? pair.right : pair.left;
 
@@ -82,10 +103,13 @@ function PairwiseLabelerPage({ serverUrl }) {
                 })
             });
 
+            // Clear chosen side BEFORE loading next pair so overlay doesn't persist
+            setChosenSide(null);
             fetchStats();
             fetchNextPair();
         } catch (err) {
             console.error('Error submitting choice:', err);
+            setChosenSide(null);
         }
     };
 
@@ -226,6 +250,12 @@ function PairwiseLabelerPage({ serverUrl }) {
                         Inter: <strong style={{ color: '#ff9800' }}>{stats.inter}</strong>
                     </Typography>
                 </Box>
+
+                <Tooltip title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}>
+                    <IconButton size="small" onClick={toggleFullscreen} sx={{ color: '#aaa', ml: 1 }}>
+                        {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
+                    </IconButton>
+                </Tooltip>
             </Paper>
 
             {/* Pair Info */}
@@ -266,12 +296,23 @@ function PairwiseLabelerPage({ serverUrl }) {
                                 cursor: 'pointer',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                border: '3px solid transparent',
-                                transition: 'all 0.2s',
-                                '&:hover': {
-                                    borderColor: '#00d9ff',
-                                    boxShadow: '0 0 30px rgba(0, 217, 255, 0.3)',
-                                    transform: 'scale(1.01)'
+                                border: chosenSide === 'left' ? '3px solid #4caf50' : '3px solid transparent',
+                                boxShadow: chosenSide === 'left' ? '0 0 30px rgba(76, 175, 80, 0.5)' : 'none',
+                                transition: 'all 0.15s ease-out',
+                                // Only apply hover effects on devices that support hover (not touch)
+                                '@media (hover: hover)': {
+                                    '&:hover': {
+                                        borderColor: chosenSide ? undefined : '#00d9ff',
+                                        boxShadow: chosenSide ? undefined : '0 0 30px rgba(0, 217, 255, 0.3)',
+                                        transform: 'scale(1.01)'
+                                    }
+                                },
+                                // Touch feedback — brief active state only
+                                '@media (hover: none)': {
+                                    '&:active': {
+                                        borderColor: '#4caf50',
+                                        boxShadow: '0 0 20px rgba(76, 175, 80, 0.4)'
+                                    }
                                 }
                             }}
                         >
@@ -301,12 +342,21 @@ function PairwiseLabelerPage({ serverUrl }) {
                                 cursor: 'pointer',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                border: '3px solid transparent',
-                                transition: 'all 0.2s',
-                                '&:hover': {
-                                    borderColor: '#00d9ff',
-                                    boxShadow: '0 0 30px rgba(0, 217, 255, 0.3)',
-                                    transform: 'scale(1.01)'
+                                border: chosenSide === 'right' ? '3px solid #4caf50' : '3px solid transparent',
+                                boxShadow: chosenSide === 'right' ? '0 0 30px rgba(76, 175, 80, 0.5)' : 'none',
+                                transition: 'all 0.15s ease-out',
+                                '@media (hover: hover)': {
+                                    '&:hover': {
+                                        borderColor: chosenSide ? undefined : '#00d9ff',
+                                        boxShadow: chosenSide ? undefined : '0 0 30px rgba(0, 217, 255, 0.3)',
+                                        transform: 'scale(1.01)'
+                                    }
+                                },
+                                '@media (hover: none)': {
+                                    '&:active': {
+                                        borderColor: '#4caf50',
+                                        boxShadow: '0 0 20px rgba(76, 175, 80, 0.4)'
+                                    }
                                 }
                             }}
                         >
