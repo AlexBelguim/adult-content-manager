@@ -19,7 +19,6 @@ import {
   FilterAlt,
   Compare
 } from '@mui/icons-material';
-import { ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePath: propBasePath }) => {

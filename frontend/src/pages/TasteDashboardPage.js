@@ -94,6 +94,7 @@ function TasteDashboardPage() {
     setLoading(false);
   };
 
+  useEffect(() => {
     // Load AI URL from DB settings on mount
     fetch('/api/settings/ai_server_url')
       .then(r => r.json())
