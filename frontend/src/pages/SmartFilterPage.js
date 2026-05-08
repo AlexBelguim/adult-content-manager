@@ -183,7 +183,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         ]);
         
         const pBin = binPref.value || 'binary_filtering.pt';
-        const pPair = pairPref.value || 'pairwise_preference.pt';
+        const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
         
         setPreferredBinaryModel(pBin);
         setPreferredPairwiseModel(pPair);
@@ -196,7 +196,17 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           setAvailableModels(models);
           
           // Load the model for the current type
-          const targetModel = modelType === 'binary' ? pBin : pPair;
+          let targetModel = modelType === 'binary' ? pBin : pPair;
+          
+          // If preferred model not found, pick the first one of matching type
+          if (!models.find(m => m.filename === targetModel)) {
+            const bestMatch = models.find(m => m.type === modelType);
+            if (bestMatch) {
+              console.log(`[SmartFilter] Preferred model ${targetModel} not found. Falling back to ${bestMatch.filename}`);
+              targetModel = bestMatch.filename;
+            }
+          }
+          
           setSelectedModel(targetModel);
           
           await fetch('/api/filter/load-model', {
@@ -311,46 +321,151 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         flexDirection: 'column', 
         alignItems: 'center', 
         justifyContent: 'center',
-        background: '#121212',
+        background: 'radial-gradient(circle at center, #1a1a2e 0%, #0a0a0f 100%)',
         color: 'white',
         textAlign: 'center',
-        position: 'relative'
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Animated Background Elements */}
+        <Box sx={{ 
+          position: 'absolute', top: '-10%', left: '-10%', width: '40%', height: '40%', 
+          borderRadius: '50%', background: 'rgba(0, 217, 255, 0.03)', filter: 'blur(100px)',
+          animation: 'pulse 10s infinite alternate'
+        }} />
+        <Box sx={{ 
+          position: 'absolute', bottom: '-10%', right: '-10%', width: '40%', height: '40%', 
+          borderRadius: '50%', background: 'rgba(124, 77, 255, 0.03)', filter: 'blur(100px)',
+          animation: 'pulse 8s infinite alternate-reverse'
+        }} />
+
         {/* Settings Icon on Splash Screen */}
         <IconButton 
           onClick={() => setShowSettings(true)}
-          sx={{ position: 'absolute', top: 20, right: 20, color: 'rgba(255,255,255,0.5)' }}
+          sx={{ position: 'absolute', top: 20, right: 20, color: 'rgba(255,255,255,0.3)', '&:hover': { color: '#00d9ff', bgcolor: 'rgba(0,217,255,0.1)' } }}
         >
           <SettingsIcon />
         </IconButton>
 
         <Box sx={{ mb: 4, position: 'relative' }}>
-          <MagicIcon sx={{ fontSize: 100, color: '#00d9ff', filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.4))' }} />
+          <Box sx={{ 
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            width: 140, height: 140, borderRadius: '50%', 
+            background: 'rgba(0, 217, 255, 0.1)', filter: 'blur(20px)'
+          }} />
+          <MagicIcon sx={{ fontSize: 100, color: '#00d9ff', filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.6))' }} />
         </Box>
-        <Box>
-          <Typography variant="h3" sx={{ fontWeight: 900, mb: 1, color: '#fff' }}>AI SMART FILTER</Typography>
-          <Typography variant="h6" sx={{ color: '#888', maxWidth: 600 }}>
+
+        <Box sx={{ mb: 6 }}>
+          <Typography variant="h3" sx={{ fontWeight: 900, mb: 1, color: '#fff', letterSpacing: -1 }}>
+            AI SMART FILTER
+          </Typography>
+          <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.5)', maxWidth: 600, mx: 'auto', fontWeight: 400 }}>
             Automate your filtering process with deep learning. 
             The AI will scan images and group them by quality and content.
           </Typography>
         </Box>
-        <Button 
-          variant="contained" 
-          size="large"
-          onClick={() => setIsStarted(true)}
-          sx={{ 
-            bgcolor: '#00d9ff', 
-            color: '#000', 
-            fontWeight: 'bold', 
-            px: 6, 
-            py: 2, 
-            borderRadius: '50px',
-            '&:hover': { bgcolor: '#00b4d8' }
-          }}
-        >
-          START SCANNING
-        </Button>
-        <Button onClick={onBack} variant="text" sx={{ color: '#888' }}>Back to Normal Filtering</Button>
+
+        <Box sx={{ mb: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2 }}>
+            Choose Filtering Method
+          </Typography>
+          <ToggleButtonGroup
+            value={modelType}
+            exclusive
+            onChange={handleModeChange}
+            sx={{ 
+              bgcolor: 'rgba(0,0,0,0.3)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '20px',
+              p: 0.75,
+              '& .MuiToggleButton-root': {
+                color: 'rgba(255,255,255,0.4)',
+                border: 'none',
+                borderRadius: '16px !important',
+                px: 5,
+                py: 2,
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&.Mui-selected': {
+                  color: '#fff',
+                  bgcolor: 'rgba(0, 217, 255, 0.15)',
+                  boxShadow: 'inset 0 0 0 1px rgba(0, 217, 255, 0.3)',
+                  '&:hover': { bgcolor: 'rgba(0, 217, 255, 0.2)' }
+                },
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.7)' }
+              }
+            }}
+          >
+            <ToggleButton value="binary">
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                <FilterAlt />
+                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>BINARY</Typography>
+              </Box>
+            </ToggleButton>
+            <ToggleButton value="pairwise">
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                <Compare />
+                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>PAIRWISE</Typography>
+              </Box>
+            </ToggleButton>
+          </ToggleButtonGroup>
+          
+          <Fade in={true} key={modelType}>
+            <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 350, fontStyle: 'italic' }}>
+              {modelType === 'binary' 
+                ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)' 
+                : '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'}
+            </Typography>
+          </Fade>
+        </Box>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+          <Button 
+            variant="contained" 
+            size="large"
+            onClick={() => setIsStarted(true)}
+            sx={{ 
+              bgcolor: '#00d9ff', 
+              color: '#000', 
+              fontWeight: 900, 
+              px: 8, 
+              py: 2.5, 
+              borderRadius: '50px',
+              fontSize: '1.1rem',
+              letterSpacing: 1,
+              boxShadow: '0 10px 30px rgba(0, 217, 255, 0.3)',
+              transition: 'all 0.3s ease',
+              '&:hover': { 
+                bgcolor: '#fff', 
+                transform: 'translateY(-3px)',
+                boxShadow: '0 15px 40px rgba(0, 217, 255, 0.4)'
+              }
+            }}
+          >
+            START SCANNING
+          </Button>
+          
+          <Button 
+            onClick={onBack} 
+            variant="text" 
+            sx={{ 
+              color: 'rgba(255,255,255,0.3)', 
+              fontWeight: 600,
+              '&:hover': { color: '#fff', bgcolor: 'transparent' }
+            }}
+          >
+            Back to Normal Filtering
+          </Button>
+        </Box>
+
+        <style>
+          {`
+            @keyframes pulse {
+              0% { transform: scale(1); opacity: 0.3; }
+              100% { transform: scale(1.2); opacity: 0.5; }
+            }
+          `}
+        </style>
       </Box>
     );
   }
