@@ -27,7 +27,8 @@ router.get('/', async (req, res) => {
       'performers', 'folders', 'filter_actions', 'tags',
       'performer_file_hashes', 'hash_runs',
       'ratings', 'content_items', 'content_clip_embeddings',
-      'pairwise_pairs', 'pairwise_image_scores', 'pairwise_inference_results'
+      'pairwise_pairs', 'pairwise_image_scores', 'pairwise_inference_results',
+      'performer_comparisons'
     ];
 
     const dbStats = {};
@@ -68,6 +69,12 @@ router.get('/', async (req, res) => {
     const orphanedFilterActions = db.prepare(`
       SELECT COUNT(*) as c FROM filter_actions fa
       WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = fa.performer_id)
+    `).get().c;
+
+    const orphanedPerformerComparisons = db.prepare(`
+      SELECT COUNT(*) as c FROM performer_comparisons pc
+      WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = pc.winner_id)
+         OR NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = pc.loser_id)
     `).get().c;
 
     // ── Pairwise labeling coverage ───────────────────────
@@ -169,7 +176,13 @@ router.get('/', async (req, res) => {
       durationMs: Date.now() - startTime,
       database: {
         tableSizes: dbStats,
-        orphanedRecords: { ratings: orphanedRatings, hashes: orphanedHashes, pairwise: orphanedPairwise, filterActions: orphanedFilterActions }
+        orphanedRecords: { 
+          ratings: orphanedRatings, 
+          hashes: orphanedHashes, 
+          pairwise: orphanedPairwise, 
+          filterActions: orphanedFilterActions,
+          performerComparisons: orphanedPerformerComparisons
+        }
       },
       performers: {
         total: performerCount,
@@ -231,6 +244,12 @@ router.post('/cleanup', (req, res) => {
 
     results.tags = db.prepare(`
       DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = tags.performer_id)
+    `).run().changes;
+
+    results.performerComparisons = db.prepare(`
+      DELETE FROM performer_comparisons 
+      WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = performer_comparisons.winner_id)
+         OR NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = performer_comparisons.loser_id)
     `).run().changes;
 
     const totalCleaned = Object.values(results).reduce((a, b) => a + b, 0);

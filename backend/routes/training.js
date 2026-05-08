@@ -208,15 +208,27 @@ router.get('/performer-stats', (req, res) => {
       const deleteOnDisk = deleteDiskCounts[p.name] || 0;
 
       // Real kept count is either DB actions or physical files on disk
-      // (Allows performers moved to 'after' to show all images as kept)
-      const realKept = Math.max(filter.kept, keepOnDisk);
-      const realDeleted = Math.max(filter.deleted, deleteOnDisk);
+      let realKept = Math.max(filter.kept, keepOnDisk);
+      let realDeleted = Math.max(filter.deleted, deleteOnDisk);
+      
+      const isMoved = p.moved_to_after === 1 || p.moved_to_after === true;
+      const totalOriginal = p.pics_original_count || p.pics_count || 0;
+
+      // If the performer is in the after folder, we can logically infer the counts 
+      // without needing a slow disk scan:
+      // - Kept = current pics_count (what's left in their folder)
+      // - Deleted = original count minus current count (what was moved to the training folder)
+      if (isMoved && !scanDisk) {
+        realKept = Math.max(realKept, p.pics_count || 0);
+        const inferredDeleted = totalOriginal > (p.pics_count || 0) 
+          ? totalOriginal - p.pics_count 
+          : 0;
+        realDeleted = Math.max(realDeleted, inferredDeleted);
+      }
       
       const totalLabeled = realKept + realDeleted + (pairs.total * 2); 
-      const totalOriginal = p.pics_original_count || p.pics_count || 0;
       
       // If moved_to_after or disk matches/exceeds original, it's 100%
-      const isMoved = p.moved_to_after === 1 || p.moved_to_after === true;
       const labelProgress = isMoved || (totalOriginal > 0 && realKept >= totalOriginal) ? 1 :
         (totalOriginal > 0 ? Math.min(1, totalLabeled / totalOriginal) : 0);
 
