@@ -71,20 +71,17 @@ if not exist "venv" (
     python -m venv venv
 )
 
-:: ── Install dependencies (skip if already done) ───────────
-:: Only re-run pip if requirements.txt changed since last install
-set "MARKER=venv\.deps_installed"
-fc /b requirements.txt "%MARKER%" >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo [AI System] Installing/updating dependencies...
+:: ── Install dependencies (skip if already installed) ──────
+.\venv\Scripts\python.exe -c "import flask, torch" >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo [OK] Dependencies already installed
+) else (
+    echo [AI System] Installing dependencies... (this may take a few minutes first time)
     .\venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu124
     if %ERRORLEVEL% neq 0 (
-        echo [WARNING] CUDA installation might have failed, trying standard install...
+        echo [WARNING] CUDA install failed, trying standard...
         .\venv\Scripts\python.exe -m pip install -r requirements.txt
     )
-    copy /y requirements.txt "%MARKER%" >nul 2>&1
-) else (
-    echo [OK] Dependencies already installed
 )
 
 echo.
