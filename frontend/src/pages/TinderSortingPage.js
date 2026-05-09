@@ -32,11 +32,11 @@ function TinderSortingPage({ basePath }) {
     const [swipeDirection, setSwipeDirection] = useState(null);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState(false);
-    const [isExiting, setIsExiting] = useState(false);
-    const [exitDirection, setExitDirection] = useState(null);
     const [isHidden, setIsHidden] = useState(false);
     const cardRef = useRef(null);
     const startPosRef = useRef({ x: 0, y: 0 });
+    const isTransitioningRef = useRef(false);
+    const isDraggingRef = useRef(false);
 
     // Swap manifest for PWA installation from this page
     useEffect(() => {
@@ -254,12 +254,14 @@ function TinderSortingPage({ basePath }) {
 
     // Swipe handlers
     const handleDragStart = (clientX, clientY) => {
+        if (isTransitioningRef.current) return;
         setIsDragging(true);
+        isDraggingRef.current = true;
         startPosRef.current = { x: clientX, y: clientY };
     };
 
     const handleDragMove = (clientX, clientY) => {
-        if (!isDragging) return;
+        if (!isDragging || isTransitioningRef.current) return;
 
         const deltaX = clientX - startPosRef.current.x;
         const deltaY = clientY - startPosRef.current.y;
@@ -275,29 +277,34 @@ function TinderSortingPage({ basePath }) {
         }
     };
 
-    const handleDragEnd = () => {
-        if (!isDragging) return;
+    const handleDragEnd = async () => {
+        if (!isDragging || isTransitioningRef.current) return;
 
         setIsDragging(false);
+        isDraggingRef.current = false;
 
         const threshold = 100;
 
         if (dragOffset.x > threshold) {
-            // Hide immediately and do action - no animation
+            // Lock transitions to prevent double-swipe
+            isTransitioningRef.current = true;
+            // Hide card and clear overlays immediately
             setIsHidden(true);
             setDragOffset({ x: 0, y: 0 });
             setSwipeDirection(null);
-            performAction('keep');
-            // Small delay to ensure React has updated, then show new card
-            setTimeout(() => setIsHidden(false), 50);
+            // Wait for action to complete (index updates)
+            await performAction('keep');
+            // Now the new image is at the new index — reveal
+            setIsHidden(false);
+            isTransitioningRef.current = false;
         } else if (dragOffset.x < -threshold) {
-            // Hide immediately and do action - no animation
+            isTransitioningRef.current = true;
             setIsHidden(true);
             setDragOffset({ x: 0, y: 0 });
             setSwipeDirection(null);
-            performAction('delete');
-            // Small delay to ensure React has updated, then show new card
-            setTimeout(() => setIsHidden(false), 50);
+            await performAction('delete');
+            setIsHidden(false);
+            isTransitioningRef.current = false;
         } else {
             setDragOffset({ x: 0, y: 0 });
             setSwipeDirection(null);
@@ -310,10 +317,21 @@ function TinderSortingPage({ basePath }) {
         handleDragStart(touch.clientX, touch.clientY);
     };
 
-    const handleTouchMove = (e) => {
+    // touchmove is registered via useEffect with { passive: false } so
+    // preventDefault() actually works on mobile browsers
+    const handleTouchMoveNative = useCallback((e) => {
+        if (isDraggingRef.current) e.preventDefault();
         const touch = e.touches[0];
         handleDragMove(touch.clientX, touch.clientY);
-    };
+    }, []);
+
+    // Register non-passive touchmove on the card element
+    useEffect(() => {
+        const el = cardRef.current;
+        if (!el) return;
+        el.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
+        return () => el.removeEventListener('touchmove', handleTouchMoveNative);
+    }, [handleTouchMoveNative, currentFile]);
 
     const handleTouchEnd = () => {
         handleDragEnd();
@@ -336,18 +354,7 @@ function TinderSortingPage({ basePath }) {
     const getCardStyle = () => {
         // Hidden during transition - prevents any snapback visibility
         if (isHidden) {
-            return { visibility: 'hidden' };
-        }
-
-        // Exit animation - fly off screen
-        if (isExiting) {
-            const flyDistance = window.innerWidth + 200;
-            const direction = exitDirection === 'right' ? 1 : -1;
-            return {
-                transform: `translateX(${direction * flyDistance}px) rotate(${direction * 30}deg)`,
-                opacity: 0,
-                transition: 'transform 0.5s ease-out, opacity 0.5s ease-out'
-            };
+            return { visibility: 'hidden', opacity: 0 };
         }
 
         const rotation = dragOffset.x * 0.1;
@@ -356,13 +363,13 @@ function TinderSortingPage({ basePath }) {
         return {
             transform: `translateX(${dragOffset.x}px) translateY(${dragOffset.y * 0.3}px) rotate(${rotation}deg)`,
             opacity: Math.max(opacity, 0.5),
-            transition: 'none'
+            transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.15s ease-out'
         };
     };
 
     const getOverlayStyle = (direction) => {
-        // Hide overlays during exit animation
-        if (isExiting || isHidden) {
+        // Hide overlays when card is hidden
+        if (isHidden) {
             return { opacity: 0 };
         }
         const isActive = swipeDirection === direction;
@@ -605,7 +612,6 @@ function TinderSortingPage({ basePath }) {
                     <Box
                         ref={cardRef}
                         onTouchStart={handleTouchStart}
-                        onTouchMove={handleTouchMove}
                         onTouchEnd={handleTouchEnd}
                         onMouseDown={handleMouseDown}
                         onMouseMove={isDragging ? handleMouseMove : undefined}

@@ -87,5 +87,70 @@
       "keep": 0,
       "delete": 0
     }
+  },
+  {
+    "type": "pairwise_siamese_binary",
+    "started_at": 1778337952.647752,
+    "finished_at": 1778342010.9774985,
+    "duration_s": 4058.3,
+    "epochs": 8,
+    "batch_size": 16,
+    "backbone": "facebook/dinov2-small",
+    "best_val_acc": 0.56,
+    "model_file": "siamese_binary.pt",
+    "epoch_history": [
+      {
+        "epoch": 1,
+        "train_loss": 0.9683477900646351,
+        "val_acc": 0.5333,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 2,
+        "train_loss": 0.8885896272129483,
+        "val_acc": 0.56,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 3,
+        "train_loss": 0.9348078303866916,
+        "val_acc": 0.5067,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 4,
+        "train_loss": 0.8786725688863684,
+        "val_acc": 0.5467,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 5,
+        "train_loss": 0.7177888993863706,
+        "val_acc": 0.5467,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 6,
+        "train_loss": 0.37513841964580397,
+        "val_acc": 0.4133,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 7,
+        "train_loss": 0.23826091046686526,
+        "val_acc": 0.5467,
+        "pairs_generated": 500
+      },
+      {
+        "epoch": 8,
+        "train_loss": 0.13388768831888834,
+        "val_acc": 0.4667,
+        "pairs_generated": 500
+      }
+    ],
+    "data": {
+      "keep": 4004,
+      "delete": 4687
+    }
   }
 ]
