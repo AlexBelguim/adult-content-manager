@@ -55,9 +55,16 @@ if %ERRORLEVEL% neq 0 (
     :: Check if Ollama is actually running
     curl -s http://localhost:11434/api/tags >nul 2>&1
     if %ERRORLEVEL% neq 0 (
-        echo [INFO] Ollama is installed but not running.
-        echo        Start it with: ollama serve
-        echo        Then pull a vision model: ollama pull gemma3:12b
+        echo [INFO] Ollama is installed but not running. Starting it...
+        start "" /min ollama serve
+        :: Wait a moment for it to start
+        timeout /t 3 /nobreak >nul
+        curl -s http://localhost:11434/api/tags >nul 2>&1
+        if %ERRORLEVEL% neq 0 (
+            echo [WARNING] Ollama failed to start. Video analysis may not work.
+        ) else (
+            echo [OK] Ollama started successfully
+        )
     ) else (
         echo [OK] Ollama is running
     )
