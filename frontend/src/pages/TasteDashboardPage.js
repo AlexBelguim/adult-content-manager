@@ -63,6 +63,7 @@ function TasteDashboardPage() {
   const [miningMultiplier, setMiningMultiplier] = useState(4);
   const [deduplicate, setDeduplicate] = useState(true);
   const [syntheticPairsPerEpoch, setSyntheticPairsPerEpoch] = useState(500);
+  const [perPerformerPairs, setPerPerformerPairs] = useState(false);
   const pollRef = useRef(null);
 
   const fetchData = async () => {
@@ -188,7 +189,8 @@ function TasteDashboardPage() {
           enable_mining: enableMining,
           mining_multiplier: miningMultiplier,
           deduplicate: deduplicate,
-          synthetic_pairs_per_epoch: selectedType === 'pairwise_siamese_binary' ? syntheticPairsPerEpoch : 0
+          synthetic_pairs_per_epoch: selectedType === 'pairwise_siamese_binary' ? syntheticPairsPerEpoch : 0,
+          per_performer_pairs: selectedType === 'pairwise_siamese_binary' ? perPerformerPairs : false
         })
       });
       const result = await res.json();
@@ -723,16 +725,58 @@ function TasteDashboardPage() {
                   </Box>
                   
                   {selectedType === 'pairwise_siamese_binary' && (
-                    <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid rgba(139,92,246,0.2)' }}>
+                    <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid rgba(233,30,99,0.25)' }}>
+                      
+                      {/* Mode toggle */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+                        <Box>
+                          <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>Pair Sampling Mode</Typography>
+                          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>
+                            {perPerformerPairs
+                              ? 'Per Performer — balanced taste across all performers'
+                              : 'Global — random mix from all performers combined'}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
+                          <Button
+                            size="small"
+                            variant={!perPerformerPairs ? 'contained' : 'outlined'}
+                            onClick={() => setPerPerformerPairs(false)}
+                            sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
+                              bgcolor: !perPerformerPairs ? '#e91e63' : 'transparent',
+                              borderColor: '#e91e63', color: !perPerformerPairs ? '#fff' : '#e91e63',
+                              '&:hover': { bgcolor: !perPerformerPairs ? '#c2185b' : 'rgba(233,30,99,0.08)' } }}
+                          >
+                            Global
+                          </Button>
+                          <Button
+                            size="small"
+                            variant={perPerformerPairs ? 'contained' : 'outlined'}
+                            onClick={() => setPerPerformerPairs(true)}
+                            sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
+                              bgcolor: perPerformerPairs ? '#e91e63' : 'transparent',
+                              borderColor: '#e91e63', color: perPerformerPairs ? '#fff' : '#e91e63',
+                              '&:hover': { bgcolor: perPerformerPairs ? '#c2185b' : 'rgba(233,30,99,0.08)' } }}
+                          >
+                            Per Performer
+                          </Button>
+                        </Box>
+                      </Box>
+
+                      {/* Pairs slider */}
                       <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
                         Synthetic Keep &gt; Delete Pairs
-                        <Typography component="span" sx={{ color: '#e91e63', fontWeight: 800 }}>{syntheticPairsPerEpoch} / epoch</Typography>
+                        <Typography component="span" sx={{ color: '#e91e63', fontWeight: 800 }}>
+                          {syntheticPairsPerEpoch} / {perPerformerPairs ? 'performer / epoch' : 'epoch'}
+                        </Typography>
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', mb: 1 }}>
-                        How many Keep &gt; Delete pairs to dynamically generate per epoch for the Siamese Ranker.
+                        {perPerformerPairs
+                          ? `Each performer contributes ${syntheticPairsPerEpoch} pairs — total pairs = ${syntheticPairsPerEpoch} × performers`
+                          : `${syntheticPairsPerEpoch} random (keep, delete) pairs drawn from the full dataset each epoch`}
                       </Typography>
-                      <Slider 
-                        value={syntheticPairsPerEpoch} 
+                      <Slider
+                        value={syntheticPairsPerEpoch}
                         min={100} max={5000} step={100}
                         onChange={(_, v) => setSyntheticPairsPerEpoch(v)}
                         sx={{ color: '#e91e63' }}

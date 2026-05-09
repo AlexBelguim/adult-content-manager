@@ -785,8 +785,10 @@ def train_siamese_binary(config):
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
     synthetic_pairs_per_epoch = config.get('synthetic_pairs_per_epoch', 500)
+    per_performer = config.get('per_performer_pairs', False)
 
-    tlog(f"📋 Siamese Binary Training | {epochs} epochs | {synthetic_pairs_per_epoch} pairs/epoch | backbone: {backbone}")
+    mode_label = f"{synthetic_pairs_per_epoch} pairs/performer" if per_performer else f"{synthetic_pairs_per_epoch} pairs total"
+    tlog(f"📋 Siamese Binary Training | {epochs} epochs | {mode_label} | backbone: {backbone}")
 
     # Resolve keep/delete dirs (same as binary)
     if use_cached or Path(os.path.join(base_path, 'keep')).exists():
@@ -814,6 +816,25 @@ def train_siamese_binary(config):
     if not keep_imgs or not delete_imgs:
         raise ValueError("Need both keep and delete images for Siamese Binary training")
 
+    # Build per-performer lookup for balanced sampling
+    def group_by_performer(img_list):
+        """Group image paths by their immediate parent folder (= performer name)."""
+        groups = {}
+        for p in img_list:
+            perf = Path(p).parent.name
+            # If parent is 'pics', go one level up
+            if perf == 'pics':
+                perf = Path(p).parent.parent.name
+            groups.setdefault(perf, []).append(p)
+        return groups
+
+    keep_by_perf = group_by_performer(keep_imgs)
+    delete_by_perf = group_by_performer(delete_imgs)
+    all_performers = sorted(set(list(keep_by_perf.keys()) + list(delete_by_perf.keys())))
+    tlog(f"  👤 Performers: {len(all_performers)} | Mode: {'Per-Performer' if per_performer else 'Global'}")
+    if per_performer:
+        tlog(f"  📐 Total pairs/epoch: ~{synthetic_pairs_per_epoch} × {len(all_performers)} = {synthetic_pairs_per_epoch * len(all_performers)}")
+
     processor = AutoImageProcessor.from_pretrained(backbone)
     model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=True).to(device)
     criterion = nn.MarginRankingLoss(margin=1.0)
@@ -837,14 +858,21 @@ def train_siamese_binary(config):
         training_state['epoch'] = epoch
         training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
 
-        # Dynamically sample synthetic pairs this epoch
-        n = min(synthetic_pairs_per_epoch, len(keep_imgs) * len(delete_imgs))
+        # ── Sample synthetic pairs ──────────────────────────────────
         pairs = []
-        for _ in range(n):
-            pairs.append((
-                random.choice(keep_imgs),
-                random.choice(delete_imgs)
-            ))
+        if per_performer:
+            # Per-performer: each performer contributes N balanced pairs
+            for perf in all_performers:
+                p_keep = keep_by_perf.get(perf, keep_imgs)  # fallback to global if missing
+                p_del  = delete_by_perf.get(perf, delete_imgs)
+                n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
+                for _ in range(n):
+                    pairs.append((random.choice(p_keep), random.choice(p_del)))
+        else:
+            # Global: random draw from the full flat pool
+            n = min(synthetic_pairs_per_epoch, len(keep_imgs) * len(delete_imgs))
+            for _ in range(n):
+                pairs.append((random.choice(keep_imgs), random.choice(delete_imgs)))
 
         # Add mining failures from previous epoch
         if config.get('enable_mining') and mining_pool:
