@@ -72,7 +72,8 @@ if not exist "venv" (
 )
 
 :: ── Install dependencies (skip if already installed) ──────
-.\venv\Scripts\python.exe -c "import flask, torch" >nul 2>&1
+echo [AI System] Checking dependencies...
+.\venv\Scripts\python.exe -c "import flask" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [OK] Dependencies already installed
 ) else (
