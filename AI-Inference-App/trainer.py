@@ -187,7 +187,35 @@ class AgentOfTasteModel(nn.Module):
         action = self.action_head(combined)
         return aesthetic.squeeze(-1), preference.squeeze(-1), action.squeeze(-1)
 
-# ── Datasets ─────────────────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def resolve_path(p):
+    """Attempt to find an image path, falling back to local training_data if absolute path fails."""
+    if not p: return None
+    pth = Path(p)
+    if pth.exists(): return str(pth)
+    
+    # Fallback: try to find it in the local training_data folder
+    # Usually images are pushed as training_data/keep/performer/file.jpg 
+    # We try to match the last parts: performer/file.jpg
+    parts = pth.parts
+    if len(parts) >= 2:
+        filename = parts[-1]
+        performer = parts[-2]
+        if performer == 'pics' and len(parts) >= 3:
+            performer = parts[-3]
+        
+        # Check both local subfolders
+        local_root = Path(__file__).parent / 'training_data'
+        for cat in ['keep', 'delete']:
+            # Try performer subfolder
+            p_path = local_root / cat / performer / filename
+            if p_path.exists(): return str(p_path)
+            # Try flat
+            f_path = local_root / cat / filename
+            if f_path.exists(): return str(f_path)
+    
+    return None
 
 class BinaryDataset(Dataset):
     def __init__(self, keep_imgs, delete_imgs, processor, augment=True, deduplicate=False):
@@ -219,13 +247,21 @@ class BinaryDataset(Dataset):
 
 class PairwiseDataset(Dataset):
     def __init__(self, pairs, processor, augment=True, deduplicate=False):
+        resolved_pairs = []
+        for w, l in pairs:
+            rw = resolve_path(w)
+            rl = resolve_path(l)
+            if rw and rl:
+                resolved_pairs.append((rw, rl))
+        
         if deduplicate:
-            # Deduplicate by (winner, loser) pair
-            pairs = list(set([(w, l) for w, l in pairs]))
-        self.pairs = [(w, l) for w, l in pairs if Path(w).exists() and Path(l).exists()]
+            resolved_pairs = list(set(resolved_pairs))
+            
+        self.pairs = resolved_pairs
         self.processor = processor
         self.augment = augment
         self.aug_t = T.Compose([T.RandomHorizontalFlip(0.5), T.ColorJitter(0.1, 0.1, 0.1, 0.05)])
+
     def __len__(self): return len(self.pairs)
     def __getitem__(self, idx):
         w, l = self.pairs[idx]
@@ -278,10 +314,10 @@ def train_binary(config):
     hard_delete = []
     if config.get('use_hard_examples', True) and hard_examples:
         tlog(f"  🧠 Integrating {len(hard_examples)} human corrections (Hard Examples)")
-        mult = config.get('hard_multiplier', 5)
+        mult = config.get('mining_multiplier', 4)
         for h in hard_examples:
-            p = h['file_path']
-            if not Path(p).exists(): continue
+            p = resolve_path(h['file_path'])
+            if not p: continue
             for _ in range(mult):
                 if h['corrected_label'] == 'keep': hard_keep.append(p)
                 else: hard_delete.append(p)
@@ -406,6 +442,10 @@ def train_binary(config):
                         'backbone': backbone, 'model_type': 'binary',
                         'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs}}, out_path)
             tlog(f"  ⭐ Saved best → {out_path.name} ({val_acc:.1%})")
+
+        # Cleanup memory
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
 
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
@@ -535,6 +575,10 @@ def train_pairwise(config):
                         'backbone': backbone, 'model_type': 'pairwise',
                         'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs}}, out_path)
             tlog(f"  ⭐ Saved best → {out_path.name}")
+
+        # Cleanup memory
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
 
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 

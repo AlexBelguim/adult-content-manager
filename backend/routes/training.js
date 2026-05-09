@@ -406,7 +406,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (type === 'binary' || type === 'context_binary') {
+    } else if (type === 'binary' || type === 'context_binary' || type === 'pairwise_siamese_binary') {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -433,6 +433,11 @@ router.post('/start', async (req, res) => {
     trainingPayload.enable_mining = req.body.enable_mining;
     trainingPayload.mining_multiplier = req.body.mining_multiplier || 4;
     trainingPayload.deduplicate = req.body.deduplicate;
+
+    // Synthetic pair count for Siamese Binary training
+    if (req.body.synthetic_pairs_per_epoch) {
+      trainingPayload.synthetic_pairs_per_epoch = req.body.synthetic_pairs_per_epoch;
+    }
 
     // Send to AI server
     const response = await axios.post(`${aiUrl}/train`, trainingPayload, {

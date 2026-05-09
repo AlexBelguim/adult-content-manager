@@ -321,7 +321,7 @@ function getSelectedPerformers() {
 /**
  * Select next pair for labeling
  */
-function selectNextPair(pairType = 'mixed') {
+function selectNextPair(pairType = 'mixed', folder = 'all') {
     const candidates = [];
     const selectedPerformers = getSelectedPerformers();
     const performersToUse = selectedPerformers.length > 0
@@ -336,7 +336,11 @@ function selectNextPair(pairType = 'mixed') {
             const perf = imageCache.performers[perfName];
             if (!perf) continue;
 
-            const allImages = [...perf.keep, ...perf.delete];
+            let allImages = [];
+            if (folder === 'keep') allImages = [...perf.keep];
+            else if (folder === 'delete') allImages = [...perf.delete];
+            else allImages = [...perf.keep, ...perf.delete];
+            
             if (allImages.length >= 2) {
                 for (let i = 0; i < Math.min(10, allImages.length); i++) {
                     const idx1 = Math.floor(Math.random() * allImages.length);
@@ -370,8 +374,18 @@ function selectNextPair(pairType = 'mixed') {
                     p2Id = performerIds[Math.floor(Math.random() * performerIds.length)];
                 }
 
-                const p1Images = [...imageCache.performers[p1Id].keep, ...imageCache.performers[p1Id].delete];
-                const p2Images = [...imageCache.performers[p2Id].keep, ...imageCache.performers[p2Id].delete];
+                let p1Images = [];
+                let p2Images = [];
+                if (folder === 'keep') {
+                    p1Images = [...imageCache.performers[p1Id].keep];
+                    p2Images = [...imageCache.performers[p2Id].keep];
+                } else if (folder === 'delete') {
+                    p1Images = [...imageCache.performers[p1Id].delete];
+                    p2Images = [...imageCache.performers[p2Id].delete];
+                } else {
+                    p1Images = [...imageCache.performers[p1Id].keep, ...imageCache.performers[p1Id].delete];
+                    p2Images = [...imageCache.performers[p2Id].keep, ...imageCache.performers[p2Id].delete];
+                }
 
                 const getChampion = (imgs) => imgs.reduce((a, b) =>
                     getImageScore(a).score > getImageScore(b).score ? a : b
@@ -559,7 +573,8 @@ app.get('/api/settings', (req, res) => {
 // Get next pair
 app.get('/api/next-pair', (req, res) => {
     const pairType = req.query.type || 'mixed';
-    const pair = selectNextPair(pairType);
+    const folder = req.query.folder || 'all';
+    const pair = selectNextPair(pairType, folder);
 
     if (!pair) {
         return res.json({ error: 'No more pairs available', done: true });

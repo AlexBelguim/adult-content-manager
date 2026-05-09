@@ -36,9 +36,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [batchCount, setBatchCount] = useState(0);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelType, setModelType] = useState('binary'); // 'binary' or 'pairwise'
+  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', or 'siamese'
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
+  const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
   const [inferenceUrl, setInferenceUrl] = useState('');
@@ -119,7 +120,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         threshold: targetThreshold,
         modelId: selectedModel,
         ai_server_url: inferenceUrl,
-        app_base_url: window.location.origin
+        app_base_url: window.location.origin,
+        modelType
       });
       console.log(`[SmartFilter] Fetching /api/filter/smart-batch/${performer.id}?${queryParams}`);
       const response = await fetch(`/api/filter/smart-batch/${performer.id}?${queryParams}`, {
@@ -134,7 +136,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         alert(`⚠️ AI Server Error: ${data.ai_error}\n\nImages are shown without AI predictions. Check your Inference Server URL in settings.`);
       }
 
-      // Update threshold ONLY on the very first real batch fetch, and ONLY for pairwise
+      // Update threshold ONLY on the very first real batch fetch, and ONLY for pairwise/siamese
       if (modelType !== 'binary' && data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
         const newThreshold = Math.round(data.threshold);
         console.log(`[SmartFilter] Updating threshold from ${threshold} to ${newThreshold}`);
@@ -144,6 +146,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         // Use the FRESH threshold for pre-fetch
         console.log(`[SmartFilter] Starting pre-fetch with fresh threshold: ${newThreshold}`);
         fetchBatch(true, newThreshold);
+        
+        // Siamese: apply zone logic to just-received results
+        if (modelType === 'siamese' && data.results) {
+          const zoned = data.results.map(r => ({
+            ...r,
+            originalDecision: r.decision,
+            decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
+          }));
+          setResults(zoned);
+          setLoading(false);
+          return; // Already set results, skip the else blocks below
+        }
       } else if (isPrefetch) {
         setNextBatch(data.results || []);
         setLoadingNext(false);
@@ -156,6 +170,14 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setResults(resultsWithOriginal);
         setLoading(false);
         if (modelType === 'binary') setFirstBatchDone(true);
+
+        // Siamese mode: re-classify into keep / uncertain / delete zones
+        if (modelType === 'siamese') {
+          setResults(prev => prev.map(r => ({
+            ...r,
+            decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
+          })));
+        }
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -194,16 +216,19 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     const fetchModels = async () => {
       try {
         // 1. Fetch preferences from backend
-        const [binPref, pairPref] = await Promise.all([
+        const [binPref, pairPref, siamesePref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
-          fetch('/api/settings/preferred_pairwise_model').then(r => r.json())
+          fetch('/api/settings/preferred_pairwise_model').then(r => r.json()),
+          fetch('/api/settings/preferred_siamese_model').then(r => r.json()).catch(() => ({ value: '' }))
         ]);
         
         const pBin = binPref.value || 'binary_filtering.pt';
         const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
+        const pSiamese = siamesePref.value || 'siamese_binary.pt';
         
         setPreferredBinaryModel(pBin);
         setPreferredPairwiseModel(pPair);
+        setPreferredSiameseModel(pSiamese);
 
         // 2. Fetch available models from AI server
         const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
@@ -213,7 +238,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           setAvailableModels(models);
           
           // Load the model for the current type
-          let targetModel = modelType === 'binary' ? pBin : pPair;
+          let targetModel = modelType === 'binary' ? pBin : modelType === 'siamese' ? pSiamese : pPair;
           
           // If preferred model not found, pick the first one of matching type
           if (!models.find(m => m.filename === targetModel)) {
@@ -286,6 +311,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   const handleSaveBatch = async () => {
     if (results.length === 0) return;
+    // For siamese mode, only save decided items (skip uncertain ones)
+    const toSave = modelType === 'siamese' ? results.filter(r => r.decision !== 'uncertain') : results;
+    if (toSave.length === 0) {
+      alert('No decided images to save. All are in the uncertain zone — please manually classify them first.');
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch('/api/filter/apply-smart-batch', {
@@ -295,8 +326,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           performerId: performer.id,
           performerName: performer.name,
           basePath: propBasePath || (performer ? performer.base_path : ''),
-          results: results.map(r => ({ path: r.path, decision: r.decision })),
-          corrections: results.filter(r => r.decision !== r.originalDecision).map(r => ({
+          results: toSave.map(r => ({ path: r.path, decision: r.decision })),
+          corrections: toSave.filter(r => r.decision !== r.originalDecision).map(r => ({
             path: r.path,
             original_label: r.originalDecision,
             corrected_label: r.decision,
@@ -445,13 +476,21 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>PAIRWISE</Typography>
               </Box>
             </ToggleButton>
+            <ToggleButton value="siamese">
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                <MagicIcon />
+                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>SIAMESE</Typography>
+              </Box>
+            </ToggleButton>
           </ToggleButtonGroup>
           
           <Fade in={true} key={modelType}>
-            <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 350, fontStyle: 'italic' }}>
+            <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 400, fontStyle: 'italic' }}>
               {modelType === 'binary' 
                 ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)' 
-                : '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'}
+                : modelType === 'pairwise'
+                ? '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'
+                : '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'}
             </Typography>
           </Fade>
         </Box>
@@ -531,6 +570,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   const keepCount = results.filter(r => r.decision === 'keep').length;
   const deleteCount = results.filter(r => r.decision === 'delete').length;
+  const uncertainCount = results.filter(r => r.decision === 'uncertain').length;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#0a0a0f', color: '#fff', display: 'flex', flexDirection: 'column' }}>
@@ -584,6 +624,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               </ToggleButton>
               <ToggleButton value="pairwise" sx={{ gap: 1 }}>
                 <Compare sx={{ fontSize: 16 }} /> Pairwise
+              </ToggleButton>
+              <ToggleButton value="siamese" sx={{ gap: 1 }}>
+                <MagicIcon sx={{ fontSize: 16 }} /> Siamese
               </ToggleButton>
             </ToggleButtonGroup>
 
@@ -639,6 +682,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               <DeleteIcon sx={{ color: '#f44336' }} />
               <Typography sx={{ color: '#f44336', fontWeight: 'bold' }}>DELETE: {deleteCount}</Typography>
             </Paper>
+            {uncertainCount > 0 && (
+              <Paper sx={{ px: 2, py: 1, bgcolor: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.3)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography sx={{ color: '#ff9800', fontWeight: 'bold' }}>⚠️ UNCERTAIN: {uncertainCount}</Typography>
+              </Paper>
+            )}
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -669,7 +717,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               <Grid item xs={12} sm={6} md={4} lg={2.4} xl={2} key={item.path}>
                 <Card sx={{ 
                   position: 'relative', bgcolor: '#1a1a2e', borderRadius: 2, overflow: 'hidden',
-                  border: item.decision === 'keep' ? '3px solid #4caf50' : '3px solid #f44336',
+                  border: item.decision === 'keep' ? '3px solid #4caf50' : item.decision === 'uncertain' ? '3px solid #ff9800' : '3px solid #f44336',
                   transition: 'transform 0.1s ease',
                   '&:hover': { transform: 'scale(1.02)', zIndex: 10 },
                   cursor: 'pointer'
@@ -695,10 +743,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                   {/* Decision Overlay */}
                   <Box sx={{ 
                     position: 'absolute', top: 0, right: 0, p: 0.5,
-                    bgcolor: item.decision === 'keep' ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)',
+                    bgcolor: item.decision === 'keep' ? 'rgba(76, 175, 80, 0.9)' : item.decision === 'uncertain' ? 'rgba(255, 152, 0, 0.9)' : 'rgba(244, 67, 54, 0.9)',
                     borderBottomLeftRadius: 8, display: 'flex', alignItems: 'center'
                   }}>
-                    {item.decision === 'keep' ? <KeepIcon fontSize="small" /> : <DeleteIcon fontSize="small" />}
+                    {item.decision === 'keep' ? <KeepIcon fontSize="small" /> : item.decision === 'uncertain' ? <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', lineHeight: 1, color: '#fff' }}>?</Typography> : <DeleteIcon fontSize="small" />}
                   </Box>
 
                   {/* Probability Bar + Score Text */}

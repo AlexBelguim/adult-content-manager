@@ -11,6 +11,7 @@ function PairwiseLabelerPage({ serverUrl }) {
     const [pair, setPair] = useState(null);
     const [loading, setLoading] = useState(true);
     const [pairType, setPairType] = useState('mixed');
+    const [folderType, setFolderType] = useState('all');
     const [stats, setStats] = useState({ total: 0, intra: 0, inter: 0 });
     const [performers, setPerformers] = useState([]);
     const [showPerformerModal, setShowPerformerModal] = useState(false);
@@ -43,7 +44,7 @@ function PairwiseLabelerPage({ serverUrl }) {
     const fetchNextPair = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${serverUrl}/api/next-pair?type=${pairType}`);
+            const res = await fetch(`${serverUrl}/api/next-pair?type=${pairType}&folder=${folderType}`);
             const data = await res.json();
 
             if (data.done) {
@@ -56,7 +57,7 @@ function PairwiseLabelerPage({ serverUrl }) {
         } finally {
             setLoading(false);
         }
-    }, [serverUrl, pairType]);
+    }, [serverUrl, pairType, folderType]);
 
     // Fetch performers
     const fetchPerformers = useCallback(async () => {
@@ -234,6 +235,24 @@ function PairwiseLabelerPage({ serverUrl }) {
                     </ToggleButton>
                     <ToggleButton value="inter" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
                         Cross Performer
+                    </ToggleButton>
+                </ToggleButtonGroup>
+
+                <ToggleButtonGroup
+                    value={folderType}
+                    exclusive
+                    onChange={(e, val) => val && setFolderType(val)}
+                    size={isMobile ? 'medium' : 'small'}
+                    sx={{ height: isMobile ? 48 : 32 }}
+                >
+                    <ToggleButton value="all" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                        All Folders
+                    </ToggleButton>
+                    <ToggleButton value="keep" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                        Keep Only
+                    </ToggleButton>
+                    <ToggleButton value="delete" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                        Delete Only
                     </ToggleButton>
                 </ToggleButtonGroup>
 

@@ -3,6 +3,7 @@ import {
   Container, Typography, Box, Grid, Card, CardContent, Collapse,
   LinearProgress, Chip, Button, Alert, CircularProgress,
   Avatar, Divider, Paper, IconButton, Tooltip, TextField, Slider,
+  Select, MenuItem, FormControl, InputLabel,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel
 } from '@mui/material';
 import {
@@ -25,6 +26,9 @@ const MODEL_TYPES = [
   { id: 'context_binary', name: 'Context-Aware Binary', icon: <Psychology />, desc: 'Personalized filtering using performer gallery as baseline context.',
     color: '#ff9800', output: 'context_binary.pt', requirements: 'Needs keep + delete folders with performer subdirectories',
     pros: ['Personalized', 'Highest Accuracy'], cons: ['Complex Inference', 'Cold Start Problem'] },
+  { id: 'pairwise_siamese_binary', name: 'Siamese Binary Ranking', icon: <AutoAwesome />, desc: 'Trains a pairwise Siamese ranker using dynamic Keep > Delete pairs from your binary folders.',
+    color: '#e91e63', output: 'siamese_binary.pt', requirements: 'Needs keep + delete folders',
+    pros: ['Granular Ranking', 'Massive Augmentation'], cons: ['Slower Training'] },
 ];
 
 function TasteDashboardPage() {
@@ -41,6 +45,7 @@ function TasteDashboardPage() {
   const [selectedType, setSelectedType] = useState('binary');
   const [epochs, setEpochs] = useState(8);
   const [batchSize, setBatchSize] = useState(16);
+  const [backbone, setBackbone] = useState('facebook/dinov2-large');
   const [startingTraining, setStartingTraining] = useState(false);
   const [trainingStatus, setTrainingStatus] = useState(null);
   const [aiHealth, setAiHealth] = useState(null);
@@ -57,6 +62,7 @@ function TasteDashboardPage() {
   const [enableMining, setEnableMining] = useState(false);
   const [miningMultiplier, setMiningMultiplier] = useState(4);
   const [deduplicate, setDeduplicate] = useState(true);
+  const [syntheticPairsPerEpoch, setSyntheticPairsPerEpoch] = useState(500);
   const pollRef = useRef(null);
 
   const fetchData = async () => {
@@ -176,12 +182,13 @@ function TasteDashboardPage() {
           type: selectedType,
           epochs,
           batch_size: batchSize,
-          backbone: 'facebook/dinov2-large',
+          backbone,
           ai_server_url: aiUrl,
           use_hard_examples: useHardExamples,
           enable_mining: enableMining,
           mining_multiplier: miningMultiplier,
-          deduplicate: deduplicate
+          deduplicate: deduplicate,
+          synthetic_pairs_per_epoch: selectedType === 'pairwise_siamese_binary' ? syntheticPairsPerEpoch : 0
         })
       });
       const result = await res.json();
@@ -613,13 +620,48 @@ function TasteDashboardPage() {
                   </Card>
                 ))}
               </Box>
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end', mb: 2 }}>
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end', mb: 2, flexWrap: 'wrap' }}>
                 <TextField label="Epochs" type="number" value={epochs} onChange={e => setEpochs(parseInt(e.target.value) || 1)}
                   InputProps={{ inputProps: { min: 1, max: 50 } }} size="small"
                   sx={{ width: 100, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } }, '& .MuiInputLabel-root': { color: '#666' } }} />
                 <TextField label="Batch Size" type="number" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 1)}
                   InputProps={{ inputProps: { min: 1, max: 64 } }} size="small"
                   sx={{ width: 100, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#444' } }, '& .MuiInputLabel-root': { color: '#666' } }} />
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel sx={{ color: '#666' }}>Backbone</InputLabel>
+                  <Select
+                    value={backbone}
+                    label="Backbone"
+                    onChange={e => setBackbone(e.target.value)}
+                    sx={{ color: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#444' }, '& .MuiSvgIcon-root': { color: '#aaa' } }}
+                    MenuProps={{ PaperProps: { sx: { bgcolor: '#1a1a2e', color: '#fff' } } }}
+                  >
+                    <MenuItem value="facebook/dinov2-small">
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>DINOv2 Small</Typography>
+                        <Typography variant="caption" sx={{ color: '#888' }}>Fast · Low VRAM · ~21M params</Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="facebook/dinov2-base">
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>DINOv2 Base</Typography>
+                        <Typography variant="caption" sx={{ color: '#888' }}>Balanced · ~86M params</Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="facebook/dinov2-large">
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>DINOv2 Large ⭐</Typography>
+                        <Typography variant="caption" sx={{ color: '#888' }}>Best accuracy · High VRAM · ~307M params</Typography>
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="facebook/dinov2-giant">
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>DINOv2 Giant</Typography>
+                        <Typography variant="caption" sx={{ color: '#888' }}>Max accuracy · Very high VRAM · ~1.1B params</Typography>
+                      </Box>
+                    </MenuItem>
+                  </Select>
+                </FormControl>
                 <Button variant="contained" startIcon={trainingStatus?.active ? <Stop /> : <PlayArrow />}
                   disabled={!aiHealth || trainingStatus?.active || startingTraining}
                   onClick={handleStartTraining}
@@ -679,6 +721,24 @@ function TasteDashboardPage() {
                       {deduplicate ? "ON" : "OFF"}
                     </Button>
                   </Box>
+                  
+                  {selectedType === 'pairwise_siamese_binary' && (
+                    <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid rgba(139,92,246,0.2)' }}>
+                      <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
+                        Synthetic Keep &gt; Delete Pairs
+                        <Typography component="span" sx={{ color: '#e91e63', fontWeight: 800 }}>{syntheticPairsPerEpoch} / epoch</Typography>
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', mb: 1 }}>
+                        How many Keep &gt; Delete pairs to dynamically generate per epoch for the Siamese Ranker.
+                      </Typography>
+                      <Slider 
+                        value={syntheticPairsPerEpoch} 
+                        min={100} max={5000} step={100}
+                        onChange={(_, v) => setSyntheticPairsPerEpoch(v)}
+                        sx={{ color: '#e91e63' }}
+                      />
+                    </Box>
+                  )}
                 </Box>
               </Box>
               {!aiHealth && <Alert severity="warning" sx={{ bgcolor: 'rgba(255,152,0,0.08)', color: '#ffb74d', py: 0.5 }}>AI server is offline. Start it to train.</Alert>}
@@ -874,6 +934,7 @@ function ModelArsenal({
     binary: { label: 'Binary', color: '#4caf50', icon: '🎯' },
     pairwise: { label: 'Pairwise', color: '#2196f3', icon: '⚖️' },
     context_binary: { label: 'Context-Aware', color: '#ff9800', icon: '🧠' },
+    siamese_binary: { label: 'Siamese Ranker', color: '#e91e63', icon: '🔬' },
     unknown: { label: 'Unknown', color: '#9e9e9e', icon: '❓' },
   };
   const grouped = {};
