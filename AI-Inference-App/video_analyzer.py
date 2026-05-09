@@ -153,21 +153,23 @@ def classify_frame_vlm(frame_b64_list, allowed_actions=None, window_size=None):
     if allowed_actions and len(allowed_actions) > 0:
         # ── Labels Mode: constrained classification ──
         action_list = "\n".join(f"- {a}" for a in allowed_actions)
-        prompt = f"""Analyze this adult video frame. Classify the PRIMARY sexual action occurring.
-
-You MUST choose exactly ONE from this list:
+        prompt = f"""Task: Classify the sexual action in this frame.
+Choices:
 {action_list}
 
-Output ONLY a JSON object, nothing else:
-{{"action": "<one from the list above>", "confidence": <0.0-1.0>}}"""
+Rules:
+1. Choose the best match from the list.
+2. Output ONLY JSON. No talk, no explanations, no mention of 'guidelines'.
+3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Analyze this adult video frame. Describe the PRIMARY sexual action occurring.
+        prompt = """Task: Describe the primary sexual action in this frame.
+Examples: cowgirl, missionary, doggy style, blowjob, handjob, cumshot, etc.
 
-Give a short, specific label (1-3 words) like "cowgirl", "blowjob", "missionary", "doggy style", "handjob", "foreplay", "idle", etc.
-
-Output ONLY a JSON object, nothing else:
-{"action": "<short label>", "confidence": <0.0-1.0>}"""
+Rules:
+1. Use 1-3 words max.
+2. Output ONLY JSON. No talk, no explanations, no mention of 'guidelines'.
+3. Use this format: {"action": "label", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -207,12 +209,27 @@ Output ONLY a JSON object, nothing else:
 def parse_vlm_response(content, allowed_actions=None):
     """Parse VLM JSON response, with fallback for malformed output."""
     try:
+        # Clean the content a bit (remove markdown code blocks)
+        content = re.sub(r'```json\s*|\s*```', '', content).strip()
+        
         # Try to extract JSON from response
         json_match = re.search(r'\{[^}]+\}', content)
         if json_match:
             data = json.loads(json_match.group())
-            action = data.get("action", "other").lower().strip()
+            action = str(data.get("action", "other")).lower().strip()
             confidence = float(data.get("confidence", 0.5))
+            
+            # If the model is being chatty in the action field (e.g. "it looks like missionary")
+            # we try to see if any known actions are mentioned
+            if len(action) > 25:
+                # Common actions to look for if the model is too talkative
+                for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'foreplay']:
+                    if common in action:
+                        action = common
+                        break
+                # Still too long? Truncate or use other
+                if len(action) > 30:
+                    action = "other"
             
             # In labels mode, validate action is in the allowed list
             if allowed_actions and len(allowed_actions) > 0:
