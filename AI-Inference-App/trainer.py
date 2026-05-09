@@ -9,6 +9,7 @@ from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
+from model_dinov2 import DinoV2PreferenceModel
 
 IMAGE_EXTS = {'.jpg','.jpeg','.png','.webp','.gif','.bmp'}
 
@@ -246,6 +247,7 @@ def train_binary(config):
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 8)
     bs = config.get('batch_size', 16)
+    warmup = config.get('warmup_epochs', 2)
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
 
@@ -413,18 +415,31 @@ def train_pairwise(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 10)
+    warmup = config.get('warmup_epochs', 2)
     bs = config.get('batch_size', 8)
+    base_path = config.get('base_path', '')
     pairs = config.get('pairs', [])
 
     tlog(f"📋 Pairwise Training | {len(pairs)} pairs | {epochs} epochs")
     if len(pairs) < 10:
         raise ValueError(f"Need at least 10 pairs, got {len(pairs)}")
 
-    pair_tuples = [(p['winner'], p['loser']) for p in pairs]
+    def resolve(p):
+        if not p: return p
+        if Path(p).exists(): return str(p)
+        if base_path:
+            # Try direct relative to base_path
+            alt = Path(base_path) / p
+            if alt.exists(): return str(alt)
+            # Try cleaning path (if it has backslashes or absolute parts from another system)
+            p_clean = p.replace('\\', '/').split('/')
+            if 'keep' in p_clean: p_clean = p_clean[p_clean.index('keep'):]
+            elif 'delete' in p_clean: p_clean = p_clean[p_clean.index('delete'):]
+            alt2 = Path(base_path) / '/'.join(p_clean)
+            if alt2.exists(): return str(alt2)
+        return p
 
-    # Deduplicate if requested
-    if config.get('deduplicate', False):
-        pair_tuples = list(set(pair_tuples))
+    pair_tuples = [(resolve(p['winner']), resolve(p['loser'])) for p in pairs]
     
     processor = AutoImageProcessor.from_pretrained(backbone)
     full_ds = PairwiseDataset(pair_tuples, processor, deduplicate=False)
@@ -459,14 +474,16 @@ def train_pairwise(config):
         num_batches = len(train_loader)
         training_state['total_batches'] = num_batches
 
-        if epoch == 3:
+        training_state['epoch'] = epoch
+        training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
+        
+        if epoch == warmup + 1:
             for p in model.backbone.parameters(): p.requires_grad = True
             optimizer = torch.optim.AdamW([
                 {'params': model.head.parameters(), 'lr': 1e-3},
                 {'params': model.backbone.parameters(), 'lr': 1e-5}
             ])
         
-        training_state['epoch'] = epoch
         model.train()
         total_loss = 0
         new_mining_pool = set()
@@ -486,10 +503,7 @@ def train_pairwise(config):
                 if failed.dim() == 0: failed = failed.unsqueeze(0)
                 for i in range(failed.size(0)):
                     if failed[i] and 'idx' in batch:
-                        # Map back to original index if possible, or just use the pair
-                        # Actually, tracking by index is hard when we mix multiple epochs.
-                        # We'll just store the failed pairs themselves.
-                        new_mining_pool.add(tuple(current_pairs[bi*bs - bs + i]))
+                        new_mining_pool.add(tuple(current_pairs[batch['idx'][i].item()]))
 
             training_state['batch'] = bi
             training_state['train_loss'] = total_loss / bi

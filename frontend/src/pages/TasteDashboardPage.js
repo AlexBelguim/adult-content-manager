@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Container, Typography, Box, Grid, Card, CardContent, Collapse,
   LinearProgress, Chip, Button, Alert, CircularProgress,
-  Avatar, Divider, Paper, IconButton, Tooltip, TextField,
+  Avatar, Divider, Paper, IconButton, Tooltip, TextField, Slider,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel
 } from '@mui/material';
 import {
@@ -53,6 +53,10 @@ function TasteDashboardPage() {
   const [aiTrainingData, setAiTrainingData] = useState(null);
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
+  const [useHardExamples, setUseHardExamples] = useState(true);
+  const [enableMining, setEnableMining] = useState(false);
+  const [miningMultiplier, setMiningMultiplier] = useState(4);
+  const [deduplicate, setDeduplicate] = useState(true);
   const pollRef = useRef(null);
 
   const fetchData = async () => {
@@ -173,7 +177,11 @@ function TasteDashboardPage() {
           epochs,
           batch_size: batchSize,
           backbone: 'facebook/dinov2-large',
-          ai_server_url: aiUrl
+          ai_server_url: aiUrl,
+          use_hard_examples: useHardExamples,
+          enable_mining: enableMining,
+          mining_multiplier: miningMultiplier,
+          deduplicate: deduplicate
         })
       });
       const result = await res.json();
@@ -507,7 +515,10 @@ function TasteDashboardPage() {
                   <Typography variant="subtitle2" sx={{ color: '#4caf50', mb: 1 }}>Binary Classification</Typography>
                   <Box sx={{ display: 'flex', gap: 3 }}>
                     <Box>
-                      <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 'bold' }}>{training?.binary?.keep || 0}</Typography>
+                      <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 'bold' }}>
+                        {training?.binary?.keep || 0}
+                        {training?.hardExamples?.binary > 0 && <Typography component="span" variant="caption" sx={{ ml: 0.5, opacity: 0.7 }}>({training.hardExamples.binary} corr)</Typography>}
+                      </Typography>
                       <Typography variant="caption" sx={{ color: '#666' }}>Keep Images</Typography>
                     </Box>
                     <Box>
@@ -521,7 +532,10 @@ function TasteDashboardPage() {
                 </Box>
                 <Box sx={{ p: 2, bgcolor: '#252525', borderRadius: 1, borderLeft: '4px solid #2196f3' }}>
                   <Typography variant="subtitle2" sx={{ color: '#2196f3', mb: 1 }}>Pairwise Preference</Typography>
-                  <Typography variant="body2" sx={{ color: '#ccc' }}>{pw.totalPairs || 0} labeled pairs from {pw.performersLabeled || 0} performers</Typography>
+                  <Typography variant="body2" sx={{ color: '#ccc' }}>
+                    {pw.totalPairs || 0} labeled pairs from {pw.performersLabeled || 0} performers
+                    {training?.hardExamples?.pairwise > 0 && <Typography component="span" variant="caption" sx={{ ml: 0.5, color: '#8b5cf6' }}>({training.hardExamples.pairwise} corr)</Typography>}
+                  </Typography>
                   <Chip label={pw.totalPairs >= 50 ? 'Ready' : `Need ${50 - (pw.totalPairs || 0)}+ pairs`}
                     size="small" sx={{ mt: 1 }}
                     color={pw.totalPairs >= 50 ? 'success' : 'warning'} variant="outlined" />
@@ -614,6 +628,58 @@ function TasteDashboardPage() {
                     '&:disabled': { bgcolor: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.3)' } }}>
                   {startingTraining ? 'Starting...' : trainingStatus?.active ? 'Training...' : `Start ${selectedModel?.name}`}
                 </Button>
+              </Box>
+
+              <Box sx={{ p: 2, mb: 2, bgcolor: 'rgba(139,92,246,0.05)', borderRadius: 2, border: '1px solid rgba(139,92,246,0.1)' }}>
+                <Typography variant="subtitle2" sx={{ color: '#8b5cf6', mb: 1, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AutoAwesome fontSize="small" /> Advanced Training Logic
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" sx={{ color: '#aaa', fontSize: '0.85rem' }}>Use Human Corrections (Oversample)</Typography>
+                    <Button 
+                      size="small" 
+                      variant={useHardExamples ? "contained" : "outlined"}
+                      onClick={() => setUseHardExamples(!useHardExamples)}
+                      sx={{ minWidth: 80, height: 24, fontSize: '0.7rem', textTransform: 'none' }}
+                    >
+                      {useHardExamples ? "ON" : "OFF"}
+                    </Button>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" sx={{ color: '#aaa', fontSize: '0.85rem' }}>Hard Example Mining (Recursive)</Typography>
+                    <Button 
+                      size="small" 
+                      variant={enableMining ? "contained" : "outlined"}
+                      onClick={() => setEnableMining(!enableMining)}
+                      sx={{ minWidth: 80, height: 24, fontSize: '0.7rem', textTransform: 'none' }}
+                    >
+                      {enableMining ? "ON" : "OFF"}
+                    </Button>
+                  </Box>
+                  {enableMining && (
+                    <Box sx={{ pl: 2, mt: 1 }}>
+                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>Failure Multiplier: {miningMultiplier}x</Typography>
+                      <Slider 
+                        value={miningMultiplier} 
+                        min={2} max={10} step={1}
+                        onChange={(_, v) => setMiningMultiplier(v)}
+                        sx={{ color: '#8b5cf6', py: 1 }}
+                      />
+                    </Box>
+                  )}
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+                    <Typography variant="body2" sx={{ color: '#aaa', fontSize: '0.85rem' }}>Deduplicate Data</Typography>
+                    <Button 
+                      size="small" 
+                      variant={deduplicate ? "contained" : "outlined"}
+                      onClick={() => setDeduplicate(!deduplicate)}
+                      sx={{ minWidth: 80, height: 24, fontSize: '0.7rem', textTransform: 'none' }}
+                    >
+                      {deduplicate ? "ON" : "OFF"}
+                    </Button>
+                  </Box>
+                </Box>
               </Box>
               {!aiHealth && <Alert severity="warning" sx={{ bgcolor: 'rgba(255,152,0,0.08)', color: '#ffb74d', py: 0.5 }}>AI server is offline. Start it to train.</Alert>}
               {selectedModel && <Alert severity="info" sx={{ bgcolor: 'rgba(33,150,243,0.08)', color: '#90caf9', py: 0.5 }}>{selectedModel.requirements}</Alert>}
