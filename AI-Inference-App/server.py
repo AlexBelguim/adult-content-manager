@@ -31,6 +31,14 @@ CALIBRATOR = CalibrationEngine()
 app = Flask(__name__)
 CORS(app) # Enable CORS for frontend access
 
+# Register video analysis blueprint
+try:
+    from video_analyzer import video_bp
+    app.register_blueprint(video_bp, url_prefix='/video')
+    print("🎬 Video analysis module loaded")
+except Exception as e:
+    print(f"⚠️ Video analysis module not available: {e}")
+
 # Global model state
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL = None
@@ -917,5 +925,6 @@ def api_training_history():
 if __name__ == '__main__':
     # Models are now loaded dynamically by the frontend on mount
     log("🚀 AI Server starting on http://0.0.0.0:3344 (Idle - Waiting for model load)")
+    log("🎬 Video analysis available at /video/*")
     # Using use_reloader=False to prevent double model loading in debug mode
     app.run(host='0.0.0.0', port=3344, threaded=True, debug=True, use_reloader=False)

@@ -11,8 +11,8 @@ const path = require('path');
 const fs = require('fs');
 const { spawn, exec } = require('child_process');
 
-// Video analysis service URL
-const VISION_VIDEO_URL = process.env.VISION_VIDEO_URL || 'http://localhost:5003';
+// Video analysis service URL - now integrated into AI Inference App
+const VISION_VIDEO_URL = process.env.VISION_VIDEO_URL || 'http://localhost:3344/video';
 
 // Track the service process
 let serviceProcess = null;
@@ -20,7 +20,7 @@ let serviceLogs = [];
 const MAX_LOGS = 2000;
 
 // Log file path
-const servicePath = path.join(__dirname, '..', '..', 'vision-llm-video');
+const servicePath = path.join(__dirname, '..', '..', 'AI-Inference-App');
 const logFile = path.join(servicePath, 'service.log');
 
 function addLog(data, type = 'info') {
@@ -215,9 +215,9 @@ router.post('/start-service', async (req, res) => {
       // Not running, continue to start
     }
 
-    // Path to the vision-llm-video directory
-    const servicePath = path.join(__dirname, '..', '..', 'vision-llm-video');
-    const batFile = path.join(servicePath, 'start-video-service.bat');
+    // Path to the AI-Inference-App directory
+    const servicePath = path.join(__dirname, '..', '..', 'AI-Inference-App');
+    const batFile = path.join(servicePath, 'Run_AI.bat');
     
     console.log(`[Video Analysis] Starting service from: ${servicePath}`);
     
@@ -747,35 +747,17 @@ router.post('/cancel-analysis', async (req, res) => {
  * Stop the video analysis service
  */
 router.post('/stop-service', async (req, res) => {
-  let stopped = false;
-  
-  // 1. Try to kill the process spawned by this backend
-  if (serviceProcess) {
-    try {
-      serviceProcess.kill();
-      serviceProcess = null;
-      stopped = true;
-      addLog('Service stopped by user (spawned process)', 'info');
-    } catch (e) {
-      console.error('Error killing spawned process:', e);
-    }
-  }
-  
-  // 2. Try to kill any process on port 5003 (handles manual starts)
+  // Video analysis is now integrated into the AI Inference App.
+  // "Stop" means cancel any running analysis, NOT kill the server
+  // (killing port 3344 would also kill image inference, training, etc.)
   try {
-    const killedPort = await killProcessOnPort(5003);
-    if (killedPort) {
-      stopped = true;
-      addLog('Service stopped by user (port 5003)', 'info');
-    }
+    await axios.post(`${VISION_VIDEO_URL}/cancel`, {}, { timeout: 5000 });
+    addLog('Video analysis cancelled by user', 'info');
+    res.send({ success: true, message: 'Analysis cancelled' });
   } catch (e) {
-    console.error('Error killing process on port 5003:', e);
-  }
-  
-  if (stopped) {
-    res.send({ success: true, message: 'Service stopped' });
-  } else {
-    res.send({ success: false, message: 'Service was not running or could not be stopped' });
+    // If server isn't running, that's also fine
+    addLog('No active analysis to cancel', 'info');
+    res.send({ success: true, message: 'No active analysis to cancel' });
   }
 });
 
