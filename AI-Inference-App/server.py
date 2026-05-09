@@ -190,6 +190,8 @@ def api_list_models():
                     m_type = 'pairwise'
                 elif 'context' in m.name.lower():
                     m_type = 'context_binary'
+                elif 'siamese' in m.name.lower():
+                    m_type = 'siamese_binary'
                 elif 'binary' in m.name.lower() or 'filtering' in m.name.lower():
                     m_type = 'binary'
                 # Check state dict keys as fallback
@@ -639,7 +641,7 @@ def classify_batch():
             except Exception as e:
                 log(f"  ❌ Batch Error: {e}"); continue
     
-    # ── Pairwise model (default): single-score path ───────────────
+    # ── Pairwise / Siamese model (default): single-score path ───────────────
     else:
         for i in range(0, len(image_paths), 4):
             batch_paths = image_paths[i:i+4]

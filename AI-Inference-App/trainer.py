@@ -770,12 +770,188 @@ def train_context_binary(config):
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
 
+def train_siamese_binary(config):
+    """Train a Siamese Pairwise Ranker using synthetic Keep > Delete pairs.
+    Instead of needing manual pairwise labels, it dynamically samples
+    random (keep_image, delete_image) pairs from the binary training folders
+    each epoch. This creates a bimodal score distribution ideal for
+    triple-zone inference (confident keep / uncertain / confident delete).
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 8)
+    warmup = config.get('warmup_epochs', 2)
+    bs = config.get('batch_size', 8)
+    base_path = config.get('base_path', '')
+    use_cached = config.get('use_cached', False)
+    synthetic_pairs_per_epoch = config.get('synthetic_pairs_per_epoch', 500)
+
+    tlog(f"📋 Siamese Binary Training | {epochs} epochs | {synthetic_pairs_per_epoch} pairs/epoch | backbone: {backbone}")
+
+    # Resolve keep/delete dirs (same as binary)
+    if use_cached or Path(os.path.join(base_path, 'keep')).exists():
+        keep_dir = os.path.join(base_path, 'keep')
+        delete_dir = os.path.join(base_path, 'delete')
+    else:
+        keep_dir = os.path.join(base_path, 'after filter performer')
+        delete_dir = os.path.join(base_path, 'deleted keep for training')
+
+    def scan_images(dir_path):
+        paths = []
+        if not os.path.exists(dir_path): return paths
+        for root, _, files in os.walk(dir_path):
+            for f in files:
+                if Path(f).suffix.lower() in IMAGE_EXTS:
+                    paths.append(os.path.join(root, f))
+        return paths
+
+    keep_imgs = scan_images(keep_dir)
+    delete_imgs = scan_images(delete_dir)
+    tlog(f"  📊 Found: {len(keep_imgs)} keep, {len(delete_imgs)} delete images")
+    config['_keep_count'] = len(keep_imgs)
+    config['_delete_count'] = len(delete_imgs)
+
+    if not keep_imgs or not delete_imgs:
+        raise ValueError("Need both keep and delete images for Siamese Binary training")
+
+    processor = AutoImageProcessor.from_pretrained(backbone)
+    model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=True).to(device)
+    criterion = nn.MarginRankingLoss(margin=1.0)
+    optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    best_acc = 0.0
+    out_path = Path(__file__).parent / 'models' / 'siamese_binary.pt'
+    out_path.parent.mkdir(exist_ok=True)
+    mining_pool = []
+    mining_mult = config.get('mining_multiplier', 4)
+
+    for epoch in range(1, epochs + 1):
+        # Unfreeze backbone after warmup
+        if epoch == warmup + 1:
+            for p in model.backbone.parameters(): p.requires_grad = True
+            optimizer = torch.optim.AdamW([
+                {'params': model.head.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5}
+            ])
+
+        training_state['epoch'] = epoch
+        training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
+
+        # Dynamically sample synthetic pairs this epoch
+        n = min(synthetic_pairs_per_epoch, len(keep_imgs) * len(delete_imgs))
+        pairs = []
+        for _ in range(n):
+            pairs.append((
+                random.choice(keep_imgs),
+                random.choice(delete_imgs)
+            ))
+
+        # Add mining failures from previous epoch
+        if config.get('enable_mining') and mining_pool:
+            tlog(f"  ⛏️ Mining: adding {len(mining_pool)} failures (x{mining_mult})")
+            for pair in mining_pool:
+                for _ in range(mining_mult):
+                    pairs.append(pair)
+
+        train_ds = PairwiseDataset(pairs, processor, augment=True, deduplicate=False)
+        vs = max(1, int(len(train_ds) * 0.15))
+        train_split, val_split = random_split(train_ds, [len(train_ds) - vs, vs])
+        train_loader = DataLoader(train_split, batch_size=bs, shuffle=True, num_workers=0)
+        val_loader_ep = DataLoader(val_split, batch_size=bs, num_workers=0)
+
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+
+        model.train()
+        total_loss = 0
+        new_mining_pool = set()
+
+        for bi, batch in enumerate(train_loader, 1):
+            w = batch['winner'].to(device)
+            l = batch['loser'].to(device)
+            optimizer.zero_grad()
+
+            if scaler:
+                with torch.amp.autocast('cuda'):
+                    sw, sl = model(w, l)
+                    target = torch.ones(sw.size(0), device=device)
+                    loss = criterion(sw, sl, target)
+                scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
+            else:
+                sw, sl = model(w, l)
+                target = torch.ones(sw.size(0), device=device)
+                loss = criterion(sw, sl, target)
+                loss.backward(); optimizer.step()
+
+            total_loss += loss.item()
+
+            if config.get('enable_mining'):
+                failed = (sw <= sl).squeeze()
+                if failed.dim() == 0: failed = failed.unsqueeze(0)
+                for i in range(failed.size(0)):
+                    if failed[i]:
+                        idx = batch['idx'][i].item()
+                        if idx < len(pairs):
+                            new_mining_pool.add(tuple(pairs[idx]))
+
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
+
+        if config.get('enable_mining'):
+            mining_pool = list(new_mining_pool)
+            if mining_pool:
+                tlog(f"  🚩 Failures tracked: {len(mining_pool)}")
+
+        # Validate
+        model.eval()
+        correct = total = 0
+        with torch.no_grad():
+            for batch in val_loader_ep:
+                w = batch['winner'].to(device)
+                l = batch['loser'].to(device)
+                sw, sl = model(w, l)
+                correct += (sw > sl).sum().item()
+                total += sw.size(0)
+        val_acc = correct / max(total, 1)
+        training_state['val_acc'] = val_acc
+        training_state['epoch_history'].append({
+            'epoch': epoch,
+            'train_loss': total_loss / max(num_batches, 1),
+            'val_acc': round(val_acc, 4),
+            'pairs_generated': len(pairs)
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val Acc: {val_acc:.1%} | Pairs: {len(pairs)}")
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+            training_state['best_val_acc'] = best_acc
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'val_acc': val_acc,
+                'backbone': backbone,
+                'model_type': 'siamese_binary',
+                'config': {
+                    'model_name': backbone,
+                    'epochs': epochs,
+                    'batch_size': bs,
+                    'synthetic_pairs_per_epoch': synthetic_pairs_per_epoch
+                }
+            }, out_path)
+            tlog(f"  ⭐ Saved best → {out_path.name} ({val_acc:.1%})")
+
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+    return {'model': str(out_path.name), 'best_val_acc': best_acc}
+
+
 # ── Background runner ────────────────────────────────────────────────────────
 
 TRAIN_FNS = {
     'binary': train_binary,
     'pairwise': train_pairwise,
     'context_binary': train_context_binary,
+    'pairwise_siamese_binary': train_siamese_binary,
 }
 
 def start_training(config):
