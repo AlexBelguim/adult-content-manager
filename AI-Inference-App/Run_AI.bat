@@ -71,14 +71,20 @@ if not exist "venv" (
     python -m venv venv
 )
 
-:: ── Install dependencies ──────────────────────────────────
-echo [AI System] Checking/Installing dependencies...
-:: First try to install with CUDA support explicitly (using cu124 for Python 3.13 support)
-.\venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu124 --no-cache-dir -q
-
+:: ── Install dependencies (skip if already done) ───────────
+:: Only re-run pip if requirements.txt changed since last install
+set "MARKER=venv\.deps_installed"
+fc /b requirements.txt "%MARKER%" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo [WARNING] CUDA installation might have failed, trying standard install...
-    .\venv\Scripts\python.exe -m pip install -r requirements.txt -q
+    echo [AI System] Installing/updating dependencies...
+    .\venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu124
+    if %ERRORLEVEL% neq 0 (
+        echo [WARNING] CUDA installation might have failed, trying standard install...
+        .\venv\Scripts\python.exe -m pip install -r requirements.txt
+    )
+    copy /y requirements.txt "%MARKER%" >nul 2>&1
+) else (
+    echo [OK] Dependencies already installed
 )
 
 echo.
