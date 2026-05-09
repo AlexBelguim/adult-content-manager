@@ -173,18 +173,19 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   // Initial trigger - when started or performer changes or fetchBatch updates
   useEffect(() => {
-    if (performer?.id && isStarted && results.length === 0 && !loading && !isLoadingModel && !isFetchingRef.current) {
+    if (performer?.id && isStarted && results.length === 0 && !isLoadingModel && !isFetchingRef.current) {
       if (nextBatch) {
         console.log('[SmartFilter] Using prefetched nextBatch for results');
         setResults(nextBatch);
         setNextBatch(null);
+        setLoading(false);
       } else {
         console.log('[SmartFilter] Initial trigger firing fetchBatch');
         fetchBatch();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [performer?.id, isStarted, results.length, nextBatch, loading, isLoadingModel, fetchBatch]);
+  }, [performer?.id, isStarted, results.length, nextBatch, isLoadingModel, fetchBatch]);
 
   useEffect(() => {
     // Don't run until inferenceUrl is loaded from settings
