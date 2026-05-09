@@ -20,6 +20,17 @@ _cancel_flag = threading.Event()
 _analysis_lock = threading.Lock()
 _current_progress = {"status": "idle", "message": "", "progress": 0}
 
+def map_path(path):
+    """Maps remote paths (TrueNAS) to local paths (Windows)."""
+    if not path:
+        return path
+    # Normalize slashes to Windows-style for consistency
+    p = path.replace('/', '\\')
+    # If it starts with \media
+    if p.startswith('\\media'):
+        return 'Z:\\Apps\\adultManager' + p
+    return p
+
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:12b")
@@ -497,7 +508,7 @@ def video_categories():
 def video_analyze():
     """Analyze a video to detect action timeline."""
     data = request.json or {}
-    video_path = data.get('video_path')
+    video_path = map_path(data.get('video_path'))
     
     if not video_path:
         return jsonify({"success": False, "error": "video_path is required"}), 400
@@ -530,7 +541,7 @@ def video_analyze():
 def video_analyze_frame():
     """Analyze a single frame from a video."""
     data = request.json or {}
-    video_path = data.get('video_path')
+    video_path = map_path(data.get('video_path'))
     time_sec = data.get('time')
     
     if not video_path or time_sec is None:
@@ -547,7 +558,7 @@ def video_analyze_frame():
 def video_find_action():
     """Find segments containing a specific action."""
     data = request.json or {}
-    video_path = data.get('video_path')
+    video_path = map_path(data.get('video_path'))
     action = data.get('action')
     
     if not video_path or not action:
@@ -606,7 +617,7 @@ def video_find_action():
 def video_find_transition():
     """Find exact transition point between two actions using binary search."""
     data = request.json or {}
-    video_path = data.get('video_path')
+    video_path = map_path(data.get('video_path'))
     start_time = data.get('start_time')
     end_time = data.get('end_time')
     label_1 = data.get('label_1')

@@ -54,6 +54,17 @@ def log(msg):
     print(f"[{timestamp}] {msg}", flush=True)
     sys.stdout.flush()
 
+def map_path(path):
+    """Maps remote paths (TrueNAS) to local paths (Windows)."""
+    if not path:
+        return path
+    # Normalize slashes to Windows-style for consistency
+    p = str(path).replace('/', '\\')
+    # If it starts with \media
+    if p.startswith('\\media'):
+        return 'Z:\\Apps\\adultManager' + p
+    return p
+
 # Enhanced device logging
 log(f"🚀 INITIALIZING AI SERVER")
 log(f"🐍 Python Version: {sys.version.split(' ')[0]}")
@@ -525,8 +536,9 @@ def predict_batch():
 def _load_image(p, app_base_url=None):
     """Load an image from local path or remote URL. Returns PIL Image or None."""
     try:
-        if os.path.exists(p):
-            return Image.open(p).convert('RGB')
+        mapped_p = map_path(p)
+        if os.path.exists(mapped_p):
+            return Image.open(mapped_p).convert('RGB')
         elif app_base_url:
             clean_path = p.replace('\\', '/')
             if not clean_path.startswith('/'): clean_path = '/' + clean_path
