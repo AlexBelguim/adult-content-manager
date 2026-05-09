@@ -5,7 +5,7 @@ import {
   AppBar, Toolbar, IconButton, Card, CardContent, Select, MenuItem,
   FormControl, InputLabel, TextField, CircularProgress, Alert, Divider,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
-  Collapse
+  Collapse, Slider
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SchoolIcon from '@mui/icons-material/School';
