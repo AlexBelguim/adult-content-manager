@@ -125,10 +125,16 @@ def get_video_duration(video_path):
             'ffprobe', '-v', 'quiet', '-print_format', 'json',
             '-show_format', video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
+        # Use encoding='utf-8' and errors='replace' to safely handle special characters on Windows
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=10)
+        
+        if result.returncode == 0 and result.stdout:
             info = json.loads(result.stdout)
             return float(info.get('format', {}).get('duration', 0))
+        elif result.returncode != 0:
+            log(f"  ⚠️ ffprobe returned code {result.returncode}")
+            if result.stderr:
+                log(f"  ⚠️ ffprobe stderr: {result.stderr[:200]}")
     except Exception as ex:
         log(f"  ⚠️ ffprobe failed: {ex}")
     return 0
