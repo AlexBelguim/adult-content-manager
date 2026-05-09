@@ -1476,7 +1476,7 @@ class FunscriptPlayer extends HTMLElement {
         height: 100vh;
         max-width: 100vw;
         max-height: 100vh;
-        object-fit: fill;
+        object-fit: contain;
         margin: 0;
         padding: 0;
         border: none;
@@ -3914,15 +3914,19 @@ class FunscriptPlayer extends HTMLElement {
           background: rgba(255,255,255,0.9);
           border: none;
           border-radius: 50%;
-          width: 40px;
-          height: 40px;
+          width: 48px;
+          height: 48px;
+          min-width: 48px;
+          min-height: 48px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 16px;
+          font-size: 20px;
           transition: all 0.2s ease;
           flex-shrink: 0;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
         }
 
         .play-pause-btn:hover,
@@ -3935,10 +3939,12 @@ class FunscriptPlayer extends HTMLElement {
         .progress-container {
           flex: 1;
           position: relative;
-          height: 20px;
+          height: 32px;
           display: flex;
           align-items: center;
           margin: 0 10px;
+          cursor: pointer;
+          touch-action: manipulation;
         }
 
         .progress-bar {
@@ -4040,7 +4046,7 @@ class FunscriptPlayer extends HTMLElement {
           max-height: none !important;
           min-width: 100vw !important;
           min-height: 100vh !important;
-          object-fit: fill !important;
+          object-fit: contain !important;
           position: fixed !important;
           top: 0 !important;
           left: 0 !important;
@@ -4050,6 +4056,7 @@ class FunscriptPlayer extends HTMLElement {
           transform: none !important;
           z-index: 999998 !important;
           box-sizing: border-box !important;
+          background: #000 !important;
         }
 
         :host(.fullscreen) .media-container img {
@@ -4059,7 +4066,7 @@ class FunscriptPlayer extends HTMLElement {
           max-height: none !important;
           min-width: 100vw !important;
           min-height: 100vh !important;
-          object-fit: fill !important;
+          object-fit: contain !important;
           position: fixed !important;
           top: 0 !important;
           left: 0 !important;
@@ -4069,6 +4076,7 @@ class FunscriptPlayer extends HTMLElement {
           transform: none !important;
           z-index: 999998 !important;
           box-sizing: border-box !important;
+          background: #000 !important;
         }
 
         :host(.fullscreen) .custom-video-controls {

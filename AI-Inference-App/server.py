@@ -75,6 +75,17 @@ def load_model(checkpoint_path, model_id=None):
     global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
     try:
         log(f"📦 Loading checkpoint: {checkpoint_path}")
+        
+        # Free resources before loading a new model
+        if MODEL is not None:
+            log("♻️ Unloading previous model to free resources...")
+            MODEL = None
+            PROCESSOR = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            import gc
+            gc.collect()
+            
         checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
         
         config = checkpoint.get('config', {})
@@ -169,8 +180,12 @@ def api_unload_model():
     LOADED_MODEL_ID = None
     LOADED_MODEL_TYPE = 'pairwise'
     CONTEXT_STAR_CACHE.clear()
+    import gc
+    gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        vram = f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.0f} MB"
+        log(f"♻️ VRAM after unload: {vram}")
     return jsonify({"success": True, "message": "Model unloaded"})
 
 @app.route('/list_models', methods=['GET'])
@@ -216,6 +231,7 @@ def api_list_models():
             config = ckpt.get('config', {})
             info['epochs'] = config.get('epochs')
             del ckpt  # free memory
+            import gc; gc.collect()
         except Exception as e:
             info['error'] = str(e)
         result.append(info)

@@ -301,6 +301,21 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     setNextBatch(null);
   };
 
+  const handleUnloadModel = async () => {
+    try {
+      await fetch('/api/filter/unload-model', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_server_url: inferenceUrl })
+      });
+      alert('GPU Memory freed successfully!');
+      setShowSettings(false);
+    } catch (err) {
+      console.error('Failed to unload model:', err);
+      alert('Failed to free memory.');
+    }
+  };
+
   const handleToggleDecision = (index) => {
     setResults(prev => {
       const updated = [...prev];
@@ -807,9 +822,19 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         <DialogContent sx={{ bgcolor: '#1a1a2e', color: '#fff', pt: 2 }}>
           <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 1 }}>AI Server</Typography>
           <Typography variant="body2" sx={{ color: '#7c4dff', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
-          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', display: 'block', mb: 3 }}>
             Change in <span style={{ color: '#7c4dff', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
           </Typography>
+
+          <Button 
+            variant="outlined" 
+            color="warning" 
+            onClick={handleUnloadModel}
+            fullWidth
+            sx={{ mt: 1 }}
+          >
+            FREE GPU MEMORY (UNLOAD MODEL)
+          </Button>
         </DialogContent>
         <DialogActions sx={{ bgcolor: '#1a1a2e', p: 2 }}>
           <Button onClick={() => setShowSettings(false)} sx={{ color: '#7c4dff' }}>

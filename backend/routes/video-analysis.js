@@ -10,9 +10,13 @@ const db = require('../db');
 const path = require('path');
 const fs = require('fs');
 const { spawn, exec } = require('child_process');
+const { getAiServerUrl } = require('../utils/aiUrl');
 
-// Video analysis service URL - now integrated into AI Inference App
-const VISION_VIDEO_URL = process.env.VISION_VIDEO_URL || 'http://localhost:3344/video';
+// Video analysis URL - derived from AI server URL (same server, /video prefix)
+function getVideoUrl() {
+  const base = process.env.VISION_VIDEO_URL || (getAiServerUrl() + '/video');
+  return base;
+}
 
 // Track the service process
 let serviceProcess = null;
@@ -184,12 +188,12 @@ router.get('/logs', (req, res) => {
  */
 router.get('/health', async (req, res) => {
   try {
-    const response = await axios.get(`${VISION_VIDEO_URL}/health`, { timeout: 5000 });
+    const response = await axios.get(`${getVideoUrl()}/health`, { timeout: 5000 });
     res.send({
       success: true,
       running: true,
       service: response.data,
-      url: VISION_VIDEO_URL
+      url: getVideoUrl()
     });
   } catch (err) {
     res.send({
@@ -197,7 +201,7 @@ router.get('/health', async (req, res) => {
       running: false,
       error: 'Video analysis service not running',
       hint: 'Click "Start Service" to launch it',
-      url: VISION_VIDEO_URL
+      url: getVideoUrl()
     });
   }
 });
@@ -209,7 +213,7 @@ router.post('/start-service', async (req, res) => {
   try {
     // Check if already running
     try {
-      await axios.get(`${VISION_VIDEO_URL}/health`, { timeout: 2000 });
+      await axios.get(`${getVideoUrl()}/health`, { timeout: 2000 });
       return res.send({ success: true, message: 'Service already running' });
     } catch (e) {
       // Not running, continue to start
@@ -271,7 +275,7 @@ router.post('/start-service', async (req, res) => {
  */
 router.get('/supported-actions', async (req, res) => {
   try {
-    const response = await axios.get(`${VISION_VIDEO_URL}/supported-actions`, { timeout: 5000 });
+    const response = await axios.get(`${getVideoUrl()}/supported-actions`, { timeout: 5000 });
     res.send(response.data);
   } catch (err) {
     if (err.code === 'ECONNREFUSED') {
@@ -289,7 +293,7 @@ router.get('/supported-actions', async (req, res) => {
  */
 router.get('/categories', async (req, res) => {
   try {
-    const response = await axios.get(`${VISION_VIDEO_URL}/categories`, { timeout: 5000 });
+    const response = await axios.get(`${getVideoUrl()}/categories`, { timeout: 5000 });
     res.send(response.data);
   } catch (err) {
     res.status(503).send({
@@ -315,7 +319,7 @@ router.post('/analyze', async (req, res) => {
     console.log(`[Video Analysis] Sample interval: ${sampleInterval}s, Min segment: ${minSegment}s`);
 
     const response = await axios.post(
-      `${VISION_VIDEO_URL}/analyze`,
+      `${getVideoUrl()}/analyze`,
       {
         video_path: videoPath,
         sample_interval: sampleInterval,
@@ -360,7 +364,7 @@ router.post('/analyze-frame', async (req, res) => {
 
   try {
     const response = await axios.post(
-      `${VISION_VIDEO_URL}/analyze-frame`,
+      `${getVideoUrl()}/analyze-frame`,
       {
         video_path: videoPath,
         time: time
@@ -417,7 +421,7 @@ router.post('/find-action', async (req, res) => {
     console.log(`[Video Analysis] Skipping ${allExistingSegments.length} existing segments`);
 
     const response = await axios.post(
-      `${VISION_VIDEO_URL}/find-action`,
+      `${getVideoUrl()}/find-action`,
       {
         video_path: videoPath,
         action: action,
@@ -472,7 +476,7 @@ router.post('/find-action-and-create-scenes', async (req, res) => {
     `).all(videoPath);
 
     const response = await axios.post(
-      `${VISION_VIDEO_URL}/find-action`,
+      `${getVideoUrl()}/find-action`,
       {
         video_path: videoPath,
         action: action,
@@ -567,7 +571,7 @@ router.post('/analyze-and-create-scenes', async (req, res) => {
 
     // Call the video analysis service
     const response = await axios.post(
-      `${VISION_VIDEO_URL}/analyze`,
+      `${getVideoUrl()}/analyze`,
       {
         video_path: videoPath,
         segment_duration: sampleInterval,
@@ -735,7 +739,7 @@ function formatTime(seconds) {
  */
 router.post('/cancel-analysis', async (req, res) => {
   try {
-    await axios.post(`${VISION_VIDEO_URL}/cancel`);
+    await axios.post(`${getVideoUrl()}/cancel`);
     res.send({ success: true, message: 'Cancellation requested' });
   } catch (err) {
     console.error('Error cancelling analysis:', err.message);
@@ -751,7 +755,7 @@ router.post('/stop-service', async (req, res) => {
   // "Stop" means cancel any running analysis, NOT kill the server
   // (killing port 3344 would also kill image inference, training, etc.)
   try {
-    await axios.post(`${VISION_VIDEO_URL}/cancel`, {}, { timeout: 5000 });
+    await axios.post(`${getVideoUrl()}/cancel`, {}, { timeout: 5000 });
     addLog('Video analysis cancelled by user', 'info');
     res.send({ success: true, message: 'Analysis cancelled' });
   } catch (e) {
@@ -819,7 +823,7 @@ router.post('/find-transition-point', async (req, res) => {
     console.log(`[Video Analysis] Finding transition: ${label1} -> ${label2} (${startTime}s - ${endTime}s)${originalWindowSize ? ` [window: ${originalWindowSize}s]` : ''}`);
 
     const response = await axios.post(
-      `${VISION_VIDEO_URL}/find-transition-point`,
+      `${getVideoUrl()}/find-transition-point`,
       {
         video_path: videoPath,
         start_time: startTime,

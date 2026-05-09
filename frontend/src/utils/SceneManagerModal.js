@@ -369,6 +369,24 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   const [showActionPicker, setShowActionPicker] = useState(false);
   const [serviceRunning, setServiceRunning] = useState(null); // null = unknown, true/false = checked
   const [startingService, setStartingService] = useState(false);
+  const [ollamaConnected, setOllamaConnected] = useState(false);
+
+  // Check if the AI service (video analysis) is healthy
+  const checkServiceHealth = async () => {
+    try {
+      const response = await fetch('/api/video-analysis/health');
+      if (response.ok) {
+        const data = await response.json();
+        setServiceRunning(!!data.running);
+        setOllamaConnected(data.service?.ollama_connected ?? false);
+        return data.running;
+      }
+    } catch (err) {
+      console.error('Health check failed:', err);
+    }
+    setServiceRunning(false);
+    return false;
+  };
 
   // Load supported actions from the video analysis service
   const loadSupportedActions = async () => {
@@ -402,6 +420,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
       loadAvailableFunscripts();
       loadSupportedActions();
       loadAnalysisSettings();
+      checkServiceHealth();
     }
   }, [open, filePath]);
 
@@ -1278,35 +1297,41 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
     }
   };
 
-  // Stop the video analysis service
+  // Cancel running video analysis
   const stopVideoService = async () => {
-    if (!window.confirm('Are you sure you want to stop the AI service? Analysis will be interrupted.')) return;
+    if (!window.confirm('Cancel the current AI analysis? Already-detected segments will be preserved.')) return;
     
     try {
       const response = await fetch('/api/video-analysis/stop-service', { method: 'POST' });
       const data = await response.json();
       if (data.success) {
-        setServiceRunning(false);
         setIsAnalyzing(false);
         setAnalysisProgress('');
-        // Add a log entry locally to show it stopped
-        setServiceLogs(prev => [...prev, { timestamp: new Date(), type: 'info', message: 'Service stopped by user' }]);
-      } else {
-        alert('Failed to stop service: ' + data.message);
+        setServiceLogs(prev => [...prev, { timestamp: new Date(), type: 'info', message: 'Analysis cancelled by user' }]);
+        await loadScenes();
       }
     } catch (err) {
-      console.error('Error stopping service:', err);
-      alert('Error stopping service');
+      console.error('Error cancelling analysis:', err);
     }
   };
 
-  // Show the action picker dialog instead of auto-analyzing everything
-  // Start the video analysis service
+  // Start the video analysis service (or verify it's running)
   const startVideoService = async (shouldRunAnalysis = true) => {
     setStartingService(true);
     setError('');
     
     try {
+      // First just check if it's already running
+      const isRunning = await checkServiceHealth();
+      if (isRunning) {
+        setStartingService(false);
+        if (shouldRunAnalysis) {
+          await runVideoAnalysis();
+        }
+        return;
+      }
+
+      // Not running — try to start it
       const response = await fetch('/api/video-analysis/start-service', {
         method: 'POST'
       });
@@ -1319,15 +1344,12 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         const checkReady = setInterval(async () => {
           attempts++;
           try {
-            const health = await fetch('/api/video-analysis/health');
-            const healthData = await health.json();
-            if (healthData.running) {
+            const running = await checkServiceHealth();
+            if (running) {
               clearInterval(checkReady);
-              setServiceRunning(true);
               setStartingService(false);
               setShowActionPicker(false);
               
-              // Only run analysis if requested
               if (shouldRunAnalysis) {
                 await runVideoAnalysis();
               }
@@ -1415,6 +1437,26 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
       }
     }
   };
+
+  // Poll analysis progress while analyzing
+  useEffect(() => {
+    if (!isAnalyzing) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/video-analysis/health');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.running && data.service) {
+            // The Python /video/progress endpoint could be polled too,
+            // but for now we use health to confirm service is alive
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isAnalyzing]);
 
   const executeFullAnalysis = async (allowedActions, windowSize, preserveExisting = false) => {
     if (!filePath) return;
@@ -1620,9 +1662,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
           // Show summary
           const summary = result.analysis.segments
             .map(s => `${s.start} - ${s.end}: ${s.action}`)
-            .join('\\n');
+            .join('\n');
           
-          alert(`✅ Video analysis complete!\\n\\nFound ${result.scenesCreated} action segments:\\n${summary}`);
+          alert(`✅ Video analysis complete!\n\nFound ${result.scenesCreated} action segments:\n${summary}`);
           
           // Notify FunscriptPlayer components about scene changes
           window.dispatchEvent(new CustomEvent('scenesUpdated'));
@@ -2443,16 +2485,34 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 {/* Service Status */}
                 <Box sx={{ mb: 3, p: 2, backgroundColor: 'background.paper', borderRadius: 1, border: '1px solid #333' }}>
                   <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 1 }}>Service Status</Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                     <Chip 
-                      label={serviceRunning ? 'Running' : 'Stopped'} 
+                      label={serviceRunning === null ? 'Checking...' : serviceRunning ? 'AI Server Connected' : 'AI Server Offline'} 
                       size="small" 
                       sx={{ 
-                        backgroundColor: serviceRunning ? 'success.main' : 'text.disabled',
+                        backgroundColor: serviceRunning === null ? 'text.disabled' : serviceRunning ? 'success.main' : 'error.main',
                         color: '#fff'
                       }} 
                     />
-                    {!serviceRunning ? (
+                    {serviceRunning && (
+                      <Chip 
+                        label={ollamaConnected ? 'Ollama Connected' : 'Ollama Offline'} 
+                        size="small" 
+                        variant="outlined"
+                        sx={{ 
+                          borderColor: ollamaConnected ? 'success.main' : 'warning.main',
+                          color: ollamaConnected ? 'success.main' : 'warning.main'
+                        }} 
+                      />
+                    )}
+                    <Button
+                      size="small"
+                      onClick={checkServiceHealth}
+                      sx={{ color: 'text.secondary', minWidth: 0 }}
+                    >
+                      ↻ Refresh
+                    </Button>
+                    {!serviceRunning && serviceRunning !== null && (
                       <Button
                         variant="outlined"
                         size="small"
@@ -2460,19 +2520,15 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         disabled={startingService}
                         sx={{ borderColor: 'success.main', color: 'success.main' }}
                       >
-                        {startingService ? 'Starting...' : 'Start Service'}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={stopVideoService}
-                        sx={{ borderColor: 'error.main', color: 'error.main' }}
-                      >
-                        Stop Service
+                        {startingService ? 'Starting...' : 'Start AI Server'}
                       </Button>
                     )}
                   </Box>
+                  {serviceRunning && !ollamaConnected && (
+                    <Typography variant="caption" sx={{ color: 'warning.main', mt: 1, display: 'block' }}>
+                      ⚠️ Ollama is not running — video analysis requires Ollama for VLM classification.
+                    </Typography>
+                  )}
                 </Box>
 
                 {/* Analysis Configuration */}
@@ -2630,9 +2686,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                   )}
                 </Box>
 
-                {!serviceRunning && (
+                {!serviceRunning && serviceRunning !== null && (
                   <Alert severity="warning" sx={{ mt: 2, backgroundColor: '#5d4037', color: '#fff' }}>
-                    Start the AI service first to run analysis.
+                    AI Inference Server is not running. Start it with Run_AI.bat or click "Start AI Server" above.
+                  </Alert>
+                )}
+                {serviceRunning && !ollamaConnected && (
+                  <Alert severity="info" sx={{ mt: 2, backgroundColor: '#1a237e', color: '#fff' }}>
+                    AI Server is connected but Ollama is offline. Start Ollama to enable video analysis.
                   </Alert>
                 )}
               </Box>
@@ -2645,45 +2706,23 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Service Output</Typography>
                     <Box>
-                      {!serviceRunning && (
-                        <Button 
-                          size="small" 
-                          onClick={() => startVideoService(false)} 
-                          sx={{ color: 'success.main', mr: 1, borderColor: 'success.main' }} 
-                          variant="outlined"
-                          disabled={startingService}
-                        >
-                          {startingService ? 'Starting...' : 'Start Service'}
-                        </Button>
-                      )}
-                      {serviceRunning && (
-                        <Button 
-                          size="small" 
-                          onClick={stopVideoService} 
-                          sx={{ color: 'error.light', mr: 1, borderColor: 'error.light' }} 
-                          variant="outlined"
-                        >
-                          Stop Service
-                        </Button>
-                      )}
                       {isAnalyzing && (
                         <Button 
                           size="small" 
                           onClick={async () => {
-                            if(window.confirm('Stop current analysis? Any already-detected segments will be preserved.')) {
+                            if(window.confirm('Cancel current analysis? Any already-detected segments will be preserved.')) {
                               try {
                                 await fetch('/api/video-analysis/cancel-analysis', { method: 'POST' });
                               } catch(e) { console.error(e); }
                               setIsAnalyzing(false);
                               setAnalysisProgress('');
-                              // Reload scenes to show any segments that were saved before cancellation
                               await loadScenes();
                             }
                           }} 
                           sx={{ color: 'warning.main', mr: 1, borderColor: 'warning.main' }} 
                           variant="outlined"
                         >
-                          Stop Analysis
+                          Cancel Analysis
                         </Button>
                       )}
                       <Button size="small" onClick={() => setServiceLogs([])} sx={{ color: 'text.secondary' }}>Clear</Button>

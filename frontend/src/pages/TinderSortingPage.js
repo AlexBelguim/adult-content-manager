@@ -14,7 +14,9 @@ import {
     Undo as UndoIcon,
     ArrowBack as ArrowBackIcon,
     Image as ImageIcon,
-    Videocam as VideoIcon
+    Videocam as VideoIcon,
+    CheckCircle as CheckCircleIcon,
+    Delete as DeleteIcon
 } from '@mui/icons-material';
 
 function TinderSortingPage({ basePath }) {
@@ -132,7 +134,7 @@ function TinderSortingPage({ basePath }) {
 
     // Preload next images for instant swipe
     const preloadImages = useCallback((startIndex, fileList) => {
-        const preloadCount = 3; // Preload next 3 images
+        const preloadCount = 5; // Preload next 5 images
         for (let i = startIndex; i < Math.min(startIndex + preloadCount, fileList.length); i++) {
             const file = fileList[i];
             if (file && contentType === 'pics') {
@@ -186,43 +188,44 @@ function TinderSortingPage({ basePath }) {
         loadPerformers();
     }, [selectedPerformer, triggerCleanup]);
 
-    // Perform action (keep or delete)
-    const performAction = useCallback(async (action) => {
+    // Perform action (keep or delete) — optimistic, non-blocking
+    const performAction = useCallback((action) => {
         if (!currentFile || !selectedPerformer) return;
 
-        try {
-            const response = await fetch('/api/filter/action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    performerId: selectedPerformer.id,
-                    filePath: currentFile.path,
-                    action: action
-                })
-            });
+        // Capture file reference before state change
+        const actionFile = currentFile;
+        const actionIndex = currentIndex;
 
-            if (response.ok) {
-                // Add to undo stack
-                setUndoStack(prev => [...prev, {
-                    file: currentFile,
-                    index: currentIndex,
-                    action
-                }]);
+        // Add to undo stack immediately
+        setUndoStack(prev => [...prev, {
+            file: actionFile,
+            index: actionIndex,
+            action
+        }]);
 
-                // Move to next file
-                if (currentIndex < files.length - 1) {
-                    setCurrentIndex(prev => prev + 1);
-                } else {
-                    // No more files - trigger cleanup and go back to performer selection
-                    await triggerCleanup(selectedPerformer.id);
-                    setSelectedPerformer(null);
-                    setFiles([]);
-                    loadPerformers(); // Refresh counts
-                }
-            }
-        } catch (error) {
-            console.error('Error performing action:', error);
+        // Move to next file immediately (optimistic)
+        if (currentIndex < files.length - 1) {
+            setCurrentIndex(prev => prev + 1);
+        } else {
+            // No more files — schedule cleanup & go back
+            triggerCleanup(selectedPerformer.id);
+            setSelectedPerformer(null);
+            setFiles([]);
+            loadPerformers();
         }
+
+        // Fire-and-forget the network call
+        fetch('/api/filter/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                performerId: selectedPerformer.id,
+                filePath: actionFile.path,
+                action: action
+            })
+        }).catch(error => {
+            console.error('Error performing action:', error);
+        });
     }, [currentFile, selectedPerformer, currentIndex, files.length, triggerCleanup]);
 
     // Undo last action
@@ -277,7 +280,7 @@ function TinderSortingPage({ basePath }) {
         }
     };
 
-    const handleDragEnd = async () => {
+    const handleDragEnd = () => {
         if (!isDragging || isTransitioningRef.current) return;
 
         setIsDragging(false);
@@ -286,25 +289,28 @@ function TinderSortingPage({ basePath }) {
         const threshold = 100;
 
         if (dragOffset.x > threshold) {
-            // Lock transitions to prevent double-swipe
+            // Lock transitions briefly to prevent double-swipe
             isTransitioningRef.current = true;
-            // Hide card and clear overlays immediately
+            // Hide card, clear overlays, fire action (optimistic — no await)
             setIsHidden(true);
             setDragOffset({ x: 0, y: 0 });
             setSwipeDirection(null);
-            // Wait for action to complete (index updates)
-            await performAction('keep');
-            // Now the new image is at the new index — reveal
-            setIsHidden(false);
-            isTransitioningRef.current = false;
+            performAction('keep');
+            // Reveal the next card after a single frame so React has flushed the index bump
+            requestAnimationFrame(() => {
+                setIsHidden(false);
+                isTransitioningRef.current = false;
+            });
         } else if (dragOffset.x < -threshold) {
             isTransitioningRef.current = true;
             setIsHidden(true);
             setDragOffset({ x: 0, y: 0 });
             setSwipeDirection(null);
-            await performAction('delete');
-            setIsHidden(false);
-            isTransitioningRef.current = false;
+            performAction('delete');
+            requestAnimationFrame(() => {
+                setIsHidden(false);
+                isTransitioningRef.current = false;
+            });
         } else {
             setDragOffset({ x: 0, y: 0 });
             setSwipeDirection(null);
@@ -508,7 +514,7 @@ function TinderSortingPage({ basePath }) {
     // SWIPE VIEW
     return (
         <Box sx={{
-            height: '100vh',
+            height: '100dvh',
             width: '100vw',
             display: 'flex',
             flexDirection: 'column',
@@ -516,7 +522,9 @@ function TinderSortingPage({ basePath }) {
             overflow: 'hidden',
             position: 'fixed',
             top: 0,
-            left: 0
+            left: 0,
+            // Safe area padding for notched devices
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}>
             {/* Header */}
             <AppBar position="static" sx={{ bgcolor: 'rgba(0,0,0,0.9)', flexShrink: 0 }}>
@@ -593,7 +601,8 @@ function TinderSortingPage({ basePath }) {
                 justifyContent: 'center',
                 position: 'relative',
                 overflow: 'hidden',
-                p: 2
+                p: { xs: 0.5, sm: 2 },
+                minHeight: 0, // Allow flex child to shrink properly
             }}>
                 {/* Loading state */}
                 {loading && (
@@ -605,6 +614,36 @@ function TinderSortingPage({ basePath }) {
                     <Typography variant="h6" sx={{ color: 'grey.500', textAlign: 'center' }}>
                         No unfiltered {contentType === 'pics' ? 'images' : 'videos'} remaining
                     </Typography>
+                )}
+
+                {/* Background card — next image sits behind the current card for instant reveal */}
+                {!loading && contentType === 'pics' && files[currentIndex + 1] && (
+                    <Box
+                        sx={{
+                            position: 'absolute',
+                            width: '100%',
+                            height: '100%',
+                            maxWidth: { xs: '100%', sm: '500px' },
+                            maxHeight: { xs: '100%', sm: '80vh' },
+                            borderRadius: { xs: 0, sm: 3 },
+                            overflow: 'hidden',
+                            boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+                            zIndex: 0,
+                        }}
+                    >
+                        <img
+                            src={`/api/files/raw?path=${encodeURIComponent(files[currentIndex + 1].path)}`}
+                            alt="Next content"
+                            draggable={false}
+                            style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                backgroundColor: '#000',
+                                pointerEvents: 'none'
+                            }}
+                        />
+                    </Box>
                 )}
 
                 {/* Swipe card */}
@@ -621,13 +660,15 @@ function TinderSortingPage({ basePath }) {
                             position: 'relative',
                             width: '100%',
                             height: '100%',
-                            maxWidth: '500px',
-                            maxHeight: '80vh',
-                            borderRadius: 3,
+                            maxWidth: { xs: '100%', sm: '500px' },
+                            maxHeight: { xs: '100%', sm: '80vh' },
+                            borderRadius: { xs: 0, sm: 3 },
                             overflow: 'hidden',
                             cursor: 'grab',
                             userSelect: 'none',
+                            bgcolor: '#000',
                             boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+                            zIndex: 1,
                             ...getCardStyle()
                         }}
                     >
@@ -718,17 +759,87 @@ function TinderSortingPage({ basePath }) {
                 )}
             </Box>
 
-            {/* Bottom hint */}
+            {/* Bottom action bar with tappable buttons */}
             {currentFile && (
                 <Box sx={{
-                    textAlign: 'center',
-                    p: 2,
-                    bgcolor: 'rgba(0,0,0,0.7)',
-                    flexShrink: 0
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: { xs: 3, sm: 4 },
+                    py: { xs: 1.5, sm: 2 },
+                    px: 2,
+                    bgcolor: 'rgba(0,0,0,0.85)',
+                    backdropFilter: 'blur(10px)',
+                    flexShrink: 0,
                 }}>
-                    <Typography variant="body2" sx={{ color: 'grey.500' }}>
-                        ← DELETE • KEEP →
-                    </Typography>
+                    {/* Delete button */}
+                    <IconButton
+                        onClick={() => {
+                            if (isTransitioningRef.current) return;
+                            isTransitioningRef.current = true;
+                            setIsHidden(true);
+                            setDragOffset({ x: 0, y: 0 });
+                            setSwipeDirection(null);
+                            performAction('delete');
+                            requestAnimationFrame(() => {
+                                setIsHidden(false);
+                                isTransitioningRef.current = false;
+                            });
+                        }}
+                        sx={{
+                            bgcolor: 'rgba(244, 67, 54, 0.15)',
+                            border: '2px solid #f44336',
+                            color: '#f44336',
+                            width: { xs: 64, sm: 72 },
+                            height: { xs: 64, sm: 72 },
+                            '&:active': { bgcolor: 'rgba(244, 67, 54, 0.4)', transform: 'scale(0.92)' },
+                            transition: 'transform 0.1s ease',
+                        }}
+                    >
+                        <DeleteIcon sx={{ fontSize: { xs: 30, sm: 36 } }} />
+                    </IconButton>
+
+                    {/* Undo button */}
+                    <IconButton
+                        onClick={handleUndo}
+                        disabled={undoStack.length === 0}
+                        sx={{
+                            bgcolor: 'rgba(255,255,255,0.08)',
+                            color: '#ff9800',
+                            width: { xs: 48, sm: 56 },
+                            height: { xs: 48, sm: 56 },
+                            '&:disabled': { opacity: 0.3 },
+                        }}
+                    >
+                        <UndoIcon />
+                    </IconButton>
+
+                    {/* Keep button */}
+                    <IconButton
+                        onClick={() => {
+                            if (isTransitioningRef.current) return;
+                            isTransitioningRef.current = true;
+                            setIsHidden(true);
+                            setDragOffset({ x: 0, y: 0 });
+                            setSwipeDirection(null);
+                            performAction('keep');
+                            requestAnimationFrame(() => {
+                                setIsHidden(false);
+                                isTransitioningRef.current = false;
+                            });
+                        }}
+                        sx={{
+                            bgcolor: 'rgba(76, 175, 80, 0.15)',
+                            border: '2px solid #4caf50',
+                            color: '#4caf50',
+                            width: { xs: 64, sm: 72 },
+                            height: { xs: 64, sm: 72 },
+                            '&:active': { bgcolor: 'rgba(76, 175, 80, 0.4)', transform: 'scale(0.92)' },
+                            transition: 'transform 0.1s ease',
+                        }}
+                    >
+                        <CheckCircleIcon sx={{ fontSize: { xs: 30, sm: 36 } }} />
+                    </IconButton>
                 </Box>
             )}
         </Box>
