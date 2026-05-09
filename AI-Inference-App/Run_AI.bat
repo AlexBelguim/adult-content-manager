@@ -48,7 +48,7 @@ if %ERRORLEVEL% neq 0 (
     echo [INFO] Ollama not found in PATH.
     echo        Video scene classification requires Ollama with a vision model.
     echo        Install from: https://ollama.com/download
-    echo        Then run: ollama pull gemma3:12b
+    echo        Then run: ollama pull minicpm-v:latest
     echo.
 ) else (
     echo [OK] Ollama found

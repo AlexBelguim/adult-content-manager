@@ -33,7 +33,7 @@ def map_path(path):
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:12b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "minicpm-v:latest")
 
 # Default supported actions (used when user provides specific labels)
 SUPPORTED_ACTIONS = {
@@ -194,7 +194,10 @@ Output ONLY a JSON object, nothing else:
             content = resp.json().get("message", {}).get("content", "")
             return parse_vlm_response(content, allowed_actions)
         else:
-            log(f"  ⚠️ Ollama returned status {resp.status_code}")
+            hint = ""
+            if resp.status_code == 404:
+                hint = f" (Is the model '{OLLAMA_MODEL}' downloaded? Run 'ollama pull {OLLAMA_MODEL}')"
+            log(f"  ⚠️ Ollama returned status {resp.status_code}{hint}")
             return {"action": "other", "confidence": 0.0}
             
     except Exception as ex:
