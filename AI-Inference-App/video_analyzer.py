@@ -93,7 +93,7 @@ def extract_frames(video_path, interval_sec=12, start_time=None, end_time=None):
             frames.append({"time": t, "data": frame_data})
         t += interval_sec
     
-    log(f"📸 Extracted {len(frames)} frames ({s:.0f}s - {e:.0f}s, interval={interval_sec}s)")
+    log(f"📸 Identified {len(frames)} analysis points ({s:.0f}s - {e:.0f}s, interval={interval_sec}s)")
     return frames
 
 def extract_burst_frames(video_path, center_time, duration_sec=2, count=8):
@@ -467,8 +467,11 @@ def analyze_video(video_path, segment_duration=12, min_segment=10,
         
         # Fallback to single frame if burst fails
         if not context_frames:
-             # Just the one frame we already had
+             log(f"   ⚠️ Burst failed at {frame['time']}s, using single frame")
              context_frames = [frame["data"]]
+        else:
+             # Success! Log that we are using the burst
+             pass # We log the result anyway, no need to spam 'Using 8 frames'
         
         result = classify_frame_vlm(context_frames, allowed_actions)
         raw_segments.append({
