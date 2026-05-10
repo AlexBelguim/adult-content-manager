@@ -96,20 +96,32 @@ def extract_frames(video_path, interval_sec=12, start_time=None, end_time=None):
     log(f"📸 Extracted {len(frames)} frames ({s:.0f}s - {e:.0f}s, interval={interval_sec}s)")
     return frames
 
-def extract_single_frame(video_path, time_sec):
-    """Extract a single frame at given timestamp, return as base64 JPEG."""
+def extract_burst_frames(video_path, center_time, duration_sec=2, count=8):
+    """Extract a burst of frames around a center time using a single ffmpeg call."""
     try:
+        start = max(0, center_time - (duration_sec / 2))
+        fps = count / duration_sec
         cmd = [
-            'ffmpeg', '-ss', str(time_sec), '-i', video_path,
-            '-vframes', '1', '-f', 'image2', '-c:v', 'mjpeg',
-            '-q:v', '3', '-y', 'pipe:1'
+            'ffmpeg', '-ss', str(start), '-t', str(duration_sec),
+            '-i', video_path,
+            '-vf', f'fps={fps}',
+            '-vframes', str(count),
+            '-f', 'image2pipe', '-c:v', 'mjpeg',
+            '-q:v', '3', 'pipe:1'
         ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20)
         if result.returncode == 0 and result.stdout:
-            return base64.b64encode(result.stdout).decode('utf-8')
+            # Split concatenated JPEGs (JPEG starts with \xFF\xD8)
+            data = result.stdout
+            frames = []
+            parts = data.split(b'\xff\xd8')
+            for part in parts[1:]:
+                frame = b'\xff\xd8' + part
+                frames.append(base64.b64encode(frame).decode('utf-8'))
+            return frames[:count]
     except Exception as ex:
-        log(f"  ⚠️ Frame extraction failed at {time_sec}s: {ex}")
-    return None
+        log(f"  ⚠️ Burst extraction failed at {center_time}s: {ex}")
+    return []
 
 def extract_multi_frames(video_path, center_time, count=3, span_sec=2):
     """Extract multiple frames around a center time for context."""
@@ -171,10 +183,10 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Task: Classify the primary sexual action in these frames.
-Target Detail Level: Highest Specificity (identify exact body parts and tools).
+        prompt = """Task: Analyze the motion in these frames and describe the primary sexual action.
+Compare the frames to distinguish between manual (fingers), oral, or TOYS (dildo, vibrator, etc).
 
-Taxonomy Guide (Always prefer the most specific label):
+Taxonomy Guide (Prefer specific labels):
 1. TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
 2. MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
 3. ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
@@ -183,9 +195,9 @@ Taxonomy Guide (Always prefer the most specific label):
 6. OTHER: nudity, idle, transition
 
 Rules:
-1. Look at the motion across frames to distinguish between fingers and toys.
-2. Output ONLY JSON. No explanations or mentions of 'guidelines'.
-3. Format: {"action": "most specific label", "confidence": 0.9}"""
+1. Be SPECIFIC. If there's a toy, identify what it's doing (e.g. 'pussy dildo play').
+2. Output ONLY JSON. No talk, no explanations.
+3. Format: {"action": "specific label", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -429,18 +441,13 @@ def analyze_video(video_path, segment_duration=12, min_segment=10,
             "progress": progress
         }
         
-        # Use multi-frame context (current, -2s, +2s) to help VLM see motion
-        context_frames = []
-        # Current
-        context_frames.append(frame["data"])
-        # Previous (try to extract)
-        if frame["time"] >= 2:
-            prev = extract_single_frame(video_path, frame["time"] - 2)
-            if prev: context_frames.append(prev)
-        # Next (try to extract)
-        if frame["time"] + 2 <= video_duration:
-            nxt = extract_single_frame(video_path, frame["time"] + 2)
-            if nxt: context_frames.append(nxt)
+        # Use a burst of 8 frames over 2 seconds to help VLM see fluid motion
+        context_frames = extract_burst_frames(video_path, frame["time"], duration_sec=2, count=8)
+        
+        # Fallback to single frame if burst fails
+        if not context_frames:
+             # Just the one frame we already had
+             context_frames = [frame["data"]]
         
         result = classify_frame_vlm(context_frames, allowed_actions)
         raw_segments.append({
