@@ -221,7 +221,7 @@ Format: {"action": "label from choices", "confidence": 0.5-1.0}"""
             "messages": [{
                 "role": "user",
                 "content": prompt,
-                "images": frame_b64_list[:3]  # Max 3 frames for context
+                "images": frame_b64_list  # Use all provided context frames
             }],
             "stream": False,
             "options": {
