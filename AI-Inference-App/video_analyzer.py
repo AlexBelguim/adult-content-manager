@@ -199,20 +199,20 @@ Rules:
     else:
         # ── Free Mode: open vocabulary ──
         prompt = """Task: Analyze the motion in these frames and describe the primary sexual action.
-Compare the frames to distinguish between manual (fingers), oral, or TOYS (dildo, vibrator, etc).
 
-Taxonomy Guide (Prefer specific labels):
-1. TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
-2. MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
-3. ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
-4. PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
-5. FINALE: cumshot, facial, creampie
-6. OTHER: nudity, idle, transition
+Taxonomy Guide (Target these specific detail levels):
+- TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
+- MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
+- ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
+- PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
+- FINALE: cumshot, facial, creampie
+- OTHER: idle, transition (Only use 'nudity' if NO specific action is happening)
 
 Rules:
-1. Be SPECIFIC. If there's a toy, identify what it's doing (e.g. 'pussy dildo play').
-2. Output ONLY JSON. No talk, no explanations.
-3. Format: {"action": "specific label", "confidence": 0.9}"""
+1. Output ONLY the specific action label. Do NOT include category names like 'MANUAL' or 'TOYS' in the answer.
+2. If you see a toy, describe the action (e.g. 'pussy dildo play').
+3. Output ONLY JSON. No talk, no explanations.
+4. Format: {"action": "fingering pussy", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -261,6 +261,12 @@ def parse_vlm_response(content, allowed_actions=None):
             data = json.loads(json_match.group())
             action = str(data.get("action", "other")).lower().strip()
             confidence = float(data.get("confidence", 0.5))
+            
+            # Strip category prefixes the model might have included (e.g. "manual: fingering" -> "fingering")
+            for prefix in ['toys:', 'manual:', 'oral:', 'penetration:', 'finale:', 'other:', 'toys ', 'manual ', 'oral ', 'penetration ', 'finale ', 'other ']:
+                if action.startswith(prefix):
+                    action = action[len(prefix):].strip()
+                    break
             
             # If the model is being chatty in the action field (e.g. "it looks like missionary")
             # we try to see if any known actions are mentioned
