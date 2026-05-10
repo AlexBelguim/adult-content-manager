@@ -175,47 +175,6 @@ def get_video_duration(video_path):
     return 0
 
 # ── VLM Classification via Ollama ───────────────────────────────────────────────
-def create_frame_grid(base64_frames, cols=3):
-    """Combine multiple frames into a single grid image for models that only support 1 image."""
-    from PIL import Image
-    import io
-    import base64
-    
-    if not base64_frames:
-        return None
-    
-    try:
-        # Take up to 6 frames for a 3x2 grid
-        sample_frames = base64_frames
-        if len(base64_frames) > 6:
-            # Sample 6 evenly spaced frames
-            indices = [int(i * (len(base64_frames)-1) / 5) for i in range(6)]
-            sample_frames = [base64_frames[i] for i in indices]
-            
-        images = []
-        for b64 in sample_frames:
-            img_data = base64.b64decode(b64)
-            img = Image.open(io.BytesIO(img_data))
-            # Resize for grid to keep total size reasonable (max 640px wide per cell)
-            if img.width > 640:
-                img.thumbnail((640, 640))
-            images.append(img)
-            
-        w, h = images[0].size
-        cols = min(len(images), cols)
-        rows = (len(images) + cols - 1) // cols
-        
-        grid_img = Image.new('RGB', (cols * w, rows * h))
-        for i, img in enumerate(images):
-            grid_img.paste(img, ((i % cols) * w, (i // cols) * h))
-            
-        buffered = io.BytesIO()
-        grid_img.save(buffered, format="JPEG", quality=75)
-        return base64.b64encode(buffered.getvalue()).decode('utf-8')
-    except Exception as ex:
-        log(f"  ⚠️ Grid creation failed: {ex}")
-        return base64_frames[0] if base64_frames else None
-
 def classify_frame_vlm(frame_b64_list, allowed_actions=None, window_size=None):
     """
     Classify action in frame(s) using Ollama VLM.
@@ -239,42 +198,44 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """{"action": "label", "confidence": 0.9}
+        prompt = """Task: Analyze the motion in these frames and describe the primary sexual action.
+
+Focus: Watch the movement carefully. Distinguish between human fingers and synthetic toys (dildos, vibrators). 
+Note: Toys can be flesh-colored; look for their shape and mechanical motion.
+
+Taxonomy Guide (Target these specific detail levels):
+- TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
+- MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
+- ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
+- PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
+- FINALE: cumshot, facial, creampie
+- OTHER: idle, transition (Only use 'nudity' if NO specific action is happening)
 
 Rules:
-- Choose from: pussy dildo play, anal dildo play, dildo blowjob, fingering pussy, fingering ass, handjob, missionary, cowgirl, doggy style, anal, cumshot, nudity, idle.
-- Output ONLY the JSON. No other text."""
+1. Output ONLY the specific action label. Do NOT include category names.
+2. If any toy is visible, prioritize 'toy' labels (e.g. 'pussy dildo play').
+3. Output ONLY JSON. No talk, no explanations.
+4. Format: {"action": "fingering pussy", "confidence": 0.9}"""
 
     try:
-        # ── Handle Model Specifics ──
-        # llama3.2-vision only supports 1 image in Ollama currently.
-        # We use a grid of frames to provide temporal context.
-        if "llama" in OLLAMA_MODEL.lower():
-            grid_b64 = create_frame_grid(frame_b64_list)
-            messages_images = [grid_b64] if grid_b64 else []
-        else:
-            # Other models like qwen2-vl or minicpm-v support multi-image natively
-            # We send up to 8 frames for a good balance of detail and speed
-            messages_images = frame_b64_list[:8]
-            
         payload = {
             "model": OLLAMA_MODEL,
             "messages": [{
                 "role": "user",
                 "content": prompt,
-                "images": messages_images
+                "images": frame_b64_list[:3]  # Max 3 frames for context
             }],
             "stream": False,
             "options": {
                 "temperature": 0.1,
-                "num_predict": 150
+                "num_predict": 100
             }
         }
         
         resp = requests.post(
             f"{OLLAMA_URL}/api/chat",
             json=payload,
-            timeout=180
+            timeout=120
         )
         
         if resp.status_code == 200:
@@ -294,21 +255,15 @@ Rules:
 def parse_vlm_response(content, allowed_actions=None):
     """Parse VLM JSON response, with fallback for malformed output."""
     try:
-        # Clean the content (remove markdown and ChatML tokens)
+        # Clean the content a bit (remove markdown code blocks)
         content = re.sub(r'```json\s*|\s*```', '', content).strip()
-        content = re.sub(r'<\|[^|]+\|>', '', content).strip()
-        content = content.replace('assistant', '').replace('user', '').replace('system', '').strip()
         
         # Try to extract JSON from response
-        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        json_match = re.search(r'\{[^}]+\}', content)
         if json_match:
-            try:
-                data = json.loads(json_match.group())
-                action = str(data.get("action", "other")).lower().strip()
-                confidence = float(data.get("confidence", 0.5))
-            except Exception as e:
-                log(f"  ⚠️ JSON parse error: {e}. Raw: {content[:100]}")
-                raise ValueError("Malformed JSON")
+            data = json.loads(json_match.group())
+            action = str(data.get("action", "other")).lower().strip()
+            confidence = float(data.get("confidence", 0.5))
             
             # Strip category prefixes (e.g. "manual: fingering" -> "fingering")
             for prefix in ['toys:', 'manual:', 'oral:', 'penetration:', 'finale:', 'other:', 'toys ', 'manual ', 'oral ', 'penetration ', 'finale ', 'other ']:
@@ -317,13 +272,13 @@ def parse_vlm_response(content, allowed_actions=None):
                     break
             
             # Additional cleanup for disclaimers
-            if "based on" in action or "following" in action or "guideline" in action or "openai" in action or "the image" in action or "can't help" in action:
+            if "based on" in action or "following" in action or "guideline" in action or "openai" in action:
                 # Try to find a valid action word in the mess
                 for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'fingering', 'dildo', 'toy', 'boob', 'rimming']:
                     if common in action:
                         action = common
                         break
-                if len(action) > 20: # Still too long/messy
+                if len(action) > 25: # Still too long?
                     action = "other"
             
             # In labels mode, validate action is in the allowed list
