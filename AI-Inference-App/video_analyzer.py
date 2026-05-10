@@ -198,23 +198,22 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Task: Classify the sexual action in these frames.
-Target: Be extremely specific. Distinguish between toys and fingers.
+        prompt = """Classification Task: Identify the primary action in these frames.
 
-Examples:
-- If a dildo/toy is used: {"action": "pussy dildo play", "confidence": 0.9}
-- If fingers are used: {"action": "fingering pussy", "confidence": 0.9}
-- If oral is happening: {"action": "blowjob", "confidence": 0.9}
+Visual Cues:
+- TOYS: Look for uniform color (pink, flesh, or purple), plastic-like texture, or steady mechanical motion.
+- MANUAL: Look for distinct human fingers, skin wrinkles, and organic movement.
 
-Taxonomy (Choose the most specific):
-- TOYS: pussy dildo play, anal dildo play, dildo blowjob
-- MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing
-- ORAL: blowjob, cunnilingus, 69, deepthroat
-- PENETRATION: missionary, cowgirl, doggy style, anal
-- OTHER: nudity, idle
+Choices (Use these exact labels):
+- pussy dildo play, anal dildo play, dildo blowjob
+- fingering pussy, fingering ass, handjob
+- blowjob, cunnilingus, 69, deepthroat
+- missionary, cowgirl, doggy style, anal
+- handbra, boob teasing, titjob, cumshot
+- nudity, idle, transition
 
-Rule: Output ONLY JSON. No talk.
-Format: {"action": "label", "confidence": 0.9}"""
+Rule: Output ONLY a JSON object. No other text.
+Format: {"action": "label from choices", "confidence": 0.5-1.0}"""
 
     try:
         payload = {
