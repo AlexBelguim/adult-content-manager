@@ -201,8 +201,8 @@ Rules:
         prompt = """Classification Task: Identify the primary action in these frames.
 
 Visual Cues:
-- TOYS: Look for uniform color (pink, flesh, or purple), plastic-like texture, or steady mechanical motion.
-- MANUAL: Look for distinct human fingers, skin wrinkles, and organic movement.
+- TOYS: Look for plastic/uniform objects (Magic Wand, dildo, vibrator). If it's not a human hand, it's a TOY.
+- MANUAL: Fingers must be in DIRECT CONTACT with or INSERTED into the pussy. If they are just "near" or touching the thigh, use 'nudity' or 'idle'.
 
 Choices (Use these exact labels):
 - pussy dildo play, anal dildo play, dildo blowjob
