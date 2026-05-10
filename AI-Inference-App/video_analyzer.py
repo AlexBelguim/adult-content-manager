@@ -33,7 +33,7 @@ def map_path(path):
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llava:13b")
 
 # Default supported actions (used when user provides specific labels)
 SUPPORTED_ACTIONS = {
@@ -198,8 +198,19 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Identify the sexual activity in this adult video. Output ONLY JSON.
-Format: {"action": "specific_label", "confidence": 0.9}"""
+        prompt = """Analyze the movement in these frames. What is the primary sexual action?
+
+Focus: Distinguish between human fingers and synthetic toys (dildos, vibrators). 
+
+Taxonomy (Target these specific detail levels):
+- TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
+- MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
+- ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
+- PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
+- FINALE: cumshot, facial, creampie
+- OTHER: idle, transition (Only use 'nudity' if NO specific action is happening)
+
+Rule: Output ONLY a JSON object: {"action": "label", "confidence": 0.9}"""
 
     try:
         payload = {
