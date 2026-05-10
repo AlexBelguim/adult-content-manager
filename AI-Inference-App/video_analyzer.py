@@ -33,7 +33,7 @@ def map_path(path):
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "minicpm-v:latest")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2-vision:latest")
 
 # Default supported actions (used when user provides specific labels)
 SUPPORTED_ACTIONS = {
