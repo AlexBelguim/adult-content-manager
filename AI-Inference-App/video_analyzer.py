@@ -198,24 +198,16 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Task: Analyze the motion in these frames and describe the primary sexual action.
+        prompt = """Analyze the movement in these frames. What is the primary sexual action?
 
-Focus: Watch the movement carefully. Distinguish between human fingers and synthetic toys (dildos, vibrators). 
-Note: Toys can be flesh-colored; look for their shape and mechanical motion.
-
-Taxonomy Guide (Target these specific detail levels):
+Taxonomy (Prefer these specific labels):
 - TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
 - MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
 - ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
 - PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
 - FINALE: cumshot, facial, creampie
-- OTHER: idle, transition (Only use 'nudity' if NO specific action is happening)
 
-Rules:
-1. Output ONLY the specific action label. Do NOT include category names.
-2. If any toy is visible, prioritize 'toy' labels (e.g. 'pussy dildo play').
-3. Output ONLY JSON. No talk, no explanations.
-4. Format: {"action": "fingering pussy", "confidence": 0.9}"""
+Rule: Output ONLY a JSON object: {"action": "label", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -240,7 +232,13 @@ Rules:
         
         if resp.status_code == 200:
             content = resp.json().get("message", {}).get("content", "")
-            return parse_vlm_response(content, allowed_actions)
+            result = parse_vlm_response(content, allowed_actions)
+            
+            # Debug log if we got "other" which might mean parsing failed
+            if result['action'] == 'other' and len(content) > 0:
+                log(f"  🔍 VLM Response (failed to parse): {content[:100]}...")
+            
+            return result
         else:
             hint = ""
             if resp.status_code == 404:
@@ -466,8 +464,8 @@ def analyze_video(video_path, segment_duration=12, min_segment=10,
             "progress": progress
         }
         
-        # Use a burst of 12 frames over 3 seconds (4 FPS) for more temporal detail
-        context_frames = extract_burst_frames(video_path, frame["time"], duration_sec=3, count=12)
+        # Use a burst of 8 frames over 2 seconds (good balance for Qwen)
+        context_frames = extract_burst_frames(video_path, frame["time"], duration_sec=2, count=8)
         
         # Fallback to single frame if burst fails
         if not context_frames:
