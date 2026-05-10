@@ -239,17 +239,11 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Analyze the motion in these frames.
-Output ONLY a JSON object with this exact format:
-{"action": "<specific action label>", "confidence": 0.9}
+        prompt = """{"action": "label", "confidence": 0.9}
 
-Taxonomy Guide:
-- pussy dildo play, anal dildo play, dildo blowjob, dildo handjob
-- fingering pussy, fingering ass, handjob, handbra, boob teasing
-- missionary, cowgirl, doggy style, anal, cumshot
-- nudity, idle, transition
-
-Rule: No conversational text. No categories. Just JSON."""
+Rules:
+- Choose from: pussy dildo play, anal dildo play, dildo blowjob, fingering pussy, fingering ass, handjob, missionary, cowgirl, doggy style, anal, cumshot, nudity, idle.
+- Output ONLY the JSON. No other text."""
 
     try:
         # ── Handle Model Specifics ──
@@ -306,11 +300,15 @@ def parse_vlm_response(content, allowed_actions=None):
         content = content.replace('assistant', '').replace('user', '').replace('system', '').strip()
         
         # Try to extract JSON from response
-        json_match = re.search(r'\{[^}]+\}', content)
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
         if json_match:
-            data = json.loads(json_match.group())
-            action = str(data.get("action", "other")).lower().strip()
-            confidence = float(data.get("confidence", 0.5))
+            try:
+                data = json.loads(json_match.group())
+                action = str(data.get("action", "other")).lower().strip()
+                confidence = float(data.get("confidence", 0.5))
+            except Exception as e:
+                log(f"  ⚠️ JSON parse error: {e}. Raw: {content[:100]}")
+                raise ValueError("Malformed JSON")
             
             # Strip category prefixes (e.g. "manual: fingering" -> "fingering")
             for prefix in ['toys:', 'manual:', 'oral:', 'penetration:', 'finale:', 'other:', 'toys ', 'manual ', 'oral ', 'penetration ', 'finale ', 'other ']:
