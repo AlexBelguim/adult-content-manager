@@ -123,6 +123,21 @@ def extract_burst_frames(video_path, center_time, duration_sec=2, count=8):
         log(f"  ⚠️ Burst extraction failed at {center_time}s: {ex}")
     return []
 
+def extract_single_frame(video_path, time_sec):
+    """Extract a single frame at given timestamp, return as base64 JPEG."""
+    try:
+        cmd = [
+            'ffmpeg', '-ss', str(time_sec), '-i', video_path,
+            '-vframes', '1', '-f', 'image2', '-c:v', 'mjpeg',
+            '-q:v', '3', '-y', 'pipe:1'
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+        if result.returncode == 0 and result.stdout:
+            return base64.b64encode(result.stdout).decode('utf-8')
+    except Exception as ex:
+        log(f"  ⚠️ Frame extraction failed at {time_sec}s: {ex}")
+    return None
+
 def extract_multi_frames(video_path, center_time, count=3, span_sec=2):
     """Extract multiple frames around a center time for context."""
     half = span_sec / 2
@@ -551,9 +566,10 @@ def video_supported_actions():
         actions.append({
             "id": action_id,
             "name": name,
-            "category": "position" if action_id in ['missionary','cowgirl','reverse_cowgirl','doggy','spooning','standing'] 
-                        else "oral" if action_id in ['blowjob','cunnilingus','69']
-                        else "manual" if action_id in ['handjob','fingering','titfuck','footjob']
+            "category": "position" if action_id in ['missionary','cowgirl','reverse_cowgirl','doggy','anal_doggy','anal'] 
+                        else "oral" if action_id in ['blowjob','cunnilingus','69','rimming','dildo_blowjob']
+                        else "manual" if action_id in ['handjob','fingering_pussy','fingering_anal','titfuck','boob_teasing','handbra','dildo_handjob']
+                        else "toys" if 'dildo' in action_id or 'vibrator' in action_id
                         else "other"
         })
     return jsonify({"actions": actions})
