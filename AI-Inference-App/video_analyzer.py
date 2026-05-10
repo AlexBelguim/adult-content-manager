@@ -200,6 +200,9 @@ Rules:
         # ── Free Mode: open vocabulary ──
         prompt = """Task: Analyze the motion in these frames and describe the primary sexual action.
 
+Focus: Watch the movement carefully. Distinguish between human fingers and synthetic toys (dildos, vibrators). 
+Note: Toys can be flesh-colored; look for their shape and mechanical motion.
+
 Taxonomy Guide (Target these specific detail levels):
 - TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
 - MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
@@ -209,8 +212,8 @@ Taxonomy Guide (Target these specific detail levels):
 - OTHER: idle, transition (Only use 'nudity' if NO specific action is happening)
 
 Rules:
-1. Output ONLY the specific action label. Do NOT include category names like 'MANUAL' or 'TOYS' in the answer.
-2. If you see a toy, describe the action (e.g. 'pussy dildo play').
+1. Output ONLY the specific action label. Do NOT include category names.
+2. If any toy is visible, prioritize 'toy' labels (e.g. 'pussy dildo play').
 3. Output ONLY JSON. No talk, no explanations.
 4. Format: {"action": "fingering pussy", "confidence": 0.9}"""
 
@@ -262,22 +265,20 @@ def parse_vlm_response(content, allowed_actions=None):
             action = str(data.get("action", "other")).lower().strip()
             confidence = float(data.get("confidence", 0.5))
             
-            # Strip category prefixes the model might have included (e.g. "manual: fingering" -> "fingering")
+            # Strip category prefixes (e.g. "manual: fingering" -> "fingering")
             for prefix in ['toys:', 'manual:', 'oral:', 'penetration:', 'finale:', 'other:', 'toys ', 'manual ', 'oral ', 'penetration ', 'finale ', 'other ']:
                 if action.startswith(prefix):
                     action = action[len(prefix):].strip()
                     break
             
-            # If the model is being chatty in the action field (e.g. "it looks like missionary")
-            # we try to see if any known actions are mentioned
-            if len(action) > 25 or "based on" in action or "following" in action or "openai" in action:
-                # Common actions to look for if the model is too talkative
+            # Additional cleanup for disclaimers
+            if "based on" in action or "following" in action or "guideline" in action or "openai" in action:
+                # Try to find a valid action word in the mess
                 for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'fingering', 'dildo', 'toy', 'boob', 'rimming']:
                     if common in action:
                         action = common
                         break
-                # Still too long? Truncate or use other
-                if len(action) > 35:
+                if len(action) > 25: # Still too long?
                     action = "other"
             
             # In labels mode, validate action is in the allowed list
@@ -462,8 +463,8 @@ def analyze_video(video_path, segment_duration=12, min_segment=10,
             "progress": progress
         }
         
-        # Use a burst of 8 frames over 2 seconds to help VLM see fluid motion
-        context_frames = extract_burst_frames(video_path, frame["time"], duration_sec=2, count=8)
+        # Use a burst of 12 frames over 3 seconds (4 FPS) for more temporal detail
+        context_frames = extract_burst_frames(video_path, frame["time"], duration_sec=3, count=12)
         
         # Fallback to single frame if burst fails
         if not context_frames:
