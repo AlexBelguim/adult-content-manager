@@ -172,12 +172,16 @@ Rules:
     else:
         # ── Free Mode: open vocabulary ──
         prompt = """Task: Describe the primary sexual action in this frame.
-Be as SPECIFIC as possible. Distinguish between different types of stimulation.
+Be as SPECIFIC as possible.
+
+IMPORTANT:
+- If there is NUDITY or POSING (e.g. topless, showing breasts, spread eagle), do NOT use 'idle'. Use a descriptive label like 'topless', 'nudity', or 'posing'.
+- Use 'idle' ONLY for non-content moments: talking to chat, walking away, black screens, or transitions.
 
 Examples of specific labels:
+- topless, posing, nudity, handbra, boob teasing
 - fingering pussy, fingering ass, pussy dildo play, anal dildo play
 - blowjob, handjob, dildo blowjob, dildo handjob
-- handbra, boob teasing, titjob
 - missionary, cowgirl, reverse cowgirl, doggy style, anal
 - cumshot, rimming, 69
 
