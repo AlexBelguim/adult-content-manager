@@ -175,6 +175,47 @@ def get_video_duration(video_path):
     return 0
 
 # ── VLM Classification via Ollama ───────────────────────────────────────────────
+def create_frame_grid(base64_frames, cols=3):
+    """Combine multiple frames into a single grid image for models that only support 1 image."""
+    from PIL import Image
+    import io
+    import base64
+    
+    if not base64_frames:
+        return None
+    
+    try:
+        # Take up to 6 frames for a 3x2 grid
+        sample_frames = base64_frames
+        if len(base64_frames) > 6:
+            # Sample 6 evenly spaced frames
+            indices = [int(i * (len(base64_frames)-1) / 5) for i in range(6)]
+            sample_frames = [base64_frames[i] for i in indices]
+            
+        images = []
+        for b64 in sample_frames:
+            img_data = base64.b64decode(b64)
+            img = Image.open(io.BytesIO(img_data))
+            # Resize for grid to keep total size reasonable (max 640px wide per cell)
+            if img.width > 640:
+                img.thumbnail((640, 640))
+            images.append(img)
+            
+        w, h = images[0].size
+        cols = min(len(images), cols)
+        rows = (len(images) + cols - 1) // cols
+        
+        grid_img = Image.new('RGB', (cols * w, rows * h))
+        for i, img in enumerate(images):
+            grid_img.paste(img, ((i % cols) * w, (i // cols) * h))
+            
+        buffered = io.BytesIO()
+        grid_img.save(buffered, format="JPEG", quality=75)
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+    except Exception as ex:
+        log(f"  ⚠️ Grid creation failed: {ex}")
+        return base64_frames[0] if base64_frames else None
+
 def classify_frame_vlm(frame_b64_list, allowed_actions=None, window_size=None):
     """
     Classify action in frame(s) using Ollama VLM.
@@ -218,17 +259,27 @@ Rules:
 4. Format: {"action": "fingering pussy", "confidence": 0.9}"""
 
     try:
+        # ── Handle Model Specifics ──
+        # llama3.2-vision only supports 1 image in Ollama currently.
+        # We use a grid of frames to provide temporal context.
+        if "llama3.2-vision" in OLLAMA_MODEL:
+            grid_b64 = create_frame_grid(frame_b64_list)
+            messages_images = [grid_b64] if grid_b64 else []
+        else:
+            # Other models like minicpm-v support multi-image
+            messages_images = frame_b64_list[:4] # limit to 4 for speed
+            
         payload = {
             "model": OLLAMA_MODEL,
             "messages": [{
                 "role": "user",
                 "content": prompt,
-                "images": frame_b64_list[:3]  # Max 3 frames for context
+                "images": messages_images
             }],
             "stream": False,
             "options": {
                 "temperature": 0.1,
-                "num_predict": 100
+                "num_predict": 150
             }
         }
         
