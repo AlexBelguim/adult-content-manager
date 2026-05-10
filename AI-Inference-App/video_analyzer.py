@@ -171,20 +171,21 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Task: Describe the primary sexual action in these frames.
-Identify if it is manual (fingers), oral, or uses a TOY (dildo, vibrator, etc).
+        prompt = """Task: Classify the primary sexual action in these frames.
+Target Detail Level: Highest Specificity (identify exact body parts and tools).
 
-Examples of specific labels:
-- pussy dildo play, anal dildo play, dildo blowjob
-- fingering pussy, fingering ass, handjob
-- blowjob, missionary, cowgirl, doggy style, anal
-- handbra, boob teasing, titjob, cumshot
+Taxonomy Guide (Always prefer the most specific label):
+1. TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
+2. MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
+3. ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
+4. PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
+5. FINALE: cumshot, facial, creampie
+6. OTHER: nudity, idle, transition
 
 Rules:
-1. Be as SPECIFIC as possible. If there's a toy, mention it (e.g. 'pussy dildo play' NOT just 'toy').
-2. Use 1-4 words max.
-3. Output ONLY JSON. No talk, no explanations.
-4. Use this format: {"action": "specific label", "confidence": 0.9}"""
+1. Look at the motion across frames to distinguish between fingers and toys.
+2. Output ONLY JSON. No explanations or mentions of 'guidelines'.
+3. Format: {"action": "most specific label", "confidence": 0.9}"""
 
     try:
         payload = {
