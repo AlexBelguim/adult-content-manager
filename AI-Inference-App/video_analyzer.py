@@ -37,25 +37,33 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "minicpm-v:latest")
 
 # Default supported actions (used when user provides specific labels)
 SUPPORTED_ACTIONS = {
-    'missionary': 'Missionary / Man on top',
+    'missionary': 'Missionary',
     'cowgirl': 'Cowgirl / Woman on top',
     'reverse_cowgirl': 'Reverse Cowgirl',
-    'doggy': 'Doggy style / From behind',
-    'spooning': 'Spooning / Side position',
-    'standing': 'Standing position',
-    'blowjob': 'Oral (giving)',
-    'cunnilingus': 'Oral (receiving)',
-    '69': 'Sixty-nine position',
-    'handjob': 'Handjob / Manual stimulation',
-    'fingering': 'Fingering',
-    'titfuck': 'Titjob / Between breasts',
-    'footjob': 'Footjob',
+    'doggy': 'Doggy style',
     'anal': 'Anal penetration',
-    'foreplay': 'Foreplay / Kissing / Touching',
-    'masturbation': 'Solo / Masturbation',
-    'cumshot': 'Climax / Cumshot',
-    'idle': 'Idle / Talking / Transition',
-    'other': 'Other / Unrecognized'
+    'anal_doggy': 'Anal doggy style',
+    'blowjob': 'Blowjob / Oral',
+    'cunnilingus': 'Cunnilingus / Oral',
+    'fingering_pussy': 'Fingering (pussy)',
+    'fingering_anal': 'Fingering (anal)',
+    'dildo_pussy': 'Pussy dildo play',
+    'dildo_anal': 'Anal dildo play',
+    'dildo_blowjob': 'Dildo blowjob',
+    'dildo_handjob': 'Dildo handjob',
+    'handjob': 'Handjob',
+    'titfuck': 'Titjob',
+    'boob_teasing': 'Boob teasing',
+    'handbra': 'Handbra',
+    '69': 'Sixty-nine (69)',
+    'rimming': 'Rimming / Analingus',
+    'tribadism': 'Tribadism / Scissoring',
+    'cumshot': 'Cumshot / Climax',
+    'foreplay': 'Foreplay / Kissing',
+    'masturbation_solo': 'Solo masturbation',
+    'nudity': 'Nudity / Posing',
+    'idle': 'Idle / Transition',
+    'other': 'Other'
 }
 
 def log(msg):
@@ -164,12 +172,19 @@ Rules:
     else:
         # ── Free Mode: open vocabulary ──
         prompt = """Task: Describe the primary sexual action in this frame.
-Examples: cowgirl, missionary, doggy style, blowjob, handjob, cumshot, etc.
+Be as SPECIFIC as possible. Distinguish between different types of stimulation.
+
+Examples of specific labels:
+- fingering pussy, fingering ass, pussy dildo play, anal dildo play
+- blowjob, handjob, dildo blowjob, dildo handjob
+- handbra, boob teasing, titjob
+- missionary, cowgirl, reverse cowgirl, doggy style, anal
+- cumshot, rimming, 69
 
 Rules:
-1. Use 1-3 words max.
-2. Output ONLY JSON. No talk, no explanations, no mention of 'guidelines'.
-3. Use this format: {"action": "label", "confidence": 0.9}"""
+1. Use 1-4 words max.
+2. Output ONLY JSON. No talk, no explanations.
+3. Use this format: {"action": "specific label", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -221,14 +236,14 @@ def parse_vlm_response(content, allowed_actions=None):
             
             # If the model is being chatty in the action field (e.g. "it looks like missionary")
             # we try to see if any known actions are mentioned
-            if len(action) > 25:
+            if len(action) > 40:
                 # Common actions to look for if the model is too talkative
-                for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'foreplay']:
+                for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'fingering', 'dildo', 'boob', 'rimming']:
                     if common in action:
                         action = common
                         break
                 # Still too long? Truncate or use other
-                if len(action) > 30:
+                if len(action) > 50:
                     action = "other"
             
             # In labels mode, validate action is in the allowed list
