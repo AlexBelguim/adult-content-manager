@@ -171,24 +171,20 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Task: Describe the primary sexual action in this frame.
-Be as SPECIFIC as possible.
-
-IMPORTANT:
-- If there is NUDITY or POSING (e.g. topless, showing breasts, spread eagle), do NOT use 'idle'. Use a descriptive label like 'topless', 'nudity', or 'posing'.
-- Use 'idle' ONLY for non-content moments: talking to chat, walking away, black screens, or transitions.
+        prompt = """Task: Describe the primary sexual action in these frames.
+Identify if it is manual (fingers), oral, or uses a TOY (dildo, vibrator, etc).
 
 Examples of specific labels:
-- topless, posing, nudity, handbra, boob teasing
-- fingering pussy, fingering ass, pussy dildo play, anal dildo play
-- blowjob, handjob, dildo blowjob, dildo handjob
-- missionary, cowgirl, reverse cowgirl, doggy style, anal
-- cumshot, rimming, 69
+- pussy dildo play, anal dildo play, dildo blowjob
+- fingering pussy, fingering ass, handjob
+- blowjob, missionary, cowgirl, doggy style, anal
+- handbra, boob teasing, titjob, cumshot
 
 Rules:
-1. Use 1-4 words max.
-2. Output ONLY JSON. No talk, no explanations.
-3. Use this format: {"action": "specific label", "confidence": 0.9}"""
+1. Be as SPECIFIC as possible. If there's a toy, mention it (e.g. 'pussy dildo play' NOT just 'toy').
+2. Use 1-4 words max.
+3. Output ONLY JSON. No talk, no explanations.
+4. Use this format: {"action": "specific label", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -240,14 +236,14 @@ def parse_vlm_response(content, allowed_actions=None):
             
             # If the model is being chatty in the action field (e.g. "it looks like missionary")
             # we try to see if any known actions are mentioned
-            if len(action) > 40:
+            if len(action) > 25 or "based on" in action or "following" in action or "openai" in action:
                 # Common actions to look for if the model is too talkative
-                for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'fingering', 'dildo', 'boob', 'rimming']:
+                for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'fingering', 'dildo', 'toy', 'boob', 'rimming']:
                     if common in action:
                         action = common
                         break
                 # Still too long? Truncate or use other
-                if len(action) > 50:
+                if len(action) > 35:
                     action = "other"
             
             # In labels mode, validate action is in the allowed list
@@ -432,8 +428,18 @@ def analyze_video(video_path, segment_duration=12, min_segment=10,
             "progress": progress
         }
         
-        # Use multi-frame context when possible
-        context_frames = [frame["data"]]
+        # Use multi-frame context (current, -2s, +2s) to help VLM see motion
+        context_frames = []
+        # Current
+        context_frames.append(frame["data"])
+        # Previous (try to extract)
+        if frame["time"] >= 2:
+            prev = extract_single_frame(video_path, frame["time"] - 2)
+            if prev: context_frames.append(prev)
+        # Next (try to extract)
+        if frame["time"] + 2 <= video_duration:
+            nxt = extract_single_frame(video_path, frame["time"] + 2)
+            if nxt: context_frames.append(nxt)
         
         result = classify_frame_vlm(context_frames, allowed_actions)
         raw_segments.append({
