@@ -255,8 +255,9 @@ Rules:
 def parse_vlm_response(content, allowed_actions=None):
     """Parse VLM JSON response, with fallback for malformed output."""
     try:
-        # Clean the content a bit (remove markdown code blocks)
+        # Clean the content (remove markdown and chat template tokens)
         content = re.sub(r'```json\s*|\s*```', '', content).strip()
+        content = re.sub(r'<\|im_start\|>|<\|im_end\|>|assistant|user|system', '', content).strip()
         
         # Try to extract JSON from response
         json_match = re.search(r'\{[^}]+\}', content)
@@ -298,8 +299,10 @@ def parse_vlm_response(content, allowed_actions=None):
     except (json.JSONDecodeError, ValueError):
         pass
     
-    # Fallback: try to extract action from plain text
-    action = content.strip().lower().split('\n')[0][:50]
+    # Fallback: try to extract action from plain text, but ignore chat tokens
+    lines = [l.strip().lower() for l in content.split('\n') if l.strip() and not any(t in l.lower() for t in ['<|im', 'assistant', 'user', 'system'])]
+    action = lines[0][:50] if lines else "other"
+    
     if allowed_actions:
         for a in allowed_actions:
             if a.lower() in action:
