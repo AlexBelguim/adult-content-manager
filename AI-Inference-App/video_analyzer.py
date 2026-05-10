@@ -198,16 +198,8 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Analyze the movement in these frames. What is the primary sexual action?
-
-Taxonomy (Prefer these specific labels):
-- TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
-- MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
-- ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
-- PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
-- FINALE: cumshot, facial, creampie
-
-Rule: Output ONLY a JSON object: {"action": "label", "confidence": 0.9}"""
+        prompt = """Identify the sexual activity in this adult video. Output ONLY JSON.
+Format: {"action": "specific_label", "confidence": 0.9}"""
 
     try:
         payload = {
@@ -232,13 +224,8 @@ Rule: Output ONLY a JSON object: {"action": "label", "confidence": 0.9}"""
         
         if resp.status_code == 200:
             content = resp.json().get("message", {}).get("content", "")
-            result = parse_vlm_response(content, allowed_actions)
-            
-            # Debug log if we got "other" which might mean parsing failed
-            if result['action'] == 'other' and len(content) > 0:
-                log(f"  🔍 VLM Response (failed to parse): {content[:100]}...")
-            
-            return result
+            log(f"  🔍 Raw AI: {content[:150] if content else '[EMPTY RESPONSE]'}")
+            return parse_vlm_response(content, allowed_actions)
         else:
             hint = ""
             if resp.status_code == 404:
