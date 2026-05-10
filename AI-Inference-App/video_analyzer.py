@@ -239,24 +239,17 @@ Rules:
 3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
     else:
         # ── Free Mode: open vocabulary ──
-        prompt = """Task: Analyze the motion in these frames and describe the primary sexual action.
+        prompt = """Analyze the motion in these frames.
+Output ONLY a JSON object with this exact format:
+{"action": "<specific action label>", "confidence": 0.9}
 
-Focus: Watch the movement carefully. Distinguish between human fingers and synthetic toys (dildos, vibrators). 
-Note: Toys can be flesh-colored; look for their shape and mechanical motion.
+Taxonomy Guide:
+- pussy dildo play, anal dildo play, dildo blowjob, dildo handjob
+- fingering pussy, fingering ass, handjob, handbra, boob teasing
+- missionary, cowgirl, doggy style, anal, cumshot
+- nudity, idle, transition
 
-Taxonomy Guide (Target these specific detail levels):
-- TOYS: pussy dildo play, anal dildo play, dildo blowjob, dildo handjob, vibrator play
-- MANUAL: fingering pussy, fingering ass, handjob, handbra, boob teasing, titjob
-- ORAL: blowjob, cunnilingus, rimming, 69, deepthroat
-- PENETRATION: missionary, cowgirl, reverse cowgirl, doggy style, anal, anal doggy
-- FINALE: cumshot, facial, creampie
-- OTHER: idle, transition (Only use 'nudity' if NO specific action is happening)
-
-Rules:
-1. Output ONLY the specific action label. Do NOT include category names.
-2. If any toy is visible, prioritize 'toy' labels (e.g. 'pussy dildo play').
-3. Output ONLY JSON. No talk, no explanations.
-4. Format: {"action": "fingering pussy", "confidence": 0.9}"""
+Rule: No conversational text. No categories. Just JSON."""
 
     try:
         # ── Handle Model Specifics ──
@@ -287,7 +280,7 @@ Rules:
         resp = requests.post(
             f"{OLLAMA_URL}/api/chat",
             json=payload,
-            timeout=120
+            timeout=180
         )
         
         if resp.status_code == 200:
@@ -307,8 +300,10 @@ Rules:
 def parse_vlm_response(content, allowed_actions=None):
     """Parse VLM JSON response, with fallback for malformed output."""
     try:
-        # Clean the content a bit (remove markdown code blocks)
+        # Clean the content (remove markdown and ChatML tokens)
         content = re.sub(r'```json\s*|\s*```', '', content).strip()
+        content = re.sub(r'<\|[^|]+\|>', '', content).strip()
+        content = content.replace('assistant', '').replace('user', '').replace('system', '').strip()
         
         # Try to extract JSON from response
         json_match = re.search(r'\{[^}]+\}', content)
