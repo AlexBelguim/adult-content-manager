@@ -48,7 +48,7 @@ if %ERRORLEVEL% neq 0 (
     echo [INFO] Ollama not found in PATH.
     echo        Video scene classification requires Ollama with a vision model.
     echo        Install from: https://ollama.com/download
-    echo        Then run: ollama pull llama3.2-vision
+    echo        Then run: ollama pull qwen2-vl
     echo.
 ) else (
     echo [OK] Ollama found

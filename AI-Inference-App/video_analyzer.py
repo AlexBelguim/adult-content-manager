@@ -33,7 +33,7 @@ def map_path(path):
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2-vision:latest")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2-vl:latest")
 
 # Default supported actions (used when user provides specific labels)
 SUPPORTED_ACTIONS = {
@@ -262,12 +262,13 @@ Rules:
         # ── Handle Model Specifics ──
         # llama3.2-vision only supports 1 image in Ollama currently.
         # We use a grid of frames to provide temporal context.
-        if "llama3.2-vision" in OLLAMA_MODEL:
+        if "llama" in OLLAMA_MODEL.lower():
             grid_b64 = create_frame_grid(frame_b64_list)
             messages_images = [grid_b64] if grid_b64 else []
         else:
-            # Other models like minicpm-v support multi-image
-            messages_images = frame_b64_list[:4] # limit to 4 for speed
+            # Other models like qwen2-vl or minicpm-v support multi-image natively
+            # We send up to 8 frames for a good balance of detail and speed
+            messages_images = frame_b64_list[:8]
             
         payload = {
             "model": OLLAMA_MODEL,
@@ -323,13 +324,13 @@ def parse_vlm_response(content, allowed_actions=None):
                     break
             
             # Additional cleanup for disclaimers
-            if "based on" in action or "following" in action or "guideline" in action or "openai" in action:
+            if "based on" in action or "following" in action or "guideline" in action or "openai" in action or "the image" in action or "can't help" in action:
                 # Try to find a valid action word in the mess
                 for common in ['missionary', 'cowgirl', 'doggy', 'blowjob', 'handjob', 'anal', 'cumshot', 'fingering', 'dildo', 'toy', 'boob', 'rimming']:
                     if common in action:
                         action = common
                         break
-                if len(action) > 25: # Still too long?
+                if len(action) > 20: # Still too long/messy
                     action = "other"
             
             # In labels mode, validate action is in the allowed list
