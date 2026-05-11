@@ -9,3 +9,6 @@ pystray
 pyperclip
 pyngrok
 tqdm
+bitsandbytes
+accelerate
+peft

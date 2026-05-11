@@ -86,7 +86,7 @@ def find_models():
     models_path = Path(__file__).parent / 'models'
     return list(models_path.rglob('*.pt')) if models_path.exists() else []
 
-def load_model(checkpoint_path, model_id=None):
+def load_model(checkpoint_path, model_id=None, quantize=False):
     global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
     
     # Check if already loaded
@@ -135,14 +135,21 @@ def load_model(checkpoint_path, model_id=None):
             log(f"🦕 Architecture: {MODEL_NAME} | Type: {model_type} (Device: {DEVICE})")
             
             # Initialize the correct model class based on type
-            if model_type == 'binary':
-                from trainer import BinaryClassifier
-                MODEL = BinaryClassifier(MODEL_NAME)
-            elif model_type == 'context_binary':
-                from trainer import ContextBinaryClassifier
-                MODEL = ContextBinaryClassifier(MODEL_NAME)
-            else:
-                MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True)
+            try:
+                if model_type == 'binary':
+                    from trainer import BinaryClassifier
+                    MODEL = BinaryClassifier(MODEL_NAME, quantize=quantize)
+                elif model_type == 'context_binary':
+                    from trainer import ContextBinaryClassifier
+                    MODEL = ContextBinaryClassifier(MODEL_NAME, quantize=quantize)
+                else:
+                    MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True, quantize=quantize)
+            except ImportError as ie:
+                if 'bitsandbytes' in str(ie).lower():
+                    log("❌ ERROR: bitsandbytes not found. Quantization requires bitsandbytes and accelerate.")
+                    log("💡 Install with: pip install bitsandbytes accelerate")
+                    return False, "bitsandbytes not found. Install it to use quantization."
+                raise ie
             
             # Load state dict (strict=False: some checkpoints omit frozen backbone weights)
             MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -211,7 +218,7 @@ def api_load_model():
         
     # Use relative path from models dir as the ID
     rel_id = str(target.relative_to(models_path)).replace('\\', '/')
-    success, msg = load_model(str(target), model_id=rel_id)
+    success, msg = load_model(str(target), model_id=rel_id, quantize=data.get('quantize', False))
     return jsonify({"success": success, "message": msg, "model": MODEL_NAME})
 
 @app.route('/unload_model', methods=['POST'])

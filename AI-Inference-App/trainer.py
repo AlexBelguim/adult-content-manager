@@ -84,9 +84,13 @@ def scan_performer_dirs(base_dir):
 # ── Models ───────────────────────────────────────────────────────────────────
 
 class BinaryClassifier(nn.Module):
-    def __init__(self, backbone_name='facebook/dinov2-large'):
+    def __init__(self, backbone_name='facebook/dinov2-large', quantize=False):
         super().__init__()
-        self.backbone = AutoModel.from_pretrained(backbone_name)
+        if quantize:
+            tlog(f"  💎 Loading backbone in 8-bit quantization...")
+            self.backbone = AutoModel.from_pretrained(backbone_name, load_in_8bit=True, device_map="auto")
+        else:
+            self.backbone = AutoModel.from_pretrained(backbone_name)
         hs = self.backbone.config.hidden_size
         self.classifier = nn.Sequential(
             nn.Linear(hs, 256), nn.ReLU(), nn.Dropout(0.3), nn.Linear(256, 1)
@@ -107,9 +111,13 @@ class ContextBinaryClassifier(nn.Module):
     Training: both heads train simultaneously with real star ratings from DB.
     Inference: Head 1 runs first on a batch → average → feeds into Head 2.
     """
-    def __init__(self, backbone_name='facebook/dinov2-large'):
+    def __init__(self, backbone_name='facebook/dinov2-large', quantize=False):
         super().__init__()
-        self.backbone = AutoModel.from_pretrained(backbone_name)
+        if quantize:
+            tlog(f"  💎 Loading backbone in 8-bit quantization...")
+            self.backbone = AutoModel.from_pretrained(backbone_name, load_in_8bit=True, device_map="auto")
+        else:
+            self.backbone = AutoModel.from_pretrained(backbone_name)
         hs = self.backbone.config.hidden_size
         # Head 1: Star Predictor (image → star rating 0-5)
         self.star_head = nn.Sequential(
@@ -283,7 +291,8 @@ def train_binary(config):
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 8)
     bs = config.get('batch_size', 16)
-    warmup = config.get('warmup_epochs', 2)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
 
@@ -344,8 +353,8 @@ def train_binary(config):
     train_ds_base, val_ds = random_split(full_ds, [len(full_ds)-vs, vs])
     
     val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
-    model = BinaryClassifier(backbone_name=backbone).to(device)
-    model.freeze_backbone()
+    model = BinaryClassifier(backbone_name=backbone, quantize=quantize).to(device)
+    if not quantize: model.freeze_backbone()
     criterion = nn.BCEWithLogitsLoss()
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
     optimizer = torch.optim.AdamW(model.classifier.parameters(), lr=1e-3)
@@ -353,14 +362,16 @@ def train_binary(config):
     out_path = Path(__file__).parent / 'models' / 'binary_filtering.pt'
 
     for epoch in range(1, epochs + 1):
-        if epoch == warmup + 1:
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Starting Fine-tuning (unfreezing backbone) at epoch {epoch}")
             model.unfreeze_backbone()
             optimizer = torch.optim.AdamW([
                 {'params': model.classifier.parameters(), 'lr': 1e-3},
                 {'params': model.backbone.parameters(), 'lr': 1e-5}
             ])
         training_state['epoch'] = epoch
-        training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
 
         # Create loader for this epoch (potentially with mining pool)
         current_keep = [s[0] for s in train_ds_base.dataset.samples if s[1] == 1.0]
@@ -455,7 +466,8 @@ def train_pairwise(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 10)
-    warmup = config.get('warmup_epochs', 2)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
     bs = config.get('batch_size', 8)
     base_path = config.get('base_path', '')
     pairs = config.get('pairs', [])
@@ -491,7 +503,7 @@ def train_pairwise(config):
     train_ds_base, val_ds = random_split(full_ds, [len(full_ds)-vs, vs])
     val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
 
-    model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=True).to(device)
+    model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
     criterion = nn.MarginRankingLoss(margin=1.0)
     optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
     best_acc = 0.0
@@ -514,15 +526,17 @@ def train_pairwise(config):
         num_batches = len(train_loader)
         training_state['total_batches'] = num_batches
 
-        training_state['epoch'] = epoch
-        training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
-        
-        if epoch == warmup + 1:
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Starting Fine-tuning (unfreezing backbone) at epoch {epoch}")
             for p in model.backbone.parameters(): p.requires_grad = True
             optimizer = torch.optim.AdamW([
                 {'params': model.head.parameters(), 'lr': 1e-3},
                 {'params': model.backbone.parameters(), 'lr': 1e-5}
             ])
+        
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
         
         model.train()
         total_loss = 0
@@ -591,7 +605,8 @@ def train_context_binary(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 8)
-    warmup = config.get('warmup_epochs', 2)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
     bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
@@ -666,8 +681,8 @@ def train_context_binary(config):
     val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
 
     # 4. Model setup
-    model = ContextBinaryClassifier(backbone).to(device)
-    model.freeze_backbone()
+    model = ContextBinaryClassifier(backbone, quantize=quantize).to(device)
+    if not quantize: model.freeze_backbone()
     criterion_stars = nn.MSELoss()
     criterion_action = nn.BCEWithLogitsLoss()
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
@@ -681,7 +696,8 @@ def train_context_binary(config):
 
     # 5. Training loop
     for epoch in range(1, epochs+1):
-        if epoch == warmup + 1:
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Starting Fine-tuning (unfreezing backbone) at epoch {epoch}")
             model.unfreeze_backbone()
             optimizer = torch.optim.AdamW([
                 {'params': model.star_head.parameters(), 'lr': 1e-3},
@@ -689,7 +705,8 @@ def train_context_binary(config):
                 {'params': model.backbone.parameters(), 'lr': 1e-5},
             ])
         training_state['epoch'] = epoch
-        training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
         model.train()
         total_loss = correct = total = 0
         star_loss_sum = action_loss_sum = 0
@@ -780,7 +797,8 @@ def train_siamese_binary(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = config.get('backbone', 'facebook/dinov2-large')
     epochs = config.get('epochs', 8)
-    warmup = config.get('warmup_epochs', 2)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
     bs = config.get('batch_size', 8)
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
@@ -836,7 +854,7 @@ def train_siamese_binary(config):
         tlog(f"  📐 Total pairs/epoch: ~{synthetic_pairs_per_epoch} × {len(all_performers)} = {synthetic_pairs_per_epoch * len(all_performers)}")
 
     processor = AutoImageProcessor.from_pretrained(backbone)
-    model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=True).to(device)
+    model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
     criterion = nn.MarginRankingLoss(margin=1.0)
     optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
@@ -848,7 +866,8 @@ def train_siamese_binary(config):
 
     for epoch in range(1, epochs + 1):
         # Unfreeze backbone after warmup
-        if epoch == warmup + 1:
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Starting Fine-tuning (unfreezing backbone) at epoch {epoch}")
             for p in model.backbone.parameters(): p.requires_grad = True
             optimizer = torch.optim.AdamW([
                 {'params': model.head.parameters(), 'lr': 1e-3},
@@ -856,7 +875,8 @@ def train_siamese_binary(config):
             ])
 
         training_state['epoch'] = epoch
-        training_state['phase'] = 'warmup' if epoch <= warmup else 'finetune'
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
 
         # ── Sample synthetic pairs ──────────────────────────────────
         pairs = []

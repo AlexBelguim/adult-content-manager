@@ -4,7 +4,8 @@ import {
   LinearProgress, Chip, Button, Alert, CircularProgress,
   Avatar, Divider, Paper, IconButton, Tooltip, TextField, Slider,
   Select, MenuItem, FormControl, InputLabel,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
+  FormControlLabel, Checkbox
 } from '@mui/material';
 import {
   TrendingUp, Psychology, Storage, CloudOff, CloudDone,
@@ -64,6 +65,8 @@ function TasteDashboardPage() {
   const [deduplicate, setDeduplicate] = useState(true);
   const [syntheticPairsPerEpoch, setSyntheticPairsPerEpoch] = useState(500);
   const [perPerformerPairs, setPerPerformerPairs] = useState(false);
+  const [useQuantization, setUseQuantization] = useState(false);
+  const [finetuneStart, setFinetuneStart] = useState(3);
   const pollRef = useRef(null);
 
   const fetchData = async () => {
@@ -189,6 +192,8 @@ function TasteDashboardPage() {
           enable_mining: enableMining,
           mining_multiplier: miningMultiplier,
           deduplicate: deduplicate,
+          quantize: useQuantization,
+          finetune_start_epoch: finetuneStart,
           synthetic_pairs_per_epoch: selectedType === 'pairwise_siamese_binary' ? syntheticPairsPerEpoch : 0,
           per_performer_pairs: selectedType === 'pairwise_siamese_binary' ? perPerformerPairs : false
         })
@@ -680,6 +685,33 @@ function TasteDashboardPage() {
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Box>
+                      <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>8-bit Quantization</Typography>
+                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>Reduces VRAM by 4x. Required for Giant models.</Typography>
+                    </Box>
+                    <Button 
+                      size="small" 
+                      variant={useQuantization ? "contained" : "outlined"}
+                      onClick={() => setUseQuantization(!useQuantization)}
+                      sx={{ minWidth: 80, height: 24, fontSize: '0.7rem', textTransform: 'none',
+                        bgcolor: useQuantization ? '#8b5cf6' : 'transparent', borderColor: '#8b5cf6' }}
+                    >
+                      {useQuantization ? "ON" : "OFF"}
+                    </Button>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Box>
+                      <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>Finetune Start Epoch</Typography>
+                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>0 = Never unfreeze (saves VRAM)</Typography>
+                    </Box>
+                    <TextField 
+                      type="number" size="small" value={finetuneStart}
+                      onChange={e => setFinetuneStart(parseInt(e.target.value))}
+                      InputProps={{ inputProps: { min: 0, max: 20 } }}
+                      sx={{ width: 60, '& .MuiOutlinedInput-root': { color: '#fff', height: 26, fontSize: '0.75rem', '& fieldset': { borderColor: '#444' } } }}
+                    />
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
                     <Typography variant="body2" sx={{ color: '#aaa', fontSize: '0.85rem' }}>Use Human Corrections (Oversample)</Typography>
                     <Button 
                       size="small" 
@@ -974,6 +1006,7 @@ function ModelArsenal({
   preferredBinary, preferredPairwise, onSetPreferred
 }) {
   const [loadingModel, setLoadingModel] = useState(null);
+  const [quantizeLoad, setQuantizeLoad] = useState(false);
   const typeLabels = {
     binary: { label: 'Binary', color: '#4caf50', icon: '🎯' },
     pairwise: { label: 'Pairwise', color: '#2196f3', icon: '⚖️' },
@@ -999,7 +1032,7 @@ function ModelArsenal({
       await fetch('/api/training/ai-load-model', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ url: aiUrl, model_id: model.filename }) 
+        body: JSON.stringify({ url: aiUrl, model_id: model.filename, quantize: quantizeLoad }) 
       }); 
       if (onModelLoaded) onModelLoaded(); 
     } catch (_) {}
@@ -1019,8 +1052,17 @@ function ModelArsenal({
   const formatDate = (ts) => !ts ? '—' : new Date(ts * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   if (models.length === 0) return <Box sx={{ textAlign: 'center', py: 3, color: '#666' }}><Science sx={{ fontSize: 40, mb: 1, opacity: 0.3 }} /><Typography>No models found. Train one above.</Typography></Box>;
-
-  return Object.entries(grouped).map(([type, typeModels]) => {
+  
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, p: 1.5, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, border: '1px solid rgba(255,255,255,0.05)' }}>
+        <Typography variant="body2" sx={{ color: '#aaa', fontWeight: 700, flex: 1 }}>Load Mode:</Typography>
+        <FormControlLabel
+          control={<Checkbox size="small" checked={quantizeLoad} onChange={e => setQuantizeLoad(e.target.checked)} sx={{ color: '#8b5cf6', '&.Mui-checked': { color: '#8b5cf6' } }} />}
+          label={<Typography variant="caption" sx={{ color: quantizeLoad ? '#8b5cf6' : '#666', fontWeight: 700 }}>8-bit Quantization (Low VRAM)</Typography>}
+        />
+      </Box>
+      {Object.entries(grouped).map(([type, typeModels]) => {
     const tInfo = typeLabels[type] || typeLabels.unknown;
     return (
       <Box key={type} sx={{ mb: 2 }}>

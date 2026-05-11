@@ -6,9 +6,13 @@ class DinoV2PreferenceModel(nn.Module):
     """
     DINOv2-based Siamese network for learning image preferences.
     """
-    def __init__(self, model_name="facebook/dinov2-large", freeze_backbone=True):
+    def __init__(self, model_name="facebook/dinov2-large", freeze_backbone=True, quantize=False):
         super().__init__()
-        self.backbone = AutoModel.from_pretrained(model_name)
+        if quantize:
+            print(f"💎 Loading {model_name} with 8-bit quantization...")
+            self.backbone = AutoModel.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+        else:
+            self.backbone = AutoModel.from_pretrained(model_name)
         hidden_dim = self.backbone.config.hidden_size
         
         # Standard head for CLS-only model

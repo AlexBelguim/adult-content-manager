@@ -63,6 +63,7 @@ export default function TrainingHubPage() {
   const [selectedType, setSelectedType] = useState('binary');
   const [epochs, setEpochs] = useState(8);
   const [batchSize, setBatchSize] = useState(16);
+  const [finetuneStart, setFinetuneStart] = useState(3);
   const [loading, setLoading] = useState(true);
   const [startingTraining, setStartingTraining] = useState(false);
   const pollRef = useRef(null);
@@ -152,6 +153,7 @@ export default function TrainingHubPage() {
         type: selectedType, 
         epochs, 
         batch_size: batchSize, 
+        finetune_start_epoch: finetuneStart,
         backbone: 'facebook/dinov2-large',
         use_hard_examples: useHardExamples,
         enable_mining: enableMining,
@@ -335,6 +337,19 @@ export default function TrainingHubPage() {
                     InputProps={{ inputProps: { min: 1, max: 64 } }}
                     sx={{ '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' } },
                           '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.5)' } }}
+                  />
+                  <TextField 
+                    label="Finetune Start Epoch" 
+                    type="number" 
+                    value={finetuneStart}
+                    helperText="Epoch to unfreeze backbone. Set to 0 to NEVER finetune (saves VRAM)."
+                    onChange={e => setFinetuneStart(parseInt(e.target.value))}
+                    InputProps={{ inputProps: { min: 0, max: 50 } }}
+                    sx={{ 
+                      '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' } },
+                      '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.5)' },
+                      '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.4)' }
+                    }}
                   />
                   
                   <Box sx={{ p: 2, bgcolor: 'rgba(139,92,246,0.05)', borderRadius: 2, border: '1px solid rgba(139,92,246,0.1)' }}>
