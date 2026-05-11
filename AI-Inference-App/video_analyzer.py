@@ -145,13 +145,25 @@ Visual Cues:
 - MANUAL: Fingers must be in DIRECT CONTACT with or INSERTED into the pussy. If they are just "near" or touching the thigh, use 'nudity' or 'idle'.
 - RIDING: If a person is riding an object alone, it is 'pussy dildo play'.
 
-Choices (Use these exact labels):
+Choices (use these exact labels or with simple modification or in same style, like more poses or positions of the action etc):
 - pussy dildo play, anal dildo play, dildo blowjob, vibrator play
 - fingering pussy, fingering ass, handjob, boob teasing, handbra
 - blowjob, cunnilingus, 69, deepthroat
 - missionary, cowgirl, doggy style, anal
 - cumshot, facial, creampie
 - nudity, idle, transition
+
+if fingering detected make sure fingers are in the pussy not just touching. the same is for ass. otherwise probably dildo pussy play or dildo ass play.
+when penis like objects are seen it is probably dildo.
+if she is inserting object in pussy or ass or rubbing it against her clit or vagina then it is dildo pussy play or dildo ass play or dildo cunnilingus.
+all toys must be considered as dildos.
+if she is inserting anything in pussy or ass or rubbing it against her clit or vagina then dont say nudity or idle. use appropriate label.
+cowgirls, or reverse cowgirl can both be with dildo or with dick label. correct labels must be used as per the content. 
+When toy near face label it as dildo blowjob.
+
+
+
+
 
 Rule: Output ONLY a JSON object. No other text.
 Format: {"action": "label from choices", "confidence": 0.5-1.0}"""

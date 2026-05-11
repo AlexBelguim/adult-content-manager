@@ -48,6 +48,10 @@ LOADED_MODEL_ID = None
 LOADED_MODEL_TYPE = 'pairwise'
 CONTEXT_STAR_CACHE = {}  # performer_name → predicted star rating
 
+from threading import Lock
+MODEL_LOCK = Lock()
+MODEL_METADATA_CACHE = {}  # Cache for model file metadata to prevent heavy I/O
+
 def log(msg):
     """Immediate flushing logger to bypass terminal buffering."""
     timestamp = time.strftime('%H:%M:%S')
@@ -84,66 +88,95 @@ def find_models():
 
 def load_model(checkpoint_path, model_id=None):
     global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
-    try:
-        log(f"📦 Loading checkpoint: {checkpoint_path}")
-        
-        # Free resources before loading a new model
-        if MODEL is not None:
-            log("♻️ Unloading previous model to free resources...")
-            MODEL = None
-            PROCESSOR = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+    
+    # Check if already loaded
+    if model_id and LOADED_MODEL_ID == model_id and MODEL is not None:
+        log(f"✅ Model {model_id} already loaded. Skipping.")
+        return True, "Already loaded"
+
+    with MODEL_LOCK:
+        # Re-check inside lock to handle race conditions
+        if model_id and LOADED_MODEL_ID == model_id and MODEL is not None:
+            log(f"✅ Model {model_id} already loaded (confirmed inside lock).")
+            return True, "Already loaded"
+
+        try:
+            log(f"📦 Loading checkpoint: {checkpoint_path}")
+            
+            # Free resources before loading a new model
+            if MODEL is not None:
+                log("♻️ Unloading previous model to free resources...")
+                try:
+                    MODEL.to('cpu') # Move to RAM to clear VRAM immediately
+                except: pass
+                MODEL = None
+                PROCESSOR = None
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+                # Breather for the driver/OS to recover from VRAM pressure
+                time.sleep(0.5)
+                
+            # Load to CPU first to avoid VRAM spikes during loading
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            
+            config = checkpoint.get('config', {})
+            MODEL_NAME = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
+            model_type = checkpoint.get('model_type', 'pairwise')
+            
+            # Auto-detect from filename if model_type is missing
+            if model_id and (model_type == 'unknown' or not model_type):
+                if 'context' in model_id.lower(): model_type = 'context_binary'
+                elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): model_type = 'binary'
+                elif 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): model_type = 'pairwise'
+            
+            log(f"🦕 Architecture: {MODEL_NAME} | Type: {model_type} (Device: {DEVICE})")
+            
+            # Initialize the correct model class based on type
+            if model_type == 'binary':
+                from trainer import BinaryClassifier
+                MODEL = BinaryClassifier(MODEL_NAME)
+            elif model_type == 'context_binary':
+                from trainer import ContextBinaryClassifier
+                MODEL = ContextBinaryClassifier(MODEL_NAME)
+            else:
+                MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True)
+            
+            # Load state dict (strict=False: some checkpoints omit frozen backbone weights)
+            MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            MODEL.to(DEVICE)
+            MODEL.eval()
+            LOADED_MODEL_TYPE = model_type
+            CONTEXT_STAR_CACHE.clear()
+            
+            # Load processor
+            PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
+            
+            val_acc = checkpoint.get('val_acc')
+            if val_acc: log(f"  Val accuracy at save: {val_acc*100:.1f}%")
+            if model_type == 'context_binary':
+                mae = checkpoint.get('val_star_mae')
+                if mae: log(f"  Star prediction MAE: {mae:.2f}")
+            
+            # Explicit cleanup of the checkpoint object
+            del checkpoint
             import gc
             gc.collect()
-            
-        checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
-        
-        config = checkpoint.get('config', {})
-        MODEL_NAME = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
-        model_type = checkpoint.get('model_type', 'pairwise')
-        
-        # Auto-detect from filename if model_type is missing
-        if model_type == 'unknown' and model_id:
-            if 'context' in model_id.lower(): model_type = 'context_binary'
-            elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): model_type = 'binary'
-            elif 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): model_type = 'pairwise'
-        
-        log(f"🦕 Architecture: {MODEL_NAME} | Type: {model_type} (Device: {DEVICE})")
-        
-        # Initialize the correct model class based on type
-        if model_type == 'binary':
-            from trainer import BinaryClassifier
-            MODEL = BinaryClassifier(MODEL_NAME)
-        elif model_type == 'context_binary':
-            from trainer import ContextBinaryClassifier
-            MODEL = ContextBinaryClassifier(MODEL_NAME)
-        else:
-            MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True)
-        
-        # Load state dict (strict=False: some checkpoints omit frozen backbone weights)
-        MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        MODEL.to(DEVICE)
-        MODEL.eval()
-        LOADED_MODEL_TYPE = model_type
-        CONTEXT_STAR_CACHE.clear()
-        
-        # Load processor
-        PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
-        
-        val_acc = checkpoint.get('val_acc')
-        if val_acc: log(f"  Val accuracy at save: {val_acc*100:.1f}%")
-        if model_type == 'context_binary':
-            mae = checkpoint.get('val_star_mae')
-            if mae: log(f"  Star prediction MAE: {mae:.2f}")
-        
-        log(f"✅ Model loaded successfully on {DEVICE}")
-        LOADED_MODEL_ID = model_id
-        return True, "Success"
-    except Exception as e:
-        log(f"❌ Error loading model: {e}")
-        import traceback; traceback.print_exc()
-        return False, str(e)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            log(f"✅ Model loaded successfully on {DEVICE}")
+            LOADED_MODEL_ID = model_id
+            return True, "Success"
+        except Exception as e:
+            log(f"❌ Error loading model: {e}")
+            import traceback; traceback.print_exc()
+            # Ensure model is None if load failed
+            MODEL = None
+            PROCESSOR = None
+            return False, str(e)
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -184,19 +217,25 @@ def api_load_model():
 @app.route('/unload_model', methods=['POST'])
 def api_unload_model():
     global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
-    log("♻️ Unloading model to free resources...")
-    MODEL = None
-    PROCESSOR = None
-    MODEL_NAME = None
-    LOADED_MODEL_ID = None
-    LOADED_MODEL_TYPE = 'pairwise'
-    CONTEXT_STAR_CACHE.clear()
-    import gc
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        vram = f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.0f} MB"
-        log(f"♻️ VRAM after unload: {vram}")
+    with MODEL_LOCK:
+        log("♻️ Unload request received. Acquiring lock...")
+        if MODEL is None:
+            log("♻️ No model loaded. Nothing to unload.")
+            return jsonify({'success': True, 'message': 'No model loaded'})
+            
+        log(f"♻️ Unloading model {LOADED_MODEL_ID} to free resources...")
+        MODEL = None
+        PROCESSOR = None
+        MODEL_NAME = None
+        LOADED_MODEL_ID = None
+        LOADED_MODEL_TYPE = 'pairwise'
+        CONTEXT_STAR_CACHE.clear()
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            vram = f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.0f} MB"
+            log(f"♻️ VRAM after unload: {vram}")
     return jsonify({"success": True, "message": "Model unloaded"})
 
 @app.route('/list_models', methods=['GET'])
@@ -206,29 +245,35 @@ def api_list_models():
     result = []
     for m in models:
         rel_path = str(m.relative_to(models_path)).replace('\\', '/')
+        m_id = str(m)
+        mtime = m.stat().st_mtime
+        
+        # Check cache to avoid heavy torch.load
+        if m_id in MODEL_METADATA_CACHE and MODEL_METADATA_CACHE[m_id]['mtime'] == mtime:
+            result.append(MODEL_METADATA_CACHE[m_id]['info'])
+            continue
+
         info = {
             'filename': rel_path,
             'size_mb': round(m.stat().st_size / 1024**2, 1),
-            'modified': m.stat().st_mtime,
+            'modified': mtime,
             'type': 'unknown',
             'backbone': None,
             'val_acc': None,
         }
         try:
+            # Use map_location='cpu' and weights_only=True for safety/speed if possible
             ckpt = torch.load(m, map_location='cpu', weights_only=False)
             m_type = ckpt.get('model_type', 'unknown')
             
             # Auto-detect type if unknown
             if m_type == 'unknown':
-                if 'pairwise' in m.name.lower() or 'preference' in m.name.lower():
-                    m_type = 'pairwise'
-                elif 'context' in m.name.lower():
-                    m_type = 'context_binary'
-                elif 'siamese' in m.name.lower():
-                    m_type = 'siamese_binary'
-                elif 'binary' in m.name.lower() or 'filtering' in m.name.lower():
-                    m_type = 'binary'
-                # Check state dict keys as fallback
+                name_low = m.name.lower()
+                if 'pairwise' in name_low or 'preference' in name_low: m_type = 'pairwise'
+                elif 'context' in name_low: m_type = 'context_binary'
+                elif 'siamese' in name_low: m_type = 'siamese_binary'
+                elif 'binary' in name_low or 'filtering' in name_low: m_type = 'binary'
+                
                 sd = ckpt.get('model_state_dict', {})
                 if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
                 elif any('head' in k for k in sd.keys()) and m_type == 'unknown': m_type = 'pairwise'
@@ -239,13 +284,16 @@ def api_list_models():
             info['samples'] = ckpt.get('samples')
             info['created_at'] = ckpt.get('created_at')
             info['epoch_history'] = ckpt.get('epoch_history')
-            config = ckpt.get('config', {})
-            info['epochs'] = config.get('epochs')
-            del ckpt  # free memory
-            import gc; gc.collect()
+            info['epochs'] = ckpt.get('config', {}).get('epochs')
+            del ckpt
+            
+            # Update cache
+            MODEL_METADATA_CACHE[m_id] = {'mtime': mtime, 'info': info}
         except Exception as e:
             info['error'] = str(e)
+            
         result.append(info)
+        
     result.sort(key=lambda x: x['modified'], reverse=True)
     return jsonify({
         "success": True,
@@ -327,175 +375,196 @@ def api_test_model():
     
     # Load model temporarily
     try:
-        ckpt = torch.load(target, map_location=DEVICE, weights_only=False)
-        m_type = ckpt.get('model_type', 'unknown')
-        if m_type == 'unknown':
-            if 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): m_type = 'pairwise'
-            elif 'context' in model_id.lower(): m_type = 'context_binary'
-            elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): m_type = 'binary'
-            sd = ckpt.get('model_state_dict', {})
-            if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
+        # Serializing test to avoid VRAM competition with main model if both are large
+        with MODEL_LOCK:
+            checkpoint_cpu = torch.load(target, map_location='cpu', weights_only=False)
+            m_type = checkpoint_cpu.get('model_type', 'unknown')
+            if m_type == 'unknown':
+                if 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): m_type = 'pairwise'
+                elif 'context' in model_id.lower(): m_type = 'context_binary'
+                elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): m_type = 'binary'
+                sd = checkpoint_cpu.get('model_state_dict', {})
+                if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
 
-        config = ckpt.get('config', {})
-        model_name = config.get('model_name') or ckpt.get('backbone') or 'facebook/dinov2-large'
-        model_type = m_type
-        
-        from model_dinov2 import DinoV2PreferenceModel
-        
-        if model_type == 'binary':
-            from trainer import BinaryClassifier
-            test_model = BinaryClassifier(model_name)
-            test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
-        elif model_type == 'pairwise':
-            test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
-            test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
-        elif model_type == 'context_binary':
-            from trainer import ContextBinaryClassifier
-            test_model = ContextBinaryClassifier(model_name)
-            test_model.load_state_dict(ckpt['model_state_dict'], strict=False)
-        else:
-            return jsonify({'success': False, 'error': f'Testing not supported for type: {model_type}'}), 400
-        
-        test_model.to(DEVICE)
-        test_model.eval()
-        
-        processor = AutoImageProcessor.from_pretrained(model_name)
-        
-        # Helper to load image from sample object
-        def load_img(sample_obj):
-            if 'data' in sample_obj:
-                # Base64 data
-                img_data = base64.b64decode(sample_obj['data'].split(',')[-1])
-                return Image.open(io.BytesIO(img_data)).convert('RGB')
+            config = checkpoint_cpu.get('config', {})
+            model_name = config.get('model_name') or checkpoint_cpu.get('backbone') or 'facebook/dinov2-large'
+            model_type = m_type
+            
+            from model_dinov2 import DinoV2PreferenceModel
+            
+            if model_type == 'binary':
+                from trainer import BinaryClassifier
+                test_model = BinaryClassifier(model_name)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+            elif model_type == 'pairwise':
+                test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+            elif model_type == 'context_binary':
+                from trainer import ContextBinaryClassifier
+                test_model = ContextBinaryClassifier(model_name)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             else:
-                # Local path
-                return Image.open(sample_obj['path']).convert('RGB')
+                return jsonify({'success': False, 'error': f'Testing not supported for type: {model_type}'}), 400
+            
+            test_model.to(DEVICE)
+            test_model.eval()
+            
+            processor = AutoImageProcessor.from_pretrained(model_name)
+            
+            # Helper to load image from sample object
+            def load_img(sample_obj):
+                if 'data' in sample_obj:
+                    # Base64 data
+                    img_data = base64.b64decode(sample_obj['data'].split(',')[-1])
+                    return Image.open(io.BytesIO(img_data)).convert('RGB')
+                else:
+                    # Local path
+                    return Image.open(sample_obj['path']).convert('RGB')
 
-        # Test binary models
-        if model_type == 'binary':
-            correct = 0
-            total = 0
-            keep_scores = []
-            delete_scores = []
+            # Test binary models
+            if model_type == 'binary':
+                correct = 0
+                total = 0
+                keep_scores = []
+                delete_scores = []
+                
+                with torch.no_grad():
+                    for sample in test_samples:
+                        try:
+                            img = load_img(sample)
+                            label = sample['label']
+                            inp = processor(images=img, return_tensors='pt').to(DEVICE)
+                            logit = test_model(inp['pixel_values'])
+                            prob = torch.sigmoid(logit).item()
+                            pred = 1 if prob > 0.5 else 0
+                            if pred == label: correct += 1
+                            total += 1
+                            if label == 1: keep_scores.append(prob)
+                            else: delete_scores.append(prob)
+                            
+                            # Breathing room
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                            time.sleep(0.005)
+                        except: continue
+                
+                accuracy = correct / max(total, 1)
+                avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
+                avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
+                separation = avg_keep - avg_delete
+                
+                result = {
+                    'accuracy': round(accuracy, 4),
+                    'total_tested': total,
+                    'correct': correct,
+                    'avg_keep_score': round(avg_keep, 4),
+                    'avg_delete_score': round(avg_delete, 4),
+                    'separation': round(separation, 4),
+                    'model_type': model_type,
+                }
+            elif model_type == 'pairwise':
+                # Pairwise: test by scoring keep vs delete pairs
+                correct = 0
+                total = 0
+                # Split samples back to pairs
+                ks = [s for s in test_samples if s['label'] == 1]
+                ds = [s for s in test_samples if s['label'] == 0]
+                pairs_tested = min(len(ks), len(ds))
+                
+                with torch.no_grad():
+                    for i in range(pairs_tested):
+                        try:
+                            keep_img = load_img(ks[i])
+                            del_img = load_img(ds[i])
+                            k_inp = processor(images=keep_img, return_tensors='pt').to(DEVICE)
+                            d_inp = processor(images=del_img, return_tensors='pt').to(DEVICE)
+                            k_score, d_score = test_model(k_inp['pixel_values'], d_inp['pixel_values'])
+                            if k_score.item() > d_score.item(): correct += 1
+                            total += 1
+                            
+                            # Breathing room
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                            time.sleep(0.005)
+                        except: continue
+                
+                result = {
+                    'accuracy': round(correct / max(total, 1), 4),
+                    'total_tested': total,
+                    'correct': correct,
+                    'model_type': model_type,
+                }
+            elif model_type == 'context_binary':
+                # Context-aware binary: uses performer context embeddings from checkpoint
+                saved_contexts = checkpoint_cpu.get('contexts', {})
+                hs = test_model.backbone.config.hidden_size
+                zero_ctx = torch.zeros(1, hs).to(DEVICE)
+                
+                correct = 0
+                total = 0
+                keep_scores = []
+                delete_scores = []
+                
+                # Build mapping: image path -> performer name (from directory structure)
+                def get_performer(sample):
+                    if 'performer' in sample: return sample['performer']
+                    if 'path' in sample:
+                        parts = Path(sample['path']).parts
+                        for i, p in enumerate(parts):
+                            if p in ('pics',):
+                                if i > 0: return parts[i-1]
+                    return None
+                
+                with torch.no_grad():
+                    for sample in test_samples:
+                        try:
+                            perf = get_performer(sample)
+                            ctx = saved_contexts.get(perf, zero_ctx.squeeze(0)).unsqueeze(0).to(DEVICE) if perf else zero_ctx
+                            
+                            img = load_img(sample)
+                            label = sample['label']
+                            inp = processor(images=img, return_tensors='pt').to(DEVICE)
+                            logit = test_model(inp['pixel_values'], ctx)
+                            prob = torch.sigmoid(logit).item()
+                            pred = 1 if prob > 0.5 else 0
+                            if pred == label: correct += 1
+                            total += 1
+                            if label == 1: keep_scores.append(prob)
+                            else: delete_scores.append(prob)
+                            
+                            # Breathing room
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                            time.sleep(0.005)
+                        except: continue
+                
+                accuracy = correct / max(total, 1)
+                avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
+                avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
+                separation = avg_keep - avg_delete
+                
+                result = {
+                    'accuracy': round(accuracy, 4),
+                    'total_tested': total,
+                    'correct': correct,
+                    'avg_keep_score': round(avg_keep, 4),
+                    'avg_delete_score': round(avg_delete, 4),
+                    'separation': round(separation, 4),
+                    'model_type': model_type,
+                    'contexts_used': len(saved_contexts),
+                }
             
-            with torch.no_grad():
-                for sample in test_samples:
-                    try:
-                        img = load_img(sample)
-                        label = sample['label']
-                        inp = processor(images=img, return_tensors='pt').to(DEVICE)
-                        logit = test_model(inp['pixel_values'])
-                        prob = torch.sigmoid(logit).item()
-                        pred = 1 if prob > 0.5 else 0
-                        if pred == label: correct += 1
-                        total += 1
-                        if label == 1: keep_scores.append(prob)
-                        else: delete_scores.append(prob)
-                    except: continue
+            # Cleanup
+            try:
+                test_model.to('cpu')
+            except: pass
+            del test_model
+            del checkpoint_cpu
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
             
-            accuracy = correct / max(total, 1)
-            avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
-            avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
-            separation = avg_keep - avg_delete
-            
-            result = {
-                'accuracy': round(accuracy, 4),
-                'total_tested': total,
-                'correct': correct,
-                'avg_keep_score': round(avg_keep, 4),
-                'avg_delete_score': round(avg_delete, 4),
-                'separation': round(separation, 4),
-                'model_type': model_type,
-            }
-        elif model_type == 'pairwise':
-            # Pairwise: test by scoring keep vs delete pairs
-            correct = 0
-            total = 0
-            # Split samples back to pairs
-            ks = [s for s in test_samples if s['label'] == 1]
-            ds = [s for s in test_samples if s['label'] == 0]
-            pairs_tested = min(len(ks), len(ds))
-            
-            with torch.no_grad():
-                for i in range(pairs_tested):
-                    try:
-                        keep_img = load_img(ks[i])
-                        del_img = load_img(ds[i])
-                        k_inp = processor(images=keep_img, return_tensors='pt').to(DEVICE)
-                        d_inp = processor(images=del_img, return_tensors='pt').to(DEVICE)
-                        k_score, d_score = test_model(k_inp['pixel_values'], d_inp['pixel_values'])
-                        if k_score.item() > d_score.item(): correct += 1
-                        total += 1
-                    except: continue
-            
-            result = {
-                'accuracy': round(correct / max(total, 1), 4),
-                'total_tested': total,
-                'correct': correct,
-                'model_type': model_type,
-            }
-        elif model_type == 'context_binary':
-            # Context-aware binary: uses performer context embeddings from checkpoint
-            saved_contexts = ckpt.get('contexts', {})
-            hs = test_model.backbone.config.hidden_size
-            zero_ctx = torch.zeros(1, hs).to(DEVICE)
-            
-            correct = 0
-            total = 0
-            keep_scores = []
-            delete_scores = []
-            
-            # Build mapping: image path -> performer name (from directory structure)
-            def get_performer(sample):
-                if 'performer' in sample: return sample['performer']
-                if 'path' in sample:
-                    parts = Path(sample['path']).parts
-                    for i, p in enumerate(parts):
-                        if p in ('pics',):
-                            if i > 0: return parts[i-1]
-                return None
-            
-            with torch.no_grad():
-                for sample in test_samples:
-                    try:
-                        perf = get_performer(sample)
-                        ctx = saved_contexts.get(perf, zero_ctx.squeeze(0)).unsqueeze(0).to(DEVICE) if perf else zero_ctx
-                        
-                        img = load_img(sample)
-                        label = sample['label']
-                        inp = processor(images=img, return_tensors='pt').to(DEVICE)
-                        logit = test_model(inp['pixel_values'], ctx)
-                        prob = torch.sigmoid(logit).item()
-                        pred = 1 if prob > 0.5 else 0
-                        if pred == label: correct += 1
-                        total += 1
-                        if label == 1: keep_scores.append(prob)
-                        else: delete_scores.append(prob)
-                    except: continue
-            
-            accuracy = correct / max(total, 1)
-            avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
-            avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
-            separation = avg_keep - avg_delete
-            
-            result = {
-                'accuracy': round(accuracy, 4),
-                'total_tested': total,
-                'correct': correct,
-                'avg_keep_score': round(avg_keep, 4),
-                'avg_delete_score': round(avg_delete, 4),
-                'separation': round(separation, 4),
-                'model_type': model_type,
-                'contexts_used': len(saved_contexts),
-            }
-        
-        # Cleanup
-        del test_model
-        del ckpt
-        torch.cuda.empty_cache()
-        
-        log(f"🧪 Test complete: {result['accuracy']:.1%} accuracy ({result['correct']}/{result['total_tested']})")
-        return jsonify({'success': True, 'results': result})
+            log(f"🧪 Test complete: {result['accuracy']:.1%} accuracy ({result['correct']}/{result['total_tested']})")
+            return jsonify({'success': True, 'results': result})
         
     except Exception as e:
         log(f"❌ Test error: {e}")
@@ -561,253 +630,227 @@ def _get_performer_name(image_path):
 
 @app.route('/classify_batch', methods=['POST'])
 def classify_batch():
-    """Binary classification (Keep/Delete) for Smart Filtering.
-    Supports pairwise, binary, and context_binary model types."""
-    if MODEL is None or PROCESSOR is None:
-        return jsonify({'error': 'Model not loaded (MODEL or PROCESSOR is None)'}), 500
-    
+    """Binary classification (Keep/Delete) for Smart Filtering."""
     data = request.json
     image_paths = data.get('images', [])
     threshold = data.get('threshold', 50.0)
     app_base_url = data.get('app_base_url')
     
     if not image_paths: return jsonify({'error': 'No images'}), 400
+
+    # 1. PRE-LOAD IMAGES (Outside lock to avoid blocking and system lag)
+    # We do this in smaller chunks to avoid memory spikes
+    loaded_data = [] # List of (path, PIL_Image)
+    log(f"🧠 SMART FILTERING {len(image_paths)} images (Threshold: {threshold})...")
     
-    log(f"🧠 SMART FILTERING {len(image_paths)} images (Type: {LOADED_MODEL_TYPE}, Threshold: {threshold})...")
-    start_time = time.time()
+    for p in image_paths:
+        img = _load_image(p, app_base_url)
+        if img:
+            loaded_data.append((p, img))
+            
+    if not loaded_data:
+        return jsonify({"success": False, "error": "Could not load any images."}), 500
+
     results = []
+    start_time = time.time()
     import math
-    
-    # ── Context-Aware: Two-pass inference ──────────────────────────
-    if LOADED_MODEL_TYPE == 'context_binary':
-        # Group images by performer
-        performer_images = {}  # performer_name → [paths]
-        for p in image_paths:
-            perf = _get_performer_name(p)
-            performer_images.setdefault(perf, []).append(p)
-        
-        log(f"  Context-aware mode: {len(performer_images)} performers detected")
-        
-        # Pass 1: Predict star rating per performer (sample up to 100 images)
-        for perf, paths in performer_images.items():
-            if perf in CONTEXT_STAR_CACHE:
-                continue
-            sample_paths = paths[:100]
-            star_preds = []
-            for i in range(0, len(sample_paths), 4):
-                batch_p = sample_paths[i:i+4]
-                imgs = [_load_image(p, app_base_url) for p in batch_p]
-                imgs = [im for im in imgs if im is not None]
-                if not imgs: continue
-                try:
+
+    # 2. RUN INFERENCE (Inside lock)
+    with MODEL_LOCK:
+        if MODEL is None or PROCESSOR is None:
+            return jsonify({'error': 'Model not loaded'}), 500
+            
+        try:
+            # ── Context-Aware: Two-pass inference ──────────────────────────
+            if LOADED_MODEL_TYPE == 'context_binary':
+                # Group loaded images by performer
+                performer_data = {} # name -> [(path, img)]
+                for p, img in loaded_data:
+                    perf = _get_performer_name(p)
+                    performer_data.setdefault(perf, []).append((p, img))
+                
+                # Pass 1: Predict star rating per performer (sample up to 20 images)
+                for perf, items in performer_data.items():
+                    if perf in CONTEXT_STAR_CACHE: continue
+                    
+                    sample_items = items[:20] # Reduced from 100 to 20 for speed/stability
+                    star_preds = []
+                    for i in range(0, len(sample_items), 4):
+                        batch = sample_items[i:i+4]
+                        imgs = [it[1] for it in batch]
+                        with torch.no_grad():
+                            inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                            pv = inputs['pixel_values'].to(DEVICE)
+                            stars = MODEL.predict_stars(pv)
+                            star_preds.extend(stars.cpu().tolist())
+                        # Breather for the system
+                        if torch.cuda.is_available(): torch.cuda.synchronize()
+                        time.sleep(0.005)
+                    
+                    avg_stars = sum(star_preds) / max(len(star_preds), 1) if star_preds else 2.5
+                    CONTEXT_STAR_CACHE[perf] = avg_stars
+                    log(f"  ⭐ {perf}: predicted {avg_stars:.2f} stars")
+
+                # Pass 2: Keep/Delete classification
+                for i in range(0, len(loaded_data), 4):
+                    batch = loaded_data[i:i+4]
+                    imgs = [it[1] for it in batch]
+                    paths = [it[0] for it in batch]
+                    stars = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
+                    
                     with torch.no_grad():
                         inputs = PROCESSOR(images=imgs, return_tensors="pt")
                         pv = inputs['pixel_values'].to(DEVICE)
-                        stars = MODEL.predict_stars(pv)
-                        star_preds.extend(stars.cpu().tolist())
-                except: continue
-            
-            avg_stars = sum(star_preds) / max(len(star_preds), 1) if star_preds else 2.5
-            CONTEXT_STAR_CACHE[perf] = avg_stars
-            log(f"  ⭐ {perf}: predicted {avg_stars:.2f} stars ({len(star_preds)} images sampled)")
-        
-        # Pass 2: Keep/Delete classification with star context
-        for i in range(0, len(image_paths), 4):
-            batch_paths = image_paths[i:i+4]
-            imgs = []
-            valid_paths = []
-            batch_stars = []
-            for p in batch_paths:
-                img = _load_image(p, app_base_url)
-                if img:
-                    imgs.append(img)
-                    valid_paths.append(p)
-                    perf = _get_performer_name(p)
-                    batch_stars.append(CONTEXT_STAR_CACHE.get(perf, 2.5))
-            if not imgs: continue
-            try:
-                with torch.no_grad():
-                    inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                    pv = inputs['pixel_values'].to(DEVICE)
-                    star_tensor = torch.tensor(batch_stars, dtype=torch.float32).to(DEVICE)
-                    logits = MODEL.classify_with_stars(pv, star_tensor)
-                    logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
-                    scores = (torch.sigmoid(logits) * 100).cpu().tolist()
-                    for p, s, star in zip(valid_paths, scores, batch_stars):
-                        safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
-                        decision = "keep" if safe_score >= threshold else "delete"
-                        results.append({
-                            'path': p, 'score': float(safe_score), 'decision': decision,
-                            'predicted_stars': round(star, 2),
-                            'performer': _get_performer_name(p)
-                        })
-            except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache(); continue
-            except Exception as e:
-                log(f"  ❌ Batch Error: {e}"); continue
-    
-    # ── Binary model: direct classification ───────────────────────
-    elif LOADED_MODEL_TYPE == 'binary':
-        for i in range(0, len(image_paths), 4):
-            batch_paths = image_paths[i:i+4]
-            imgs = []
-            valid_paths = []
-            for p in batch_paths:
-                img = _load_image(p, app_base_url)
-                if img: imgs.append(img); valid_paths.append(p)
-            if not imgs: continue
-            try:
-                with torch.no_grad():
-                    inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                    pv = inputs['pixel_values'].to(DEVICE)
-                    # Compatibility: use forward_single if present (e.g. for pairwise models loaded as binary type)
-                    if hasattr(MODEL, 'forward_single'):
-                        logits = MODEL.forward_single(pv)
-                    else:
-                        logits = MODEL(pv)
-                    logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
-                    scores = (torch.sigmoid(logits) * 100).cpu().tolist()
-                    if not isinstance(scores, list): scores = [scores]
-                    for p, s in zip(valid_paths, scores):
-                        safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
-                        decision = "keep" if safe_score >= threshold else "delete"
-                        results.append({'path': p, 'score': float(safe_score), 'decision': decision})
-            except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache(); continue
-            except Exception as e:
-                log(f"  ❌ Batch Error: {e}"); continue
-    
-    # ── Pairwise / Siamese model (default): single-score path ───────────────
-    else:
-        for i in range(0, len(image_paths), 4):
-            batch_paths = image_paths[i:i+4]
-            imgs = []
-            valid_paths = []
-            for p in batch_paths:
-                img = _load_image(p, app_base_url)
-                if img: imgs.append(img); valid_paths.append(p)
-            if not imgs: continue
-            try:
-                with torch.no_grad():
-                    inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                    pixel_values = inputs['pixel_values'].to(DEVICE)
-                    MODEL.eval()
-                    raw_scores = MODEL.forward_single(pixel_values)
-                    raw_scores = torch.nan_to_num(raw_scores, nan=0.0, posinf=10.0, neginf=-10.0)
-                    normalized = torch.sigmoid(raw_scores) * 100
-                    scores = normalized.cpu().numpy().flatten().tolist()
-                    for p, s in zip(valid_paths, scores):
-                        safe_score = s if not (math.isnan(s) or math.isinf(s)) else 50.0
-                        decision = "keep" if safe_score >= threshold else "delete"
-                        results.append({'path': p, 'score': float(safe_score), 'decision': decision})
-            except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache(); continue
-            except Exception as e:
-                log(f"  ❌ Batch Error: {e}"); continue
+                        star_t = torch.tensor(stars, dtype=torch.float32).to(DEVICE)
+                        logits = MODEL.classify_with_stars(pv, star_t)
+                        logits = torch.nan_to_num(logits, nan=0.0)
+                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
+                        for p, s, star in zip(paths, scores, stars):
+                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
+                            results.append({
+                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
+                                'predicted_stars': round(star, 2), 'performer': _get_performer_name(p)
+                            })
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    time.sleep(0.005)
 
-    log(f"✅ Classification completed in {time.time() - start_time:.2f}s")
+            # ── Binary / Pairwise / Siamese: direct classification ──────────
+            else:
+                for i in range(0, len(loaded_data), 4):
+                    batch = loaded_data[i:i+4]
+                    imgs = [it[1] for it in batch]
+                    paths = [it[0] for it in batch]
+                    
+                    with torch.no_grad():
+                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                        pv = inputs['pixel_values'].to(DEVICE)
+                        
+                        if hasattr(MODEL, 'forward_single'): logits = MODEL.forward_single(pv)
+                        else: logits = MODEL(pv)
+                        
+                        logits = torch.nan_to_num(logits, nan=0.0)
+                        scores = (torch.sigmoid(logits) * 100).cpu().numpy().flatten().tolist()
+                        
+                        for p, s in zip(paths, scores):
+                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
+                            results.append({
+                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
+                                'performer': _get_performer_name(p)
+                            })
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    time.sleep(0.005)
+        except torch.cuda.OutOfMemoryError:
+            log("❌ OOM in classify_batch")
+            torch.cuda.empty_cache()
+        except Exception as e:
+            log(f"❌ classify_batch error: {e}")
+            import traceback; traceback.print_exc()
+        finally:
+            # Clean up PIL images from RAM
+            for _, img in loaded_data: img.close()
+            import gc; gc.collect()
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+    duration = time.time() - start_time
+    log(f"✅ Classification completed in {duration:.2f}s")
     
     if not results:
         return jsonify({"success": False, "error": "Failed to process any images. Check AI server logs."}), 500
         
-    return jsonify({'success': True, 'results': results})
+    return jsonify({'success': True, 'results': results, 'duration': duration})
 
 @app.route('/classify', methods=['POST'])
 def classify_single():
     """Single image classification (Keep/Delete)."""
-    if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
-    
-    data = request.json
-    image_path = data.get('image')
-    threshold = data.get('threshold', 50.0)
-    
-    if not image_path or not os.path.exists(image_path):
-        return jsonify({'error': 'Invalid image path'}), 400
+    with MODEL_LOCK:
+        if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
         
-    try:
-        img = Image.open(image_path).convert('RGB')
-        with torch.no_grad():
-            inputs = PROCESSOR(images=[img], return_tensors="pt")
-            pixel_values = inputs['pixel_values'].to(DEVICE)
-            raw_scores = MODEL.forward_single(pixel_values)
-            score = (torch.sigmoid(raw_scores) * 100).item()
-            decision = "keep" if score >= threshold else "delete"
+        data = request.json
+        image_path = data.get('image')
+        threshold = data.get('threshold', 50.0)
+        
+        if not image_path or not os.path.exists(image_path):
+            return jsonify({'error': 'Invalid image path'}), 400
             
-        return jsonify({
-            'success': True, 
-            'path': image_path, 
-            'score': score, 
-            'decision': decision,
-            'confidence': score if decision == "keep" else (100 - score)
-        })
-    except Exception as e:
-        log(f"❌ Single Classification Error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        try:
+            img = Image.open(image_path).convert('RGB')
+            with torch.no_grad():
+                inputs = PROCESSOR(images=[img], return_tensors="pt")
+                pixel_values = inputs['pixel_values'].to(DEVICE)
+                raw_scores = MODEL.forward_single(pixel_values)
+                score = (torch.sigmoid(raw_scores) * 100).item()
+                decision = "keep" if score >= threshold else "delete"
+                
+            return jsonify({
+                'success': True, 
+                'path': image_path, 
+                'score': score, 
+                'decision': decision,
+                'confidence': score if decision == "keep" else (100 - score)
+            })
+        except Exception as e:
+            log(f"❌ Single Classification Error: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/score', methods=['POST'])
 def score_images():
     log("📥 RECEIVED SCORING REQUEST")
-    if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
-    
     data = request.json
     image_paths = data.get('images', [])
     app_base_url = data.get('app_base_url')
     
     if not image_paths: return jsonify({'error': 'No images'}), 400
     
-    log(f"🖼️  Processing {len(image_paths)} images...")
-    start_time = time.time()
+    # 1. LOAD IMAGES (Outside lock)
+    loaded_data = []
+    log(f"🖼️  Pre-loading {len(image_paths)} images...")
+    for p in image_paths:
+        img = _load_image(p, app_base_url)
+        if img: loaded_data.append((p, img))
+
+    if not loaded_data:
+        return jsonify({"success": False, "error": "No images could be loaded"}), 404
+
     results = []
+    start_time = time.time()
     
-    # Process in small batches
-    batch_size = 4 
-    for i in range(0, len(image_paths), batch_size):
-        batch_paths = image_paths[i:i+batch_size]
-        imgs = []
-        valid_paths = []
+    # 2. RUN SCORING (Inside lock)
+    with MODEL_LOCK:
+        if MODEL is None: return jsonify({'error': 'Model not loaded'}), 500
         
-        for p in batch_paths:
-            try:
-                img = None
-                # 1. Local
-                if os.path.exists(p):
-                    img = Image.open(p).convert('RGB')
-                # 2. Remote
-                elif app_base_url:
-                    clean_path = p.replace('\\', '/')
-                    if not clean_path.startswith('/'): clean_path = '/' + clean_path
-                    encoded_path = quote(clean_path, safe='/')
-                    url = f"{app_base_url.rstrip('/')}/api/files/raw?path={encoded_path}"
-                    resp = requests.get(url, timeout=5)
-                    if resp.status_code == 200:
-                        img = Image.open(io.BytesIO(resp.content)).convert('RGB')
-                    else:
-                        log(f"  ❌ Failed to fetch remote: {url} (Status: {resp.status_code})")
+        try:
+            # Process in small batches
+            batch_size = 4 
+            for i in range(0, len(loaded_data), batch_size):
+                batch = loaded_data[i:i+batch_size]
+                imgs = [it[1] for it in batch]
+                paths = [it[0] for it in batch]
                 
-                if img:
-                    imgs.append(img)
-                    valid_paths.append(p)
-                else:
-                    log(f"  ❌ Image not found: {p}")
-            except Exception as e:
-                log(f"  ⚠️ Skipping {p}: {e}")
-            
-        if imgs:
-            try:
                 with torch.no_grad():
                     inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                    pixel_values = inputs['pixel_values'].to(DEVICE)
+                    pv = inputs['pixel_values'].to(DEVICE)
                     
-                    # Get scores (returns normalized 0-100 via Sigmoid)
-                    raw_scores = MODEL.forward_single(pixel_values)
+                    # Get scores
+                    if hasattr(MODEL, 'forward_single'):
+                        raw_scores = MODEL.forward_single(pv)
+                    else:
+                        raw_scores = MODEL(pv)
+                        
                     normalized = torch.sigmoid(raw_scores) * 100
-                    scores = normalized.cpu().numpy().tolist()
+                    scores = normalized.cpu().numpy().flatten().tolist()
                     
-                    if not isinstance(scores, list): scores = [scores]
-                    for p, s in zip(valid_paths, scores):
-                        results.append({'path': p, 'normalized': s})
-            except Exception as e:
-                log(f"  ❌ Batch Error: {e}")
+                    for p, s in zip(paths, scores):
+                        results.append({'path': p, 'normalized': float(s)})
+                
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+                time.sleep(0.005)
+        except Exception as e:
+            log(f"  ❌ Scoring Error: {e}")
+            import traceback; traceback.print_exc()
+        finally:
+            for _, img in loaded_data: img.close()
+            import gc; gc.collect()
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
 
     duration = time.time() - start_time
     log(f"✅ Request completed in {duration:.2f}s")

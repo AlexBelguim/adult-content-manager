@@ -46,6 +46,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [showSettings, setShowSettings] = useState(false);
   const [isLoadingModel, setIsLoadingModel] = useState(false);
   const isFetchingRef = useRef(false);
+  const isPrefetchUrgentRef = useRef(false);
   const abortControllerRef = useRef(null);
   const holdTimerRef = useRef(null);
 
@@ -156,27 +157,36 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           }));
           setResults(zoned);
           setLoading(false);
+          isPrefetchUrgentRef.current = false;
           return; // Already set results, skip the else blocks below
         }
-      } else if (isPrefetch) {
+      } else if (isPrefetch && !isPrefetchUrgentRef.current) {
         setNextBatch(data.results || []);
         setLoadingNext(false);
       } else {
-        console.log(`[SmartFilter] Setting results (${(data.results || []).length} items) and loading=false`);
+        console.log(`[SmartFilter] Setting results (${(data.results || []).length} items) and loading=false (Urgent=${isPrefetchUrgentRef.current})`);
         const resultsWithOriginal = (data.results || []).map(r => ({
           ...r,
           originalDecision: r.decision
         }));
-        setResults(resultsWithOriginal);
-        setLoading(false);
-        if (modelType === 'binary') setFirstBatchDone(true);
-
+        
         // Siamese mode: re-classify into keep / uncertain / delete zones
-        if (modelType === 'siamese') {
-          setResults(prev => prev.map(r => ({
-            ...r,
-            decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
-          })));
+        const finalResults = modelType === 'siamese' 
+          ? resultsWithOriginal.map(r => ({
+              ...r,
+              decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
+            }))
+          : resultsWithOriginal;
+
+        setResults(finalResults);
+        setLoading(false);
+        setLoadingNext(false);
+        isPrefetchUrgentRef.current = false;
+        if (modelType === 'binary') setFirstBatchDone(true);
+        
+        // If this was an upgraded prefetch, we should probably start a NEW prefetch now
+        if (isPrefetch) {
+           setTimeout(() => fetchBatch(true), 100);
         }
       }
     } catch (err) {
@@ -278,16 +288,27 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     };
     fetchModels();
 
-    // UNLOAD on leave and cancel requests
+    // Abort ongoing requests on change
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
-      fetch('/api/filter/unload-model', { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ai_server_url: inferenceUrl })
-      }).catch(() => {});
     };
   }, [inferenceUrl, modelType]);
+
+  // Handle Unload ONLY on Unmount
+  useEffect(() => {
+    return () => {
+      // We use a ref for the URL because the cleanup function might run after inferenceUrl is gone 
+      // (though in this case it's stable)
+      if (inferenceUrl) {
+        fetch('/api/filter/unload-model', { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ai_server_url: inferenceUrl })
+        }).catch(() => {});
+      }
+    };
+  }, [inferenceUrl]); // Only depends on inferenceUrl so it doesn't trigger on modelType changes
+
 
   const handleModeChange = async (event, newMode) => {
     if (!newMode || newMode === modelType) return;
@@ -361,6 +382,13 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           setNextBatch(null);
           // Prefetch the one after that
           fetchBatch(true);
+        } else if (loadingNext) {
+          // If a prefetch is ALREADY in flight, don't start a new fetch,
+          // just mark the flight as urgent so it populates 'results'
+          setResults([]);
+          setLoading(true);
+          isPrefetchUrgentRef.current = true;
+          console.log('[SmartFilter] Upgrading in-flight prefetch to urgent batch');
         } else {
           setResults([]); // Clear results to prevent seeing them while loading next
           fetchBatch();
