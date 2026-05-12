@@ -1172,7 +1172,9 @@ function ModelArsenal({
         </Box>
       </Box>
     );
-  });
+  })}
+</Box>
+);
 }
 
 // ── Per-Performer Training Table ──

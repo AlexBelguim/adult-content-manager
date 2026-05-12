@@ -359,7 +359,10 @@ def train_binary(config):
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
     optimizer = torch.optim.AdamW(model.classifier.parameters(), lr=1e-3)
     best_acc = 0.0
-    out_path = Path(__file__).parent / 'models' / 'binary_filtering.pt'
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'binary_filtering_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
 
     for epoch in range(1, epochs + 1):
         if finetune_start > 0 and epoch == finetune_start:
@@ -507,7 +510,10 @@ def train_pairwise(config):
     criterion = nn.MarginRankingLoss(margin=1.0)
     optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
     best_acc = 0.0
-    out_path = Path(__file__).parent / 'models' / 'pairwise_preference.pt'
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'pairwise_preference_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
 
     mining_pool = [] # list of indices into train_ds_base
     mining_mult = config.get('mining_multiplier', 4)
@@ -691,7 +697,9 @@ def train_context_binary(config):
         {'params': model.action_head.parameters(), 'lr': 1e-3},
     ])
     best_acc = 0.0
-    out_path = Path(__file__).parent / 'models' / 'context_binary.pt'
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'context_binary_{backbone_short}_{timestamp}.pt'
     out_path.parent.mkdir(exist_ok=True)
 
     # 5. Training loop
@@ -859,7 +867,9 @@ def train_siamese_binary(config):
     optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
     best_acc = 0.0
-    out_path = Path(__file__).parent / 'models' / 'siamese_binary.pt'
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'siamese_binary_{backbone_short}_{timestamp}.pt'
     out_path.parent.mkdir(exist_ok=True)
     mining_pool = []
     mining_mult = config.get('mining_multiplier', 4)
