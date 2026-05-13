@@ -267,13 +267,18 @@ class FlorenceEngine:
     @classmethod
     def _load(cls):
         try:
-            from transformers import AutoProcessor, AutoModelForCausalLM
+            from transformers import AutoProcessor, AutoModelForCausalLM, AutoConfig
             import torch
             log("🔬 Loading Florence-2-large on CPU...")
             mid = "microsoft/Florence-2-large"
+            # Patch: transformers 5.x removed forced_bos_token_id from config
+            config = AutoConfig.from_pretrained(mid, trust_remote_code=True)
+            if hasattr(config, 'text_config') and not hasattr(config.text_config, 'forced_bos_token_id'):
+                config.text_config.forced_bos_token_id = getattr(config.text_config, 'bos_token_id', 0)
+                log("  ℹ️ Patched forced_bos_token_id for transformers 5.x")
             cls._processor = AutoProcessor.from_pretrained(mid, trust_remote_code=True)
             cls._model = AutoModelForCausalLM.from_pretrained(
-                mid, trust_remote_code=True, torch_dtype=torch.float32
+                mid, config=config, trust_remote_code=True, torch_dtype=torch.float32
             ).eval().to("cpu")
             cls._available = True
             log("✅ Florence-2 ready (CPU, ~800MB RAM)")
