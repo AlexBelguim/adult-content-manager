@@ -30,6 +30,9 @@ const MODEL_TYPES = [
   { id: 'pairwise_siamese_binary', name: 'Siamese Binary Ranking', icon: <AutoAwesome />, desc: 'Trains a pairwise Siamese ranker using dynamic Keep > Delete pairs from your binary folders.',
     color: '#e91e63', output: 'siamese_binary.pt', requirements: 'Needs keep + delete folders',
     pros: ['Granular Ranking', 'Massive Augmentation'], cons: ['Slower Training'] },
+  { id: 'rank_aware_siamese', name: 'Rank-Aware Siamese', icon: <EmojiEvents />, desc: 'Conditioned preference model that learns image quality relative to performer status.',
+    color: '#673ab7', output: 'rank_siamese.pt', requirements: 'Needs rated performers with keep + delete images',
+    pros: ['Contextual Accuracy', 'Dynamic Baseline'], cons: ['Needs Star Ratings'] },
 ];
 
 function TasteDashboardPage() {
@@ -59,6 +62,9 @@ function TasteDashboardPage() {
   const [aiTrainingData, setAiTrainingData] = useState(null);
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
+  const [preferredContextModel, setPreferredContextModel] = useState('');
+  const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
+  const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
   const [useHardExamples, setUseHardExamples] = useState(true);
   const [enableMining, setEnableMining] = useState(false);
   const [miningMultiplier, setMiningMultiplier] = useState(4);
@@ -123,6 +129,9 @@ function TasteDashboardPage() {
     // Load preferred models
     fetch('/api/settings/preferred_binary_model').then(r => r.json()).then(d => d.value && setPreferredBinaryModel(d.value)).catch(() => {});
     fetch('/api/settings/preferred_pairwise_model').then(r => r.json()).then(d => d.value && setPreferredPairwiseModel(d.value)).catch(() => {});
+    fetch('/api/settings/preferred_context_model').then(r => r.json()).then(d => d.value && setPreferredContextModel(d.value)).catch(() => {});
+    fetch('/api/settings/preferred_siamese_model').then(r => r.json()).then(d => d.value && setPreferredSiameseModel(d.value)).catch(() => {});
+    fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).then(d => d.value && setPreferredRankSiameseModel(d.value)).catch(() => {});
 
     fetchData();
   }, []);
@@ -228,7 +237,12 @@ function TasteDashboardPage() {
   };
 
   const handleSetPreferred = async (modelName, type) => {
-    const key = type === 'binary' ? 'preferred_binary_model' : 'preferred_pairwise_model';
+    let key = 'preferred_binary_model';
+    if (type === 'pairwise') key = 'preferred_pairwise_model';
+    if (type === 'context_binary') key = 'preferred_context_model';
+    if (type === 'siamese_binary') key = 'preferred_siamese_model';
+    if (type === 'rank_aware_siamese') key = 'preferred_rank_siamese_model';
+
     try {
       await fetch(`/api/settings/${key}`, {
         method: 'POST',
@@ -236,7 +250,10 @@ function TasteDashboardPage() {
         body: JSON.stringify({ value: modelName })
       });
       if (type === 'binary') setPreferredBinaryModel(modelName);
-      else setPreferredPairwiseModel(modelName);
+      else if (type === 'pairwise') setPreferredPairwiseModel(modelName);
+      else if (type === 'context_binary') setPreferredContextModel(modelName);
+      else if (type === 'siamese_binary') setPreferredSiameseModel(modelName);
+      else if (type === 'rank_aware_siamese') setPreferredRankSiameseModel(modelName);
     } catch (err) {
       alert('Failed to save preferred model: ' + err.message);
     }
@@ -756,54 +773,61 @@ function TasteDashboardPage() {
                     </Button>
                   </Box>
                   
-                  {selectedType === 'pairwise_siamese_binary' && (
-                    <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid rgba(233,30,99,0.25)' }}>
+                  {['pairwise_siamese_binary', 'rank_aware_siamese'].includes(selectedType) && (
+                    <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px solid ${selectedType === 'rank_aware_siamese' ? 'rgba(103,58,183,0.25)' : 'rgba(233,30,99,0.25)'}` }}>
                       
                       {/* Mode toggle */}
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
                         <Box>
                           <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', fontWeight: 700 }}>Pair Sampling Mode</Typography>
                           <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>
-                            {perPerformerPairs
-                              ? 'Per Performer — balanced taste across all performers'
-                              : 'Global — random mix from all performers combined'}
+                            {selectedType === 'rank_aware_siamese' 
+                              ? 'Strictly Per-Performer — focusing on intra-performer preference'
+                              : (perPerformerPairs
+                                ? 'Per Performer — balanced taste across all performers'
+                                : 'Global — random mix from all performers combined')}
                           </Typography>
                         </Box>
-                        <Box sx={{ display: 'flex', gap: 0.5 }}>
-                          <Button
-                            size="small"
-                            variant={!perPerformerPairs ? 'contained' : 'outlined'}
-                            onClick={() => setPerPerformerPairs(false)}
-                            sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
-                              bgcolor: !perPerformerPairs ? '#e91e63' : 'transparent',
-                              borderColor: '#e91e63', color: !perPerformerPairs ? '#fff' : '#e91e63',
-                              '&:hover': { bgcolor: !perPerformerPairs ? '#c2185b' : 'rgba(233,30,99,0.08)' } }}
-                          >
-                            Global
-                          </Button>
-                          <Button
-                            size="small"
-                            variant={perPerformerPairs ? 'contained' : 'outlined'}
-                            onClick={() => setPerPerformerPairs(true)}
-                            sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
-                              bgcolor: perPerformerPairs ? '#e91e63' : 'transparent',
-                              borderColor: '#e91e63', color: perPerformerPairs ? '#fff' : '#e91e63',
-                              '&:hover': { bgcolor: perPerformerPairs ? '#c2185b' : 'rgba(233,30,99,0.08)' } }}
-                          >
-                            Per Performer
-                          </Button>
-                        </Box>
+                        {selectedType === 'pairwise_siamese_binary' && (
+                          <Box sx={{ display: 'flex', gap: 0.5 }}>
+                            <Button
+                              size="small"
+                              variant={!perPerformerPairs ? 'contained' : 'outlined'}
+                              onClick={() => setPerPerformerPairs(false)}
+                              sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
+                                bgcolor: !perPerformerPairs ? '#e91e63' : 'transparent',
+                                borderColor: '#e91e63', color: !perPerformerPairs ? '#fff' : '#e91e63',
+                                '&:hover': { bgcolor: !perPerformerPairs ? '#c2185b' : 'rgba(233,30,99,0.08)' } }}
+                            >
+                              Global
+                            </Button>
+                            <Button
+                              size="small"
+                              variant={perPerformerPairs ? 'contained' : 'outlined'}
+                              onClick={() => setPerPerformerPairs(true)}
+                              sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
+                                bgcolor: perPerformerPairs ? '#e91e63' : 'transparent',
+                                borderColor: '#e91e63', color: perPerformerPairs ? '#fff' : '#e91e63',
+                                '&:hover': { bgcolor: perPerformerPairs ? '#c2185b' : 'rgba(233,30,99,0.08)' } }}
+                            >
+                              Per Performer
+                            </Button>
+                          </Box>
+                        )}
+                        {selectedType === 'rank_aware_siamese' && (
+                          <Chip label="Per Performer Required" size="small" sx={{ bgcolor: 'rgba(103,58,183,0.15)', color: '#673ab7', fontWeight: 700 }} />
+                        )}
                       </Box>
 
                       {/* Pairs slider */}
                       <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
                         Synthetic Keep &gt; Delete Pairs
-                        <Typography component="span" sx={{ color: '#e91e63', fontWeight: 800 }}>
-                          {syntheticPairsPerEpoch} / {perPerformerPairs ? 'performer / epoch' : 'epoch'}
+                        <Typography component="span" sx={{ color: selectedType === 'rank_aware_siamese' ? '#673ab7' : '#e91e63', fontWeight: 800 }}>
+                          {syntheticPairsPerEpoch} / {perPerformerPairs || selectedType === 'rank_aware_siamese' ? 'performer / epoch' : 'epoch'}
                         </Typography>
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', mb: 1 }}>
-                        {perPerformerPairs
+                        {(perPerformerPairs || selectedType === 'rank_aware_siamese')
                           ? `Each performer contributes ${syntheticPairsPerEpoch} pairs — total pairs = ${syntheticPairsPerEpoch} × performers`
                           : `${syntheticPairsPerEpoch} random (keep, delete) pairs drawn from the full dataset each epoch`}
                       </Typography>
@@ -811,8 +835,7 @@ function TasteDashboardPage() {
                         value={syntheticPairsPerEpoch}
                         min={100} max={5000} step={100}
                         onChange={(_, v) => setSyntheticPairsPerEpoch(v)}
-                        sx={{ color: '#e91e63' }}
-                      />
+                        sx={{ color: selectedType === 'rank_aware_siamese' ? '#673ab7' : '#e91e63' }}
                     </Box>
                   )}
                 </Box>
@@ -943,6 +966,9 @@ function TasteDashboardPage() {
                 onModelLoaded={fetchData}
                 preferredBinary={preferredBinaryModel}
                 preferredPairwise={preferredPairwiseModel}
+                preferredContext={preferredContextModel}
+                preferredSiamese={preferredSiameseModel}
+                preferredRankSiamese={preferredRankSiameseModel}
                 onSetPreferred={handleSetPreferred}
               />
             </Box>
@@ -1003,7 +1029,7 @@ export default TasteDashboardPage;
 // ── Model Arsenal sub-component ──
 function ModelArsenal({ 
   models, aiUrl, aiHealth, testingModel, setTestingModel, testResults, setTestResults, onModelLoaded,
-  preferredBinary, preferredPairwise, onSetPreferred
+  preferredBinary, preferredPairwise, preferredContext, preferredSiamese, preferredRankSiamese, onSetPreferred
 }) {
   const [loadingModel, setLoadingModel] = useState(null);
   const [quantizeLoad, setQuantizeLoad] = useState(false);
@@ -1012,6 +1038,7 @@ function ModelArsenal({
     pairwise: { label: 'Pairwise', color: '#2196f3', icon: '⚖️' },
     context_binary: { label: 'Context-Aware', color: '#ff9800', icon: '🧠' },
     siamese_binary: { label: 'Siamese Ranker', color: '#e91e63', icon: '🔬' },
+    rank_aware_siamese: { label: 'Rank-Aware Siamese', color: '#673ab7', icon: '👑' },
     unknown: { label: 'Unknown', color: '#9e9e9e', icon: '❓' },
   };
   const grouped = {};
@@ -1144,23 +1171,53 @@ function ModelArsenal({
 
                 {/* Preferred Selection Button */}
                 <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                  {['binary', 'pairwise', 'context_binary'].includes(type) && (
+                  {['binary', 'pairwise', 'context_binary', 'siamese_binary', 'rank_aware_siamese'].includes(type) && (
                     <Button 
                       fullWidth
                       size="small" 
-                      variant={(type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? "contained" : "outlined"}
-                      onClick={() => onSetPreferred(m.filename, type === 'pairwise' ? 'pairwise' : 'binary')}
-                      startIcon={(type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? <CheckCircle /> : (type === 'pairwise' ? <Compare /> : <FilterAlt />)}
+                      variant={
+                        (type === 'binary' ? preferredBinary :
+                         type === 'pairwise' ? preferredPairwise :
+                         type === 'context_binary' ? preferredContext :
+                         type === 'siamese_binary' ? preferredSiamese :
+                         type === 'rank_aware_siamese' ? preferredRankSiamese : '') === m.filename ? "contained" : "outlined"
+                      }
+                      onClick={() => onSetPreferred(m.filename, type)}
+                      startIcon={
+                        (type === 'binary' ? preferredBinary :
+                         type === 'pairwise' ? preferredPairwise :
+                         type === 'context_binary' ? preferredContext :
+                         type === 'siamese_binary' ? preferredSiamese :
+                         type === 'rank_aware_siamese' ? preferredRankSiamese : '') === m.filename 
+                          ? <CheckCircle /> 
+                          : (type === 'pairwise' ? <Compare /> : (['siamese_binary', 'rank_aware_siamese'].includes(type) ? <AutoAwesome /> : <FilterAlt />))
+                      }
                       sx={{ 
                         fontSize: '0.65rem', 
                         justifyContent: 'center',
-                        bgcolor: (type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? `${tInfo.color}20` : 'transparent',
-                        color: (type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? tInfo.color : '#888',
-                        borderColor: (type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename ? tInfo.color : 'rgba(255,255,255,0.1)',
+                        bgcolor: (type === 'binary' ? preferredBinary :
+                                  type === 'pairwise' ? preferredPairwise :
+                                  type === 'context_binary' ? preferredContext :
+                                  type === 'siamese_binary' ? preferredSiamese :
+                                  type === 'rank_aware_siamese' ? preferredRankSiamese : '') === m.filename ? `${tInfo.color}20` : 'transparent',
+                        color: (type === 'binary' ? preferredBinary :
+                                type === 'pairwise' ? preferredPairwise :
+                                type === 'context_binary' ? preferredContext :
+                                type === 'siamese_binary' ? preferredSiamese :
+                                type === 'rank_aware_siamese' ? preferredRankSiamese : '') === m.filename ? tInfo.color : '#888',
+                        borderColor: (type === 'binary' ? preferredBinary :
+                                      type === 'pairwise' ? preferredPairwise :
+                                      type === 'context_binary' ? preferredContext :
+                                      type === 'siamese_binary' ? preferredSiamese :
+                                      type === 'rank_aware_siamese' ? preferredRankSiamese : '') === m.filename ? tInfo.color : 'rgba(255,255,255,0.1)',
                         '&:hover': { bgcolor: `${tInfo.color}30`, borderColor: tInfo.color }
                       }}
                     >
-                      {(type === 'pairwise' ? preferredPairwise : preferredBinary) === m.filename 
+                      {(type === 'binary' ? preferredBinary :
+                        type === 'pairwise' ? preferredPairwise :
+                        type === 'context_binary' ? preferredContext :
+                        type === 'siamese_binary' ? preferredSiamese :
+                        type === 'rank_aware_siamese' ? preferredRankSiamese : '') === m.filename 
                         ? `Default ${tInfo.label} Model` 
                         : `Use as Default ${tInfo.label}`}
                     </Button>

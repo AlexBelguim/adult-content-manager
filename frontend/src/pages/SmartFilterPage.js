@@ -36,10 +36,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [batchCount, setBatchCount] = useState(0);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', or 'siamese'
+  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'siamese', or 'rank_aware_siamese'
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
+  const [preferredContextModel, setPreferredContextModel] = useState('');
   const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
+  const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
   const [inferenceUrl, setInferenceUrl] = useState('');
@@ -148,8 +150,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         console.log(`[SmartFilter] Starting pre-fetch with fresh threshold: ${newThreshold}`);
         fetchBatch(true, newThreshold);
         
-        // Siamese: apply zone logic to just-received results
-        if (modelType === 'siamese' && data.results) {
+        // Siamese/Rank-Aware: apply zone logic to just-received results
+        if (['siamese', 'rank_aware_siamese'].includes(modelType) && data.results) {
           const zoned = data.results.map(r => ({
             ...r,
             originalDecision: r.decision,
@@ -170,8 +172,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           originalDecision: r.decision
         }));
         
-        // Siamese mode: re-classify into keep / uncertain / delete zones
-        const finalResults = modelType === 'siamese' 
+        // Siamese modes: re-classify into keep / uncertain / delete zones
+        const finalResults = ['siamese', 'rank_aware_siamese'].includes(modelType) 
           ? resultsWithOriginal.map(r => ({
               ...r,
               decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
@@ -226,19 +228,25 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     const fetchModels = async () => {
       try {
         // 1. Fetch preferences from backend
-        const [binPref, pairPref, siamesePref] = await Promise.all([
+        const [binPref, pairPref, contextPref, siamesePref, rankSiamesePref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
           fetch('/api/settings/preferred_pairwise_model').then(r => r.json()),
-          fetch('/api/settings/preferred_siamese_model').then(r => r.json()).catch(() => ({ value: '' }))
+          fetch('/api/settings/preferred_context_model').then(r => r.json()).catch(() => ({ value: '' })),
+          fetch('/api/settings/preferred_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
+          fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).catch(() => ({ value: '' }))
         ]);
         
         const pBin = binPref.value || 'binary_filtering.pt';
         const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
+        const pContext = contextPref.value || 'context_binary.pt';
         const pSiamese = siamesePref.value || 'siamese_binary.pt';
+        const pRankSiamese = rankSiamesePref.value || 'rank_siamese.pt';
         
         setPreferredBinaryModel(pBin);
         setPreferredPairwiseModel(pPair);
+        setPreferredContextModel(pContext);
         setPreferredSiameseModel(pSiamese);
+        setPreferredRankSiameseModel(pRankSiamese);
 
         // 2. Fetch available models from AI server
         const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
@@ -248,7 +256,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           setAvailableModels(models);
           
           // Load the model for the current type
-          let targetModel = modelType === 'binary' ? pBin : modelType === 'siamese' ? pSiamese : pPair;
+          let targetModel = pBin;
+          if (modelType === 'pairwise') targetModel = pPair;
+          else if (modelType === 'context_binary') targetModel = pContext;
+          else if (modelType === 'siamese') targetModel = pSiamese;
+          else if (modelType === 'rank_aware_siamese') targetModel = pRankSiamese;
           
           // If preferred model not found, pick the first one of matching type
           if (!models.find(m => m.filename === targetModel)) {
@@ -347,8 +359,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   const handleSaveBatch = async () => {
     if (results.length === 0) return;
-    // For siamese mode, only save decided items (skip uncertain ones)
-    const toSave = modelType === 'siamese' ? results.filter(r => r.decision !== 'uncertain') : results;
+    // For siamese modes, only save decided items (skip uncertain ones)
+    const isSiamese = ['siamese', 'rank_aware_siamese'].includes(modelType);
+    const toSave = isSiamese ? results.filter(r => r.decision !== 'uncertain') : results;
     if (toSave.length === 0) {
       alert('No decided images to save. All are in the uncertain zone — please manually classify them first.');
       return;
@@ -525,15 +538,23 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>SIAMESE</Typography>
               </Box>
             </ToggleButton>
+            <ToggleButton value="rank_aware_siamese">
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                <MagicIcon sx={{ color: '#673ab7' }} />
+                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>RANK-AWARE</Typography>
+              </Box>
+            </ToggleButton>
           </ToggleButtonGroup>
           
           <Fade in={true} key={modelType}>
-            <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 400, fontStyle: 'italic' }}>
+            <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 500, fontStyle: 'italic' }}>
               {modelType === 'binary' 
                 ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)' 
                 : modelType === 'pairwise'
                 ? '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'
-                : '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'}
+                : modelType === 'siamese'
+                ? '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'
+                : '👑 Rank-Conditioned Siamese — dynamically adjusts Keep standards based on performer star-rating'}
             </Typography>
           </Fade>
         </Box>
@@ -671,6 +692,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               <ToggleButton value="siamese" sx={{ gap: 1 }}>
                 <MagicIcon sx={{ fontSize: 16 }} /> Siamese
               </ToggleButton>
+              <ToggleButton value="rank_aware_siamese" sx={{ gap: 1 }}>
+                <MagicIcon sx={{ fontSize: 16, color: '#673ab7' }} /> Rank-Aware
+              </ToggleButton>
             </ToggleButtonGroup>
 
             <IconButton color="inherit" onClick={() => setShowSettings(true)}>
@@ -806,6 +830,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                         }}
                       >
                         {Math.round(item.score)}%
+                        {item.predicted_rank !== undefined && (
+                          <Typography component="span" sx={{ ml: 1, color: '#ffca28', fontSize: '0.65rem', fontWeight: 900 }}>
+                            ⭐ {item.predicted_rank}
+                          </Typography>
+                        )}
                       </Typography>
                        <LinearProgress 
                         variant="determinate" 

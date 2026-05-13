@@ -142,6 +142,9 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                 elif model_type == 'context_binary':
                     from trainer import ContextBinaryClassifier
                     MODEL = ContextBinaryClassifier(MODEL_NAME, quantize=quantize)
+                elif model_type == 'rank_aware_siamese':
+                    from model_dinov2 import RankAwareSiameseModel
+                    MODEL = RankAwareSiameseModel(MODEL_NAME, quantize=quantize)
                 else:
                     MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True, quantize=quantize)
             except ImportError as ie:
@@ -717,6 +720,55 @@ def classify_batch():
                             results.append({
                                 'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
                                 'predicted_stars': round(star, 2), 'performer': _get_performer_name(p)
+                            })
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    time.sleep(0.005)
+
+            # ── Rank-Aware Siamese: Two-pass inference ──────────────────────
+            elif LOADED_MODEL_TYPE == 'rank_aware_siamese':
+                performer_data = {}
+                for p, img in loaded_data:
+                    perf = _get_performer_name(p)
+                    performer_data.setdefault(perf, []).append((p, img))
+                
+                # Pass 1: Predict rank
+                for perf, items in performer_data.items():
+                    if perf in CONTEXT_STAR_CACHE: continue
+                    sample_items = items[:20]
+                    rank_preds = []
+                    for i in range(0, len(sample_items), 4):
+                        batch = sample_items[i:i+4]
+                        imgs = [it[1] for it in batch]
+                        with torch.no_grad():
+                            inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                            pv = inputs['pixel_values'].to(DEVICE)
+                            ranks = MODEL.predict_rank(pv)
+                            rank_preds.extend(ranks.cpu().tolist())
+                        if torch.cuda.is_available(): torch.cuda.synchronize()
+                        time.sleep(0.005)
+                    avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
+                    CONTEXT_STAR_CACHE[perf] = avg_rank
+                    log(f"  ⭐ {perf}: estimated rank {avg_rank:.2f}")
+
+                # Pass 2: Preference classification
+                for i in range(0, len(loaded_data), 4):
+                    batch = loaded_data[i:i+4]
+                    imgs = [it[1] for it in batch]
+                    paths = [it[0] for it in batch]
+                    ranks = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
+                    
+                    with torch.no_grad():
+                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                        pv = inputs['pixel_values'].to(DEVICE)
+                        rank_t = torch.tensor(ranks, dtype=torch.float32).to(DEVICE)
+                        logits = MODEL.forward_single(pv, rank_t)
+                        logits = torch.nan_to_num(logits, nan=0.0)
+                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
+                        for p, s, r in zip(paths, scores, ranks):
+                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
+                            results.append({
+                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
+                                'predicted_rank': round(r, 2), 'performer': _get_performer_name(p)
                             })
                     if torch.cuda.is_available(): torch.cuda.synchronize()
                     time.sleep(0.005)

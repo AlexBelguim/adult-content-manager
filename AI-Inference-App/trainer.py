@@ -9,7 +9,7 @@ from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
-from model_dinov2 import DinoV2PreferenceModel
+from model_dinov2 import DinoV2PreferenceModel, RankAwareSiameseModel
 
 IMAGE_EXTS = {'.jpg','.jpeg','.png','.webp','.gif','.bmp'}
 
@@ -638,20 +638,34 @@ def train_context_binary(config):
     manifest_path = Path(base_path) / 'manifest.json'
     if not star_ratings and manifest_path.exists():
         try:
-            manifest = json.loads(manifest_path.read_text())
+            # Use utf-8 explicitly to avoid encoding issues on Windows
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
             star_ratings = manifest.get('performer_ratings', {})
             tlog(f"  ⭐ Loaded {len(star_ratings)} star ratings from manifest")
-        except: pass
+        except Exception as e:
+            tlog(f"  ⚠️ Failed to load manifest.json: {e}")
+    elif not star_ratings:
+        tlog(f"  ℹ️ No manifest.json found at {manifest_path}")
 
+    # 3. Normalize star_ratings keys for case-insensitive lookup
+    # This handles discrepancies between folder names and manifest keys
+    star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
+    
     # Default unknown performers to 2.5 (neutral)
     all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
+    final_ratings = {}
     for p in all_performers:
-        if p not in star_ratings:
-            star_ratings[p] = 2.5
+        p_norm = p.lower().strip()
+        if p_norm in star_ratings_norm:
+            final_ratings[p] = star_ratings_norm[p_norm]
+        else:
+            final_ratings[p] = 2.5
+    
+    star_ratings = final_ratings
     rated_count = sum(1 for v in star_ratings.values() if v != 2.5)
     tlog(f"  Performers with real ratings: {rated_count}/{len(all_performers)}")
 
-    # 3. Build dataset
+    # 4. Build dataset
     processor = AutoImageProcessor.from_pretrained(backbone)
     all_samples = []  # (path, performer_name, star_rating, label)
     for perf, imgs in keep_map.items():
@@ -891,10 +905,15 @@ def train_siamese_binary(config):
         # ── Sample synthetic pairs ──────────────────────────────────
         pairs = []
         if per_performer:
-            # Per-performer: each performer contributes N balanced pairs
-            for perf in all_performers:
-                p_keep = keep_by_perf.get(perf, keep_imgs)  # fallback to global if missing
-                p_del  = delete_by_perf.get(perf, delete_imgs)
+            # Per-performer: only use performers who have BOTH keep and delete images
+            # This ensures we learn the specific "before and after" differences for each person
+            performers_with_both = [p for p in all_performers if p in keep_by_perf and p in delete_by_perf]
+            if epoch == 1:
+                tlog(f"  🎯 Siamese Mode: Strictly Per-Performer ({len(performers_with_both)} performers with both sides)")
+            
+            for perf in performers_with_both:
+                p_keep = keep_by_perf[perf]
+                p_del  = delete_by_perf[perf]
                 n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
                 for _ in range(n):
                     pairs.append((random.choice(p_keep), random.choice(p_del)))
@@ -1003,13 +1022,183 @@ def train_siamese_binary(config):
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
 
-# ── Background runner ────────────────────────────────────────────────────────
+def train_rank_aware_siamese(config):
+    """
+    Trains a Rank-Aware Siamese model that takes (Image + Performer Rank) as input.
+    """
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 8)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
+    bs = config.get('batch_size', 8)
+    base_path = config.get('base_path', '')
+    synthetic_pairs_per_epoch = config.get('synthetic_pairs_per_epoch', 500)
+    
+    tlog(f"📋 Rank-Aware Siamese Training | {epochs} epochs | backbone: {backbone}")
+
+    # 1. Load Data
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+    tlog(f"  📂 Keep: {len(keep_map)} | Delete: {len(delete_map)} performers")
+
+    # 2. Load star ratings
+    star_ratings = config.get('performer_ratings', {})
+    manifest_path = Path(base_path) / 'manifest.json'
+    if not star_ratings and manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            star_ratings = manifest.get('performer_ratings', {})
+            tlog(f"  ⭐ Loaded {len(star_ratings)} star ratings from manifest")
+        except: pass
+    
+    # Normalize ratings keys
+    star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
+
+    # Strictly use performers with BOTH sides
+    all_performers = sorted(set(keep_map.keys()) & set(delete_map.keys()))
+    tlog(f"  🎯 Using {len(all_performers)} performers with both Keep & Delete data")
+    
+    if not all_performers:
+        raise ValueError("No performers have both Keep and Delete images. Need intra-performer pairs.")
+
+    # 3. Setup Model
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = RankAwareSiameseModel(model_name=backbone, freeze_backbone=True, quantize=quantize).to(device)
+    
+    criterion = nn.MarginRankingLoss(margin=1.0)
+    optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    
+    best_acc = 0.0
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'rank_siamese_{backbone_short}_{timestamp}.pt'
+    
+    for epoch in range(1, epochs + 1):
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Starting Fine-tuning at epoch {epoch}")
+            for p in model.backbone.parameters(): p.requires_grad = True
+            optimizer = torch.optim.AdamW([
+                {'params': model.head.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5}
+            ])
+
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
+
+        # Sample pairs with ratings
+        pairs = [] # (img_a, rank_a, img_b, rank_b)
+        for perf in all_performers:
+            p_keep = keep_map[perf]
+            p_del = delete_map[perf]
+            rank = star_ratings_norm.get(perf.lower().strip(), 2.5)
+            n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
+            for _ in range(n):
+                pairs.append((random.choice(p_keep), rank, random.choice(p_del), rank))
+        
+        random.shuffle(pairs)
+        
+        # Training loop
+        model.train()
+        total_loss = 0
+        correct = 0
+        total = 0
+        
+        training_state['total_batches'] = (len(pairs) + bs - 1) // bs
+        
+        for i in range(0, len(pairs), bs):
+            batch = pairs[i:i+bs]
+            training_state['batch'] = (i // bs) + 1
+            
+            # Load images and ranks
+            imgs_a = []
+            ranks_a = []
+            imgs_b = []
+            ranks_b = []
+            
+            transform = T.Compose([
+                T.Resize((224,224)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+            ])
+            
+            for path_a, r_a, path_b, r_b in batch:
+                try:
+                    imgs_a.append(transform(Image.open(path_a).convert('RGB')))
+                    imgs_b.append(transform(Image.open(path_b).convert('RGB')))
+                    ranks_a.append(float(r_a))
+                    ranks_b.append(float(r_b))
+                except: continue
+            
+            if not imgs_a: continue
+            
+            x_a = torch.stack(imgs_a).to(device)
+            r_a = torch.tensor(ranks_a, dtype=torch.float32).to(device)
+            x_b = torch.stack(imgs_b).to(device)
+            r_b = torch.tensor(ranks_b, dtype=torch.float32).to(device)
+            
+            optimizer.zero_grad()
+            
+            with torch.amp.autocast('cuda', enabled=(scaler is not None)):
+                # Rank Prediction Loss (Head 1)
+                pred_r_a = model.predict_rank(x_a)
+                pred_r_b = model.predict_rank(x_b)
+                loss_rank = nn.functional.mse_loss(pred_r_a, r_a) + nn.functional.mse_loss(pred_r_b, r_b)
+                
+                # Preference Loss (Head 2)
+                score_a, score_b = model(x_a, r_a, x_b, r_b)
+                target = torch.ones(score_a.size(0)).to(device)
+                loss_pref = criterion(score_a, score_b, target)
+                
+                # Combine losses
+                loss = loss_pref + 0.5 * loss_rank
+            
+            if scaler:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+                
+            total_loss += loss.item()
+            correct += (score_a > score_b).sum().item()
+            total += score_a.size(0)
+            
+            training_state['train_loss'] = total_loss / (i // bs + 1)
+            training_state['train_acc'] = correct / total if total > 0 else 0
+            
+        epoch_acc = correct / total if total > 0 else 0
+        training_state['val_acc'] = epoch_acc
+        training_state['epoch_history'].append({'epoch': epoch, 'loss': total_loss/max(1, training_state['total_batches']), 'acc': epoch_acc})
+        
+        if epoch_acc > best_acc:
+            best_acc = epoch_acc
+            training_state['best_val_acc'] = best_acc
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'model_type': 'rank_aware_siamese',
+                'backbone': backbone,
+                'val_acc': best_acc,
+                'config': config,
+                'created_at': time.time()
+            }, out_path)
+            tlog(f"  ⭐ Epoch {epoch}: Loss {training_state['train_loss']:.4f}, Acc {epoch_acc:.1%} (New Best!)")
+        else:
+            tlog(f"  Epoch {epoch}: Loss {training_state['train_loss']:.4f}, Acc {epoch_acc:.1%}")
+
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+    return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
 TRAIN_FNS = {
     'binary': train_binary,
     'pairwise': train_pairwise,
     'context_binary': train_context_binary,
     'pairwise_siamese_binary': train_siamese_binary,
+    'rank_aware_siamese': train_rank_aware_siamese,
 }
 
 def start_training(config):

@@ -431,12 +431,17 @@ router.post('/start', async (req, res) => {
 
     // Add mining/dedupe flags from body
     trainingPayload.enable_mining = req.body.enable_mining;
+    trainingPayload.quantize = req.body.quantize;
     trainingPayload.mining_multiplier = req.body.mining_multiplier || 4;
     trainingPayload.deduplicate = req.body.deduplicate;
+    trainingPayload.finetune_start_epoch = req.body.finetune_start_epoch;
 
     // Synthetic pair count for Siamese Binary training
     if (req.body.synthetic_pairs_per_epoch) {
       trainingPayload.synthetic_pairs_per_epoch = req.body.synthetic_pairs_per_epoch;
+    }
+    if (req.body.per_performer_pairs !== undefined) {
+      trainingPayload.per_performer_pairs = req.body.per_performer_pairs;
     }
 
     // Send to AI server

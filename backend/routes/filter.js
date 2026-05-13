@@ -155,7 +155,7 @@ router.post('/delete', async (req, res) => {
 // GET /api/filter/smart-batch/:performerId
 router.get('/smart-batch/:performerId', async (req, res) => {
   const { performerId } = req.params;
-  const { threshold, modelId, ai_server_url, app_base_url } = req.query;
+  const { threshold, modelId, ai_server_url, app_base_url, modelType } = req.query;
 
   // Determine TrueNAS IP for image fetching
   const protocol = req.protocol;
@@ -167,7 +167,8 @@ router.get('/smart-batch/:performerId', async (req, res) => {
       threshold: threshold ? parseFloat(threshold) : 50.0,
       modelId,
       ai_server_url: ai_server_url || getAiServerUrl(),
-      app_base_url: myBaseUrl
+      app_base_url: myBaseUrl,
+      modelType
     });
     res.send(result);
   } catch (err) {
