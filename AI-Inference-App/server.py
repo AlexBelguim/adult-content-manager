@@ -23,7 +23,10 @@ from calibration import CalibrationEngine
 
 # Add current dir to path for model import
 sys.path.insert(0, str(Path(__file__).parent))
-from model_dinov2 import DinoV2PreferenceModel
+from model_dinov2 import (
+    DinoV2PreferenceModel, PerformerRankerModel,
+    RankedBinaryClassifier, RankedSiameseModel
+)
 
 # Initialize Calibration Engine
 CALIBRATOR = CalibrationEngine()
@@ -46,7 +49,11 @@ PROCESSOR = None
 MODEL_NAME = None
 LOADED_MODEL_ID = None
 LOADED_MODEL_TYPE = 'pairwise'
-CONTEXT_STAR_CACHE = {}  # performer_name → predicted star rating
+RANK_CONDITIONED = False   # True if loaded model needs rank input
+RANKER_MODEL = None        # Optional standalone PerformerRankerModel
+RANKER_PROCESSOR = None
+RANKER_MODEL_ID = None
+CONTEXT_STAR_CACHE = {}    # performer_name → predicted star rating (per inference session)
 
 from threading import Lock
 MODEL_LOCK = Lock()
@@ -134,11 +141,35 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             
             log(f"🦕 Architecture: {MODEL_NAME} | Type: {model_type} (Device: {DEVICE})")
             
-            # Initialize the correct model class based on type
+            rank_conditioned = checkpoint.get('rank_conditioned', False)
+            
+            # Initialize the correct model class based on type + rank flag
             try:
-                if model_type == 'binary':
+                if model_type == 'performer_ranker':
+                    # This is a ranker, not a filtering model — load into RANKER_MODEL
+                    global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
+                    ranker = PerformerRankerModel(MODEL_NAME, quantize=quantize)
+                    ranker.load_state_dict(checkpoint['model_state_dict'], strict=False)
+                    ranker.to(DEVICE)
+                    ranker.eval()
+                    RANKER_MODEL = ranker
+                    RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
+                    RANKER_MODEL_ID = model_id
+                    val_mae = checkpoint.get('val_mae')
+                    if val_mae: log(f"  Ranker MAE at save: {val_mae:.3f}")
+                    del checkpoint
+                    import gc; gc.collect()
+                    if torch.cuda.is_available(): torch.cuda.empty_cache()
+                    log(f"✅ Performer Ranker loaded on {DEVICE}")
+                    LOADED_MODEL_ID = model_id  # Track for UI
+                    return True, "Ranker loaded"
+                elif model_type == 'binary' and rank_conditioned:
+                    MODEL = RankedBinaryClassifier(MODEL_NAME, quantize=quantize)
+                elif model_type == 'binary':
                     from trainer import BinaryClassifier
                     MODEL = BinaryClassifier(MODEL_NAME, quantize=quantize)
+                elif model_type in ('siamese_binary', 'pairwise_siamese_binary') and rank_conditioned:
+                    MODEL = RankedSiameseModel(model_name=MODEL_NAME, quantize=quantize)
                 elif model_type == 'context_binary':
                     from trainer import ContextBinaryClassifier
                     MODEL = ContextBinaryClassifier(MODEL_NAME, quantize=quantize)
@@ -159,7 +190,10 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             MODEL.to(DEVICE)
             MODEL.eval()
             LOADED_MODEL_TYPE = model_type
+            RANK_CONDITIONED = rank_conditioned
             CONTEXT_STAR_CACHE.clear()
+            if rank_conditioned:
+                log(f"  🎯 Rank-conditioned model: will use ranker for context")
             
             # Load processor
             PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
@@ -196,6 +230,10 @@ def health():
         'model_loaded': MODEL is not None,
         'model_name': MODEL_NAME,
         'current_model': LOADED_MODEL_ID,
+        'model_type': LOADED_MODEL_TYPE,
+        'rank_conditioned': RANK_CONDITIONED,
+        'ranker_loaded': RANKER_MODEL is not None,
+        'ranker_model': RANKER_MODEL_ID,
         'vram_allocated': f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.2f} MB" if torch.cuda.is_available() else "0 MB"
     })
 
@@ -226,7 +264,7 @@ def api_load_model():
 
 @app.route('/unload_model', methods=['POST'])
 def api_unload_model():
-    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE
+    global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE, RANK_CONDITIONED
     with MODEL_LOCK:
         log("♻️ Unload request received. Acquiring lock...")
         if MODEL is None:
@@ -239,6 +277,7 @@ def api_unload_model():
         MODEL_NAME = None
         LOADED_MODEL_ID = None
         LOADED_MODEL_TYPE = 'pairwise'
+        RANK_CONDITIONED = False
         CONTEXT_STAR_CACHE.clear()
         import gc
         gc.collect()
@@ -281,6 +320,7 @@ def api_list_models():
                 name_low = m.name.lower()
                 if 'pairwise' in name_low or 'preference' in name_low: m_type = 'pairwise'
                 elif 'context' in name_low: m_type = 'context_binary'
+                elif 'ranker' in name_low: m_type = 'performer_ranker'
                 elif 'siamese' in name_low: m_type = 'siamese_binary'
                 elif 'binary' in name_low or 'filtering' in name_low: m_type = 'binary'
                 
@@ -291,6 +331,8 @@ def api_list_models():
             info['type'] = m_type
             info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
             info['val_acc'] = ckpt.get('val_acc')
+            info['val_mae'] = ckpt.get('val_mae')  # For performer_ranker
+            info['rank_conditioned'] = ckpt.get('rank_conditioned', False)
             info['samples'] = ckpt.get('samples')
             info['created_at'] = ckpt.get('created_at')
             info['epoch_history'] = ckpt.get('epoch_history')
@@ -773,6 +815,108 @@ def classify_batch():
                     if torch.cuda.is_available(): torch.cuda.synchronize()
                     time.sleep(0.005)
 
+            # ── Rank-Conditioned Binary: Two-pass (ranker + classifier) ────
+            elif RANK_CONDITIONED and isinstance(MODEL, RankedBinaryClassifier):
+                # Pass 0: Get performer ranks via RANKER_MODEL or fallback to 2.5
+                performer_data = {}
+                for p, img in loaded_data:
+                    perf = _get_performer_name(p)
+                    performer_data.setdefault(perf, []).append((p, img))
+                
+                for perf, items in performer_data.items():
+                    if perf in CONTEXT_STAR_CACHE: continue
+                    if RANKER_MODEL is not None:
+                        sample_items = items[:20]
+                        rank_preds = []
+                        for ri in range(0, len(sample_items), 4):
+                            batch = sample_items[ri:ri+4]
+                            imgs = [it[1] for it in batch]
+                            with torch.no_grad():
+                                proc = RANKER_PROCESSOR or PROCESSOR
+                                inputs = proc(images=imgs, return_tensors="pt")
+                                pv = inputs['pixel_values'].to(DEVICE)
+                                ranks = RANKER_MODEL.predict_rank(pv)
+                                rank_preds.extend(ranks.cpu().tolist())
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                        avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
+                    else:
+                        avg_rank = 2.5  # No ranker loaded — neutral fallback
+                    CONTEXT_STAR_CACHE[perf] = avg_rank
+                    log(f"  ⭐ {perf}: rank {avg_rank:.2f}" + (" (ranker)" if RANKER_MODEL else " (fallback)"))
+                
+                # Pass 1: Classify with rank
+                for i in range(0, len(loaded_data), 4):
+                    batch = loaded_data[i:i+4]
+                    imgs = [it[1] for it in batch]
+                    paths = [it[0] for it in batch]
+                    ranks = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
+                    
+                    with torch.no_grad():
+                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                        pv = inputs['pixel_values'].to(DEVICE)
+                        rank_t = torch.tensor(ranks, dtype=torch.float32).to(DEVICE)
+                        logits = MODEL(pv, rank_t)
+                        logits = torch.nan_to_num(logits, nan=0.0)
+                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
+                        for p, s, r in zip(paths, scores, ranks):
+                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
+                            results.append({
+                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
+                                'predicted_rank': round(r, 2), 'performer': _get_performer_name(p)
+                            })
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    time.sleep(0.005)
+
+            # ── Rank-Conditioned Siamese: Two-pass ────────────────────────────
+            elif RANK_CONDITIONED and isinstance(MODEL, RankedSiameseModel):
+                performer_data = {}
+                for p, img in loaded_data:
+                    perf = _get_performer_name(p)
+                    performer_data.setdefault(perf, []).append((p, img))
+                
+                for perf, items in performer_data.items():
+                    if perf in CONTEXT_STAR_CACHE: continue
+                    if RANKER_MODEL is not None:
+                        sample_items = items[:20]
+                        rank_preds = []
+                        for ri in range(0, len(sample_items), 4):
+                            batch = sample_items[ri:ri+4]
+                            imgs = [it[1] for it in batch]
+                            with torch.no_grad():
+                                proc = RANKER_PROCESSOR or PROCESSOR
+                                inputs = proc(images=imgs, return_tensors="pt")
+                                pv = inputs['pixel_values'].to(DEVICE)
+                                ranks = RANKER_MODEL.predict_rank(pv)
+                                rank_preds.extend(ranks.cpu().tolist())
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                        avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
+                    else:
+                        avg_rank = 2.5
+                    CONTEXT_STAR_CACHE[perf] = avg_rank
+                    log(f"  ⭐ {perf}: rank {avg_rank:.2f}" + (" (ranker)" if RANKER_MODEL else " (fallback)"))
+                
+                for i in range(0, len(loaded_data), 4):
+                    batch = loaded_data[i:i+4]
+                    imgs = [it[1] for it in batch]
+                    paths = [it[0] for it in batch]
+                    ranks = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
+                    
+                    with torch.no_grad():
+                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
+                        pv = inputs['pixel_values'].to(DEVICE)
+                        rank_t = torch.tensor(ranks, dtype=torch.float32).to(DEVICE)
+                        logits = MODEL.forward_single(pv, rank_t)
+                        logits = torch.nan_to_num(logits, nan=0.0)
+                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
+                        for p, s, r in zip(paths, scores, ranks):
+                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
+                            results.append({
+                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
+                                'predicted_rank': round(r, 2), 'performer': _get_performer_name(p)
+                            })
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    time.sleep(0.005)
+
             # ── Binary / Pairwise / Siamese: direct classification ──────────
             else:
                 for i in range(0, len(loaded_data), 4):
@@ -836,7 +980,28 @@ def classify_single():
             with torch.no_grad():
                 inputs = PROCESSOR(images=[img], return_tensors="pt")
                 pixel_values = inputs['pixel_values'].to(DEVICE)
-                raw_scores = MODEL.forward_single(pixel_values)
+                
+                # Dispatch based on model type
+                if RANK_CONDITIONED and isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
+                    # Get rank for this performer
+                    perf = _get_performer_name(image_path)
+                    if perf not in CONTEXT_STAR_CACHE:
+                        if RANKER_MODEL is not None:
+                            rank_pred = RANKER_MODEL.predict_rank(pixel_values)
+                            CONTEXT_STAR_CACHE[perf] = rank_pred.item()
+                        else:
+                            CONTEXT_STAR_CACHE[perf] = 2.5
+                    rank = CONTEXT_STAR_CACHE[perf]
+                    rank_t = torch.tensor([rank], dtype=torch.float32).to(DEVICE)
+                    if isinstance(MODEL, RankedBinaryClassifier):
+                        raw_scores = MODEL(pixel_values, rank_t)
+                    else:
+                        raw_scores = MODEL.forward_single(pixel_values, rank_t)
+                elif hasattr(MODEL, 'forward_single'):
+                    raw_scores = MODEL.forward_single(pixel_values)
+                else:
+                    raw_scores = MODEL(pixel_values)
+                
                 score = (torch.sigmoid(raw_scores) * 100).item()
                 decision = "keep" if score >= threshold else "delete"
                 
@@ -889,8 +1054,12 @@ def score_images():
                     inputs = PROCESSOR(images=imgs, return_tensors="pt")
                     pv = inputs['pixel_values'].to(DEVICE)
                     
-                    # Get scores
-                    if hasattr(MODEL, 'forward_single'):
+                    # Get scores — handle all model types
+                    if RANK_CONDITIONED and isinstance(MODEL, RankedBinaryClassifier):
+                        raw_scores = MODEL.forward_no_rank(pv)
+                    elif RANK_CONDITIONED and isinstance(MODEL, RankedSiameseModel):
+                        raw_scores = MODEL.forward_no_rank(pv)
+                    elif hasattr(MODEL, 'forward_single'):
                         raw_scores = MODEL.forward_single(pv)
                     else:
                         raw_scores = MODEL(pv)

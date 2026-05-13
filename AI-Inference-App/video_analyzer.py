@@ -169,31 +169,59 @@ Rule: Output ONLY a JSON object. No other text.
 Format: {"action": "label from choices", "confidence": 0.5-1.0}"""
 
     try:
+        # Qwen2.5-VL and newer models require images embedded as content parts.
+        # MiniCPM-V / LLaVA accept the legacy top-level "images" key.
+        _model_lower = OLLAMA_MODEL.lower()
+        if any(m in _model_lower for m in ['qwen', 'internvl', 'llama4']):
+            # OpenAI-style multipart content
+            content_parts = [{"type": "text", "text": prompt}]
+            for img in frame_b64_list:
+                content_parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}})
+            messages = [{"role": "user", "content": content_parts}]
+        else:
+            # Legacy Ollama format (MiniCPM-V, LLaVA, BakLLaVA, etc.)
+            messages = [{"role": "user", "content": prompt, "images": frame_b64_list}]
+
         payload = {
             "model": OLLAMA_MODEL,
-            "messages": [{
-                "role": "user",
-                "content": prompt,
-                "images": frame_b64_list
-            }],
+            "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 100}
+            "options": {"temperature": 0.1, "num_predict": 150}
         }
         resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=120)
         if resp.status_code == 200:
             content = resp.json().get("message", {}).get("content", "")
-            log(f"  🔍 Raw AI: {content[:150] if content else '[EMPTY RESPONSE]'}")
+            log(f"  🔍 Raw AI ({OLLAMA_MODEL}): {content[:300] if content else '[EMPTY RESPONSE]'}")
             return parse_vlm_response(content, allowed_actions)
+        else:
+            log(f"  ⚠️ VLM HTTP {resp.status_code}: {resp.text[:200]}")
         return {"action": "other", "confidence": 0.0}
     except Exception as ex:
         log(f"  ⚠️ VLM failed: {ex}")
         return {"action": "other", "confidence": 0.0}
 
+# Phrases that indicate the model refused to answer
+_REFUSAL_PHRASES = [
+    "i can't", "i cannot", "i'm not able", "i am not able", "unable to",
+    "as an ai", "i don't think", "inappropriate", "i'm sorry", "i apologize",
+    "not appropriate", "content policy", "harmful", "explicit content",
+    "this image", "cannot assist", "can't assist", "against my",
+]
+
 def parse_vlm_response(content, allowed_actions=None):
+    if not content:
+        return {"action": "other", "confidence": 0.0}
+
+    # Detect refusals early so they don't silently fall through
+    content_lower = content.lower()
+    if any(phrase in content_lower for phrase in _REFUSAL_PHRASES):
+        log(f"  🚫 Model refused: {content[:120]}")
+        return {"action": "refused", "confidence": 0.0}
+
     try:
-        content = re.sub(r'```json\s*|\s*```', '', content).strip()
-        content = re.sub(r'<\|im_start\|>|<\|im_end\|>|assistant|user|system', '', content).strip()
-        json_match = re.search(r'\{[^}]+\}', content)
+        content_clean = re.sub(r'```json\s*|\s*```', '', content).strip()
+        content_clean = re.sub(r'<\|im_start\|>|<\|im_end\|>|assistant|user|system', '', content_clean).strip()
+        json_match = re.search(r'\{[^}]+\}', content_clean)
         if json_match:
             data = json.loads(json_match.group())
             action = str(data.get("action", "other")).lower().strip()

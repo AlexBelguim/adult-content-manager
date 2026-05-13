@@ -1,6 +1,7 @@
 """
 Training module for AI Inference App.
-Supports: binary, pairwise, context-aware binary, and agent-of-taste models.
+Supports: binary, pairwise, siamese binary, performer ranker, and rank-conditioned variants.
+Legacy: context_binary and rank_aware_siamese checkpoints still loadable but no new training.
 Runs in a background thread so the server stays responsive.
 """
 import os, sys, time, random, json, threading, torch, torch.nn as nn
@@ -9,7 +10,10 @@ from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
-from model_dinov2 import DinoV2PreferenceModel, RankAwareSiameseModel
+from model_dinov2 import (
+    DinoV2PreferenceModel, RankAwareSiameseModel,
+    PerformerRankerModel, RankedBinaryClassifier, RankedSiameseModel
+)
 
 IMAGE_EXTS = {'.jpg','.jpeg','.png','.webp','.gif','.bmp'}
 
@@ -1066,7 +1070,9 @@ def train_rank_aware_siamese(config):
     model = RankAwareSiameseModel(model_name=backbone, freeze_backbone=True, quantize=quantize).to(device)
     
     criterion = nn.MarginRankingLoss(margin=1.0)
-    optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(
+        list(model.rank_head.parameters()) + list(model.preference_head.parameters()), lr=1e-3
+    )
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
     
     best_acc = 0.0
@@ -1079,7 +1085,7 @@ def train_rank_aware_siamese(config):
             tlog(f"  🔥 Starting Fine-tuning at epoch {epoch}")
             for p in model.backbone.parameters(): p.requires_grad = True
             optimizer = torch.optim.AdamW([
-                {'params': model.head.parameters(), 'lr': 1e-3},
+                {'params': list(model.rank_head.parameters()) + list(model.preference_head.parameters()), 'lr': 1e-3},
                 {'params': model.backbone.parameters(), 'lr': 1e-5}
             ])
 
@@ -1193,11 +1199,504 @@ def train_rank_aware_siamese(config):
 
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
+
+# ── New Training Functions ──────────────────────────────────────────────────
+
+def train_performer_ranker(config):
+    """Train a standalone performer ranker: image → star rating regression.
+    Uses ALL images (keep + delete) from rated performers.
+    manifest.json star ratings are the ground-truth labels.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 8)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
+    bs = config.get('batch_size', 16)
+    base_path = config.get('base_path', '')
+
+    tlog(f"📋 Performer Ranker Training | {epochs} epochs | backbone: {backbone}")
+
+    # 1. Load performer directories (both keep and delete)
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+
+    # 2. Load star ratings from manifest
+    star_ratings = config.get('performer_ratings', {})
+    manifest_path = Path(base_path) / 'manifest.json'
+    if not star_ratings and manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            star_ratings = manifest.get('performer_ratings', {})
+            tlog(f"  ⭐ Loaded {len(star_ratings)} star ratings from manifest")
+        except Exception as e:
+            tlog(f"  ⚠️ Failed to load manifest.json: {e}")
+
+    if not star_ratings:
+        raise ValueError("No performer ratings found. Need manifest.json with performer_ratings.")
+
+    # Normalize keys for case-insensitive matching
+    star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
+
+    # 3. Build dataset: ALL images of each rated performer (keep + delete)
+    all_samples = []  # (path, star_rating)
+    all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
+    rated_count = 0
+
+    for perf in all_performers:
+        perf_key = perf.lower().strip()
+        if perf_key not in star_ratings_norm:
+            continue  # skip unrated performers
+        stars = star_ratings_norm[perf_key]
+        rated_count += 1
+        # Add all keep images
+        for p in keep_map.get(perf, []):
+            all_samples.append((p, stars))
+        # Add all delete images
+        for p in delete_map.get(perf, []):
+            all_samples.append((p, stars))
+
+    random.shuffle(all_samples)
+    tlog(f"  📊 {len(all_samples)} images from {rated_count} rated performers")
+    config['_keep_count'] = sum(len(v) for v in keep_map.values())
+    config['_delete_count'] = sum(len(v) for v in delete_map.values())
+
+    if len(all_samples) < 10:
+        raise ValueError(f"Too few samples ({len(all_samples)}). Need rated performers with images.")
+
+    # 4. Dataset
+    processor = AutoImageProcessor.from_pretrained(backbone)
+
+    class RankerDS(Dataset):
+        def __init__(self, samples):
+            self.samples = samples
+            self.aug = T.Compose([T.RandomHorizontalFlip(0.5),
+                                  T.RandomResizedCrop(224, scale=(0.85, 1.0)),
+                                  T.ColorJitter(0.08, 0.08, 0.05, 0.02)])
+        def __len__(self): return len(self.samples)
+        def __getitem__(self, idx):
+            path, stars = self.samples[idx]
+            try: img = Image.open(path).convert('RGB')
+            except: return self.__getitem__((idx+1) % len(self))
+            img = self.aug(img)
+            inp = processor(images=img, return_tensors='pt')
+            return {'pixel_values': inp['pixel_values'].squeeze(0),
+                    'star_rating': torch.tensor(stars, dtype=torch.float32)}
+
+    ds = RankerDS(all_samples)
+    vs = max(1, int(len(ds) * 0.15))
+    train_ds, val_ds = random_split(ds, [len(ds)-vs, vs])
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+
+    # 5. Model
+    model = PerformerRankerModel(backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
+    if not quantize: model.freeze_backbone()
+    criterion = nn.MSELoss()
+    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    optimizer = torch.optim.AdamW(model.rank_head.parameters(), lr=1e-3)
+    best_mae = float('inf')
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'performer_ranker_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
+
+    for epoch in range(1, epochs+1):
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Unfreezing backbone at epoch {epoch}")
+            model.unfreeze_backbone()
+            optimizer = torch.optim.AdamW([
+                {'params': model.rank_head.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5},
+            ])
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
+
+        model.train()
+        total_loss = 0
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+
+        for bi, batch in enumerate(train_loader, 1):
+            pv = batch['pixel_values'].to(device)
+            stars_gt = batch['star_rating'].to(device)
+            optimizer.zero_grad()
+
+            if scaler:
+                with torch.amp.autocast('cuda'):
+                    pred = model(pv)
+                    loss = criterion(pred, stars_gt)
+                scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
+            else:
+                pred = model(pv)
+                loss = criterion(pred, stars_gt)
+                loss.backward(); optimizer.step()
+
+            total_loss += loss.item()
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
+
+        # Validate
+        model.eval()
+        val_err = val_n = 0
+        with torch.no_grad():
+            for batch in val_loader:
+                pv = batch['pixel_values'].to(device)
+                stars_gt = batch['star_rating'].to(device)
+                pred = model(pv)
+                val_err += (pred - stars_gt).abs().sum().item()
+                val_n += stars_gt.size(0)
+
+        val_mae = val_err / max(val_n, 1)
+        # Use inverse MAE as "accuracy" for the training state UI
+        val_acc_proxy = max(0.0, 1.0 - val_mae / 5.0)
+        training_state['val_acc'] = val_acc_proxy
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / max(num_batches, 1),
+            'val_mae': round(val_mae, 3), 'val_acc_proxy': round(val_acc_proxy, 4)
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val MAE: {val_mae:.3f}")
+
+        if val_mae < best_mae:
+            best_mae = val_mae
+            training_state['best_val_acc'] = val_acc_proxy
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'val_mae': val_mae,
+                'backbone': backbone,
+                'model_type': 'performer_ranker',
+                'performer_ratings': star_ratings,
+                'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
+                'created_at': time.time()
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} (MAE: {val_mae:.3f})")
+
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+    return {'model': str(out_path.name), 'best_val_acc': max(0, 1.0 - best_mae / 5.0)}
+
+
+def train_ranked_binary(config):
+    """Train a rank-conditioned binary classifier.
+    Same as train_binary but the model takes (image, performer_rank) as input.
+    During training, rank comes from manifest.json star ratings.
+    During inference, rank comes from a separately loaded PerformerRankerModel.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 8)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
+    bs = config.get('batch_size', 16)
+    base_path = config.get('base_path', '')
+
+    tlog(f"📋 Ranked Binary Training | {epochs} epochs | backbone: {backbone}")
+
+    # Load performer directories
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+    tlog(f"  Keep performers: {len(keep_map)} | Delete performers: {len(delete_map)}")
+
+    if not keep_map or not delete_map:
+        raise ValueError("Need both keep and delete performer directories")
+
+    # Load star ratings
+    star_ratings = config.get('performer_ratings', {})
+    manifest_path = Path(base_path) / 'manifest.json'
+    if not star_ratings and manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            star_ratings = manifest.get('performer_ratings', {})
+            tlog(f"  ⭐ Loaded {len(star_ratings)} star ratings from manifest")
+        except Exception as e:
+            tlog(f"  ⚠️ Failed to load manifest.json: {e}")
+
+    star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
+
+    # Build samples: (path, star_rating, label)
+    all_samples = []
+    all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
+    for perf in all_performers:
+        stars = star_ratings_norm.get(perf.lower().strip(), 2.5)
+        for p in keep_map.get(perf, []):
+            all_samples.append((p, stars, 1.0))
+        for p in delete_map.get(perf, []):
+            all_samples.append((p, stars, 0.0))
+    random.shuffle(all_samples)
+
+    config['_keep_count'] = sum(len(v) for v in keep_map.values())
+    config['_delete_count'] = sum(len(v) for v in delete_map.values())
+    tlog(f"  📊 Total samples: {len(all_samples)}")
+
+    processor = AutoImageProcessor.from_pretrained(backbone)
+
+    class RankedBinaryDS(Dataset):
+        def __init__(self, samples):
+            self.samples = samples
+            self.aug = T.Compose([T.RandomHorizontalFlip(0.5),
+                                  T.RandomResizedCrop(224, scale=(0.85, 1.0)),
+                                  T.ColorJitter(0.08, 0.08, 0.05, 0.02)])
+        def __len__(self): return len(self.samples)
+        def __getitem__(self, idx):
+            path, stars, label = self.samples[idx]
+            try: img = Image.open(path).convert('RGB')
+            except: return self.__getitem__((idx+1) % len(self))
+            img = self.aug(img)
+            inp = processor(images=img, return_tensors='pt')
+            return {'pixel_values': inp['pixel_values'].squeeze(0),
+                    'star_rating': torch.tensor(stars, dtype=torch.float32),
+                    'label': torch.tensor(label, dtype=torch.float32)}
+
+    ds = RankedBinaryDS(all_samples)
+    vs = max(1, int(len(ds) * 0.15))
+    train_ds, val_ds = random_split(ds, [len(ds)-vs, vs])
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+
+    model = RankedBinaryClassifier(backbone, quantize=quantize).to(device)
+    if not quantize: model.freeze_backbone()
+    criterion = nn.BCEWithLogitsLoss()
+    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    optimizer = torch.optim.AdamW(model.classifier.parameters(), lr=1e-3)
+    best_acc = 0.0
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'binary_filtering_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
+
+    for epoch in range(1, epochs+1):
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Unfreezing backbone at epoch {epoch}")
+            model.unfreeze_backbone()
+            optimizer = torch.optim.AdamW([
+                {'params': model.classifier.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5},
+            ])
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
+
+        model.train()
+        total_loss = correct = total = 0
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+
+        for bi, batch in enumerate(train_loader, 1):
+            pv = batch['pixel_values'].to(device)
+            stars = batch['star_rating'].to(device)
+            labels = batch['label'].to(device)
+            optimizer.zero_grad()
+            if scaler:
+                with torch.amp.autocast('cuda'):
+                    logits = model(pv, stars)
+                    loss = criterion(logits, labels)
+                scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
+            else:
+                logits = model(pv, stars)
+                loss = criterion(logits, labels)
+                loss.backward(); optimizer.step()
+            total_loss += loss.item()
+            preds = (torch.sigmoid(logits) > 0.5).float()
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
+            training_state['train_acc'] = correct / max(total, 1)
+
+        # Validate
+        model.eval()
+        vc = vt = 0
+        with torch.no_grad():
+            for batch in val_loader:
+                pv = batch['pixel_values'].to(device)
+                stars = batch['star_rating'].to(device)
+                labels = batch['label'].to(device)
+                logits = model(pv, stars)
+                vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
+                vt += labels.size(0)
+        val_acc = vc / max(vt, 1)
+        training_state['val_acc'] = val_acc
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / num_batches,
+            'train_acc': round(correct / max(total, 1), 4), 'val_acc': round(val_acc, 4)
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Train: {correct/max(total,1):.1%} | Val: {val_acc:.1%}")
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+            training_state['best_val_acc'] = best_acc
+            torch.save({
+                'model_state_dict': model.state_dict(), 'val_acc': val_acc,
+                'backbone': backbone, 'model_type': 'binary',
+                'rank_conditioned': True,
+                'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
+                'created_at': time.time()
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} ({val_acc:.1%})")
+
+        if device.type == 'cuda': torch.cuda.empty_cache()
+
+    return {'model': str(out_path.name), 'best_val_acc': best_acc}
+
+
+def train_ranked_siamese_binary(config):
+    """Train a rank-conditioned siamese binary using synthetic keep>delete pairs.
+    Same as train_siamese_binary but the model takes (image, rank) as input.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 8)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
+    bs = config.get('batch_size', 8)
+    base_path = config.get('base_path', '')
+    synthetic_pairs_per_epoch = config.get('synthetic_pairs_per_epoch', 500)
+
+    tlog(f"📋 Ranked Siamese Binary Training | {epochs} epochs | backbone: {backbone}")
+
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+
+    # Load star ratings
+    star_ratings = config.get('performer_ratings', {})
+    manifest_path = Path(base_path) / 'manifest.json'
+    if not star_ratings and manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            star_ratings = manifest.get('performer_ratings', {})
+            tlog(f"  ⭐ Loaded {len(star_ratings)} ratings from manifest")
+        except: pass
+    star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
+
+    # Strictly use performers with BOTH sides
+    all_performers = sorted(set(keep_map.keys()) & set(delete_map.keys()))
+    tlog(f"  🎯 {len(all_performers)} performers with both keep & delete")
+    if not all_performers:
+        raise ValueError("No performers have both keep and delete images.")
+
+    config['_keep_count'] = sum(len(v) for v in keep_map.values())
+    config['_delete_count'] = sum(len(v) for v in delete_map.values())
+
+    processor = AutoImageProcessor.from_pretrained(backbone)
+    model = RankedSiameseModel(model_name=backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
+    criterion = nn.MarginRankingLoss(margin=1.0)
+    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
+    best_acc = 0.0
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'siamese_binary_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
+
+    aug_t = T.Compose([T.RandomHorizontalFlip(0.5), T.ColorJitter(0.1, 0.1, 0.1, 0.05)])
+
+    for epoch in range(1, epochs+1):
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Unfreezing backbone at epoch {epoch}")
+            model.unfreeze_backbone()
+            optimizer = torch.optim.AdamW([
+                {'params': model.head.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5}
+            ])
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
+
+        # Generate synthetic pairs with ranks
+        pairs = []  # (keep_path, rank, delete_path, rank)
+        for perf in all_performers:
+            p_keep = keep_map[perf]
+            p_del = delete_map[perf]
+            rank = star_ratings_norm.get(perf.lower().strip(), 2.5)
+            n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
+            for _ in range(n):
+                pairs.append((random.choice(p_keep), rank, random.choice(p_del), rank))
+        random.shuffle(pairs)
+
+        training_state['total_batches'] = (len(pairs) + bs - 1) // bs
+
+        model.train()
+        total_loss = correct = total = 0
+
+        for i in range(0, len(pairs), bs):
+            batch = pairs[i:i+bs]
+            training_state['batch'] = (i // bs) + 1
+            imgs_a, ranks_a, imgs_b, ranks_b = [], [], [], []
+
+            for path_a, r_a, path_b, r_b in batch:
+                try:
+                    img_a = aug_t(Image.open(path_a).convert('RGB'))
+                    img_b = aug_t(Image.open(path_b).convert('RGB'))
+                    inp_a = processor(images=img_a, return_tensors='pt')
+                    inp_b = processor(images=img_b, return_tensors='pt')
+                    imgs_a.append(inp_a['pixel_values'].squeeze(0))
+                    imgs_b.append(inp_b['pixel_values'].squeeze(0))
+                    ranks_a.append(float(r_a))
+                    ranks_b.append(float(r_b))
+                except: continue
+
+            if not imgs_a: continue
+
+            x_a = torch.stack(imgs_a).to(device)
+            r_a = torch.tensor(ranks_a, dtype=torch.float32).to(device)
+            x_b = torch.stack(imgs_b).to(device)
+            r_b = torch.tensor(ranks_b, dtype=torch.float32).to(device)
+
+            optimizer.zero_grad()
+            if scaler:
+                with torch.amp.autocast('cuda'):
+                    sa, sb = model(x_a, r_a, x_b, r_b)
+                    target = torch.ones(sa.size(0), device=device)
+                    loss = criterion(sa, sb, target)
+                scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
+            else:
+                sa, sb = model(x_a, r_a, x_b, r_b)
+                target = torch.ones(sa.size(0), device=device)
+                loss = criterion(sa, sb, target)
+                loss.backward(); optimizer.step()
+
+            total_loss += loss.item()
+            correct += (sa > sb).sum().item()
+            total += sa.size(0)
+            training_state['train_loss'] = total_loss / ((i // bs) + 1)
+            training_state['train_acc'] = correct / max(total, 1)
+
+        epoch_acc = correct / max(total, 1)
+        training_state['val_acc'] = epoch_acc
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / max(1, training_state['total_batches']),
+            'val_acc': round(epoch_acc, 4), 'pairs': len(pairs)
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {training_state['train_loss']:.4f} | Acc: {epoch_acc:.1%}")
+
+        if epoch_acc > best_acc:
+            best_acc = epoch_acc
+            training_state['best_val_acc'] = best_acc
+            torch.save({
+                'model_state_dict': model.state_dict(), 'val_acc': best_acc,
+                'backbone': backbone, 'model_type': 'siamese_binary',
+                'rank_conditioned': True,
+                'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
+                'created_at': time.time()
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} ({epoch_acc:.1%})")
+
+        if device.type == 'cuda': torch.cuda.empty_cache()
+
+    return {'model': str(out_path.name), 'best_val_acc': best_acc}
+
+
 TRAIN_FNS = {
     'binary': train_binary,
     'pairwise': train_pairwise,
-    'context_binary': train_context_binary,
     'pairwise_siamese_binary': train_siamese_binary,
+    'performer_ranker': train_performer_ranker,
+    'ranked_binary': train_ranked_binary,
+    'ranked_siamese_binary': train_ranked_siamese_binary,
+    # Legacy: kept for backward compat — functions still exist but not recommended
+    'context_binary': train_context_binary,
     'rank_aware_siamese': train_rank_aware_siamese,
 }
 
