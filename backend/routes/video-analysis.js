@@ -548,14 +548,14 @@ router.post('/find-action-and-create-scenes', async (req, res) => {
  * POST body: { videoPath, sampleInterval?, minSegment?, saveScenes?, preserveExisting? }
  */
 router.post('/analyze-and-create-scenes', async (req, res) => {
-  const { videoPath, sampleInterval = 30, minSegment = 10, saveScenes = true, allowedActions = [], startTime, endTime, windowSize, preserveExisting = false } = req.body;
+  const { videoPath, sampleInterval = 30, minSegment = 10, saveScenes = true, allowedActions = [], startTime, endTime, windowSize, preserveExisting = false, mode = 'basic', macroInterval = 60, actionInterval = 5 } = req.body;
   
   if (!videoPath) {
     return res.status(400).send({ error: 'videoPath is required' });
   }
 
   try {
-    console.log(`[Video Analysis] Analyzing video for scene creation: ${videoPath}`);
+    console.log(`[Video Analysis] Analyzing video (${mode} mode) for scene creation: ${videoPath}`);
     if (allowedActions.length > 0) {
       console.log(`[Video Analysis] Restricted to actions: ${allowedActions.join(', ')}`);
     }
@@ -568,20 +568,38 @@ router.post('/analyze-and-create-scenes', async (req, res) => {
     if (preserveExisting) {
       console.log(`[Video Analysis] Preserve existing scenes: enabled`);
     }
+    if (mode === 'advanced') {
+      console.log(`[Video Analysis] Advanced mode: macro=${macroInterval}s, action=${actionInterval}s`);
+    } else {
+      console.log(`[Video Analysis] Basic mode: interval=${sampleInterval}s`);
+    }
+
+    // Choose endpoint based on mode
+    const endpoint = mode === 'advanced' ? '/analyze-advanced' : '/analyze';
+    const payload = mode === 'advanced' ? {
+      video_path: videoPath,
+      segment_duration: sampleInterval,
+      min_segment: minSegment,
+      allowed_actions: allowedActions,
+      start_time: startTime,
+      end_time: endTime,
+      macro_interval: macroInterval,
+      action_interval: actionInterval
+    } : {
+      video_path: videoPath,
+      segment_duration: sampleInterval,
+      min_segment: minSegment,
+      allowed_actions: allowedActions,
+      start_time: startTime,
+      end_time: endTime,
+      window_size: windowSize
+    };
 
     // Call the video analysis service
     const response = await axios.post(
-      `${getVideoUrl()}/analyze`,
-      {
-        video_path: videoPath,
-        segment_duration: sampleInterval,
-        min_segment: minSegment,
-        allowed_actions: allowedActions,
-        start_time: startTime,
-        end_time: endTime,
-        window_size: windowSize
-      },
-      { timeout: 1800000 } // 30 minute timeout for long videos
+      `${getVideoUrl()}${endpoint}`,
+      payload,
+      { timeout: 3600000 } // 60 minute timeout for long videos in advanced mode
     );
 
     const result = response.data;

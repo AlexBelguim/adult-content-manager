@@ -1,4 +1,5 @@
 import os
+import io
 import json
 import base64
 import subprocess
@@ -250,7 +251,181 @@ def parse_vlm_response(content, allowed_actions=None):
     action = lines[0][:50] if lines else "other"
     return {"action": action, "confidence": 0.3}
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
+# ── Florence-2 Pre-Pass Engine ─────────────────────────────────────────────────
+class FlorenceEngine:
+    """Lazy-loaded Florence-2-Large for object detection and captioning. Runs on CPU."""
+    _model = None
+    _processor = None
+    _available = None
+
+    @classmethod
+    def is_available(cls):
+        if cls._available is None:
+            cls._load()
+        return cls._available
+
+    @classmethod
+    def _load(cls):
+        try:
+            from transformers import AutoProcessor, AutoModelForCausalLM
+            import torch
+            log("🔬 Loading Florence-2-large on CPU...")
+            mid = "microsoft/Florence-2-large"
+            cls._processor = AutoProcessor.from_pretrained(mid, trust_remote_code=True)
+            cls._model = AutoModelForCausalLM.from_pretrained(
+                mid, trust_remote_code=True, torch_dtype=torch.float32
+            ).eval().to("cpu")
+            cls._available = True
+            log("✅ Florence-2 ready (CPU, ~800MB RAM)")
+        except Exception as ex:
+            log(f"⚠️ Florence-2 not available: {ex}")
+            cls._available = False
+
+    @classmethod
+    def detect_objects(cls, frame_b64):
+        """Object detection on a base64 JPEG. Returns ([{label, bbox}], (w, h))."""
+        if not cls.is_available():
+            return [], (0, 0)
+        try:
+            from PIL import Image
+            import torch
+            image = Image.open(io.BytesIO(base64.b64decode(frame_b64))).convert("RGB")
+            inputs = cls._processor(text="<OD>", images=image, return_tensors="pt")
+            with torch.no_grad():
+                ids = cls._model.generate(
+                    input_ids=inputs["input_ids"],
+                    pixel_values=inputs["pixel_values"],
+                    max_new_tokens=512, num_beams=3
+                )
+            text = cls._processor.batch_decode(ids, skip_special_tokens=False)[0]
+            parsed = cls._processor.post_process_generation(
+                text, task="<OD>", image_size=(image.width, image.height)
+            )
+            detections = []
+            if "<OD>" in parsed:
+                od = parsed["<OD>"]
+                for lbl, bbox in zip(od.get("labels", []), od.get("bboxes", [])):
+                    detections.append({"label": lbl.lower().strip(), "bbox": bbox})
+            return detections, (image.width, image.height)
+        except Exception as ex:
+            log(f"⚠️ Florence OD failed: {ex}")
+            return [], (0, 0)
+
+    @classmethod
+    def caption(cls, frame_b64):
+        """Detailed caption for a base64 JPEG frame."""
+        if not cls.is_available():
+            return ""
+        try:
+            from PIL import Image
+            import torch
+            image = Image.open(io.BytesIO(base64.b64decode(frame_b64))).convert("RGB")
+            inputs = cls._processor(text="<MORE_DETAILED_CAPTION>", images=image, return_tensors="pt")
+            with torch.no_grad():
+                ids = cls._model.generate(
+                    input_ids=inputs["input_ids"],
+                    pixel_values=inputs["pixel_values"],
+                    max_new_tokens=256
+                )
+            return cls._processor.batch_decode(ids, skip_special_tokens=True)[0].strip()
+        except Exception as ex:
+            log(f"⚠️ Florence caption failed: {ex}")
+            return ""
+
+    @classmethod
+    def crop_region(cls, frame_b64, bbox, pad_pct=0.15):
+        """Crop a bbox region from a frame, return as base64 JPEG."""
+        try:
+            from PIL import Image
+            image = Image.open(io.BytesIO(base64.b64decode(frame_b64))).convert("RGB")
+            w, h = image.size
+            x1, y1, x2, y2 = bbox
+            pw, ph = (x2 - x1) * pad_pct, (y2 - y1) * pad_pct
+            crop = image.crop((
+                int(max(0, x1 - pw)), int(max(0, y1 - ph)),
+                int(min(w, x2 + pw)), int(min(h, y2 + ph))
+            ))
+            buf = io.BytesIO()
+            crop.save(buf, format="JPEG", quality=85)
+            return base64.b64encode(buf.getvalue()).decode("utf-8")
+        except Exception as ex:
+            log(f"⚠️ Crop failed: {ex}")
+            return None
+
+
+# ── Video State Machine ────────────────────────────────────────────────────────
+class VideoState:
+    """Persistent state tracked across video analysis frames."""
+    def __init__(self):
+        self.scene_type = "idle"
+        self.clothed_state = "unknown"
+        self.insertion_active = False
+        self.current_toy = None
+        self.people_count = 0
+        self.last_action = "idle"
+        self.last_confidence = 0.0
+        self.last_clean_time = 0.0
+
+    def to_context(self):
+        parts = [f"Scene:{self.scene_type}", f"Clothing:{self.clothed_state}",
+                 f"People:{self.people_count}"]
+        if self.insertion_active:
+            parts.append(f"ActiveInsertion:{self.current_toy or 'yes'}")
+        parts.append(f"PrevAction:{self.last_action}")
+        return " | ".join(parts)
+
+
+# ── Detection Helpers ──────────────────────────────────────────────────────────
+_TOY_KEYWORDS = {'toy', 'dildo', 'vibrator', 'object', 'device', 'wand', 'cylinder', 'bottle', 'stick'}
+_BODY_KEYWORDS = {'person', 'body', 'woman', 'man', 'human', 'torso', 'leg', 'thigh'}
+_HAND_KEYWORDS = {'hand', 'finger', 'fingers', 'arm'}
+
+def categorize_detections(detections):
+    """Sort Florence detections into semantic categories."""
+    cats = {"people": [], "hands": [], "toys": [], "other": []}
+    for d in detections:
+        lbl = d["label"]
+        if any(k in lbl for k in _BODY_KEYWORDS):
+            cats["people"].append(d)
+        elif any(k in lbl for k in _HAND_KEYWORDS):
+            cats["hands"].append(d)
+        elif any(k in lbl for k in _TOY_KEYWORDS):
+            cats["toys"].append(d)
+        else:
+            cats["other"].append(d)
+    return cats
+
+def bbox_overlap_ratio(box_a, box_b):
+    """How much of box_a overlaps with box_b (intersection / area_a)."""
+    x1, y1 = max(box_a[0], box_b[0]), max(box_a[1], box_b[1])
+    x2, y2 = min(box_a[2], box_b[2]), min(box_a[3], box_b[3])
+    if x1 >= x2 or y1 >= y2:
+        return 0.0
+    intersection = (x2 - x1) * (y2 - y1)
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    return intersection / area_a if area_a > 0 else 0.0
+
+def check_insertion_overlap(categorized, threshold=0.15):
+    """Check if any toy bbox overlaps with any body bbox above threshold."""
+    for toy in categorized["toys"]:
+        for body in categorized["people"]:
+            if bbox_overlap_ratio(toy["bbox"], body["bbox"]) > threshold:
+                return True, toy["label"]
+    return False, None
+
+def format_detections_for_prompt(categorized):
+    """Format categorized detections as a string hint for VLM prompt."""
+    parts = []
+    if categorized["people"]:
+        parts.append(f"{len(categorized['people'])} person(s)")
+    if categorized["hands"]:
+        parts.append(f"{len(categorized['hands'])} hand(s)")
+    if categorized["toys"]:
+        labels = set(d["label"] for d in categorized["toys"])
+        parts.append(f"Toys/objects: {', '.join(labels)}")
+    return "; ".join(parts) if parts else "no specific objects detected"
+
+
 def analyze_video(video_path, segment_duration=12, min_segment=10, allowed_actions=None, start_time=None, end_time=None, window_size=None):
     _cancel_flag.clear()
     log(f"🎬 Starting analysis: {video_path}")
@@ -281,6 +456,388 @@ def analyze_video(video_path, segment_duration=12, min_segment=10, allowed_actio
     
     return {"success": True, "segments": final_segments}
 
+# ── Advanced VLM Helpers ───────────────────────────────────────────────────────
+def _build_vlm_messages(prompt, frame_b64_list):
+    """Build model-aware message payload for VLM call."""
+    _model_lower = OLLAMA_MODEL.lower()
+    if any(m in _model_lower for m in ['qwen', 'internvl', 'llama4']):
+        parts = [{"type": "text", "text": prompt}]
+        for img in frame_b64_list:
+            parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}})
+        return [{"role": "user", "content": parts}]
+    return [{"role": "user", "content": prompt, "images": frame_b64_list}]
+
+def _call_vlm(prompt, frame_b64_list, max_tokens=150, timeout=120):
+    """Send a prompt + images to Ollama VLM, return raw text content."""
+    try:
+        payload = {
+            "model": OLLAMA_MODEL,
+            "messages": _build_vlm_messages(prompt, frame_b64_list),
+            "stream": False,
+            "options": {"temperature": 0.1, "num_predict": max_tokens}
+        }
+        resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=timeout)
+        if resp.status_code == 200:
+            return resp.json().get("message", {}).get("content", "")
+        log(f"  ⚠️ VLM HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as ex:
+        log(f"  ⚠️ VLM call failed: {ex}")
+    return ""
+
+def classify_macro(frame_b64, florence_hint=""):
+    """Quick macro scan: people count, scene type, clothing state."""
+    ctx = f"\nDetection hint: {florence_hint}" if florence_hint else ""
+    prompt = f"""Quick scene check. Analyze this single frame.{ctx}
+Report:
+1. people: number of people visible (0, 1, 2, 3)
+2. scene: idle, solo, straight_sex, lesbian, threesome
+3. clothing: clothed, lingerie, nude, stripping
+
+Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
+
+    raw = _call_vlm(prompt, [frame_b64], max_tokens=80, timeout=60)
+    if raw:
+        try:
+            cleaned = re.sub(r'```json\s*|\s*```', '', raw).strip()
+            m = re.search(r'\{[^}]+\}', cleaned)
+            if m:
+                data = json.loads(m.group())
+                return {
+                    "people": int(data.get("people", 0)),
+                    "scene": str(data.get("scene", "idle")).lower().strip(),
+                    "clothing": str(data.get("clothing", "unknown")).lower().strip()
+                }
+        except:
+            pass
+    return {"people": 0, "scene": "idle", "clothing": "unknown"}
+
+def classify_action_with_context(frame_b64_list, state, florence_caption="",
+                                  florence_hint="", crop_b64=None, allowed_actions=None):
+    """Action classification with state context, Florence hints, and optional crop."""
+    context = state.to_context()
+    extra = ""
+    if florence_caption:
+        extra += f"\nFlorence-2 caption: {florence_caption}"
+    if florence_hint:
+        extra += f"\nDetected objects: {florence_hint}"
+
+    if allowed_actions:
+        action_list = "\n".join(f"- {a}" for a in allowed_actions)
+        prompt = f"""State: {context}{extra}
+Task: Classify the sexual action in these frames.
+Choices:
+{action_list}
+
+Rules:
+1. Use state context for consistency.
+2. If Florence detected a toy/object, it IS a toy — not fingers.
+3. Output ONLY JSON: {{"action": "choice", "confidence": 0.9, "insertion": false}}"""
+    else:
+        prompt = f"""State: {context}{extra}
+
+Classify the primary action in these frames.
+KEY RULES:
+- If Florence detected a toy/object/device, classify as dildo/vibrator play, NOT fingering.
+- Fingers must be clearly INSERTED (not just near) for fingering labels.
+- "insertion" = true if any penetration is actively happening.
+
+Choices:
+- pussy dildo play, anal dildo play, dildo blowjob, vibrator play
+- fingering pussy, fingering ass, handjob, boob teasing, handbra
+- blowjob, cunnilingus, 69, deepthroat
+- missionary, cowgirl, reverse cowgirl, doggy style, anal
+- cumshot, facial, creampie
+- nudity, idle, transition
+
+Output ONLY JSON: {{"action": "label", "confidence": 0.5-1.0, "insertion": false}}"""
+
+    # If we have a crop, add it as the first image for emphasis
+    images = list(frame_b64_list)
+    if crop_b64:
+        images.insert(0, crop_b64)
+
+    raw = _call_vlm(prompt, images)
+    if raw:
+        log(f"  🔍 Advanced AI: {raw[:300]}")
+        result = parse_vlm_response(raw, allowed_actions)
+        # Extract insertion flag from raw JSON
+        try:
+            m = re.search(r'\{[^}]+\}', re.sub(r'```json\s*|\s*```', '', raw))
+            if m:
+                result["insertion"] = bool(json.loads(m.group()).get("insertion", False))
+        except:
+            result["insertion"] = False
+        return result
+    return {"action": "other", "confidence": 0.0, "insertion": False}
+
+
+# ── Back-Search / Refinement ──────────────────────────────────────────────────
+def find_insertion_point(video_path, t_start, t_end, max_checks=12):
+    """Back-search using Florence-2 bbox overlap to find exact insertion frame."""
+    if not FlorenceEngine.is_available():
+        log(f"  ⏩ Florence not available, using t_start={t_start:.1f}s")
+        return t_start
+
+    log(f"  🔎 Back-searching insertion: {t_start:.1f}s → {t_end:.1f}s")
+    step = max(0.5, (t_end - t_start) / max_checks)
+    t = t_start
+
+    while t <= t_end:
+        if _cancel_flag.is_set():
+            break
+        frame = extract_single_frame(video_path, t)
+        if frame:
+            dets, _ = FlorenceEngine.detect_objects(frame)
+            cats = categorize_detections(dets)
+            has_overlap, toy = check_insertion_overlap(cats)
+            if has_overlap:
+                log(f"  📍 Insertion detected at {t:.1f}s (toy: {toy})")
+                # If step is coarse, recurse with finer step
+                if step > 1.0:
+                    return find_insertion_point(video_path, max(t_start, t - step), t, max_checks)
+                return t
+        t += step
+
+    log(f"  📍 No bbox overlap found, using t_end={t_end:.1f}s")
+    return t_end
+
+def find_insertion_end(video_path, t_start, t_end, step=2.0):
+    """Find when toy bbox moves away from body (insertion ends)."""
+    if not FlorenceEngine.is_available():
+        return t_end
+
+    t = t_start
+    while t <= t_end:
+        if _cancel_flag.is_set():
+            break
+        frame = extract_single_frame(video_path, t)
+        if frame:
+            dets, _ = FlorenceEngine.detect_objects(frame)
+            cats = categorize_detections(dets)
+            has_overlap, _ = check_insertion_overlap(cats)
+            if not has_overlap:
+                log(f"  📍 Insertion ended at {t:.1f}s")
+                return t
+        t += step
+    return t_end
+
+
+# ── Advanced Pipeline (State Machine) ──────────────────────────────────────────
+def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
+                           allowed_actions=None, start_time=None, end_time=None,
+                           macro_interval=60, action_interval=5):
+    """
+    Multi-resolution state machine analysis.
+    Phase 1: Macro scan (macro_interval steps) - scene, clothing, people
+    Phase 2: Action scan (action_interval steps) - detailed in active windows
+    Phase 3: Refinement (1s back-search) - exact insertion/transition times
+    """
+    _cancel_flag.clear()
+    log(f"🎬 [Advanced] Starting analysis: {video_path}")
+
+    duration = get_video_duration(video_path)
+    if duration <= 0:
+        return {"success": False, "error": "Cannot read video duration"}
+
+    s = start_time if start_time is not None else 0
+    e = end_time if end_time is not None else duration
+    state = VideoState()
+    timeline = []
+    raw_segments = []
+
+    # Check Florence availability once
+    use_florence = FlorenceEngine.is_available()
+    if use_florence:
+        log("🔬 Florence-2 pre-pass: ENABLED")
+    else:
+        log("⚠️ Florence-2 pre-pass: DISABLED (not installed)")
+
+    # ── Phase 1: Macro Scan ────────────────────────────────────────────────
+    log(f"📊 Phase 1: Macro scan ({macro_interval}s steps, {s:.0f}s-{e:.0f}s)")
+    active_windows = []
+    t = s
+    while t < e:
+        if _cancel_flag.is_set():
+            break
+
+        frame = extract_single_frame(video_path, t)
+        if not frame:
+            t += macro_interval
+            continue
+
+        # Florence pre-pass for object hints
+        florence_hint = ""
+        if use_florence:
+            dets, _ = FlorenceEngine.detect_objects(frame)
+            cats = categorize_detections(dets)
+            florence_hint = format_detections_for_prompt(cats)
+            state.people_count = len(cats["people"])
+        
+        # Quick VLM check
+        macro = classify_macro(frame, florence_hint)
+        state.scene_type = macro["scene"]
+        state.clothed_state = macro["clothing"]
+        if not use_florence:
+            state.people_count = macro["people"]
+
+        log(f"  {t:.0f}s → scene={macro['scene']}, clothing={macro['clothing']}, people={macro['people']}")
+
+        # Mark active windows where detailed scanning is needed
+        is_active = (
+            state.people_count >= 1 or
+            state.clothed_state in ('nude', 'lingerie', 'stripping') or
+            state.scene_type != 'idle'
+        )
+        if is_active:
+            window_start = max(s, t - macro_interval / 2)
+            window_end = min(e, t + macro_interval / 2)
+            active_windows.append((window_start, window_end))
+
+        t += macro_interval
+
+    if _cancel_flag.is_set():
+        return {"success": False, "error": "Cancelled"}
+
+    # Merge overlapping windows
+    if active_windows:
+        active_windows.sort()
+        merged = [active_windows[0]]
+        for ws, we in active_windows[1:]:
+            if ws <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], we))
+            else:
+                merged.append((ws, we))
+        active_windows = merged
+    else:
+        # Nothing active found in macro — fall back to scanning everything
+        log("  ⚠️ No active windows found, scanning full range")
+        active_windows = [(s, e)]
+
+    total_active = sum(we - ws for ws, we in active_windows)
+    log(f"📋 Active windows: {len(active_windows)} regions, {total_active:.0f}s of {e-s:.0f}s total")
+
+    # ── Phase 2: Action Scan ───────────────────────────────────────────────
+    log(f"🎯 Phase 2: Action scan ({action_interval}s steps)")
+    state.last_clean_time = s
+
+    for w_start, w_end in active_windows:
+        t = w_start
+        while t < w_end:
+            if _cancel_flag.is_set():
+                break
+
+            # Get burst frames for temporal context
+            context_frames = extract_burst_frames(video_path, t, duration_sec=2, count=4)
+            if not context_frames:
+                single = extract_single_frame(video_path, t)
+                context_frames = [single] if single else []
+            if not context_frames:
+                t += action_interval
+                continue
+
+            # Florence pre-pass on the middle frame
+            florence_caption = ""
+            florence_hint = ""
+            crop_b64 = None
+            if use_florence:
+                mid_frame = context_frames[len(context_frames) // 2]
+                dets, _ = FlorenceEngine.detect_objects(mid_frame)
+                cats = categorize_detections(dets)
+                florence_hint = format_detections_for_prompt(cats)
+
+                # Get a caption for richer context
+                florence_caption = FlorenceEngine.caption(mid_frame)
+
+                # If a toy was detected, crop it for the VLM
+                if cats["toys"]:
+                    best_toy = cats["toys"][0]
+                    crop_b64 = FlorenceEngine.crop_region(mid_frame, best_toy["bbox"])
+                    log(f"  🔬 {t:.0f}s Florence: {florence_hint} | crop={crop_b64 is not None}")
+
+                # Check bbox overlap for insertion
+                has_overlap, toy_label = check_insertion_overlap(cats)
+                if has_overlap and not state.insertion_active:
+                    # Insertion just started — back-search for exact frame
+                    exact = find_insertion_point(video_path, state.last_clean_time, t)
+                    timeline.append({"event": "insertion_start", "time": exact,
+                                     "toy": toy_label or "unknown"})
+                    state.insertion_active = True
+                    state.current_toy = toy_label
+                elif not has_overlap and state.insertion_active:
+                    # Insertion just ended
+                    timeline.append({"event": "insertion_end", "time": t,
+                                     "toy": state.current_toy})
+                    state.insertion_active = False
+                    state.current_toy = None
+
+            # Full action classification with all context
+            result = classify_action_with_context(
+                context_frames, state, florence_caption, florence_hint,
+                crop_b64, allowed_actions
+            )
+
+            # Update state
+            state.last_action = result["action"]
+            state.last_confidence = result["confidence"]
+            if not state.insertion_active:
+                state.last_clean_time = t
+
+            # Handle VLM-reported insertion (if Florence missed it)
+            if result.get("insertion") and not state.insertion_active:
+                timeline.append({"event": "insertion_start", "time": t,
+                                 "toy": "vlm_detected"})
+                state.insertion_active = True
+            elif not result.get("insertion") and state.insertion_active and not use_florence:
+                timeline.append({"event": "insertion_end", "time": t})
+                state.insertion_active = False
+
+            raw_segments.append({
+                "time": t,
+                "action": result["action"],
+                "confidence": result["confidence"]
+            })
+            log(f"  ⏱ {t:.0f}s → {result['action']} ({int(result['confidence']*100)}%)")
+
+            t += action_interval
+
+    if _cancel_flag.is_set():
+        return {"success": False, "error": "Cancelled"}
+
+    # ── Phase 3: Build Final Segments ──────────────────────────────────────
+    log("📐 Phase 3: Building final segments with smoothing")
+    final_segments = []
+    if raw_segments:
+        current = {
+            "action": raw_segments[0]["action"],
+            "start": raw_segments[0]["time"],
+            "end": raw_segments[0]["time"] + action_interval,
+            "confidence": raw_segments[0]["confidence"]
+        }
+        for seg in raw_segments[1:]:
+            if seg["action"] == current["action"]:
+                current["end"] = seg["time"] + action_interval
+                # Running average confidence
+                current["confidence"] = (current["confidence"] + seg["confidence"]) / 2
+            else:
+                if (current["end"] - current["start"]) >= min_segment:
+                    final_segments.append(current)
+                current = {
+                    "action": seg["action"],
+                    "start": seg["time"],
+                    "end": seg["time"] + action_interval,
+                    "confidence": seg["confidence"]
+                }
+        final_segments.append(current)
+
+    log(f"✅ [Advanced] Done: {len(final_segments)} segments, {len(timeline)} events")
+    return {
+        "success": True,
+        "segments": final_segments,
+        "timeline": timeline,
+        "mode": "advanced"
+    }
+
+# ── Flask Routes ───────────────────────────────────────────────────────────────
 @video_bp.route('/analyze', methods=['POST'])
 def video_analyze():
     data = request.json or {}
@@ -294,8 +851,40 @@ def video_analyze():
         return jsonify(result)
     finally: _analysis_lock.release()
 
+@video_bp.route('/analyze-advanced', methods=['POST'])
+def video_analyze_advanced():
+    """Advanced multi-resolution state machine analysis with Florence-2 pre-pass."""
+    data = request.json or {}
+    video_path = map_path(data.get('video_path'))
+    if not video_path or not os.path.exists(video_path):
+        return jsonify({"success": False, "error": "Invalid video path"}), 400
+    if not _analysis_lock.acquire(blocking=False):
+        return jsonify({"success": False, "error": "Busy"}), 409
+    try:
+        raw_actions = data.get('allowed_actions', [])
+        allowed = [a.strip() for a in raw_actions if a and a.strip()]
+        result = analyze_video_advanced(
+            video_path,
+            segment_duration=data.get('segment_duration', 12),
+            min_segment=data.get('min_segment', 10),
+            allowed_actions=allowed if allowed else None,
+            start_time=data.get('start_time'),
+            end_time=data.get('end_time'),
+            macro_interval=data.get('macro_interval', 60),
+            action_interval=data.get('action_interval', 5)
+        )
+        return jsonify(result)
+    finally:
+        _analysis_lock.release()
+
 @video_bp.route('/health', methods=['GET'])
-def health(): return jsonify({"status": "ok", "model": OLLAMA_MODEL})
+def health():
+    return jsonify({
+        "status": "ok",
+        "model": OLLAMA_MODEL,
+        "florence_available": FlorenceEngine._available,
+        "modes": ["basic", "advanced"]
+    })
 
 @video_bp.route('/supported-actions', methods=['GET'])
 def supported_actions():
@@ -303,3 +892,4 @@ def supported_actions():
     for action_id, name in SUPPORTED_ACTIONS.items():
         actions.append({"id": action_id, "name": name})
     return jsonify({"actions": actions})
+

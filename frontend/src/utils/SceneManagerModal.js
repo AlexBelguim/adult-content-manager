@@ -116,7 +116,11 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   const [analysisConfig, setAnalysisConfig] = useState({
     allowedActions: '',
     windowSize: '',
-    preserveExisting: true
+    preserveExisting: true,
+    mode: 'basic',          // 'basic' or 'advanced'
+    sampleInterval: '12',   // basic mode interval (seconds)
+    macroInterval: '60',    // advanced mode macro scan interval
+    actionInterval: '5'     // advanced mode action scan interval
   });
   const [settingsModified, setSettingsModified] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -1384,19 +1388,27 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
     setShowActionPicker(false);
 
     try {
+      const sampleInt = parseInt(analysisConfig.sampleInterval) || 12;
+      const macroInt = parseInt(analysisConfig.macroInterval) || 60;
+      const actionInt = parseInt(analysisConfig.actionInterval) || 5;
+      const analysisMode = analysisConfig.mode || 'basic';
+
       const response = await fetch('/api/video-analysis/analyze-and-create-scenes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           videoPath: filePath,
-          sampleInterval: 12,  // 12 second segments
-          minSegment: 10,      // Minimum 10 second scenes
+          sampleInterval: sampleInt,
+          minSegment: 10,
           saveScenes: true,
           allowedActions: allowedActions,
           startTime: startTime,
           endTime: endTime,
           windowSize: windowSize,
-          preserveExisting: preserveExisting
+          preserveExisting: preserveExisting,
+          mode: analysisMode,
+          macroInterval: macroInt,
+          actionInterval: actionInt
         })
       });
 
@@ -1639,14 +1651,22 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
       setAnalysisProgress('Analyzing video frames with AI...');
 
       // Call the analyze-and-create-scenes endpoint
+      const sampleInt = parseInt(analysisConfig.sampleInterval) || 30;
+      const analysisMode = analysisConfig.mode || 'basic';
+      const macroInt = parseInt(analysisConfig.macroInterval) || 60;
+      const actionInt = parseInt(analysisConfig.actionInterval) || 5;
+
       const response = await fetch('/api/video-analysis/analyze-and-create-scenes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           videoPath: filePath,
-          sampleInterval: 30,  // Sample every 30 seconds initially
-          minSegment: 10,      // Minimum 10 second segments
-          saveScenes: true
+          sampleInterval: sampleInt,
+          minSegment: 10,
+          saveScenes: true,
+          mode: analysisMode,
+          macroInterval: macroInt,
+          actionInterval: actionInt
         })
       });
 
@@ -2556,6 +2576,44 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       </Button>
                     </Box>
                   </Box>
+
+                  {/* Analysis Mode Toggle */}
+                  <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
+                    <Button
+                      variant={analysisConfig.mode === 'basic' ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => updateAnalysisConfig({ mode: 'basic' })}
+                      sx={{
+                        flex: 1,
+                        backgroundColor: analysisConfig.mode === 'basic' ? 'primary.main' : 'transparent',
+                        borderColor: 'divider',
+                        color: analysisConfig.mode === 'basic' ? '#fff' : 'text.secondary',
+                        '&:hover': { borderColor: 'primary.main' }
+                      }}
+                    >
+                      🔍 Basic Mode
+                    </Button>
+                    <Button
+                      variant={analysisConfig.mode === 'advanced' ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => updateAnalysisConfig({ mode: 'advanced' })}
+                      sx={{
+                        flex: 1,
+                        backgroundColor: analysisConfig.mode === 'advanced' ? '#7b1fa2' : 'transparent',
+                        borderColor: 'divider',
+                        color: analysisConfig.mode === 'advanced' ? '#fff' : 'text.secondary',
+                        '&:hover': { borderColor: '#7b1fa2' }
+                      }}
+                    >
+                      🧠 Advanced (Florence + State Machine)
+                    </Button>
+                  </Box>
+
+                  {analysisConfig.mode === 'advanced' && (
+                    <Alert severity="info" sx={{ mb: 2, backgroundColor: '#1a237e', color: '#fff', '& .MuiAlert-icon': { color: '#90caf9' } }}>
+                      Advanced mode uses Florence-2 for object detection + multi-resolution scanning (macro → action → refinement). Best for long videos and accurate toy detection.
+                    </Alert>
+                  )}
                   
                   <TextField
                     label="Allowed Actions"
@@ -2577,6 +2635,70 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                   />
                   
                   <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    {/* Interval controls - change based on mode */}
+                    {analysisConfig.mode === 'basic' ? (
+                      <TextField
+                        label="Sample Interval (seconds)"
+                        type="number"
+                        value={analysisConfig.sampleInterval}
+                        onChange={(e) => updateAnalysisConfig({ sampleInterval: e.target.value })}
+                        placeholder="12"
+                        helperText="How often to sample frames. Higher = faster but less precise. Try 30-60 for long streams."
+                        inputProps={{ min: 1, max: 300 }}
+                        sx={{ 
+                          width: 220,
+                          '& .MuiInputLabel-root': { color: 'text.disabled' }, 
+                          '& .MuiOutlinedInput-root': { 
+                            color: '#fff',
+                            '& fieldset': { borderColor: 'divider' },
+                            '&:hover fieldset': { borderColor: 'text.disabled' }
+                          },
+                          '& .MuiFormHelperText-root': { color: 'text.disabled' }
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <TextField
+                          label="Macro Scan Interval (s)"
+                          type="number"
+                          value={analysisConfig.macroInterval}
+                          onChange={(e) => updateAnalysisConfig({ macroInterval: e.target.value })}
+                          placeholder="60"
+                          helperText="Coarse scan for scene/clothing changes. Higher = faster for long videos."
+                          inputProps={{ min: 10, max: 600 }}
+                          sx={{ 
+                            width: 200,
+                            '& .MuiInputLabel-root': { color: 'text.disabled' }, 
+                            '& .MuiOutlinedInput-root': { 
+                              color: '#fff',
+                              '& fieldset': { borderColor: 'divider' },
+                              '&:hover fieldset': { borderColor: 'text.disabled' }
+                            },
+                            '& .MuiFormHelperText-root': { color: 'text.disabled' }
+                          }}
+                        />
+                        <TextField
+                          label="Action Scan Interval (s)"
+                          type="number"
+                          value={analysisConfig.actionInterval}
+                          onChange={(e) => updateAnalysisConfig({ actionInterval: e.target.value })}
+                          placeholder="5"
+                          helperText="Detailed scan in active windows. Lower = more precise but slower."
+                          inputProps={{ min: 1, max: 120 }}
+                          sx={{ 
+                            width: 200,
+                            '& .MuiInputLabel-root': { color: 'text.disabled' }, 
+                            '& .MuiOutlinedInput-root': { 
+                              color: '#fff',
+                              '& fieldset': { borderColor: 'divider' },
+                              '&:hover fieldset': { borderColor: 'text.disabled' }
+                            },
+                            '& .MuiFormHelperText-root': { color: 'text.disabled' }
+                          }}
+                        />
+                      </>
+                    )}
+
                     <TextField
                       label="Window Size (seconds)"
                       type="number"
@@ -2615,7 +2737,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                   </Box>
                   
                   <Typography variant="caption" sx={{ color: 'text.disabled', mt: 2, display: 'block' }}>
-                    💡 Tip: Save settings for batch processing. When the batch queue processes this video, it will use these saved settings.
+                    {analysisConfig.mode === 'advanced' 
+                      ? '🧠 Advanced: Florence-2 detects objects (toys, hands, bodies) → VLM classifies with state context → back-search finds exact insertion points.'
+                      : '💡 Tip: Save settings for batch processing. For streams/long videos, increase the sample interval (e.g. 30-60s).'}
                   </Typography>
                 </Box>
 

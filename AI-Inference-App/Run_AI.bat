@@ -104,6 +104,17 @@ echo    Video Analysis:  http://localhost:3344/video
 echo ============================================
 echo.
 
+:: ── Pre-download Florence-2 model for advanced video analysis ──
+echo [AI System] Checking Florence-2 model (for advanced video analysis)...
+.\venv\Scripts\python.exe -c "from transformers import AutoProcessor, AutoModelForCausalLM; AutoProcessor.from_pretrained('microsoft/Florence-2-large', trust_remote_code=True); print('[OK] Florence-2 model ready')" >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo [OK] Florence-2 model cached
+) else (
+    echo [INFO] Florence-2 model not cached. It will download (~800MB) on first advanced analysis.
+    echo        To pre-download: venv\Scripts\python -c "from transformers import AutoProcessor; AutoProcessor.from_pretrained('microsoft/Florence-2-large', trust_remote_code=True)"
+)
+echo.
+
 .\venv\Scripts\python.exe main.py
 
 if %ERRORLEVEL% neq 0 (
