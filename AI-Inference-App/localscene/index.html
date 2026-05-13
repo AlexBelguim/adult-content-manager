@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Scene Manager</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #141420;
+    --surface2: #1a1a2e;
+    --border: #2a2a3e;
+    --text: #e0e0e0;
+    --text2: #888;
+    --accent: #7c4dff;
+    --accent2: #00e5ff;
+    --success: #4caf50;
+    --warning: #ff9800;
+    --error: #f44336;
+    --purple: #7b1fa2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+
+  .app { display: grid; grid-template-columns: 1fr 400px; grid-template-rows: auto 1fr; height: 100vh; gap: 0; }
+  .header { grid-column: 1 / -1; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 18px; color: var(--accent2); font-weight: 600; }
+  .header .status { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status-dot.ok { background: var(--success); }
+  .status-dot.err { background: var(--error); }
+
+  .video-panel { padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .sidebar { background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Video */
+  .video-container { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+  video { width: 100%; max-height: 50vh; display: block; }
+  .time-display { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-family: monospace; }
+
+  /* File Input */
+  .file-input-area { display: flex; gap: 8px; }
+  .file-input-area input[type="text"] { flex: 1; }
+
+  /* Controls */
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* Settings */
+  .settings { background: var(--surface2); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .settings h3 { font-size: 14px; color: var(--accent2); margin-bottom: 4px; }
+
+  .mode-toggle { display: flex; gap: 4px; }
+  .mode-toggle button { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text2); cursor: pointer; font-size: 13px; transition: all 0.2s; }
+  .mode-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mode-toggle button.active.adv { background: var(--purple); border-color: var(--purple); }
+
+  .field-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+  .field input, .field select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px; width: 120px; }
+  .field input:focus { border-color: var(--accent); outline: none; }
+
+  /* Buttons */
+  button { cursor: pointer; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #6a3de8; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-adv { background: var(--purple); color: #fff; }
+  .btn-adv:hover { background: #6a1b9a; }
+  .btn-danger { background: var(--error); color: #fff; }
+  .btn-danger:hover { background: #d32f2f; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* Scenes sidebar */
+  .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .sidebar-header h2 { font-size: 15px; color: var(--accent2); }
+  .scene-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .scene-item { background: var(--surface2); border-radius: 6px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; }
+  .scene-item:hover { border-color: var(--accent); }
+  .scene-item.active { border-color: var(--accent2); background: rgba(0,229,255,0.08); }
+  .scene-item .name { font-weight: 500; font-size: 13px; margin-bottom: 4px; }
+  .scene-item .time { font-size: 12px; color: var(--text2); font-family: monospace; }
+  .scene-item .conf { font-size: 11px; color: var(--accent); float: right; }
+
+  /* Progress */
+  .progress-bar { padding: 12px 16px; background: rgba(124,77,255,0.1); border-top: 1px solid var(--border); }
+  .progress-bar .text { font-size: 13px; color: var(--accent); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Logs */
+  .logs-panel { background: var(--bg); border-top: 1px solid var(--border); padding: 8px; max-height: 200px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
+  .log-line { padding: 1px 0; color: var(--text2); white-space: pre-wrap; word-break: break-all; }
+  .log-line.info { color: var(--accent2); }
+  .log-line.error { color: var(--error); }
+  .log-line.event { color: var(--warning); }
+
+  /* Timeline */
+  .timeline { background: var(--surface2); border-radius: 6px; padding: 8px; margin-top: 8px; }
+  .timeline h4 { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+  .timeline-bar { height: 24px; background: var(--bg); border-radius: 4px; position: relative; overflow: hidden; cursor: pointer; }
+  .timeline-segment { position: absolute; top: 0; height: 100%; border-radius: 2px; opacity: 0.8; }
+  .timeline-segment:hover { opacity: 1; }
+
+  .info-alert { background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.2); border-radius: 6px; padding: 10px 12px; font-size: 12px; color: var(--accent2); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <h1>🎬 Local Scene Manager</h1>
+    <span style="color:var(--text2);font-size:13px">Standalone test tool — talks to AI server on :3344</span>
+    <div class="status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText" style="font-size:12px;color:var(--text2)">Checking...</span>
+    </div>
+  </div>
+
+  <!-- Video Panel -->
+  <div class="video-panel">
+    <!-- File Input -->
+    <div class="file-input-area">
+      <input type="text" id="videoPath" placeholder="Enter full path to video file (e.g. Z:\Videos\stream.mp4)" style="font-size:14px;padding:8px 12px">
+      <button class="btn-primary" onclick="loadVideo()">Load</button>
+    </div>
+
+    <!-- Video Player -->
+    <div class="video-container">
+      <video id="videoPlayer" controls preload="metadata"></video>
+      <div class="time-display" id="timeDisplay">0:00 / 0:00</div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline" id="timelineContainer" style="display:none">
+      <h4>Scene Timeline</h4>
+      <div class="timeline-bar" id="timelineBar" onclick="seekTimeline(event)"></div>
+    </div>
+
+    <!-- Settings -->
+    <div class="settings">
+      <h3>⚙️ Analysis Settings</h3>
+      
+      <div class="mode-toggle">
+        <button id="modeBasic" class="active" onclick="setMode('basic')">🔍 Basic</button>
+        <button id="modeAdvanced" onclick="setMode('advanced')">🧠 Advanced (Florence + State Machine)</button>
+      </div>
+
+      <div id="advInfo" class="info-alert" style="display:none">
+        Advanced mode uses Florence-2 for object detection + multi-resolution scanning (macro → action → refinement). Better for long videos and toy/finger distinction.
+      </div>
+
+      <div class="field-row">
+        <!-- Basic mode fields -->
+        <div class="field" id="fieldSample">
+          <label>Sample Interval (s)</label>
+          <input type="number" id="sampleInterval" value="12" min="1" max="600">
+        </div>
+        <!-- Advanced mode fields -->
+        <div class="field" id="fieldMacro" style="display:none">
+          <label>Macro Scan (s)</label>
+          <input type="number" id="macroInterval" value="60" min="10" max="600">
+        </div>
+        <div class="field" id="fieldAction" style="display:none">
+          <label>Action Scan (s)</label>
+          <input type="number" id="actionInterval" value="5" min="1" max="120">
+        </div>
+        <div class="field">
+          <label>Min Segment (s)</label>
+          <input type="number" id="minSegment" value="10" min="1" max="120">
+        </div>
+      </div>
+
+      <div class="field" style="width:100%">
+        <label>Allowed Actions (comma-separated, leave empty for all)</label>
+        <input type="text" id="allowedActions" placeholder="e.g. blowjob, cowgirl, dildo pussy play" style="width:100%">
+      </div>
+
+      <div class="controls">
+        <button class="btn-primary" id="btnAnalyze" onclick="runAnalysis()">▶ Analyze Full Video</button>
+        <button class="btn-outline" id="btnAnalyzeRange" onclick="runRangeAnalysis()">📐 Analyze Range</button>
+        <button class="btn-danger" id="btnCancel" onclick="cancelAnalysis()" style="display:none">⏹ Cancel</button>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="logs-panel" id="logsPanel"></div>
+  </div>
+
+  <!-- Sidebar: Scenes -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>🎬 Scenes</h2>
+      <span id="sceneCount" style="font-size:12px;color:var(--text2)">0 scenes</span>
+    </div>
+    <div id="progressBar" class="progress-bar" style="display:none">
+      <span class="text"><span class="spinner"></span><span id="progressText">Analyzing...</span></span>
+    </div>
+    <div class="scene-list" id="sceneList">
+      <div style="padding:40px 20px;text-align:center;color:var(--text2)">
+        Load a video and run analysis to see scenes here.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──
+let currentMode = 'basic';
+let scenes = [];
+let timeline = [];
+let isAnalyzing = false;
+let videoDuration = 0;
+
+const COLORS = [
+  '#7c4dff','#00e5ff','#ff9800','#4caf50','#f44336','#e91e63',
+  '#2196f3','#ff5722','#9c27b0','#009688','#ffc107','#795548'
+];
+const actionColors = {};
+let colorIdx = 0;
+function getActionColor(action) {
+  if (!actionColors[action]) {
+    actionColors[action] = COLORS[colorIdx % COLORS.length];
+    colorIdx++;
+  }
+  return actionColors[action];
+}
+
+// ── Init ──
+window.addEventListener('load', () => {
+  checkHealth();
+  setInterval(checkHealth, 10000);
+
+  const video = document.getElementById('videoPlayer');
+  video.addEventListener('timeupdate', () => {
+    const t = video.currentTime;
+    document.getElementById('timeDisplay').textContent = `${fmt(t)} / ${fmt(videoDuration)}`;
+  });
+  video.addEventListener('loadedmetadata', () => {
+    if (isFinite(video.duration)) {
+      videoDuration = video.duration;
+    }
+  });
+});
+
+// ── Health Check ──
+async function checkHealth() {
+  try {
+    const resp = await fetch('/api/health');
+    if (resp.ok) {
+      const data = await resp.json();
+      document.getElementById('statusDot').className = 'status-dot ok';
+      const florence = data.florence_available ? ' | Florence ✅' : ' | Florence ❌';
+      document.getElementById('statusText').textContent = `AI Server OK (${data.model})${florence}`;
+    } else {
+      throw new Error();
+    }
+  } catch {
+    document.getElementById('statusDot').className = 'status-dot err';
+    document.getElementById('statusText').textContent = 'AI Server offline — run Run_AI.bat';
+  }
+}
+
+// ── Mode Toggle ──
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('modeBasic').className = mode === 'basic' ? 'active' : '';
+  document.getElementById('modeAdvanced').className = mode === 'advanced' ? 'active adv' : '';
+  document.getElementById('fieldSample').style.display = mode === 'basic' ? '' : 'none';
+  document.getElementById('fieldMacro').style.display = mode === 'advanced' ? '' : 'none';
+  document.getElementById('fieldAction').style.display = mode === 'advanced' ? '' : 'none';
+  document.getElementById('advInfo').style.display = mode === 'advanced' ? '' : 'none';
+}
+
+// ── Load Video ──
+function loadVideo() {
+  const path = document.getElementById('videoPath').value.trim();
+  if (!path) return;
+  // Use file:// for local files
+  const video = document.getElementById('videoPlayer');
+  video.src = `file:///${path.replace(/\\/g, '/')}`;
+  video.load();
+  addLog(`Loaded video: ${path}`, 'info');
+  scenes = [];
+  timeline = [];
+  renderScenes();
+}
+
+// ── Analysis ──
+async function runAnalysis() {
+  const path = document.getElementById('videoPath').value.trim();
+  if (!path) return alert('Enter a video path first');
+
+  isAnalyzing = true;
+  updateAnalyzingUI(true);
+  addLog(`Starting ${currentMode} analysis...`, 'info');
+
+  try {
+    const body = buildAnalysisPayload(path);
+    const endpoint = currentMode === 'advanced' ? '/api/analyze-advanced' : '/api/analyze';
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const result = await resp.json();
+    if (result.success) {
+      scenes = result.segments || [];
+      timeline = result.timeline || [];
+      addLog(`✅ Analysis complete: ${scenes.length} segments, ${timeline.length} events`, 'info');
+      
+      // Log timeline events
+      timeline.forEach(ev => {
+        addLog(`  📍 ${ev.event} at ${fmt(ev.time)}${ev.toy ? ` (${ev.toy})` : ''}`, 'event');
+      });
+
+      renderScenes();
+      renderTimeline();
+    } else {
+      addLog(`❌ Analysis failed: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog(`❌ Error: ${e.message}`, 'error');
+  } finally {
+    isAnalyzing = false;
+    updateAnalyzingUI(false);
+  }
+}
+
+async function runRangeAnalysis() {
+  const path = document.getElementById('videoPath').value.trim();
+  if (!path) return alert('Enter a video path first');
+
+  const start = parseFloat(prompt('Start time (seconds):', '0'));
+  const end = parseFloat(prompt('End time (seconds):', String(videoDuration || 300)));
+  if (isNaN(start) || isNaN(end)) return;
+
+  isAnalyzing = true;
+  updateAnalyzingUI(true);
+  addLog(`Starting ${currentMode} range analysis: ${fmt(start)} → ${fmt(end)}`, 'info');
+
+  try {
+    const body = buildAnalysisPayload(path);
+    body.start_time = start;
+    body.end_time = end;
+    const endpoint = currentMode === 'advanced' ? '/api/analyze-advanced' : '/api/analyze';
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const result = await resp.json();
+    if (result.success) {
+      scenes = result.segments || [];
+      timeline = result.timeline || [];
+      addLog(`✅ Range analysis complete: ${scenes.length} segments`, 'info');
+      renderScenes();
+      renderTimeline();
+    } else {
+      addLog(`❌ Failed: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog(`❌ Error: ${e.message}`, 'error');
+  } finally {
+    isAnalyzing = false;
+    updateAnalyzingUI(false);
+  }
+}
+
+function buildAnalysisPayload(path) {
+  const allowed = document.getElementById('allowedActions').value.trim();
+  const base = {
+    video_path: path,
+    min_segment: parseInt(document.getElementById('minSegment').value) || 10,
+  };
+  if (allowed) {
+    base.allowed_actions = allowed.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  if (currentMode === 'advanced') {
+    base.macro_interval = parseInt(document.getElementById('macroInterval').value) || 60;
+    base.action_interval = parseInt(document.getElementById('actionInterval').value) || 5;
+  } else {
+    base.segment_duration = parseInt(document.getElementById('sampleInterval').value) || 12;
+  }
+  return base;
+}
+
+async function cancelAnalysis() {
+  try {
+    await fetch('/api/cancel', { method: 'POST' });
+    addLog('Cancellation requested', 'info');
+  } catch (e) {
+    addLog(`Cancel failed: ${e.message}`, 'error');
+  }
+}
+
+// ── UI Updates ──
+function updateAnalyzingUI(analyzing) {
+  document.getElementById('btnAnalyze').disabled = analyzing;
+  document.getElementById('btnAnalyzeRange').disabled = analyzing;
+  document.getElementById('btnCancel').style.display = analyzing ? '' : 'none';
+  document.getElementById('progressBar').style.display = analyzing ? '' : 'none';
+  document.getElementById('progressText').textContent = `Analyzing (${currentMode} mode)...`;
+}
+
+function renderScenes() {
+  const list = document.getElementById('sceneList');
+  document.getElementById('sceneCount').textContent = `${scenes.length} scenes`;
+
+  if (scenes.length === 0) {
+    list.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--text2)">No scenes yet. Run analysis.</div>';
+    return;
+  }
+
+  list.innerHTML = scenes.map((s, i) => {
+    const dur = (s.end - s.start).toFixed(0);
+    const conf = s.confidence ? ` ${(s.confidence * 100).toFixed(0)}%` : '';
+    const color = getActionColor(s.action);
+    return `<div class="scene-item" onclick="seekTo(${s.start})" title="Click to seek">
+      <div class="name"><span style="color:${color}">●</span> ${s.action}${conf ? `<span class="conf">${conf}</span>` : ''}</div>
+      <div class="time">${fmt(s.start)} → ${fmt(s.end)} (${dur}s)</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTimeline() {
+  const container = document.getElementById('timelineContainer');
+  const bar = document.getElementById('timelineBar');
+  if (scenes.length === 0 || videoDuration <= 0) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = '';
+  const dur = Math.max(videoDuration, ...scenes.map(s => s.end));
+
+  bar.innerHTML = scenes.map(s => {
+    const left = (s.start / dur * 100).toFixed(2);
+    const width = ((s.end - s.start) / dur * 100).toFixed(2);
+    const color = getActionColor(s.action);
+    return `<div class="timeline-segment" style="left:${left}%;width:${width}%;background:${color}" title="${s.action}: ${fmt(s.start)} - ${fmt(s.end)}"></div>`;
+  }).join('');
+}
+
+function seekTimeline(event) {
+  const bar = document.getElementById('timelineBar');
+  const rect = bar.getBoundingClientRect();
+  const pct = (event.clientX - rect.left) / rect.width;
+  const dur = Math.max(videoDuration, ...scenes.map(s => s.end));
+  seekTo(pct * dur);
+}
+
+function seekTo(time) {
+  const video = document.getElementById('videoPlayer');
+  video.currentTime = time;
+  video.play();
+}
+
+// ── Logging ──
+function addLog(msg, type = '') {
+  const panel = document.getElementById('logsPanel');
+  const div = document.createElement('div');
+  div.className = `log-line ${type}`;
+  const ts = new Date().toLocaleTimeString();
+  div.textContent = `[${ts}] ${msg}`;
+  panel.appendChild(div);
+  panel.scrollTop = panel.scrollHeight;
+  // Keep max 200 lines
+  while (panel.children.length > 200) panel.removeChild(panel.firstChild);
+}
+
+// ── Helpers ──
+function fmt(sec) {
+  if (!sec || !isFinite(sec)) return '0:00';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+</script>
+</body>
+</html>
