@@ -842,6 +842,7 @@ function TasteDashboardPage() {
                         min={100} max={5000} step={100}
                         onChange={(_, v) => setSyntheticPairsPerEpoch(v)}
                         sx={{ color: selectedType === 'rank_aware_siamese' ? '#673ab7' : '#e91e63' }}
+                      />
                     </Box>
                   )}
                 </Box>
