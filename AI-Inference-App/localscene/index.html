@@ -278,9 +278,8 @@ function setMode(mode) {
 function loadVideo() {
   const path = document.getElementById('videoPath').value.trim();
   if (!path) return;
-  // Use file:// for local files
   const video = document.getElementById('videoPlayer');
-  video.src = `file:///${path.replace(/\\/g, '/')}`;
+  video.src = `/stream?path=${encodeURIComponent(path)}`;
   video.load();
   addLog(`Loaded video: ${path}`, 'info');
   scenes = [];
