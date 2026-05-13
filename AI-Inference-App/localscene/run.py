@@ -70,35 +70,38 @@ class LocalSceneHandler(SimpleHTTPRequestHandler):
 
         # Range request support for seeking
         range_header = self.headers.get('Range')
-        if range_header:
-            start, end = self._parse_range(range_header, file_size)
-            self.send_response(206)
-            self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
-            self.send_header('Content-Length', str(end - start + 1))
-            self.send_header('Content-Type', content_type)
-            self.send_header('Accept-Ranges', 'bytes')
-            self.end_headers()
-            with open(file_path, 'rb') as f:
-                f.seek(start)
-                remaining = end - start + 1
-                while remaining > 0:
-                    chunk = f.read(min(65536, remaining))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
-        else:
-            self.send_response(200)
-            self.send_header('Content-Type', content_type)
-            self.send_header('Content-Length', str(file_size))
-            self.send_header('Accept-Ranges', 'bytes')
-            self.end_headers()
-            with open(file_path, 'rb') as f:
-                while True:
-                    chunk = f.read(65536)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
+        try:
+            if range_header:
+                start, end = self._parse_range(range_header, file_size)
+                self.send_response(206)
+                self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+                self.send_header('Content-Length', str(end - start + 1))
+                self.send_header('Content-Type', content_type)
+                self.send_header('Accept-Ranges', 'bytes')
+                self.end_headers()
+                with open(file_path, 'rb') as f:
+                    f.seek(start)
+                    remaining = end - start + 1
+                    while remaining > 0:
+                        chunk = f.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            else:
+                self.send_response(200)
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', str(file_size))
+                self.send_header('Accept-Ranges', 'bytes')
+                self.end_headers()
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass  # Browser cancelled the request — normal during seeking
 
     def _parse_range(self, range_header, file_size):
         _, range_spec = range_header.split('=', 1)
