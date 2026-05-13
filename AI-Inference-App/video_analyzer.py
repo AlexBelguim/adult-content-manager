@@ -469,6 +469,13 @@ def _build_vlm_messages(prompt, frame_b64_list):
 
 def _call_vlm(prompt, frame_b64_list, max_tokens=150, timeout=120):
     """Send a prompt + images to Ollama VLM, return raw text content."""
+    _model_lower = OLLAMA_MODEL.lower()
+    # Models that support multiple images
+    multi_image = any(m in _model_lower for m in ['qwen', 'internvl', 'minicpm'])
+    # If model is single-image only, pick the middle frame (most representative)
+    if not multi_image and len(frame_b64_list) > 1:
+        mid = len(frame_b64_list) // 2
+        frame_b64_list = [frame_b64_list[mid]]
     try:
         payload = {
             "model": OLLAMA_MODEL,
