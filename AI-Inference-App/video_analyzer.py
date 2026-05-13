@@ -510,8 +510,9 @@ def classify_macro(frame_b64, florence_hint=""):
     """Quick macro scan: people count, scene type, clothing state."""
     ctx = f"\nDetection hint: {florence_hint}" if florence_hint else ""
     prompt = f"""Quick scene check. Analyze this single frame.{ctx}
+IMPORTANT: If this is a POV (point-of-view) shot, the camera holder counts as a person even if only their body part (penis, hand) is visible. A blowjob from POV = 2 people, straight_sex.
 Report:
-1. people: number of people visible (0, 1, 2, 3)
+1. people: number of people involved (0, 1, 2, 3) — count the camera holder if their body is visible
 2. scene: idle, solo, straight_sex, lesbian, threesome
 3. clothing: clothed, lingerie, nude, stripping
 
@@ -524,11 +525,15 @@ Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
             m = re.search(r'\{[^}]+\}', cleaned)
             if m:
                 data = json.loads(m.group())
-                return {
+                result = {
                     "people": int(data.get("people", 0)),
                     "scene": str(data.get("scene", "idle")).lower().strip(),
                     "clothing": str(data.get("clothing", "unknown")).lower().strip()
                 }
+                # POV correction: if sex scene detected but only 1 person counted
+                if result["scene"] in ("straight_sex", "threesome") and result["people"] < 2:
+                    result["people"] = 2
+                return result
         except:
             pass
     return {"people": 0, "scene": "idle", "clothing": "unknown"}
