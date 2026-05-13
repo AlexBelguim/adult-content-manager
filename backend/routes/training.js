@@ -591,7 +591,7 @@ function collectTrainingImages(basePath) {
       let picsDir = path.join(baseDir, d.name, 'pics');
       if (!fs.existsSync(picsDir)) picsDir = path.join(baseDir, d.name);
       if (!fs.existsSync(picsDir)) continue;
-      const files = fs.readdirSync(picsDir).filter(f =>
+            const files = fs.readdirSync(picsDir).filter(f =>
         IMAGE_EXTS.includes(path.extname(f).toLowerCase())
       );
       for (const f of files) {
@@ -629,10 +629,13 @@ function collectPerformerRatings() {
   return ratings;
 }
 
+
 // ── GET /api/training/export-zip ─────────────────────────────
 // Download training data as a ZIP file
 router.get('/export-zip', async (req, res) => {
   const type = req.query.type || 'binary';
+  const saveToDisk = req.query.saveToDisk === 'true';
+
   try {
     const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
     if (!folder) return res.status(400).json({ error: 'No base folder configured' });
@@ -645,7 +648,7 @@ router.get('/export-zip', async (req, res) => {
       return res.status(400).json({ error: 'No training images found' });
     }
 
-    // Build manifest with ALL training data
+    // Build manifest
     const manifest = {
       type,
       created: new Date().toISOString(),
@@ -655,20 +658,16 @@ router.get('/export-zip', async (req, res) => {
       performer_ratings: collectPerformerRatings()
     };
 
-    // Always include pairwise data — remap absolute paths to ZIP-relative paths
+    // Include pairwise data
     try {
       const pairs = db.prepare(`
         SELECT winner, loser, performer_id, type FROM pairwise_pairs WHERE type != 'both_bad'
       `).all();
-
-      // Build lookup: absolute path → zip path
       const pathMap = {};
       for (const img of [...images.keep, ...images.delete]) {
         pathMap[img.absPath] = img.zipPath;
-        // Also map with forward slashes for cross-platform matching
         pathMap[img.absPath.replace(/\\/g, '/')] = img.zipPath;
       }
-
       manifest.pairwise_pairs = pairs.map(p => ({
         winner: pathMap[p.winner] || pathMap[p.winner?.replace(/\\/g, '/')] || p.winner,
         loser: pathMap[p.loser] || pathMap[p.loser?.replace(/\\/g, '/')] || p.loser,
@@ -678,33 +677,43 @@ router.get('/export-zip', async (req, res) => {
       manifest.pairwise_count = pairs.length;
     } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
 
-    // Include filter action stats
-    try {
-      const actions = db.prepare(`
-        SELECT performer_id, action, COUNT(*) as cnt
-        FROM filter_actions GROUP BY performer_id, action
-      `).all();
-      manifest.filter_actions = actions;
-    } catch (_) {}
-
-    // Stream ZIP
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="training_data_${type}_${Date.now()}.zip"`);
-
-    const archive = archiver('zip', { zlib: { level: 1 } }); // fast compression
+    const zipFilename = `training_data_${type}_${Date.now()}.zip`;
+    const archive = archiver('zip', { zlib: { level: 1 } });
     archive.on('error', err => { throw err; });
-    archive.pipe(res);
 
-    // Add manifest
-    archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+    if (saveToDisk) {
+      const exportDir = path.join(folder.path, 'training_exports');
+      await fs.ensureDir(exportDir);
+      const exportPath = path.join(exportDir, zipFilename);
+      const output = fs.createWriteStream(exportPath);
 
-    // Add images
-    for (const img of [...images.keep, ...images.delete]) {
-      archive.file(img.absPath, { name: img.zipPath });
+      archive.pipe(output);
+      archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+      for (const img of [...images.keep, ...images.delete]) {
+        archive.file(img.absPath, { name: img.zipPath });
+      }
+
+      await archive.finalize();
+      console.log(`[Training] ZIP saved to disk: ${exportPath}`);
+      return res.json({
+        success: true,
+        message: 'Export completed successfully',
+        path: exportPath,
+        filename: zipFilename,
+        images: keepCount + deleteCount
+      });
+    } else {
+      // Stream ZIP to response
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+      archive.pipe(res);
+      archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+      for (const img of [...images.keep, ...images.delete]) {
+        archive.file(img.absPath, { name: img.zipPath });
+      }
+      await archive.finalize();
+      console.log(`[Training] ZIP exported: ${keepCount} keep + ${deleteCount} delete images`);
     }
-
-    await archive.finalize();
-    console.log(`[Training] ZIP exported: ${keepCount} keep + ${deleteCount} delete images`);
   } catch (err) {
     console.error('[Training] Export ZIP error:', err.message);
     if (!res.headersSent) res.status(500).json({ error: err.message });

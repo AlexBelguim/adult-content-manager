@@ -259,26 +259,32 @@ function TasteDashboardPage() {
     }
   };
 
-  const handleDownloadZip = async () => {
+  const handleDownloadZip = async (saveToDisk = false) => {
     setPushingData(true); // reuse loading state
     try {
-      const res = await fetch(`/api/training/export-zip?type=${selectedType}`);
+      const res = await fetch(`/api/training/export-zip?type=${selectedType}${saveToDisk ? '&saveToDisk=true' : ''}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Download failed' }));
         alert(`❌ ${err.error}`);
         setPushingData(false);
         return;
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `training_data_${selectedType}_${Date.now()}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) { alert(`Download failed: ${err.message}`); }
+      
+      if (saveToDisk) {
+        const result = await res.json();
+        alert(`✅ ${result.message}\nSaved to: ${result.path}\n(${result.images} images total)`);
+      } else {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `training_data_${selectedType}_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) { alert(`Export failed: ${err.message}`); }
     setPushingData(false);
   };
 
@@ -880,7 +886,7 @@ function TasteDashboardPage() {
                   </Button>
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                  <Button variant="outlined" size="small" fullWidth onClick={handleDownloadZip}
+                  <Button variant="outlined" size="small" fullWidth onClick={() => handleDownloadZip(false)}
                     sx={{ fontWeight: 700, textTransform: 'none', borderColor: '#444', color: '#ccc',
                       '&:hover': { borderColor: '#666', bgcolor: 'rgba(255,255,255,0.04)' } }}>
                     📥 Download ZIP
@@ -891,6 +897,11 @@ function TasteDashboardPage() {
                     📄 JSON Manifest
                   </Button>
                 </Box>
+                <Button variant="contained" size="small" fullWidth onClick={() => handleDownloadZip(true)}
+                  sx={{ mt: 1, fontWeight: 700, textTransform: 'none', bgcolor: 'rgba(255,255,255,0.05)', color: '#fff',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }, border: '1px solid #333' }}>
+                  💾 Export to Media Folder (Server-side)
+                </Button>
               </Box>
             </Box>
           </CollapsibleSection>
