@@ -267,20 +267,30 @@ class FlorenceEngine:
     @classmethod
     def _load(cls):
         try:
-            from transformers import AutoProcessor, AutoModelForCausalLM, AutoConfig
             import torch
             log("🔬 Loading Florence-2-large on CPU...")
             mid = "microsoft/Florence-2-large"
-            # Patch: transformers 5.x removed forced_bos_token_id from config
-            config = AutoConfig.from_pretrained(mid, trust_remote_code=True)
-            if hasattr(config, 'text_config') and not hasattr(config.text_config, 'forced_bos_token_id'):
-                config.text_config.forced_bos_token_id = getattr(config.text_config, 'bos_token_id', 0)
-                log("  ℹ️ Patched forced_bos_token_id for transformers 5.x")
+
+            # Patch: transformers 5.x removed forced_bos_token_id.
+            # Florence-2 remote code reads it during __init__, so we must
+            # patch the PretrainedConfig base BEFORE any Florence code loads.
+            from transformers import PretrainedConfig
+            _orig_init = PretrainedConfig.__init__
+            def _patched_init(self, **kwargs):
+                _orig_init(self, **kwargs)
+                if not hasattr(self, 'forced_bos_token_id'):
+                    self.forced_bos_token_id = getattr(self, 'bos_token_id', None)
+            PretrainedConfig.__init__ = _patched_init
+
+            from transformers import AutoProcessor, AutoModelForCausalLM
             cls._processor = AutoProcessor.from_pretrained(mid, trust_remote_code=True)
             cls._model = AutoModelForCausalLM.from_pretrained(
-                mid, config=config, trust_remote_code=True, torch_dtype=torch.float32
+                mid, trust_remote_code=True, torch_dtype=torch.float32
             ).eval().to("cpu")
             cls._available = True
+
+            # Restore original init
+            PretrainedConfig.__init__ = _orig_init
             log("✅ Florence-2 ready (CPU, ~800MB RAM)")
         except Exception as ex:
             log(f"⚠️ Florence-2 not available: {ex}")
