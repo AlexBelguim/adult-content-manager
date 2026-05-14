@@ -175,43 +175,52 @@ def check_ai_server():
         return False
 
 def start_ai_server():
-    """Start the AI server (main.py) in a background process."""
+    """Start the AI server — in a Windows Terminal tab if possible, else background."""
     global ai_process
     ai_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     main_py = os.path.join(ai_dir, "main.py")
 
     if not os.path.exists(main_py):
-        print(f"  ⚠️  Cannot find {main_py}")
+        print(f"  !! Cannot find {main_py}")
         return False
-
-    print("  🚀 Starting AI server...")
 
     # Try venv python first, fall back to system python
     venv_python = os.path.join(ai_dir, "venv", "Scripts", "python.exe")
     python_exe = venv_python if os.path.exists(venv_python) else "python"
 
-    ai_process = subprocess.Popen(
-        [python_exe, main_py],
-        cwd=ai_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    # Stream AI server output in background
-    def stream_output():
-        for line in iter(ai_process.stdout.readline, b''):
-            text = line.decode('utf-8', errors='replace').rstrip()
-            if text:
-                print(f"  [AI] {text}")
-    threading.Thread(target=stream_output, daemon=True).start()
+    # Try to open in a new Windows Terminal tab
+    try:
+        subprocess.run(["wt", "--version"], capture_output=True, timeout=3)
+        print("  >> Opening AI server in new terminal tab...")
+        subprocess.Popen(
+            ["wt", "-w", "0", "new-tab", "--title", "AI Server",
+             python_exe, main_py],
+            cwd=ai_dir,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # No Windows Terminal — run in background with piped output
+        print("  >> Starting AI server in background...")
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        ai_process = subprocess.Popen(
+            [python_exe, main_py],
+            cwd=ai_dir, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        def stream_output():
+            for line in iter(ai_process.stdout.readline, b''):
+                text = line.decode('utf-8', errors='replace').rstrip()
+                if text:
+                    print(f"  [AI] {text}")
+        threading.Thread(target=stream_output, daemon=True).start()
 
     # Wait for server to be ready
     for i in range(30):
         time.sleep(1)
         if check_ai_server():
-            print("  ✅ AI server is ready!")
+            print("  >> AI server is ready!")
             return True
-    print("  ⚠️  AI server didn't start in 30s — check logs above")
+    print("  !! AI server didn't start in 30s")
     return False
 
 
