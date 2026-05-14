@@ -247,9 +247,20 @@ def parse_vlm_response(content, allowed_actions=None):
                 action = matched
             return {"action": action, "confidence": min(1.0, max(0.0, confidence))}
     except: pass
-    lines = [l.strip().lower() for l in content.split('\n') if l.strip() and not any(t in l.lower() for t in ['<|im', 'assistant', 'user', 'system'])]
-    action = lines[0][:50] if lines else "other"
-    return {"action": action, "confidence": 0.3}
+    # Fallback: scan for known action keywords in full response
+    _known_actions = [
+        'reverse cowgirl', 'cowgirl', 'doggy style', 'doggy', 'missionary',
+        'pussy dildo play', 'anal dildo play', 'dildo blowjob', 'vibrator play',
+        'fingering pussy', 'fingering ass', 'fingering',
+        'blowjob', 'deepthroat', 'cunnilingus', '69',
+        'handjob', 'titfuck', 'boob teasing', 'handbra',
+        'anal', 'cumshot', 'facial', 'creampie',
+        'nudity', 'idle', 'stripping'
+    ]
+    for kw in _known_actions:
+        if kw in content_lower:
+            return {"action": kw, "confidence": 0.5}
+    return {"action": "other", "confidence": 0.3}
 
 # ── Florence-2 Pre-Pass Engine ─────────────────────────────────────────────────
 class FlorenceEngine:
@@ -549,34 +560,15 @@ def classify_action_with_context(frame_b64_list, state, florence_caption="",
         extra += f"\nDetected objects: {florence_hint}"
 
     if allowed_actions:
-        action_list = "\n".join(f"- {a}" for a in allowed_actions)
-        prompt = f"""State: {context}{extra}
-Task: Classify the sexual action in these frames.
-Choices:
-{action_list}
-
-Rules:
-1. Use state context for consistency.
-2. If Florence detected a toy/object, it IS a toy — not fingers.
-3. Output ONLY JSON: {{"action": "choice", "confidence": 0.9, "insertion": false}}"""
+        action_list = ", ".join(allowed_actions)
+        prompt = f"""Context: {context}{extra}
+Classify the action. Pick ONE from: {action_list}
+Respond with ONLY this JSON, nothing else: {{"action": "choice", "confidence": 0.9, "insertion": false}}"""
     else:
-        prompt = f"""State: {context}{extra}
-
-Classify the primary action in these frames.
-KEY RULES:
-- If Florence detected a toy/object/device, classify as dildo/vibrator play, NOT fingering.
-- Fingers must be clearly INSERTED (not just near) for fingering labels.
-- "insertion" = true if any penetration is actively happening.
-
-Choices:
-- pussy dildo play, anal dildo play, dildo blowjob, vibrator play
-- fingering pussy, fingering ass, handjob, boob teasing, handbra
-- blowjob, cunnilingus, 69, deepthroat
-- missionary, cowgirl, reverse cowgirl, doggy style, anal
-- cumshot, facial, creampie
-- nudity, idle, transition
-
-Output ONLY JSON: {{"action": "label", "confidence": 0.5-1.0, "insertion": false}}"""
+        prompt = f"""Context: {context}{extra}
+Classify the action. Pick ONE from: blowjob, deepthroat, handjob, cunnilingus, missionary, cowgirl, reverse cowgirl, doggy style, anal, pussy dildo play, vibrator play, fingering pussy, boob teasing, cumshot, facial, creampie, nudity, idle
+IMPORTANT: If a penis is visible near mouth/face = blowjob. If toy/device visible = dildo/vibrator play. POV counts as 2 people.
+Respond with ONLY this JSON, nothing else: {{"action": "label", "confidence": 0.9, "insertion": false}}"""
 
     # If we have a crop, add it as the first image for emphasis
     images = list(frame_b64_list)
