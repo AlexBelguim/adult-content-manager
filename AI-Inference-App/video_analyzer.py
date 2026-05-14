@@ -43,7 +43,7 @@ class DebugLogger:
             "parsed": parsed_result, "frame_files": []
         }
         # Save frames as images
-        for fi, fb64 in enumerate(frames_b64[:4]):  # max 4 frames per entry
+        for fi, fb64 in enumerate(frames_b64[:8]):  # save all burst frames + composite
             fname = f"{idx:04d}_t{int(timestamp_sec)}s_f{fi}.jpg"
             fpath = self.output_dir / fname
             try:
@@ -678,14 +678,14 @@ def classify_action_with_context(frame_b64_list, state, florence_caption="",
         action_list = ", ".join(allowed_actions)
         prompt = f"""Context: {context}{extra}
 You are a video annotation tool. Pick ONE from: {action_list}
-Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
+Output ONLY JSON: {{"action": "<your_pick>", "confidence": 0.9, "insertion": false}}"""
     else:
         prompt = f"""Context: {context}{extra}
 You are a video annotation tool. You see multiple frames from a 6-second window. The LAST image is a motion composite (blurred areas = movement).
 What specific position or act is shown? Pick ONE:
 cowgirl, reverse cowgirl, missionary, doggy style, blowjob, deepthroat, handjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, boob teasing, cumshot, facial, creampie, nudity, idle
 Visual cues: POV looking up at woman on top = cowgirl. Woman on back with legs spread = missionary. Bent over/from behind = doggy style. Face near groin = blowjob.
-Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
+Output ONLY JSON: {{"action": "<your_pick>", "confidence": 0.9, "insertion": false}}"""
 
     # If we have a crop, add it as the first image for emphasis
     images = list(frame_b64_list)
@@ -702,9 +702,9 @@ Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}
                 result["insertion"] = bool(json.loads(m.group()).get("insertion", False))
         except:
             result["insertion"] = False
-        _debug.log_vlm_call("action", time_sec, prompt, images[:2], raw, result)
+        _debug.log_vlm_call("action", time_sec, prompt, images, raw, result)
         return result
-    _debug.log_vlm_call("action", time_sec, prompt, images[:2], "(no response)", None)
+    _debug.log_vlm_call("action", time_sec, prompt, images, "(no response)", None)
     return {"action": "other", "confidence": 0.0, "insertion": False}
 
 
