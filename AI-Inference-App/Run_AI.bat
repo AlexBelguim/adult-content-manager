@@ -80,14 +80,14 @@ if not exist "venv" (
 
 :: ── Install dependencies (skip if already installed) ──────
 echo [AI System] Checking dependencies...
-.\venv\Scripts\python.exe -c "import flask; import bitsandbytes" >nul 2>&1
+.\venv\Scripts\python.exe -c "import flask; import bitsandbytes; import einops; import timm" >nul 2>&1
 if %ERRORLEVEL% equ 0 goto DEPS_OK
 
 echo [AI System] Installing dependencies... (this may take a few minutes first time)
-.\venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu124
+.\venv\Scripts\python.exe -m pip install -r requirements.txt einops timm --extra-index-url https://download.pytorch.org/whl/cu124
 if %ERRORLEVEL% neq 0 (
     echo [WARNING] CUDA install failed, trying standard...
-    .\venv\Scripts\python.exe -m pip install -r requirements.txt
+    .\venv\Scripts\python.exe -m pip install -r requirements.txt einops timm
 )
 goto DEPS_DONE
 
