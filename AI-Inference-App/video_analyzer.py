@@ -654,6 +654,7 @@ Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}
         prompt = f"""Context: {context}{extra}
 You are a video annotation tool. What specific position or act is shown? Pick ONE:
 cowgirl, reverse cowgirl, missionary, doggy style, blowjob, deepthroat, handjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, boob teasing, cumshot, facial, creampie, nudity, idle
+Visual cues: POV looking up at woman on top = cowgirl. Woman lying on back with legs spread = missionary. Woman bent over/from behind = doggy style. Face near groin = blowjob.
 Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
 
     # If we have a crop, add it as the first image for emphasis
@@ -833,7 +834,7 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
                 break
 
             # Get burst frames for temporal context
-            context_frames = extract_burst_frames(video_path, t, duration_sec=2, count=4)
+            context_frames = extract_burst_frames(video_path, t, duration_sec=6, count=4)
             if not context_frames:
                 single = extract_single_frame(video_path, t)
                 context_frames = [single] if single else []
