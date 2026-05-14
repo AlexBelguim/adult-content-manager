@@ -163,18 +163,76 @@ class LocalSceneHandler(SimpleHTTPRequestHandler):
         if '/api/' in msg or '/stream' in msg:
             print(f"  → {msg}")
 
+ai_process = None
+
+def check_ai_server():
+    """Check if AI server is already running."""
+    try:
+        req = urllib.request.Request(f"{AI_SERVER}/video/health", method='GET')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status == 200
+    except:
+        return False
+
+def start_ai_server():
+    """Start the AI server (main.py) in a background process."""
+    global ai_process
+    ai_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_py = os.path.join(ai_dir, "main.py")
+
+    if not os.path.exists(main_py):
+        print(f"  ⚠️  Cannot find {main_py}")
+        return False
+
+    print("  🚀 Starting AI server...")
+
+    # Try venv python first, fall back to system python
+    venv_python = os.path.join(ai_dir, "venv", "Scripts", "python.exe")
+    python_exe = venv_python if os.path.exists(venv_python) else "python"
+
+    ai_process = subprocess.Popen(
+        [python_exe, main_py],
+        cwd=ai_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    # Stream AI server output in background
+    def stream_output():
+        for line in iter(ai_process.stdout.readline, b''):
+            text = line.decode('utf-8', errors='replace').rstrip()
+            if text:
+                print(f"  [AI] {text}")
+    threading.Thread(target=stream_output, daemon=True).start()
+
+    # Wait for server to be ready
+    for i in range(30):
+        time.sleep(1)
+        if check_ai_server():
+            print("  ✅ AI server is ready!")
+            return True
+    print("  ⚠️  AI server didn't start in 30s — check logs above")
+    return False
+
 
 def main():
-    server = HTTPServer(('0.0.0.0', PORT), LocalSceneHandler)
     print()
     print("  ╔══════════════════════════════════════════╗")
     print("  ║   Local Scene Manager                    ║")
     print(f"  ║   http://localhost:{PORT}                  ║")
-    print(f"  ║   AI Server: {AI_SERVER}         ║")
     print("  ╚══════════════════════════════════════════╝")
     print()
-    print("  Make sure Run_AI.bat is running!")
+
+    # Auto-start AI server if not running
+    if check_ai_server():
+        print("  ✅ AI server already running")
+    else:
+        print("  ⚡ AI server not detected, starting it...")
+        start_ai_server()
+
     print()
+
+    server = HTTPServer(('0.0.0.0', PORT), LocalSceneHandler)
 
     def open_browser():
         time.sleep(0.8)
@@ -186,7 +244,11 @@ def main():
     except KeyboardInterrupt:
         print("\n  Shutting down...")
         server.shutdown()
+        if ai_process:
+            print("  Stopping AI server...")
+            ai_process.terminate()
 
 
 if __name__ == '__main__':
+    import subprocess
     main()

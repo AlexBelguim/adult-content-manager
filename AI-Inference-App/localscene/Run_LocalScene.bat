@@ -1,10 +1,11 @@
 @echo off
+title Local Scene Manager
 echo ============================================
 echo    Local Scene Manager
 echo    http://localhost:8899
 echo ============================================
 echo.
-echo Make sure Run_AI.bat is running first!
+echo    AI server will auto-start if needed.
 echo.
 
 cd /d "%~dp0.."
