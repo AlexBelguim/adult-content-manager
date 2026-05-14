@@ -8,6 +8,7 @@ import requests
 import re
 from flask import Blueprint, request, jsonify
 from threading import Lock, Event
+from pathlib import Path
 
 video_bp = Blueprint('video', __name__)
 
@@ -18,6 +19,80 @@ _cancel_flag = Event()
 def log(msg):
     timestamp = time.strftime('%H:%M:%S')
     print(f"[{timestamp}] [Video] {msg}", flush=True)
+
+# ── Debug Logger ──────────────────────────────────────────────────────────────
+class DebugLogger:
+    """Saves frames, prompts, and VLM responses to a debug folder + HTML report."""
+    def __init__(self, output_dir=None):
+        self.enabled = False
+        self.entries = []
+        self.output_dir = None
+        if output_dir:
+            self.output_dir = Path(output_dir)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            self.enabled = True
+            log(f"📝 Debug logging to: {self.output_dir}")
+
+    def log_vlm_call(self, phase, timestamp_sec, prompt, frames_b64, response, parsed_result):
+        if not self.enabled:
+            return
+        idx = len(self.entries)
+        entry = {
+            "idx": idx, "phase": phase, "time": timestamp_sec,
+            "prompt": prompt, "response": response,
+            "parsed": parsed_result, "frame_files": []
+        }
+        # Save frames as images
+        for fi, fb64 in enumerate(frames_b64[:4]):  # max 4 frames per entry
+            fname = f"{idx:04d}_t{int(timestamp_sec)}s_f{fi}.jpg"
+            fpath = self.output_dir / fname
+            try:
+                fpath.write_bytes(base64.b64decode(fb64))
+                entry["frame_files"].append(fname)
+            except:
+                pass
+        self.entries.append(entry)
+
+    def save_report(self, video_path="", result=None):
+        if not self.enabled or not self.entries:
+            return
+        html_path = self.output_dir / "debug_report.html"
+        rows = []
+        for e in self.entries:
+            imgs = "".join(f'<img src="{f}" style="max-width:200px;max-height:150px;margin:2px;border-radius:4px">' for f in e["frame_files"])
+            prompt_esc = e["prompt"].replace("<", "&lt;").replace(">", "&gt;")
+            resp_esc = e["response"].replace("<", "&lt;").replace(">", "&gt;") if e["response"] else "(empty)"
+            parsed = json.dumps(e["parsed"]) if e["parsed"] else ""
+            rows.append(f"""<tr>
+                <td style="white-space:nowrap">{e['phase']}<br><b>{int(e['time'])}s</b></td>
+                <td>{imgs}</td>
+                <td><pre style="max-width:400px;white-space:pre-wrap;font-size:11px">{prompt_esc}</pre></td>
+                <td><pre style="max-width:400px;white-space:pre-wrap;font-size:11px">{resp_esc}</pre></td>
+                <td><code>{parsed}</code></td>
+            </tr>""")
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Debug Report</title>
+<style>
+body {{ font-family: system-ui; background: #0a0a0f; color: #e0e0e0; padding: 20px; }}
+h1 {{ color: #00e5ff; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ border: 1px solid #333; padding: 8px; vertical-align: top; text-align: left; }}
+th {{ background: #1a1a2e; color: #00e5ff; position: sticky; top: 0; }}
+tr:hover {{ background: #1a1a2e; }}
+pre {{ margin: 0; color: #ccc; }}
+code {{ color: #7c4dff; }}
+img {{ border: 1px solid #333; }}
+</style></head><body>
+<h1>🔍 Debug Report</h1>
+<p>Video: <code>{video_path}</code> | Model: <code>{OLLAMA_MODEL}</code> | Entries: {len(self.entries)} | Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+<table><tr><th>Phase/Time</th><th>Frames</th><th>Prompt</th><th>Full Response</th><th>Parsed</th></tr>
+{"".join(rows)}
+</table></body></html>"""
+        html_path.write_text(html, encoding="utf-8")
+        log(f"📝 Debug report saved: {html_path}")
+
+_debug = DebugLogger()  # disabled by default, activated per-analysis
+
 
 # ── Path Mapping ──────────────────────────────────────────────────────────────
 def map_path(p):
@@ -517,7 +592,7 @@ def _call_vlm(prompt, frame_b64_list, max_tokens=150, timeout=120):
         log(f"  ⚠️ VLM call failed: {ex}")
     return ""
 
-def classify_macro(frame_b64, florence_hint=""):
+def classify_macro(frame_b64, florence_hint="", time_sec=0):
     """Quick macro scan: people count, scene type, clothing state."""
     ctx = f"\nDetection hint: {florence_hint}" if florence_hint else ""
     prompt = f"""Quick scene check. Analyze this single frame.{ctx}
@@ -530,6 +605,7 @@ Report:
 Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
 
     raw = _call_vlm(prompt, [frame_b64], max_tokens=80, timeout=60)
+    result = {"people": 0, "scene": "idle", "clothing": "unknown"}
     if raw:
         try:
             cleaned = re.sub(r'```json\s*|\s*```', '', raw).strip()
@@ -541,16 +617,15 @@ Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
                     "scene": str(data.get("scene", "idle")).lower().strip(),
                     "clothing": str(data.get("clothing", "unknown")).lower().strip()
                 }
-                # POV correction: if sex scene detected but only 1 person counted
                 if result["scene"] in ("straight_sex", "threesome") and result["people"] < 2:
                     result["people"] = 2
-                return result
         except:
             pass
-    return {"people": 0, "scene": "idle", "clothing": "unknown"}
+    _debug.log_vlm_call("macro", time_sec, prompt, [frame_b64], raw, result)
+    return result
 
 def classify_action_with_context(frame_b64_list, state, florence_caption="",
-                                  florence_hint="", crop_b64=None, allowed_actions=None):
+                                  florence_hint="", crop_b64=None, allowed_actions=None, time_sec=0):
     """Action classification with state context, Florence hints, and optional crop."""
     context = state.to_context()
     extra = ""
@@ -579,14 +654,15 @@ Respond with ONLY this JSON, nothing else: {{"action": "label", "confidence": 0.
     if raw:
         log(f"  🔍 Advanced AI: {raw[:300]}")
         result = parse_vlm_response(raw, allowed_actions)
-        # Extract insertion flag from raw JSON
         try:
             m = re.search(r'\{[^}]+\}', re.sub(r'```json\s*|\s*```', '', raw))
             if m:
                 result["insertion"] = bool(json.loads(m.group()).get("insertion", False))
         except:
             result["insertion"] = False
+        _debug.log_vlm_call("action", time_sec, prompt, images[:2], raw, result)
         return result
+    _debug.log_vlm_call("action", time_sec, prompt, images[:2], "(no response)", None)
     return {"action": "other", "confidence": 0.0, "insertion": False}
 
 
@@ -693,7 +769,7 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
             state.people_count = len(cats["people"])
         
         # Quick VLM check
-        macro = classify_macro(frame, florence_hint)
+        macro = classify_macro(frame, florence_hint, time_sec=t)
         state.scene_type = macro["scene"]
         state.clothed_state = macro["clothing"]
         if not use_florence:
@@ -792,7 +868,7 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
             # Full action classification with all context
             result = classify_action_with_context(
                 context_frames, state, florence_caption, florence_hint,
-                crop_b64, allowed_actions
+                crop_b64, allowed_actions, time_sec=t
             )
 
             # Update state
@@ -873,6 +949,7 @@ def video_analyze():
 @video_bp.route('/analyze-advanced', methods=['POST'])
 def video_analyze_advanced():
     """Advanced multi-resolution state machine analysis with Florence-2 pre-pass."""
+    global _debug
     data = request.json or {}
     video_path = map_path(data.get('video_path'))
     if not video_path or not os.path.exists(video_path):
@@ -880,6 +957,10 @@ def video_analyze_advanced():
     if not _analysis_lock.acquire(blocking=False):
         return jsonify({"success": False, "error": "Busy"}), 409
     try:
+        # Enable debug logging — saves to localscene/debug/<timestamp>/
+        debug_dir = Path(__file__).parent / "localscene" / "debug" / time.strftime("%Y%m%d_%H%M%S")
+        _debug = DebugLogger(str(debug_dir))
+
         raw_actions = data.get('allowed_actions', [])
         allowed = [a.strip() for a in raw_actions if a and a.strip()]
         result = analyze_video_advanced(
@@ -892,6 +973,11 @@ def video_analyze_advanced():
             macro_interval=data.get('macro_interval', 60),
             action_interval=data.get('action_interval', 5)
         )
+
+        # Save debug report
+        _debug.save_report(video_path=video_path, result=result)
+        _debug = DebugLogger()  # reset to disabled
+
         return jsonify(result)
     finally:
         _analysis_lock.release()
