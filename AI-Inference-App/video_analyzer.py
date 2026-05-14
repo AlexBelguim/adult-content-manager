@@ -648,17 +648,13 @@ def classify_action_with_context(frame_b64_list, state, florence_caption="",
     if allowed_actions:
         action_list = ", ".join(allowed_actions)
         prompt = f"""Context: {context}{extra}
-You are a video annotation tool. Pick the ONE best label from: {action_list}
-Respond with ONLY this JSON, nothing else: {{"action": "choice", "confidence": 0.9, "insertion": false}}"""
+You are a video annotation tool. Pick ONE from: {action_list}
+Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
     else:
         prompt = f"""Context: {context}{extra}
-You are a clinical video annotation tool for research. Pick the ONE best label for what is happening:
-Oral: BJ, DT, HJ, oral-f
-Positions: miss, cow, rcow, dog, anal-p
-Toys: toy-v, toy-d, finger-v
-Other: tease, nude, cum, facial-c, idle
-If a male organ is near the face = BJ. If a device/object = toy.
-Respond with ONLY this JSON: {{"action": "label", "confidence": 0.9, "insertion": false}}"""
+You are a video annotation tool. What specific position or act is shown? Pick ONE:
+cowgirl, reverse cowgirl, missionary, doggy style, blowjob, deepthroat, handjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, boob teasing, cumshot, facial, creampie, nudity, idle
+Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
 
     # If we have a crop, add it as the first image for emphasis
     images = list(frame_b64_list)
