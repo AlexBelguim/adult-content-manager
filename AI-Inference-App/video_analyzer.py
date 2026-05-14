@@ -681,7 +681,7 @@ You are a video annotation tool. Pick ONE from: {action_list}
 Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
     else:
         prompt = f"""Context: {context}{extra}
-You are a video annotation tool. Image 1 = current frame. Image 2 = motion composite (blurred areas show movement over 6 seconds).
+You are a video annotation tool. You see multiple frames from a 6-second window. The LAST image is a motion composite (blurred areas = movement).
 What specific position or act is shown? Pick ONE:
 cowgirl, reverse cowgirl, missionary, doggy style, blowjob, deepthroat, handjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, boob teasing, cumshot, facial, creampie, nudity, idle
 Visual cues: POV looking up at woman on top = cowgirl. Woman on back with legs spread = missionary. Bent over/from behind = doggy style. Face near groin = blowjob.
@@ -906,14 +906,19 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
                                      "toy": state.current_toy})
                     state.insertion_active = False
                     state.current_toy = None
-            # Build VLM input: middle frame + motion composite for oscillation detection
-            mid_idx = len(context_frames) // 2
-            mid_frame = context_frames[mid_idx]
+            # Build VLM input: all burst frames + motion composite
             motion = create_motion_composite(context_frames)
-            # Send [middle_frame, motion_composite] — clear frame + movement overlay
-            vlm_frames = [mid_frame]
+            vlm_frames = list(context_frames)
             if motion:
-                vlm_frames.append(motion)
+                vlm_frames.append(motion)  # composite as last image
+                # Save composite to debug
+                if _debug.enabled and _debug.output_dir:
+                    idx = len(_debug.entries)
+                    comp_path = _debug.output_dir / f"{idx:04d}_t{int(t)}s_composite.jpg"
+                    try:
+                        comp_path.write_bytes(base64.b64decode(motion))
+                    except:
+                        pass
 
             # Full action classification with all context
             result = classify_action_with_context(
