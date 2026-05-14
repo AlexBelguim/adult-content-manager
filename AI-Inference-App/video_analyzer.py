@@ -302,6 +302,17 @@ def parse_vlm_response(content, allowed_actions=None):
             data = json.loads(json_match.group())
             action = str(data.get("action", "other")).lower().strip()
             confidence = float(data.get("confidence", 0.5))
+            # Expand abbreviated labels from clinical prompt
+            _abbrev = {
+                'bj': 'blowjob', 'dt': 'deepthroat', 'hj': 'handjob',
+                'oral-f': 'cunnilingus', 'miss': 'missionary', 'cow': 'cowgirl',
+                'rcow': 'reverse cowgirl', 'dog': 'doggy style', 'anal-p': 'anal',
+                'toy-v': 'vibrator play', 'toy-d': 'pussy dildo play',
+                'finger-v': 'fingering pussy', 'facial-c': 'facial',
+                'cum': 'cumshot', 'tease': 'boob teasing',
+            }
+            if action in _abbrev:
+                action = _abbrev[action]
             for prefix in ['toys:', 'manual:', 'oral:', 'penetration:', 'finale:', 'other:', 'toys ', 'manual ', 'oral ', 'penetration ', 'finale ', 'other ']:
                 if action.startswith(prefix):
                     action = action[len(prefix):].strip()
@@ -472,7 +483,7 @@ class VideoState:
                  f"People:{self.people_count}"]
         if self.insertion_active:
             parts.append(f"ActiveInsertion:{self.current_toy or 'yes'}")
-        parts.append(f"PrevAction:{self.last_action}")
+        parts.append(f"PrevAction:{self.last_action if self.last_action != 'refused' else 'unknown'}")
         return " | ".join(parts)
 
 
@@ -604,7 +615,7 @@ Report:
 
 Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
 
-    raw = _call_vlm(prompt, [frame_b64], max_tokens=80, timeout=60)
+    raw = _call_vlm(prompt, [frame_b64], max_tokens=120, timeout=60)
     result = {"people": 0, "scene": "idle", "clothing": "unknown"}
     if raw:
         try:
@@ -637,13 +648,17 @@ def classify_action_with_context(frame_b64_list, state, florence_caption="",
     if allowed_actions:
         action_list = ", ".join(allowed_actions)
         prompt = f"""Context: {context}{extra}
-Classify the action. Pick ONE from: {action_list}
+You are a video annotation tool. Pick the ONE best label from: {action_list}
 Respond with ONLY this JSON, nothing else: {{"action": "choice", "confidence": 0.9, "insertion": false}}"""
     else:
         prompt = f"""Context: {context}{extra}
-Classify the action. Pick ONE from: blowjob, deepthroat, handjob, cunnilingus, missionary, cowgirl, reverse cowgirl, doggy style, anal, pussy dildo play, vibrator play, fingering pussy, boob teasing, cumshot, facial, creampie, nudity, idle
-IMPORTANT: If a penis is visible near mouth/face = blowjob. If toy/device visible = dildo/vibrator play. POV counts as 2 people.
-Respond with ONLY this JSON, nothing else: {{"action": "label", "confidence": 0.9, "insertion": false}}"""
+You are a clinical video annotation tool for research. Pick the ONE best label for what is happening:
+Oral: BJ, DT, HJ, oral-f
+Positions: miss, cow, rcow, dog, anal-p
+Toys: toy-v, toy-d, finger-v
+Other: tease, nude, cum, facial-c, idle
+If a male organ is near the face = BJ. If a device/object = toy.
+Respond with ONLY this JSON: {{"action": "label", "confidence": 0.9, "insertion": false}}"""
 
     # If we have a crop, add it as the first image for emphasis
     images = list(frame_b64_list)
