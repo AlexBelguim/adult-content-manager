@@ -168,8 +168,37 @@ def extract_burst_frames(video_path, center_time, duration_sec=2, count=8):
                 frames.append(base64.b64encode(frame).decode('utf-8'))
             return frames[:count]
     except Exception as ex:
-        log(f"  ⚠️ Burst extraction failed at {center_time}s: {ex}")
+        log(f"  Burst extraction failed at {center_time}s: {ex}")
     return []
+
+def create_motion_composite(frames_b64):
+    """Blend burst frames into a motion composite — static areas sharp, movement = ghosting."""
+    if len(frames_b64) < 2:
+        return None
+    try:
+        from PIL import Image
+        import numpy as np
+        images = []
+        for fb64 in frames_b64:
+            img = Image.open(io.BytesIO(base64.b64decode(fb64))).convert("RGB")
+            images.append(np.array(img, dtype=np.float32))
+        # Resize all to match first frame
+        h, w = images[0].shape[:2]
+        resized = []
+        for arr in images:
+            if arr.shape[:2] != (h, w):
+                img = Image.fromarray(arr.astype(np.uint8)).resize((w, h))
+                resized.append(np.array(img, dtype=np.float32))
+            else:
+                resized.append(arr)
+        # Blend with equal weight
+        composite = np.mean(resized, axis=0).astype(np.uint8)
+        buf = io.BytesIO()
+        Image.fromarray(composite).save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as ex:
+        log(f"  Motion composite failed: {ex}")
+        return None
 
 def extract_single_frame(video_path, time_sec):
     try:
@@ -652,9 +681,10 @@ You are a video annotation tool. Pick ONE from: {action_list}
 Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
     else:
         prompt = f"""Context: {context}{extra}
-You are a video annotation tool. What specific position or act is shown? Pick ONE:
+You are a video annotation tool. Image 1 = current frame. Image 2 = motion composite (blurred areas show movement over 6 seconds).
+What specific position or act is shown? Pick ONE:
 cowgirl, reverse cowgirl, missionary, doggy style, blowjob, deepthroat, handjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, boob teasing, cumshot, facial, creampie, nudity, idle
-Visual cues: POV looking up at woman on top = cowgirl. Woman lying on back with legs spread = missionary. Woman bent over/from behind = doggy style. Face near groin = blowjob.
+Visual cues: POV looking up at woman on top = cowgirl. Woman on back with legs spread = missionary. Bent over/from behind = doggy style. Face near groin = blowjob.
 Output ONLY JSON: {{"action": "cowgirl", "confidence": 0.9, "insertion": false}}"""
 
     # If we have a crop, add it as the first image for emphasis
@@ -876,10 +906,18 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
                                      "toy": state.current_toy})
                     state.insertion_active = False
                     state.current_toy = None
+            # Build VLM input: middle frame + motion composite for oscillation detection
+            mid_idx = len(context_frames) // 2
+            mid_frame = context_frames[mid_idx]
+            motion = create_motion_composite(context_frames)
+            # Send [middle_frame, motion_composite] — clear frame + movement overlay
+            vlm_frames = [mid_frame]
+            if motion:
+                vlm_frames.append(motion)
 
             # Full action classification with all context
             result = classify_action_with_context(
-                context_frames, state, florence_caption, florence_hint,
+                vlm_frames, state, florence_caption, florence_hint,
                 crop_b64, allowed_actions, time_sec=t
             )
 
