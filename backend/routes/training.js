@@ -1190,14 +1190,13 @@ router.post('/ai-delete-model', async (req, res) => {
 // POST /api/training/predict-ranks-batch
 router.post('/predict-ranks-batch', async (req, res) => {
   const { performerIds, ai_server_url } = req.body;
-  const db = require('../db');
-  const path = require('path');
-  const axios = require('axios');
   const aiUrl = ai_server_url || getAiServerUrl();
 
   if (!performerIds || !Array.isArray(performerIds)) {
     return res.status(400).json({ error: 'performerIds array is required' });
   }
+
+  console.log(`[Training] Batch rank prediction for ${performerIds.length} performers...`);
 
   try {
     const results = {};
@@ -1206,23 +1205,37 @@ router.post('/predict-ranks-batch', async (req, res) => {
     try {
       const healthRes = await axios.get(`${aiUrl}/health`, { timeout: 5000 });
       if (!healthRes.data.ranker_loaded) {
+        console.log(`[Training] Auto-loading ranker for batch prediction...`);
         await axios.post(`${aiUrl}/load_model`, { model_id: 'performer_ranker.pt' }, { timeout: 60000 });
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn(`[Training] Batch health check failed: ${e.message}`);
+    }
+
+    const config = db.prepare('SELECT value FROM settings WHERE key = "base_path"').get();
+    if (!config) throw new Error('base_path not set in settings');
 
     for (const performerId of performerIds) {
       const performer = db.prepare('SELECT name FROM performers WHERE id = ?').get(performerId);
-      const config = db.prepare('SELECT value FROM settings WHERE key = "base_path"').get();
-      if (!performer || !config) continue;
+      if (!performer) {
+        console.warn(`[Training] Performer not found: ${performerId}`);
+        continue;
+      }
 
       const perfPath = path.join(config.value, performer.name, 'pics');
-      if (!require('fs').existsSync(perfPath)) continue;
+      if (!fs.existsSync(perfPath)) {
+        console.warn(`[Training] Path not found for ${performer.name}: ${perfPath}`);
+        continue;
+      }
 
-      const files = require('fs').readdirSync(perfPath).filter(f => 
+      const files = fs.readdirSync(perfPath).filter(f => 
         ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-      ).slice(0, 20); // Sample 20 images per performer
+      ).slice(0, 20);
 
-      if (files.length === 0) continue;
+      if (files.length === 0) {
+        console.warn(`[Training] No images found for ${performer.name}`);
+        continue;
+      }
 
       const imagePaths = files.map(f => path.join(perfPath, f));
       
@@ -1233,15 +1246,17 @@ router.post('/predict-ranks-batch', async (req, res) => {
         
         if (response.data.success) {
           results[performerId] = response.data.predicted_rank;
+          console.log(`[Training]   ${performer.name}: ${response.data.predicted_rank.toFixed(2)} stars`);
         }
       } catch (err) {
-        console.error(`Failed to predict rank for ${performer.name}:`, err.message);
+        console.error(`[Training] Failed to predict rank for ${performer.name}:`, err.message);
       }
     }
 
+    console.log(`[Training] Batch prediction complete. Got results for ${Object.keys(results).length} performers.`);
     res.json({ success: true, results });
   } catch (err) {
-    console.error('Batch rank prediction error:', err);
+    console.error('[Training] Batch rank prediction error:', err);
     res.status(500).json({ error: err.message });
   }
 });
