@@ -359,6 +359,11 @@ function SmartComparePage() {
   }, []);
 
   const calculatePredictedStars = (score, currentPerfId) => {
+    // Priority 1: High-accuracy Ranker results from current analysis session
+    if (aiAnalysis?.rawRankResults && aiAnalysis.rawRankResults[currentPerfId] !== undefined) {
+      return aiAnalysis.rawRankResults[currentPerfId].toFixed(2);
+    }
+    // Priority 2: Calibrated stars from background service
     const val = calibratedStars[currentPerfId] ?? (score / 20) ?? 0;
     return (isNaN(val) ? 0 : val).toFixed(2);
   };
@@ -380,7 +385,8 @@ function SmartComparePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           performerIds: compareList.map(p => p.id),
-          ai_server_url: inferenceUrl
+          ai_server_url: inferenceUrl,
+          limit: picsPerPerformer
         })
       });
 
@@ -408,7 +414,22 @@ function SmartComparePage() {
         }
       });
 
-      setAiAnalysis({ winnerId, scores: scoresMap });
+      setAiAnalysis({ 
+        winnerId, 
+        scores: scoresMap,
+        rawRankResults: results // Store the raw 0-5 star ratings from Ranker
+      });
+
+      // Auto-sort compareList visually based on AI results (highest stars first)
+      setCompareList(prev => {
+        const next = [...prev];
+        next.sort((a, b) => {
+          const starA = results[a.id] ?? -1;
+          const starB = results[b.id] ?? -1;
+          return starB - starA;
+        });
+        return next;
+      });
 
       // Save scores to DB for calibration
       for (const [id, score] of Object.entries(scoresMap)) {

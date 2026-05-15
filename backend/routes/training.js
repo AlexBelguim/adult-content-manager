@@ -1189,8 +1189,11 @@ router.post('/ai-delete-model', async (req, res) => {
 
 // POST /api/training/predict-ranks-batch
 router.post('/predict-ranks-batch', async (req, res) => {
-  const { performerIds, ai_server_url } = req.body;
+  const { performerIds, ai_server_url, limit } = req.body;
   const aiUrl = ai_server_url || getAiServerUrl();
+  
+  // If limit is 51 (which UI treats as 'All'), use 100 as a reasonable 'All' limit
+  const imageLimit = (limit === 51) ? 100 : (limit || 10);
 
   if (!performerIds || !Array.isArray(performerIds)) {
     return res.status(400).json({ error: 'performerIds array is required' });
@@ -1230,7 +1233,7 @@ router.post('/predict-ranks-batch', async (req, res) => {
 
         const files = fs.readdirSync(perfPath).filter(f => 
           ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-        ).slice(0, 60); // Increased to 60 for higher accuracy
+        ).slice(0, imageLimit); 
 
         if (files.length === 0) return;
 
