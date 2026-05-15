@@ -1212,15 +1212,20 @@ router.post('/predict-ranks-batch', async (req, res) => {
       console.warn(`[Training] Batch health check failed: ${e.message}`);
     }
 
-    const config = db.prepare('SELECT value FROM app_settings WHERE key = "base_path"').get();
-    if (!config) throw new Error('base_path not set in app_settings');
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    const basePath = folder?.path || '';
+    if (!basePath) throw new Error('No base path configured in folders table');
 
     await Promise.all(performerIds.map(async (performerId) => {
       try {
         const performer = db.prepare('SELECT name FROM performers WHERE id = ?').get(performerId);
         if (!performer) return;
 
-        const perfPath = path.join(config.value, performer.name, 'pics');
+        let perfPath = path.join(basePath, 'before filter performer', performer.name, 'pics');
+        if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name, 'pics');
+        if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'before filter performer', performer.name);
+        if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name);
+
         if (!fs.existsSync(perfPath)) return;
 
         const files = fs.readdirSync(perfPath).filter(f => 
