@@ -72,6 +72,7 @@ CONTEXT_STAR_CACHE = {}    # performer_name → predicted star rating (per infer
 
 from threading import Lock
 MODEL_LOCK = Lock()
+MODELS_DIR = Path(__file__).parent / 'models'
 MODEL_METADATA_CACHE = {}  # Cache for model file metadata to prevent heavy I/O
 
 def map_path(path):
