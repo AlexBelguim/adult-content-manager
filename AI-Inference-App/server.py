@@ -1028,7 +1028,6 @@ def predict_rank():
                         config = checkpoint.get('config', {})
                         model_name = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
                         
-                        global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
                         RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
                         RANKER_MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
                         RANKER_MODEL.eval()
