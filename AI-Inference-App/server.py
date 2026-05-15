@@ -996,6 +996,7 @@ def predict_rank():
             # Determine which model to use for ranking
             target_model = None
             target_processor = None
+            method_name = None
             
             if RANKER_MODEL is not None:
                 target_model = RANKER_MODEL
@@ -1010,6 +1011,30 @@ def predict_rank():
                 target_processor = PROCESSOR
                 method_name = 'predict_rank'
             
+            if not target_model:
+                # Try auto-loading a ranker
+                ranker_path = os.path.join(MODELS_DIR, 'performer_ranker.pt')
+                if os.path.exists(ranker_path):
+                    log(f"🔄 No ranker loaded. Auto-loading {ranker_path}...")
+                    try:
+                        global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
+                        checkpoint = torch.load(ranker_path, map_location=DEVICE)
+                        config = checkpoint.get('config', {})
+                        model_name = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
+                        
+                        RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
+                        RANKER_MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
+                        RANKER_MODEL.eval()
+                        RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(model_name)
+                        RANKER_MODEL_ID = 'performer_ranker.pt'
+                        
+                        target_model = RANKER_MODEL
+                        target_processor = RANKER_PROCESSOR
+                        method_name = 'predict_rank'
+                        log("✅ Auto-loaded ranker successfully.")
+                    except Exception as le:
+                        log(f"❌ Failed to auto-load ranker: {le}")
+                
             if not target_model:
                 return jsonify({"success": False, "error": "No rank-capable model loaded (load a Ranker first)"}), 400
                 
