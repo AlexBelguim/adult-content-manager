@@ -613,6 +613,17 @@ router.post('/predict-performer-rank', async (req, res) => {
 
     const imagePaths = files.map(f => path.join(perfPath, f));
 
+    // Auto-load ranker if not loaded (consistent with Smart Filtering)
+    try {
+      const healthRes = await axios.get(`${aiUrl}/health`, { timeout: 5000 });
+      if (!healthRes.data.ranker_loaded) {
+        console.log(`[Training] Ranker not loaded, auto-loading performer_ranker.pt...`);
+        await axios.post(`${aiUrl}/load_model`, { model_id: 'performer_ranker.pt' }, { timeout: 60000 });
+      }
+    } catch (healthErr) {
+      console.warn(`[Training] Ranker health check/load failed: ${healthErr.message}`);
+    }
+
     // Send to AI server
     const response = await axios.post(`${aiUrl}/predict_rank`, {
       images: imagePaths

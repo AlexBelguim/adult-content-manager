@@ -260,12 +260,26 @@ def api_load_model():
     models_path = Path(__file__).parent / 'models'
     target = models_path / model_id if model_id else None
     
+    # If exact file doesn't exist, try finding by prefix (to handle timestamped files)
     if not target or not target.exists():
-        # Fallback to latest
+        if model_id:
+            # Try finding a file that starts with the same name (minus .pt)
+            prefix = model_id.replace('.pt', '')
+            models = find_models()
+            matches = [m for m in models if m.name.startswith(prefix)]
+            if matches:
+                # Sort by modification time to get newest
+                matches.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                target = matches[0]
+                log(f"🔍 Exact match for '{model_id}' not found. Using latest match: {target.name}")
+    
+    if not target or not target.exists():
+        # Fallback to absolute latest of any type
         models = find_models()
         if not models: return jsonify({"success": False, "error": "No models found"}), 404
         models.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         target = models[0]
+        log(f"⚠️ No matches for '{model_id}'. Falling back to latest overall: {target.name}")
         
     # Use relative path from models dir as the ID
     rel_id = str(target.relative_to(models_path)).replace('\\', '/')
