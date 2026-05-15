@@ -371,78 +371,38 @@ function SmartComparePage() {
     if (compareList.length < 2) return;
     setAnalyzing(true);
     setAiAnalysis(null);
-    setAnalyzingStatus('Gathering images...');
+    setAnalyzingStatus('Gathering data...');
 
     try {
-      // 1. Gather all available images for each performer
-      const performerGalleries = {};
-      let minImages = 9999;
-
-      for (const perf of compareList) {
-        const pics = randomPics[perf.id] || [];
-        performerGalleries[perf.id] = pics.map(p => p.path);
-        if (performerGalleries[perf.id].length < minImages) {
-          minImages = performerGalleries[perf.id].length;
-        }
-      }
-
-      // 2. Determine target count based on slider
-      // If slider is 51, it means "All" (but still capped by bottleneck)
-      let targetCount = picsPerPerformer === 51 ? 9999 : picsPerPerformer;
-      
-      // 3. APPLY BOTTLENECK BALANCING
-      // We must use the same amount of photos for everyone for a fair fight
-      const finalCount = Math.min(targetCount, minImages);
-      
-      setAnalyzingStatus(`Balancing to ${finalCount} photos each...`);
-
-      const allImages = [];
-      const performerImageMap = {}; 
-
-      compareList.forEach(performer => {
-        const images = performerGalleries[performer.id].slice(0, finalCount);
-        images.forEach(imgPath => {
-          allImages.push(imgPath);
-          performerImageMap[imgPath] = performer.id;
-        });
-      });
-
-      if (allImages.length === 0) throw new Error("No images found to analyze");
-
-      setAnalyzingStatus(`Analyzing ${allImages.length} images...`);
-      const response = await fetch('/api/filter/proxy-score', {
+      setAnalyzingStatus(`Analyzing ${compareList.length} performers with Ranker...`);
+      const response = await fetch('/api/training/predict-ranks-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          images: allImages,
-          ai_server_url: inferenceUrl,
-          app_base_url: window.location.origin // Pass our real IP to the AI
+          performerIds: compareList.map(p => p.id),
+          ai_server_url: inferenceUrl
         })
       });
 
-      if (!response.ok) throw new Error('Inference server error');
+      if (!response.ok) throw new Error('Backend server error');
 
       const data = await response.json();
-      const results = data.results;
-
-      const performerScores = {};
-      results.forEach(res => {
-        const performerId = performerImageMap[res.path];
-        if (!performerScores[performerId]) performerScores[performerId] = [];
-        performerScores[performerId].push(res.normalized);
-      });
+      if (!data.success) throw new Error(data.error || 'Prediction failed');
+      
+      const results = data.results; // Map of performerId -> predicted_rank
 
       const scoresMap = {};
       let bestScore = -1;
       let winnerId = null;
 
       compareList.forEach(performer => {
-        const scores = performerScores[performer.id] || [];
-        if (scores.length > 0) {
-          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-          scoresMap[performer.id] = avg;
-          if (avg > bestScore) {
-            bestScore = avg;
+        const rank = results[performer.id];
+        if (rank !== undefined) {
+          // Convert rank (0-5) to a comparable score (0-100) for the UI logic
+          const score = (rank / 5) * 100;
+          scoresMap[performer.id] = score;
+          if (score > bestScore) {
+            bestScore = score;
             winnerId = performer.id;
           }
         }
@@ -464,7 +424,7 @@ function SmartComparePage() {
 
     } catch (err) {
       console.error('AI Analysis failed:', err);
-      alert('AI Analysis failed. Ensure the inference server is running at ' + inferenceUrl);
+      alert('AI Analysis failed: ' + err.message);
     } finally {
       setAnalyzing(false);
     }
