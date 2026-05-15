@@ -1230,7 +1230,7 @@ router.post('/predict-ranks-batch', async (req, res) => {
 
         const files = fs.readdirSync(perfPath).filter(f => 
           ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-        ).slice(0, 10); // Reduced to 10 for batch speed
+        ).slice(0, 60); // Increased to 60 for higher accuracy
 
         if (files.length === 0) return;
 
