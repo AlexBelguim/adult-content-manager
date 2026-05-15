@@ -156,6 +156,7 @@ function PerformerSettingsModal({
   const [selectedScraper, setSelectedScraper] = useState('leakhaven');
 
   // Hash actions state
+  const [isCreatingHash, setIsCreatingHash] = useState(false);
   const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
   const [isPredictingRank, setIsPredictingRank] = useState(false);
 
