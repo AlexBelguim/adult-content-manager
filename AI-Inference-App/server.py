@@ -974,6 +974,7 @@ def classify_batch():
 @app.route('/predict_rank', methods=['POST'])
 def predict_rank():
     """Predict rank/rating for a performer based on a batch of images."""
+    global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
     data = request.json
     image_paths = data.get('images', [])
     
@@ -1017,7 +1018,6 @@ def predict_rank():
                 if os.path.exists(ranker_path):
                     log(f"🔄 No ranker loaded. Auto-loading {ranker_path}...")
                     try:
-                        global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
                         checkpoint = torch.load(ranker_path, map_location=DEVICE)
                         config = checkpoint.get('config', {})
                         model_name = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
