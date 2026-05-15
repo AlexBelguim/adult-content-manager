@@ -1067,6 +1067,8 @@ function ModelArsenal({
     siamese_binary: { label: 'Siamese Ranker', color: '#e91e63', icon: '🔬' },
     rank_aware_siamese: { label: 'Rank-Aware Siamese (Legacy)', color: '#795548', icon: '📦' },
     performer_ranker: { label: 'Performer Ranker', color: '#ff6f00', icon: '⭐' },
+    ranked_binary: { label: 'Ranked Binary', color: '#00d9ff', icon: '📊' },
+    ranked_siamese_binary: { label: 'Ranked Siamese', color: '#9c27b0', icon: '👑' },
     unknown: { label: 'Unknown', color: '#9e9e9e', icon: '❓' },
   };
   const grouped = {};

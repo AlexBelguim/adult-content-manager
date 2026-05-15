@@ -971,6 +971,82 @@ def classify_batch():
         
     return jsonify({'success': True, 'results': results, 'duration': duration})
 
+@app.route('/predict_rank', methods=['POST'])
+def predict_rank():
+    """Predict rank/rating for a performer based on a batch of images."""
+    data = request.json
+    image_paths = data.get('images', [])
+    
+    if not image_paths: return jsonify({'error': 'No images'}), 400
+
+    log(f"⭐ RANK PREDICTION for {len(image_paths)} images...")
+    
+    # 1. LOAD IMAGES
+    loaded_imgs = []
+    for p in image_paths:
+        img = _load_image(p)
+        if img: loaded_imgs.append(img)
+            
+    if not loaded_imgs:
+        return jsonify({"success": False, "error": "Could not load any images."}), 500
+
+    # 2. RUN INFERENCE
+    with MODEL_LOCK:
+        try:
+            # Determine which model to use for ranking
+            target_model = None
+            target_processor = None
+            
+            if RANKER_MODEL is not None:
+                target_model = RANKER_MODEL
+                target_processor = RANKER_PROCESSOR or PROCESSOR
+                method_name = 'predict_rank'
+            elif hasattr(MODEL, 'predict_stars'):
+                target_model = MODEL
+                target_processor = PROCESSOR
+                method_name = 'predict_stars'
+            elif hasattr(MODEL, 'predict_rank'):
+                target_model = MODEL
+                target_processor = PROCESSOR
+                method_name = 'predict_rank'
+            
+            if not target_model:
+                return jsonify({"success": False, "error": "No rank-capable model loaded (load a Ranker first)"}), 400
+                
+            rank_preds = []
+            # Process in batches of 8 for speed
+            for i in range(0, len(loaded_imgs), 8):
+                batch = loaded_imgs[i:i+8]
+                with torch.no_grad():
+                    inputs = target_processor(images=batch, return_tensors="pt")
+                    pv = inputs['pixel_values'].to(DEVICE)
+                    
+                    if method_name == 'predict_stars':
+                        ranks = target_model.predict_stars(pv)
+                    else:
+                        ranks = target_model.predict_rank(pv)
+                        
+                    rank_preds.extend(ranks.cpu().tolist())
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+            
+            avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
+            log(f"  ✅ Prediction: {avg_rank:.2f} stars (based on {len(rank_preds)} images)")
+            
+            return jsonify({
+                'success': True,
+                'predicted_rank': round(avg_rank, 3),
+                'sample_size': len(rank_preds)
+            })
+            
+        except Exception as e:
+            log(f"❌ predict_rank error: {e}")
+            import traceback; traceback.print_exc()
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            for img in loaded_imgs: img.close()
+            import gc; gc.collect()
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+
 @app.route('/classify', methods=['POST'])
 def classify_single():
     """Single image classification (Keep/Delete)."""

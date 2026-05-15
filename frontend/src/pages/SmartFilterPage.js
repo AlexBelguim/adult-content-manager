@@ -36,8 +36,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [batchCount, setBatchCount] = useState(0);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'siamese', or 'rank_aware_siamese'
+  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'siamese', 'ranked_binary', or 'ranked_siamese_binary'
+  const [batchSize, setBatchSize] = useState(100);
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
+  const [preferredRankedBinaryModel, setPreferredRankedBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
   const [preferredContextModel, setPreferredContextModel] = useState('');
   const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
@@ -124,7 +126,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         modelId: selectedModel,
         ai_server_url: inferenceUrl,
         app_base_url: window.location.origin,
-        modelType
+        modelType,
+        limit: batchSize
       });
       console.log(`[SmartFilter] Fetching /api/filter/smart-batch/${performer.id}?${queryParams}`);
       const response = await fetch(`/api/filter/smart-batch/${performer.id}?${queryParams}`, {
@@ -228,8 +231,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     const fetchModels = async () => {
       try {
         // 1. Fetch preferences from backend
-        const [binPref, pairPref, contextPref, siamesePref, rankSiamesePref] = await Promise.all([
+        const [binPref, rankBinPref, pairPref, contextPref, siamesePref, rankSiamesePref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
+          fetch('/api/settings/preferred_ranked_binary_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_pairwise_model').then(r => r.json()),
           fetch('/api/settings/preferred_context_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
@@ -237,12 +241,14 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         ]);
         
         const pBin = binPref.value || 'binary_filtering.pt';
+        const pRankBin = rankBinPref.value || 'ranked_binary.pt';
         const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
         const pContext = contextPref.value || 'context_binary.pt';
         const pSiamese = siamesePref.value || 'siamese_binary.pt';
         const pRankSiamese = rankSiamesePref.value || 'rank_siamese.pt';
         
         setPreferredBinaryModel(pBin);
+        setPreferredRankedBinaryModel(pRankBin);
         setPreferredPairwiseModel(pPair);
         setPreferredContextModel(pContext);
         setPreferredSiameseModel(pSiamese);
@@ -257,10 +263,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           
           // Load the model for the current type
           let targetModel = pBin;
-          if (modelType === 'pairwise') targetModel = pPair;
+          if (modelType === 'ranked_binary') targetModel = pRankBin;
+          else if (modelType === 'pairwise') targetModel = pPair;
           else if (modelType === 'context_binary') targetModel = pContext;
           else if (modelType === 'siamese') targetModel = pSiamese;
-          else if (modelType === 'rank_aware_siamese') targetModel = pRankSiamese;
+          else if (modelType === 'rank_aware_siamese' || modelType === 'ranked_siamese_binary') targetModel = pRankSiamese;
           
           // If preferred model not found, pick the first one of matching type
           if (!models.find(m => m.filename === targetModel)) {
@@ -526,6 +533,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>BINARY</Typography>
               </Box>
             </ToggleButton>
+            <ToggleButton value="ranked_binary">
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                <FilterAlt sx={{ color: '#00d9ff' }} />
+                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>RANK BINARY</Typography>
+              </Box>
+            </ToggleButton>
             <ToggleButton value="pairwise">
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
                 <Compare />
@@ -538,10 +551,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>SIAMESE</Typography>
               </Box>
             </ToggleButton>
-            <ToggleButton value="rank_aware_siamese">
+            <ToggleButton value="ranked_siamese_binary">
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
                 <MagicIcon sx={{ color: '#673ab7' }} />
-                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>RANK-AWARE</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>RANK SIAMESE</Typography>
               </Box>
             </ToggleButton>
           </ToggleButtonGroup>
@@ -550,13 +563,30 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 500, fontStyle: 'italic' }}>
               {modelType === 'binary' 
                 ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)' 
+                : modelType === 'ranked_binary'
+                ? '📊 Rank-Conditioned Binary — automatically adjusts Keep standards based on performer stars'
                 : modelType === 'pairwise'
                 ? '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'
                 : modelType === 'siamese'
                 ? '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'
-                : '👑 Rank-Conditioned Siamese — dynamically adjusts Keep standards based on performer star-rating'}
+                : '👑 Rank-Conditioned Siamese — top-% filtering adjusted by performer star-rating'}
             </Typography>
           </Fade>
+        </Box>
+
+        <Box sx={{ flexShrink: 0, minWidth: 200, px: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="caption" sx={{ color: '#aaa', fontWeight: 700 }}>BATCH SIZE</Typography>
+            <Chip label={batchSize} size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+          </Box>
+          <Slider
+            value={batchSize}
+            min={4}
+            max={200}
+            step={4}
+            onChange={(e, v) => setBatchSize(v)}
+            sx={{ color: '#8b5cf6', height: 4, '& .MuiSlider-thumb': { width: 12, height: 12 } }}
+          />
         </Box>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
@@ -686,14 +716,17 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               <ToggleButton value="binary" sx={{ gap: 1 }}>
                 <FilterAlt sx={{ fontSize: 16 }} /> Binary
               </ToggleButton>
+              <ToggleButton value="ranked_binary" sx={{ gap: 1 }}>
+                <FilterAlt sx={{ fontSize: 16, color: '#00d9ff' }} /> Rank Bin
+              </ToggleButton>
               <ToggleButton value="pairwise" sx={{ gap: 1 }}>
                 <Compare sx={{ fontSize: 16 }} /> Pairwise
               </ToggleButton>
               <ToggleButton value="siamese" sx={{ gap: 1 }}>
                 <MagicIcon sx={{ fontSize: 16 }} /> Siamese
               </ToggleButton>
-              <ToggleButton value="rank_aware_siamese" sx={{ gap: 1 }}>
-                <MagicIcon sx={{ fontSize: 16, color: '#673ab7' }} /> Rank-Aware
+              <ToggleButton value="ranked_siamese_binary" sx={{ gap: 1 }}>
+                <MagicIcon sx={{ fontSize: 16, color: '#673ab7' }} /> Rank Smn
               </ToggleButton>
             </ToggleButtonGroup>
 

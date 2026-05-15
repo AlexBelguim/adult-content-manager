@@ -476,6 +476,8 @@ router.get('/models', async (req, res) => {
   }
 });
 
+});
+
 // ── GET /api/training/status ─────────────────────────────────
 // Check if training is running on AI server
 router.get('/status', async (req, res) => {
@@ -578,6 +580,54 @@ router.post('/test-model', async (req, res) => {
   }
 });
 
+// ── POST /api/training/predict-performer-rank ────────────────
+// Gather images for a performer and ask AI to predict their star rating
+router.post('/predict-performer-rank', async (req, res) => {
+  const { performerId, sample_size = 200 } = req.body;
+  const aiUrl = getAiServerUrl();
+
+  try {
+    const db = req.app.get('db');
+    const performer = await db.get('SELECT * FROM performers WHERE id = ?', [performerId]);
+    if (!performer) return res.status(404).json({ error: 'Performer not found' });
+
+    const settings = await db.all('SELECT key, value FROM settings WHERE key = ?', ['base_path']);
+    const basePath = settings[0]?.value || '';
+    if (!basePath) return res.status(400).json({ error: 'Base path not set' });
+
+    // Find images for this performer
+    let perfPath = path.join(basePath, 'before filter performer', performer.name, 'pics');
+    if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name, 'pics');
+    if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'before filter performer', performer.name);
+    if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name);
+
+    if (!fs.existsSync(perfPath)) {
+      return res.status(404).json({ error: 'Performer images directory not found' });
+    }
+
+    const files = fs.readdirSync(perfPath)
+      .filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f))
+      .sort(() => 0.5 - Math.random())
+      .slice(0, sample_size);
+
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No images found for this performer' });
+    }
+
+    const imagePaths = files.map(f => path.join(perfPath, f));
+
+    // Send to AI server
+    const response = await axios.post(`${aiUrl}/predict_rank`, {
+      images: imagePaths
+    }, { timeout: 60000 });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('[Training] Rank prediction error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Helper: collect training images ──────────────────────────
 function collectTrainingImages(basePath) {
   const afterDir = path.join(basePath, 'after filter performer');
@@ -592,7 +642,7 @@ function collectTrainingImages(basePath) {
       let picsDir = path.join(baseDir, d.name, 'pics');
       if (!fs.existsSync(picsDir)) picsDir = path.join(baseDir, d.name);
       if (!fs.existsSync(picsDir)) continue;
-            const files = fs.readdirSync(picsDir).filter(f =>
+      const files = fs.readdirSync(picsDir).filter(f =>
         IMAGE_EXTS.includes(path.extname(f).toLowerCase())
       );
       for (const f of files) {

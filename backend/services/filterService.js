@@ -1019,7 +1019,7 @@ class FilterService {
     const actions = db.prepare('SELECT file_path FROM filter_actions WHERE performer_id = ?').all(performerId);
     const actionSet = new Set(actions.map(a => a.file_path));
 
-    const unfiltered = allPics.filter(p => !actionSet.has(p.path)).slice(0, 50);
+    const unfiltered = allPics.filter(p => !actionSet.has(p.path)).slice(0, options.limit || 100);
 
     if (unfiltered.length === 0) return { results: [] };
 
@@ -1040,6 +1040,8 @@ class FilterService {
             else if (type === 'context_binary') targetModel = 'context_binary.pt';
             else if (type === 'siamese') targetModel = 'siamese_binary.pt';
             else if (type === 'rank_aware_siamese') targetModel = 'rank_siamese.pt';
+            else if (type === 'ranked_binary') targetModel = 'ranked_binary.pt';
+            else if (type === 'ranked_siamese_binary') targetModel = 'ranked_siamese.pt';
             else targetModel = 'binary_filtering.pt';
           }
           console.log(`[SmartBatch] Model not loaded, auto-loading ${targetModel}...`);

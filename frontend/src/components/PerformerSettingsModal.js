@@ -156,8 +156,8 @@ function PerformerSettingsModal({
   const [selectedScraper, setSelectedScraper] = useState('leakhaven');
 
   // Hash actions state
-  const [isCreatingHash, setIsCreatingHash] = useState(false);
   const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [isPredictingRank, setIsPredictingRank] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     if (!performer?.id) return;
@@ -602,6 +602,31 @@ function PerformerSettingsModal({
       setIsDeleting(false);
     }
   };
+  
+  const handlePredictRank = async () => {
+    if (!performer?.id || isPredictingRank) return;
+    
+    setIsPredictingRank(true);
+    try {
+      const response = await fetch('/api/training/predict-performer-rank', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performerId: performer.id, sample_size: 200 })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        alert(`⭐ AI Predicted Rating for ${performer.name}:\n\n${data.predicted_rank.toFixed(2)} Stars\n(Analyzed ${data.sample_size} images)`);
+      } else {
+        alert(`Rank Prediction Failed: ${data.error || 'Unknown error'}\n\nNote: Make sure a Ranker model is loaded in the Training Hub.`);
+      }
+    } catch (error) {
+      console.error('Error predicting rank:', error);
+      alert('Error predicting rank: ' + error.message);
+    } finally {
+      setIsPredictingRank(false);
+    }
+  };
 
   const handleMoveToAfter = async (merge = false) => {
     if (!performer?.id) return;
@@ -914,6 +939,34 @@ function PerformerSettingsModal({
                     </span>
                   </Tooltip>
                 </Box>
+              </Box>
+            </Box>
+
+            <Divider sx={{ my: 3, borderColor: '#333' }} />
+
+            {/* AI Insights Section */}
+            <Box sx={darkModalStyles.section}>
+              <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
+                <RefreshIcon sx={{ color: '#8b5cf6' }} />
+                AI Insights
+              </Typography>
+              <Box sx={darkModalStyles.card}>
+                <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
+                  Use the active AI Ranker model to estimate this performer's star rating based on their content.
+                </Typography>
+                <Button
+                  variant="contained"
+                  onClick={handlePredictRank}
+                  disabled={isPredictingRank}
+                  startIcon={isPredictingRank ? <CircularProgress size={20} /> : <RefreshIcon />}
+                  sx={{ 
+                    ...darkModalStyles.gradientButton,
+                    background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+                    '&:hover': { background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)' }
+                   }}
+                >
+                  {isPredictingRank ? 'Analyzing Content...' : 'Rate Performer (AI)'}
+                </Button>
               </Box>
             </Box>
 
