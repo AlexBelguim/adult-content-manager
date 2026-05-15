@@ -1215,31 +1215,22 @@ router.post('/predict-ranks-batch', async (req, res) => {
     const config = db.prepare('SELECT value FROM settings WHERE key = "base_path"').get();
     if (!config) throw new Error('base_path not set in settings');
 
-    for (const performerId of performerIds) {
-      const performer = db.prepare('SELECT name FROM performers WHERE id = ?').get(performerId);
-      if (!performer) {
-        console.warn(`[Training] Performer not found: ${performerId}`);
-        continue;
-      }
-
-      const perfPath = path.join(config.value, performer.name, 'pics');
-      if (!fs.existsSync(perfPath)) {
-        console.warn(`[Training] Path not found for ${performer.name}: ${perfPath}`);
-        continue;
-      }
-
-      const files = fs.readdirSync(perfPath).filter(f => 
-        ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-      ).slice(0, 20);
-
-      if (files.length === 0) {
-        console.warn(`[Training] No images found for ${performer.name}`);
-        continue;
-      }
-
-      const imagePaths = files.map(f => path.join(perfPath, f));
-      
+    await Promise.all(performerIds.map(async (performerId) => {
       try {
+        const performer = db.prepare('SELECT name FROM performers WHERE id = ?').get(performerId);
+        if (!performer) return;
+
+        const perfPath = path.join(config.value, performer.name, 'pics');
+        if (!fs.existsSync(perfPath)) return;
+
+        const files = fs.readdirSync(perfPath).filter(f => 
+          ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
+        ).slice(0, 10); // Reduced to 10 for batch speed
+
+        if (files.length === 0) return;
+
+        const imagePaths = files.map(f => path.join(perfPath, f));
+        
         const response = await axios.post(`${aiUrl}/predict_rank`, {
           images: imagePaths
         }, { timeout: 30000 });
@@ -1249,9 +1240,9 @@ router.post('/predict-ranks-batch', async (req, res) => {
           console.log(`[Training]   ${performer.name}: ${response.data.predicted_rank.toFixed(2)} stars`);
         }
       } catch (err) {
-        console.error(`[Training] Failed to predict rank for ${performer.name}:`, err.message);
+        console.error(`[Training] Failed to predict rank for ${performerId}:`, err.message);
       }
-    }
+    }));
 
     console.log(`[Training] Batch prediction complete. Got results for ${Object.keys(results).length} performers.`);
     res.json({ success: true, results });
