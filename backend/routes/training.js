@@ -476,8 +476,6 @@ router.get('/models', async (req, res) => {
   }
 });
 
-});
-
 // ── GET /api/training/status ─────────────────────────────────
 // Check if training is running on AI server
 router.get('/status', async (req, res) => {
