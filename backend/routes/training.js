@@ -585,12 +585,11 @@ router.post('/predict-performer-rank', async (req, res) => {
   const aiUrl = getAiServerUrl();
 
   try {
-    const db = req.app.get('db');
-    const performer = await db.get('SELECT * FROM performers WHERE id = ?', [performerId]);
+    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performerId);
     if (!performer) return res.status(404).json({ error: 'Performer not found' });
 
-    const settings = await db.all('SELECT key, value FROM settings WHERE key = ?', ['base_path']);
-    const basePath = settings[0]?.value || '';
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    const basePath = folder?.path || '';
     if (!basePath) return res.status(400).json({ error: 'Base path not set' });
 
     // Find images for this performer
