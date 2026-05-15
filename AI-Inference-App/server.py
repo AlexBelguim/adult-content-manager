@@ -19,28 +19,43 @@ except Exception as e:
     traceback.print_exc()
     input("\nPress ENTER to close...")
     sys.exit(1)
+
 from calibration import CalibrationEngine
+
+# ── Logging Setup ─────────────────────────────────────────────────────────────
+def log(msg):
+    """Immediate flushing logger to bypass terminal buffering."""
+    timestamp = time.strftime('%H:%M:%S')
+    print(f"[{timestamp}] {msg}", flush=True)
+    sys.stdout.flush()
+
+# ── Flask Setup ───────────────────────────────────────────────────────────────
+app = Flask(__name__)
+CORS(app) # Enable CORS for frontend access
 
 # Add current dir to path for model import
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Register video analysis blueprint
+try:
+    log("🎬 Initializing Video analysis module...")
+    from video_analyzer import video_bp
+    app.register_blueprint(video_bp, url_prefix='/video')
+    log("✅ Video analysis module registered at /video")
+except Exception as e:
+    log(f"⚠️ Video analysis module failed to load: {e}")
+    import traceback
+    traceback.print_exc()
+
+# ── Module Imports ────────────────────────────────────────────────────────────
 from model_dinov2 import (
     DinoV2PreferenceModel, PerformerRankerModel,
     RankedBinaryClassifier, RankedSiameseModel
 )
 
+
 # Initialize Calibration Engine
 CALIBRATOR = CalibrationEngine()
-
-app = Flask(__name__)
-CORS(app) # Enable CORS for frontend access
-
-# Register video analysis blueprint
-try:
-    from video_analyzer import video_bp
-    app.register_blueprint(video_bp, url_prefix='/video')
-    print("🎬 Video analysis module loaded")
-except Exception as e:
-    print(f"⚠️ Video analysis module not available: {e}")
 
 # Global model state
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,12 +73,6 @@ CONTEXT_STAR_CACHE = {}    # performer_name → predicted star rating (per infer
 from threading import Lock
 MODEL_LOCK = Lock()
 MODEL_METADATA_CACHE = {}  # Cache for model file metadata to prevent heavy I/O
-
-def log(msg):
-    """Immediate flushing logger to bypass terminal buffering."""
-    timestamp = time.strftime('%H:%M:%S')
-    print(f"[{timestamp}] {msg}", flush=True)
-    sys.stdout.flush()
 
 def map_path(path):
     """Maps remote paths (TrueNAS) to local paths (Windows)."""

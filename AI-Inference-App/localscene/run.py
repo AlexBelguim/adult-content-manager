@@ -33,6 +33,10 @@ class LocalSceneHandler(SimpleHTTPRequestHandler):
             self.path = '/index.html'
             return super().do_GET()
 
+        # List videos in a folder (handled locally, no proxy needed)
+        if parsed.path == '/api/list-videos':
+            return self._list_videos(parsed)
+
         # Proxy GET /api/* → AI server /video/*
         if parsed.path.startswith('/api/'):
             return self._proxy_get()
@@ -151,6 +155,28 @@ class LocalSceneHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._json_error(502, f"AI server not reachable: {e}")
 
+    # ── List Videos in Folder ─────────────────────────────────────────────────
+    _VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.webm', '.mov', '.wmv', '.flv', '.ts', '.m4v'}
+
+    def _list_videos(self, parsed):
+        params = parse_qs(parsed.query)
+        folder = params.get('folder', [None])[0]
+        if not folder:
+            return self._json_error(400, "Missing 'folder' parameter")
+        folder = unquote(folder)
+        if not os.path.isdir(folder):
+            return self._json_error(404, f"Folder not found: {folder}")
+
+        videos = []
+        for f in sorted(os.listdir(folder)):
+            if os.path.splitext(f)[1].lower() in self._VIDEO_EXTS:
+                videos.append(os.path.join(folder, f))
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({"videos": videos, "count": len(videos)}).encode())
+
     # ── Helpers ──────────────────────────────────────────────────────────────
     def _json_error(self, code, msg):
         self.send_response(code)
@@ -190,15 +216,21 @@ def start_ai_server():
 
     # Try to open in a new Windows Terminal tab
     try:
-        subprocess.run(["wt", "--version"], capture_output=True, timeout=3)
-        print("  >> Opening AI server in new terminal tab...")
-        subprocess.Popen(
-            ["wt", "-w", "0", "new-tab", "--title", "AI Server",
-             python_exe, main_py],
-            cwd=ai_dir,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        # No Windows Terminal — run in background with piped output
+        # Check if wt is available AND supports the command line arguments we use
+        # (older versions might not support -w or new-tab)
+        res = subprocess.run(["wt", "--version"], capture_output=True, timeout=3, check=False)
+        if res.returncode == 0:
+            print("  >> Opening AI server in new terminal tab...")
+            subprocess.Popen(
+                ["wt", "-w", "0", "new-tab", "--title", "AI Server",
+                 python_exe, str(main_py)],
+                cwd=ai_dir,
+            )
+            return True
+        else:
+            raise FileNotFoundError("wt exists but returned error on version check")
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        # No Windows Terminal or older version — run in background with piped output
         print("  >> Starting AI server in background...")
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"

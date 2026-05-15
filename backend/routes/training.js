@@ -406,7 +406,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (type === 'binary' || type === 'context_binary' || type === 'pairwise_siamese_binary') {
+    } else if (['binary', 'context_binary', 'pairwise_siamese_binary', 'performer_ranker', 'ranked_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -415,7 +415,8 @@ router.post('/start', async (req, res) => {
         epochs,
         batch_size,
         backbone,
-        learning_rate
+        learning_rate,
+        performer_ratings: collectPerformerRatings()
       };
       
       if (req.body.use_hard_examples) {

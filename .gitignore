@@ -76,5 +76,11 @@ backend-pairwise/models/
 # Standalone ML / vision projects (separate repos)
 # ===========================================
 vision-llm-pairwise/
+
 # AI training data (large binary files)
 AI-Inference-App/training_data/
+
+# Local Scene Manager - test data and debug outputs
+AI-Inference-App/localscene/test/
+AI-Inference-App/localscene/debug/
+*.mp4

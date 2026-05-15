@@ -33,13 +33,14 @@ class DebugLogger:
             self.enabled = True
             log(f"📝 Debug logging to: {self.output_dir}")
 
-    def log_vlm_call(self, phase, timestamp_sec, prompt, frames_b64, response, parsed_result):
+    def log_vlm_call(self, phase, timestamp_sec, prompt, frames_b64, response, parsed_result, thinking=None):
         if not self.enabled:
             return
         idx = len(self.entries)
         entry = {
             "idx": idx, "phase": phase, "time": timestamp_sec,
             "prompt": prompt, "response": response,
+            "thinking": thinking,
             "parsed": parsed_result, "frame_files": []
         }
         # Save frames as images
@@ -62,12 +63,19 @@ class DebugLogger:
             imgs = "".join(f'<img src="{f}" style="max-width:200px;max-height:150px;margin:2px;border-radius:4px">' for f in e["frame_files"])
             prompt_esc = e["prompt"].replace("<", "&lt;").replace(">", "&gt;")
             resp_esc = e["response"].replace("<", "&lt;").replace(">", "&gt;") if e["response"] else "(empty)"
+            thinking_esc = e["thinking"].replace("<", "&lt;").replace(">", "&gt;") if e.get("thinking") else ""
             parsed = json.dumps(e["parsed"]) if e["parsed"] else ""
+            
+            thinking_html = f'<div class="thinking-box"><b>🤔 Thinking:</b><br>{thinking_esc}</div>' if thinking_esc else ""
+            
             rows.append(f"""<tr>
                 <td style="white-space:nowrap">{e['phase']}<br><b>{int(e['time'])}s</b></td>
                 <td>{imgs}</td>
-                <td><pre style="max-width:400px;white-space:pre-wrap;font-size:11px">{prompt_esc}</pre></td>
-                <td><pre style="max-width:400px;white-space:pre-wrap;font-size:11px">{resp_esc}</pre></td>
+                <td><pre style="max-width:400px;font-size:11px">{prompt_esc}</pre></td>
+                <td>
+                    <pre style="max-width:400px;font-size:11px">{resp_esc}</pre>
+                    {thinking_html}
+                </td>
                 <td><code>{parsed}</code></td>
             </tr>""")
         html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -76,12 +84,21 @@ class DebugLogger:
 body {{ font-family: system-ui; background: #0a0a0f; color: #e0e0e0; padding: 20px; }}
 h1 {{ color: #00e5ff; }}
 table {{ border-collapse: collapse; width: 100%; }}
-th, td {{ border: 1px solid #333; padding: 8px; vertical-align: top; text-align: left; }}
-th {{ background: #1a1a2e; color: #00e5ff; position: sticky; top: 0; }}
-tr:hover {{ background: #1a1a2e; }}
-pre {{ margin: 0; color: #ccc; }}
-code {{ color: #7c4dff; }}
-img {{ border: 1px solid #333; }}
+th, td {{ border: 1px solid #333; padding: 12px; vertical-align: top; text-align: left; }}
+th {{ background: #1a1a2e; color: #00e5ff; position: sticky; top: 0; z-index: 10; }}
+tr:hover {{ background: #161625; }}
+pre {{ margin: 0; color: #ccc; white-space: pre-wrap; font-family: 'Consolas', monospace; }}
+code {{ color: #7c4dff; font-weight: bold; }}
+img {{ border: 1px solid #333; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }}
+.thinking-box {{ 
+    margin-top: 10px; 
+    padding: 10px; 
+    background: #0f172a; 
+    border-left: 4px solid #38bdf8; 
+    font-size: 11px; 
+    color: #94a3b8;
+    border-radius: 0 4px 4px 0;
+}}
 </style></head><body>
 <h1>🔍 Debug Report</h1>
 <p>Video: <code>{video_path}</code> | Model: <code>{OLLAMA_MODEL}</code> | Entries: {len(self.entries)} | Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
@@ -104,14 +121,16 @@ def map_path(p):
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "minicpm-v")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "huihui_ai/qwen3.5-abliterated:35b")
 
 # Default supported actions
 SUPPORTED_ACTIONS = {
     'missionary': 'Missionary',
+    'standing_missionary': 'Standing Missionary',
     'cowgirl': 'Cowgirl / Woman on top',
     'reverse_cowgirl': 'Reverse Cowgirl',
     'doggy': 'Doggy style',
+    'sideways': 'Sideways doggy style',
     'anal': 'Anal penetration',
     'anal_doggy': 'Anal doggy style',
     'blowjob': 'Blowjob',
@@ -126,6 +145,7 @@ SUPPORTED_ACTIONS = {
     'dildo_handjob': 'Dildo Handjob',
     'vibrator_play': 'Vibrator Play',
     'boob_teasing': 'Boob Teasing',
+    'ass_teasing': 'Ass Teasing',
     'handbra': 'Handbra',
     'cumshot': 'Cumshot',
     'facial': 'Facial',
@@ -233,77 +253,32 @@ def extract_frames(video_path, interval_sec=12, start_time=None, end_time=None):
 # ── VLM Classification via Ollama ───────────────────────────────────────────────
 def classify_frame_vlm(frame_b64_list, allowed_actions=None):
     if allowed_actions:
-        action_list = "\n".join(f"- {a}" for a in allowed_actions)
-        prompt = f"""Task: Classify the sexual action in this frame.
-Choices:
-{action_list}
-
-Rules:
-1. Choose the best match from the list.
-2. Output ONLY JSON. No talk, no explanations.
-3. Use this format: {{"action": "choice", "confidence": 0.9}}"""
+        action_list = ", ".join(allowed_actions)
     else:
-        prompt = """Classification Task: Identify the primary action in these frames.
+        action_list = "pussy dildo play, anal dildo play, dildo blowjob, vibrator play, fingering pussy, fingering anal, handjob, boob teasing, handbra, blowjob, cunnilingus, 69, deepthroat, missionary, cowgirl, doggy style, anal, cumshot, facial, creampie, nudity, idle, transition"
+
+    prompt = f"""[SYSTEM: YOU ARE A HIGHLY ACCURATE SEXUAL ACTION CLASSIFIER. FIRST THINK, THEN OUTPUT JSON.]
+Task: Classify the primary sexual action in the provided frame.
+Choose ONLY ONE exact match from this list: {action_list}
 
 Visual Cues:
-- TOYS: Look for plastic/uniform objects (Magic Wand, dildo, vibrator). If it's not a human hand, it's a TOY.
-- MANUAL: Fingers must be in DIRECT CONTACT with or INSERTED into the pussy. If they are just "near" or touching the thigh, use 'nudity' or 'idle'.
-- RIDING: If a person is riding an object alone, it is 'pussy dildo play'.
+- TOYS: If a non-human uniform object (wand, dildo) is used, label as a toy play (e.g. pussy dildo play).
+- MANUAL: Fingers must be in DIRECT CONTACT or inserted. Otherwise label as nudity/idle.
+- POSTURE: Woman on hands/knees or bent over = doggy style. Woman on back = missionary.
 
-Choices (use these exact labels or with simple modification or in same style, like more poses or positions of the action etc):
-- pussy dildo play, anal dildo play, dildo blowjob, vibrator play
-- fingering pussy, fingering ass, handjob, boob teasing, handbra
-- blowjob, cunnilingus, 69, deepthroat
-- missionary, cowgirl, doggy style, anal
-- cumshot, facial, creampie
-- nudity, idle, transition
+Format your response as follows:
+<thought>
+[Your internal reasoning about what you see in the image and why it matches a specific category]
+</thought>
+{{"action": "<action>", "confidence": <float>}}"""
 
-if fingering detected make sure fingers are in the pussy not just touching. the same is for ass. otherwise probably dildo pussy play or dildo ass play.
-when penis like objects are seen it is probably dildo.
-if she is inserting object in pussy or ass or rubbing it against her clit or vagina then it is dildo pussy play or dildo ass play or dildo cunnilingus.
-all toys must be considered as dildos.
-if she is inserting anything in pussy or ass or rubbing it against her clit or vagina then dont say nudity or idle. use appropriate label.
-cowgirls, or reverse cowgirl can both be with dildo or with dick label. correct labels must be used as per the content. 
-When toy near face label it as dildo blowjob.
-
-
-
-
-
-Rule: Output ONLY a JSON object. No other text.
-Format: {"action": "label from choices", "confidence": 0.5-1.0}"""
-
-    try:
-        # Qwen2.5-VL and newer models require images embedded as content parts.
-        # MiniCPM-V / LLaVA accept the legacy top-level "images" key.
-        _model_lower = OLLAMA_MODEL.lower()
-        if any(m in _model_lower for m in ['qwen', 'internvl', 'llama4']):
-            # OpenAI-style multipart content
-            content_parts = [{"type": "text", "text": prompt}]
-            for img in frame_b64_list:
-                content_parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}})
-            messages = [{"role": "user", "content": content_parts}]
-        else:
-            # Legacy Ollama format (MiniCPM-V, LLaVA, BakLLaVA, etc.)
-            messages = [{"role": "user", "content": prompt, "images": frame_b64_list}]
-
-        payload = {
-            "model": OLLAMA_MODEL,
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 150}
-        }
-        resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=120)
-        if resp.status_code == 200:
-            content = resp.json().get("message", {}).get("content", "")
-            log(f"  🔍 Raw AI ({OLLAMA_MODEL}): {content[:300] if content else '[EMPTY RESPONSE]'}")
-            return parse_vlm_response(content, allowed_actions)
-        else:
-            log(f"  ⚠️ VLM HTTP {resp.status_code}: {resp.text[:200]}")
-        return {"action": "other", "confidence": 0.0}
-    except Exception as ex:
-        log(f"  ⚠️ VLM failed: {ex}")
-        return {"action": "other", "confidence": 0.0}
+    thinking, content = _call_vlm(prompt, frame_b64_list, max_tokens=2048)
+    if content:
+        log(f"  🔍 Raw AI ({OLLAMA_MODEL}): {content[:300] if content else '[EMPTY RESPONSE]'}")
+        result = parse_vlm_response(content, allowed_actions)
+        _debug.log_vlm_call("basic", 0, prompt, frame_b64_list, content, result, thinking=thinking)
+        return result
+    return {"action": "other", "confidence": 0.0}
 
 # Phrases that indicate the model refused to answer
 _REFUSAL_PHRASES = [
@@ -352,6 +327,9 @@ def parse_vlm_response(content, allowed_actions=None):
                         action = common
                         break
                 if len(action) > 25: action = "other"
+            if action in ["<action>", "[action]", "pick_one", "pick one", "pick_one_here"]:
+                action = "other"
+
             if allowed_actions:
                 matched = None
                 for a in allowed_actions:
@@ -366,8 +344,8 @@ def parse_vlm_response(content, allowed_actions=None):
     _known_actions = [
         'reverse cowgirl', 'cowgirl', 'doggy style', 'doggy', 'missionary',
         'pussy dildo play', 'anal dildo play', 'dildo blowjob', 'vibrator play',
-        'fingering pussy', 'fingering ass', 'fingering',
-        'blowjob', 'deepthroat', 'cunnilingus', '69',
+        'fingering pussy', 'fingering ass', 'fingering', 'masturbation',
+        'blowjob', 'deepthroat', 'cunnilingus', '69', 'footjob',
         'handjob', 'titfuck', 'boob teasing', 'handbra',
         'anal', 'cumshot', 'facial', 'creampie',
         'nudity', 'idle', 'stripping'
@@ -398,8 +376,6 @@ class FlorenceEngine:
             mid = "microsoft/Florence-2-large"
 
             # Patch: transformers 5.x removed forced_bos_token_id.
-            # Florence-2 remote code reads it during __init__, so we must
-            # patch the PretrainedConfig base BEFORE any Florence code loads.
             from transformers import PretrainedConfig
             _orig_init = PretrainedConfig.__init__
             def _patched_init(self, **kwargs):
@@ -576,9 +552,8 @@ def analyze_video(video_path, segment_duration=12, min_segment=10, allowed_actio
     raw_segments = []
     for i, frame in enumerate(frames):
         if _cancel_flag.is_set(): break
-        context_frames = extract_burst_frames(video_path, frame["time"], duration_sec=2, count=8)
-        if not context_frames: context_frames = [frame["data"]]
-        result = classify_frame_vlm(context_frames, allowed_actions)
+        # Use only the single frame extracted at the interval point
+        result = classify_frame_vlm([frame["data"]], allowed_actions)
         raw_segments.append({"time": frame["time"], "action": result["action"], "confidence": result["confidence"]})
         log(f"   {frame['time']}s → {result['action']} ({int(result['confidence']*100)}%)")
     
@@ -599,24 +574,16 @@ def analyze_video(video_path, segment_duration=12, min_segment=10, allowed_actio
 
 # ── Advanced VLM Helpers ───────────────────────────────────────────────────────
 def _build_vlm_messages(prompt, frame_b64_list):
-    """Build model-aware message payload for VLM call."""
-    _model_lower = OLLAMA_MODEL.lower()
-    if any(m in _model_lower for m in ['qwen', 'internvl', 'llama4']):
-        parts = [{"type": "text", "text": prompt}]
-        for img in frame_b64_list:
-            parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}})
-        return [{"role": "user", "content": parts}]
+    """Build message payload for VLM call. Using legacy format for maximum Ollama compatibility."""
     return [{"role": "user", "content": prompt, "images": frame_b64_list}]
 
-def _call_vlm(prompt, frame_b64_list, max_tokens=150, timeout=120):
-    """Send a prompt + images to Ollama VLM, return raw text content."""
-    _model_lower = OLLAMA_MODEL.lower()
-    # Models that support multiple images
-    multi_image = any(m in _model_lower for m in ['qwen', 'internvl', 'minicpm'])
-    # If model is single-image only, pick the middle frame (most representative)
-    if not multi_image and len(frame_b64_list) > 1:
+def _call_vlm(prompt, frame_b64_list, max_tokens=2048, timeout=None):
+    """Send a prompt + images to Ollama VLM, return (thinking, content)."""
+    # Force single image for thinking models to reduce token overhead and focus attention
+    if len(frame_b64_list) > 1:
         mid = len(frame_b64_list) // 2
         frame_b64_list = [frame_b64_list[mid]]
+    
     try:
         payload = {
             "model": OLLAMA_MODEL,
@@ -626,29 +593,61 @@ def _call_vlm(prompt, frame_b64_list, max_tokens=150, timeout=120):
         }
         resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=timeout)
         if resp.status_code == 200:
-            return resp.json().get("message", {}).get("content", "")
+            content = resp.json().get("message", {}).get("content", "")
+            return extract_thinking(content)
         log(f"  ⚠️ VLM HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as ex:
         log(f"  ⚠️ VLM call failed: {ex}")
-    return ""
+    return "", ""
+
+def extract_thinking(content):
+    """Extract thinking part from Ollama response (e.g. <thought>...</thought>)."""
+    if not content:
+        return "", ""
+    
+    thinking = ""
+    # 1. Look for explicit thinking tags
+    think_match = re.search(r'<(?:thought|think|thinking)>(.*?)</(?:thought|think|thinking)>', content, re.DOTALL | re.IGNORECASE)
+    if think_match:
+        thinking = think_match.group(1).strip()
+        # Remove thinking part from content for JSON parsing
+        content = re.sub(r'<(?:thought|think|thinking)>.*?</(?:thought|think|thinking)>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()
+    elif "[THOUGHT]" in content.upper() and "[/THOUGHT]" in content.upper():
+        parts = re.split(r'\[/?THOUGHT\]', content, flags=re.IGNORECASE)
+        if len(parts) >= 3:
+            thinking = parts[1].strip()
+            content = (parts[0] + parts[2]).strip()
+    
+    # 2. Heuristic: If there's substantial text before the first JSON brace, treat it as thinking/preamble
+    if not thinking and '{' in content:
+        idx = content.find('{')
+        preamble = content[:idx].strip()
+        # If preamble looks like reasoning (more than a few words), extract it
+        if len(preamble) > 10:
+            thinking = preamble
+            content = content[idx:].strip()
+            
+    return thinking, content
 
 def classify_macro(frame_b64, florence_hint="", time_sec=0):
     """Quick macro scan: people count, scene type, clothing state."""
     ctx = f"\nDetection hint: {florence_hint}" if florence_hint else ""
-    prompt = f"""Quick scene check. Analyze this single frame.{ctx}
-IMPORTANT: If this is a POV (point-of-view) shot, the camera holder counts as a person even if only their body part (penis, hand) is visible. A blowjob from POV = 2 people, straight_sex.
-Report:
-1. people: number of people involved (0, 1, 2, 3) — count the camera holder if their body is visible
-2. scene: idle, solo, straight_sex, lesbian, threesome
+    prompt = f"""[SYSTEM: OUTPUT ONLY VALID JSON. NO PREAMBLE. NO EXPLANATIONS.]
+Identify the scene in this frame. FIRST think about who is in the frame and what is happening.
+1. people: number of people involved (0, 1, 2, 3). IMPORTANT: If this is POV (Point-Of-View), the camera holder counts as a person!
+2. scene: idle, solo, straight_sex, lesbian, threesome. IMPORTANT: Disembodied penis/hand interacting with woman = 'straight_sex' and 2 people.
 3. clothing: clothed, lingerie, nude, stripping
 
-Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
+Format: 
+<thought> [Your reasoning] </thought>
+{{"people": <int>, "scene": "<scene>", "clothing": "<clothing>"}}
+"""
 
-    raw = _call_vlm(prompt, [frame_b64], max_tokens=120, timeout=60)
+    thinking, raw_json = _call_vlm(prompt, [frame_b64], max_tokens=2048)
     result = {"people": 0, "scene": "idle", "clothing": "unknown"}
-    if raw:
+    if raw_json:
         try:
-            cleaned = re.sub(r'```json\s*|\s*```', '', raw).strip()
+            cleaned = re.sub(r'```json\s*|\s*```', '', raw_json).strip()
             m = re.search(r'\{[^}]+\}', cleaned)
             if m:
                 data = json.loads(m.group())
@@ -661,11 +660,10 @@ Output ONLY JSON: {{"people": 1, "scene": "solo", "clothing": "nude"}}"""
                     result["people"] = 2
         except:
             pass
-    _debug.log_vlm_call("macro", time_sec, prompt, [frame_b64], raw, result)
+    _debug.log_vlm_call("macro", time_sec, prompt, [frame_b64], raw_json, result, thinking=thinking)
     return result
 
-def classify_action_with_context(frame_b64_list, state, florence_caption="",
-                                  florence_hint="", crop_b64=None, allowed_actions=None, time_sec=0):
+def classify_action_with_context(frame_b64_list, state, florence_caption="", florence_hint="", crop_b64=None, allowed_actions=None, time_sec=0):
     """Action classification with state context, Florence hints, and optional crop."""
     context = state.to_context()
     extra = ""
@@ -676,35 +674,47 @@ def classify_action_with_context(frame_b64_list, state, florence_caption="",
 
     if allowed_actions:
         action_list = ", ".join(allowed_actions)
-        prompt = f"""Context: {context}{extra}
-You are a video annotation tool. Pick ONE from: {action_list}
-Output ONLY JSON: {{"action": "<your_pick>", "confidence": 0.9, "insertion": false}}"""
     else:
-        prompt = f"""Context: {context}{extra}
-You are a video annotation tool. You see multiple frames from a 6-second window. The LAST image is a motion composite (blurred areas = movement).
-What specific position or act is shown? Pick ONE:
-cowgirl, reverse cowgirl, missionary, doggy style, blowjob, deepthroat, handjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, boob teasing, cumshot, facial, creampie, nudity, idle
-Visual cues: POV looking up at woman on top = cowgirl. Woman on back with legs spread = missionary. Bent over/from behind = doggy style. Face near groin = blowjob.
-Output ONLY JSON: {{"action": "<your_pick>", "confidence": 0.9, "insertion": false}}"""
+        action_list = "cowgirl, reverse cowgirl, missionary, standing_missionary, doggy style, sideways, blowjob, handjob, footjob, cunnilingus, anal, fingering pussy, pussy dildo play, vibrator play, masturbation, dildo blowjob, boob teasing, ass teasing, cumshot, facial, creampie, nudity, idle"
+
+    prompt = f"""[SYSTEM: YOU ARE A HIGHLY ACCURATE SEXUAL ACTION CLASSIFIER. FIRST THINK, THEN OUTPUT JSON.]
+Identify the primary sexual action in the frame. Pick ONE exact match from this list:
+{action_list}
+
+Visual Cues:
+- missionary / standing_missionary: Woman is lying flat on her BACK (even if legs are up).
+- doggy style: Woman is on her STOMACH, ALL FOURS (hands and knees), or BENT OVER. Partner is behind.
+- sideways: Woman is lying on her SIDE. Partner is behind.
+- blowjob: Mouth is on the penis.
+- handjob / cumshot: Penis is being stimulated by a hand.
+- boob teasing / ass teasing: ONLY use if no actual intercourse posture is present.
+
+Format your response as follows:
+<thought>
+[Your internal reasoning about what you see in the image, considering the context provided below]
+</thought>
+{{"action": "<action>", "confidence": <float>, "insertion": <bool>}}
+
+Context: {context}{extra}"""
 
     # If we have a crop, add it as the first image for emphasis
     images = list(frame_b64_list)
     if crop_b64:
         images.insert(0, crop_b64)
 
-    raw = _call_vlm(prompt, images)
-    if raw:
-        log(f"  🔍 Advanced AI: {raw[:300]}")
-        result = parse_vlm_response(raw, allowed_actions)
+    thinking, raw_json = _call_vlm(prompt, images)
+    if raw_json:
+        log(f"  🔍 Advanced AI: {raw_json[:300]}")
+        result = parse_vlm_response(raw_json, allowed_actions)
         try:
-            m = re.search(r'\{[^}]+\}', re.sub(r'```json\s*|\s*```', '', raw))
+            m = re.search(r'\{[^}]+\}', re.sub(r'```json\s*|\s*```', '', raw_json))
             if m:
                 result["insertion"] = bool(json.loads(m.group()).get("insertion", False))
         except:
             result["insertion"] = False
-        _debug.log_vlm_call("action", time_sec, prompt, images, raw, result)
+        _debug.log_vlm_call("action", time_sec, prompt, images, raw_json, result, thinking=thinking)
         return result
-    _debug.log_vlm_call("action", time_sec, prompt, images, "(no response)", None)
+    _debug.log_vlm_call("action", time_sec, prompt, images, "(no response)", None, thinking=thinking)
     return {"action": "other", "confidence": 0.0, "insertion": False}
 
 
@@ -782,16 +792,14 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
     timeline = []
     raw_segments = []
 
-    # Check Florence availability once
-    use_florence = FlorenceEngine.is_available()
-    if use_florence:
-        log("🔬 Florence-2 pre-pass: ENABLED")
-    else:
-        log("⚠️ Florence-2 pre-pass: DISABLED (not installed)")
+    # Florence disabled — captions hallucinate and mislead the VLM
+    use_florence = False  # FlorenceEngine.is_available()
+    log("Florence-2 pre-pass: DISABLED (captions unreliable)")
 
     # ── Phase 1: Macro Scan ────────────────────────────────────────────────
     log(f"📊 Phase 1: Macro scan ({macro_interval}s steps, {s:.0f}s-{e:.0f}s)")
     active_windows = []
+    macro_history = []
     t = s
     while t < e:
         if _cancel_flag.is_set():
@@ -818,6 +826,7 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
             state.people_count = macro["people"]
 
         log(f"  {t:.0f}s → scene={macro['scene']}, clothing={macro['clothing']}, people={macro['people']}")
+        macro_history.append({"time": t, "macro": macro, "people_count": state.people_count})
 
         # Mark active windows where detailed scanning is needed
         is_active = (
@@ -863,32 +872,35 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
             if _cancel_flag.is_set():
                 break
 
-            # Get burst frames for temporal context
-            context_frames = extract_burst_frames(video_path, t, duration_sec=6, count=4)
-            if not context_frames:
-                single = extract_single_frame(video_path, t)
-                context_frames = [single] if single else []
-            if not context_frames:
+            # Use single frame for action classification
+            single_frame = extract_single_frame(video_path, t)
+            if not single_frame:
                 t += action_interval
                 continue
+            
+            # Sync state with the closest macro scan result
+            if macro_history:
+                closest = min(macro_history, key=lambda x: abs(x["time"] - t))
+                state.scene_type = closest["macro"]["scene"]
+                state.clothed_state = closest["macro"]["clothing"]
+                state.people_count = closest["people_count"]
 
-            # Florence pre-pass on the middle frame
+            # Florence pre-pass on the frame
             florence_caption = ""
             florence_hint = ""
             crop_b64 = None
             if use_florence:
-                mid_frame = context_frames[len(context_frames) // 2]
-                dets, _ = FlorenceEngine.detect_objects(mid_frame)
+                dets, _ = FlorenceEngine.detect_objects(single_frame)
                 cats = categorize_detections(dets)
                 florence_hint = format_detections_for_prompt(cats)
 
                 # Get a caption for richer context
-                florence_caption = FlorenceEngine.caption(mid_frame)
+                florence_caption = FlorenceEngine.caption(single_frame)
 
                 # If a toy was detected, crop it for the VLM
                 if cats["toys"]:
                     best_toy = cats["toys"][0]
-                    crop_b64 = FlorenceEngine.crop_region(mid_frame, best_toy["bbox"])
+                    crop_b64 = FlorenceEngine.crop_region(single_frame, best_toy["bbox"])
                     log(f"  🔬 {t:.0f}s Florence: {florence_hint} | crop={crop_b64 is not None}")
 
                 # Check bbox overlap for insertion
@@ -906,19 +918,8 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
                                      "toy": state.current_toy})
                     state.insertion_active = False
                     state.current_toy = None
-            # Build VLM input: all burst frames + motion composite
-            motion = create_motion_composite(context_frames)
-            vlm_frames = list(context_frames)
-            if motion:
-                vlm_frames.append(motion)  # composite as last image
-                # Save composite to debug
-                if _debug.enabled and _debug.output_dir:
-                    idx = len(_debug.entries)
-                    comp_path = _debug.output_dir / f"{idx:04d}_t{int(t)}s_composite.jpg"
-                    try:
-                        comp_path.write_bytes(base64.b64decode(motion))
-                    except:
-                        pass
+
+            vlm_frames = [single_frame]
 
             # Full action classification with all context
             result = classify_action_with_context(
@@ -1018,27 +1019,43 @@ def video_analyze_advanced():
 
         raw_actions = data.get('allowed_actions', [])
         allowed = [a.strip() for a in raw_actions if a and a.strip()]
-        result = analyze_video_advanced(
-            video_path,
-            segment_duration=data.get('segment_duration', 12),
-            min_segment=data.get('min_segment', 10),
-            allowed_actions=allowed if allowed else None,
-            start_time=data.get('start_time'),
-            end_time=data.get('end_time'),
-            macro_interval=data.get('macro_interval', 60),
-            action_interval=data.get('action_interval', 5)
-        )
-
-        # Save debug report
-        _debug.save_report(video_path=video_path, result=result)
+        
+        result = {"success": False, "error": "Internal error during analysis"}
+        try:
+            result = analyze_video_advanced(
+                video_path,
+                segment_duration=data.get('segment_duration', 12),
+                min_segment=data.get('min_segment', 10),
+                allowed_actions=allowed if allowed else None,
+                start_time=data.get('start_time'),
+                end_time=data.get('end_time'),
+                macro_interval=data.get('macro_interval', 60),
+                action_interval=data.get('action_interval', 5)
+            )
+        except Exception as ex:
+            log(f"❌ Advanced analysis crashed: {ex}")
+            import traceback
+            traceback.print_exc()
+            result = {"success": False, "error": f"Analysis failed: {str(ex)}"}
+        
+        # ALWAYS save report if enabled, even on crash
+        if _debug.enabled:
+            _debug.save_report(video_path=video_path, result=result)
+        
         _debug = DebugLogger()  # reset to disabled
-
         return jsonify(result)
+
     finally:
         _analysis_lock.release()
 
+@video_bp.route('/cancel', methods=['POST'])
+def video_cancel():
+    _cancel_flag.set()
+    log("⏹ Cancel signal received")
+    return jsonify({"success": True, "message": "Analysis cancellation requested"})
+
 @video_bp.route('/health', methods=['GET'])
-def health():
+def video_health():
     return jsonify({
         "status": "ok",
         "model": OLLAMA_MODEL,
@@ -1046,10 +1063,11 @@ def health():
         "modes": ["basic", "advanced"]
     })
 
+log("🎬 Video analysis blueprint initialized")
+
 @video_bp.route('/supported-actions', methods=['GET'])
 def supported_actions():
     actions = []
     for action_id, name in SUPPORTED_ACTIONS.items():
         actions.append({"id": action_id, "name": name})
     return jsonify({"actions": actions})
-

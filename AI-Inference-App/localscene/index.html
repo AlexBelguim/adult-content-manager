@@ -123,8 +123,14 @@
   <div class="video-panel">
     <!-- File Input -->
     <div class="file-input-area">
-      <input type="text" id="videoPath" placeholder="Enter full path to video file (e.g. Z:\Videos\stream.mp4)" style="font-size:14px;padding:8px 12px">
+      <input type="text" id="videoPath" placeholder="Enter path to video file (e.g. D:\Videos\stream.mp4)" style="font-size:14px;padding:8px 12px">
       <button class="btn-primary" onclick="loadVideo()">Load</button>
+    </div>
+
+    <!-- Batch Folder Input -->
+    <div class="file-input-area">
+      <input type="text" id="folderPath" placeholder="Batch: paste folder path (e.g. D:\chaturbate)" style="font-size:14px;padding:8px 12px">
+      <button class="btn-adv" id="btnBatch" onclick="runBatchAnalysis()">📂 Batch Analyze Folder</button>
     </div>
 
     <!-- Video Player -->
@@ -394,8 +400,82 @@ async function cancelAnalysis() {
   try {
     await fetch('/api/cancel', { method: 'POST' });
     addLog('Cancellation requested', 'info');
+    batchCancelled = true;
   } catch (e) {
     addLog(`Cancel failed: ${e.message}`, 'error');
+  }
+}
+
+// ── Batch Folder Analysis ──
+let batchCancelled = false;
+async function runBatchAnalysis() {
+  const folder = document.getElementById('folderPath').value.trim();
+  if (!folder) return alert('Enter a folder path first');
+
+  batchCancelled = false;
+  isAnalyzing = true;
+  updateAnalyzingUI(true);
+  addLog(`📂 Scanning folder: ${folder}`, 'info');
+
+  try {
+    // Get video list from backend
+    const listResp = await fetch(`/api/list-videos?folder=${encodeURIComponent(folder)}`);
+    const listData = await listResp.json();
+    if (listData.error) {
+      addLog(`❌ ${listData.error}`, 'error');
+      return;
+    }
+    const videos = listData.videos || [];
+    if (videos.length === 0) {
+      addLog('No video files found in folder', 'info');
+      return;
+    }
+    addLog(`Found ${videos.length} videos. Starting batch...`, 'info');
+
+    for (let i = 0; i < videos.length; i++) {
+      if (batchCancelled) {
+        addLog('⏹ Batch cancelled', 'info');
+        break;
+      }
+      const vpath = videos[i];
+      const fname = vpath.split('\\').pop().split('/').pop();
+      document.getElementById('progressText').textContent = `Batch: ${i+1}/${videos.length} — ${fname}`;
+      addLog(`\n📹 [${i+1}/${videos.length}] ${fname}`, 'info');
+
+      // Load video in player
+      document.getElementById('videoPath').value = vpath;
+      const video = document.getElementById('videoPlayer');
+      video.src = `/stream?path=${encodeURIComponent(vpath)}`;
+      video.load();
+
+      try {
+        const body = buildAnalysisPayload(vpath);
+        const endpoint = currentMode === 'advanced' ? '/api/analyze-advanced' : '/api/analyze';
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          scenes = result.segments || [];
+          timeline = result.timeline || [];
+          addLog(`  ✅ ${scenes.length} segments found`, 'info');
+          renderScenes();
+          renderTimeline();
+        } else {
+          addLog(`  ❌ Failed: ${result.error}`, 'error');
+        }
+      } catch (e) {
+        addLog(`  ❌ Error: ${e.message}`, 'error');
+      }
+    }
+    addLog(`\n🏁 Batch complete! Processed ${videos.length} videos.`, 'info');
+  } catch (e) {
+    addLog(`❌ Error: ${e.message}`, 'error');
+  } finally {
+    isAnalyzing = false;
+    updateAnalyzingUI(false);
   }
 }
 
