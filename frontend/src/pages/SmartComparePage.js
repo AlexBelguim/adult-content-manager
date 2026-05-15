@@ -595,11 +595,8 @@ function SmartComparePage() {
                         border: `1px solid ${isWinner ? theme.palette.secondary.main : theme.palette.primary.main}40`,
                         textAlign: 'center'
                       }}>
-                        <Typography variant="caption" sx={{ color: isWinner ? 'secondary.main' : 'primary.main', fontWeight: 900, display: 'block', lineHeight: 1.2 }}>
+                        <Typography variant="caption" sx={{ color: isWinner ? 'secondary.main' : 'primary.main', fontWeight: 900, display: 'block' }}>
                           {scoreToStars(aiScore, performer.id)}★
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
-                          {aiScore.toFixed(0)}%
                         </Typography>
                       </Box>
                     )}
@@ -765,11 +762,8 @@ function SmartComparePage() {
                       <Box sx={{ width: voteW, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                         {aiAnalysis?.scores[performer.id] !== undefined && (
                           <Box sx={{ p: isLandscape ? 1 : 2, bgcolor: `${theme.palette.secondary.main}0d`, borderRadius: 3, border: `1px solid ${theme.palette.secondary.main}40` }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 0.5 }}>
                               <Typography variant="caption" sx={{ color: 'secondary.main', fontWeight: 'bold' }}>AI PREDICTION</Typography>
-                              <Typography variant="caption" sx={{ color: 'secondary.main', opacity: 0.6, fontWeight: 'bold' }}>
-                                {aiAnalysis.scores[performer.id].toFixed(1)}%
-                              </Typography>
                             </Box>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                               <Typography variant={isLandscape ? 'body1' : 'h6'} sx={{ color: 'secondary.main', fontWeight: 900 }}>{scoreToStars(aiAnalysis.scores[performer.id], performer.id)}</Typography>
