@@ -1014,27 +1014,33 @@ def predict_rank():
                 method_name = 'predict_rank'
             
             if not target_model:
-                # Try auto-loading a ranker
-                ranker_path = os.path.join(MODELS_DIR, 'performer_ranker.pt')
-                if os.path.exists(ranker_path):
-                    log(f"🔄 No ranker loaded. Auto-loading {ranker_path}...")
-                    try:
+                # Try auto-loading a ranker (find latest performer_ranker*.pt)
+                try:
+                    ranker_files = [f for f in os.listdir(MODELS_DIR) if f.startswith('performer_ranker') and f.endswith('.pt')]
+                    if ranker_files:
+                        # Sort by modification time to get the newest
+                        ranker_files.sort(key=lambda x: os.path.getmtime(os.path.join(MODELS_DIR, x)), reverse=True)
+                        ranker_filename = ranker_files[0]
+                        ranker_path = os.path.join(MODELS_DIR, ranker_filename)
+                        
+                        log(f"🔄 No ranker loaded. Auto-loading latest ranker: {ranker_filename}...")
                         checkpoint = torch.load(ranker_path, map_location=DEVICE)
                         config = checkpoint.get('config', {})
                         model_name = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
                         
+                        global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
                         RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
                         RANKER_MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
                         RANKER_MODEL.eval()
                         RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(model_name)
-                        RANKER_MODEL_ID = 'performer_ranker.pt'
+                        RANKER_MODEL_ID = ranker_filename
                         
                         target_model = RANKER_MODEL
                         target_processor = RANKER_PROCESSOR
                         method_name = 'predict_rank'
                         log("✅ Auto-loaded ranker successfully.")
-                    except Exception as le:
-                        log(f"❌ Failed to auto-load ranker: {le}")
+                except Exception as le:
+                    log(f"❌ Failed to auto-load ranker: {le}")
                 
             if not target_model:
                 return jsonify({"success": False, "error": "No rank-capable model loaded (load a Ranker first)"}), 400
