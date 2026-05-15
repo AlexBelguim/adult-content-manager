@@ -1212,8 +1212,8 @@ router.post('/predict-ranks-batch', async (req, res) => {
       console.warn(`[Training] Batch health check failed: ${e.message}`);
     }
 
-    const config = db.prepare('SELECT value FROM settings WHERE key = "base_path"').get();
-    if (!config) throw new Error('base_path not set in settings');
+    const config = db.prepare('SELECT value FROM app_settings WHERE key = "base_path"').get();
+    if (!config) throw new Error('base_path not set in app_settings');
 
     await Promise.all(performerIds.map(async (performerId) => {
       try {
