@@ -280,4 +280,58 @@ router.post('/proxy-classify', async (req, res) => {
   }
 });
 
+// GET /api/filter/pre-rank-performer/:performerId
+// Runs the performer ranker on up to 200 of the performer's images and returns the rank.
+// Must be called before filtering with a rank-conditioned model.
+router.get('/pre-rank-performer/:performerId', async (req, res) => {
+  const { performerId } = req.params;
+  const { ai_server_url, app_base_url } = req.query;
+  const AI_URL = ai_server_url || getAiServerUrl();
+  const myBaseUrl = app_base_url || `${req.protocol}://${req.headers.host}`;
+
+  try {
+    const db = require('../db');
+    const path = require('path');
+    const fs = require('fs-extra');
+
+    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(parseInt(performerId));
+    if (!performer) return res.status(404).json({ error: 'Performer not found' });
+
+    const folder = db.prepare('SELECT path FROM folders WHERE id = ?').get(performer.folder_id);
+    if (!folder) return res.status(404).json({ error: 'Folder not found' });
+
+    const performerPath = performer.moved_to_after === 1
+      ? path.join(folder.path, 'after filter performer', performer.name)
+      : path.join(folder.path, 'before filter performer', performer.name);
+    const picsDir = path.join(performerPath, 'pics');
+
+    if (!await fs.pathExists(picsDir)) {
+      return res.status(404).json({ error: 'Pics directory not found' });
+    }
+
+    const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
+    const entries = await fs.readdir(picsDir);
+    const imagePaths = entries
+      .filter(f => IMAGE_EXTS.has(path.extname(f).toLowerCase()))
+      .slice(0, 200)
+      .map(f => path.join(picsDir, f));
+
+    if (imagePaths.length === 0) {
+      return res.status(404).json({ error: 'No images found for performer' });
+    }
+
+    const axios = require('axios');
+    const response = await axios.post(`${AI_URL}/rank_performer`, {
+      image_paths: imagePaths,
+      performer_name: performer.name,
+      app_base_url: myBaseUrl
+    }, { timeout: 120000 });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('[pre-rank-performer] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

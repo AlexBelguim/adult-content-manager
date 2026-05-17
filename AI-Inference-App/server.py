@@ -352,11 +352,16 @@ def api_list_models():
                 if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
                 elif any('head' in k for k in sd.keys()) and m_type == 'unknown': m_type = 'pairwise'
             
+            rank_conditioned = ckpt.get('rank_conditioned', False)
+            # Normalise type so rank-conditioned models have distinct identifiers
+            if rank_conditioned:
+                if m_type == 'binary': m_type = 'ranked_binary'
+                elif m_type in ('siamese_binary', 'pairwise_siamese_binary'): m_type = 'ranked_siamese_binary'
             info['type'] = m_type
             info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
             info['val_acc'] = ckpt.get('val_acc')
             info['val_mae'] = ckpt.get('val_mae')  # For performer_ranker
-            info['rank_conditioned'] = ckpt.get('rank_conditioned', False)
+            info['rank_conditioned'] = rank_conditioned
             info['samples'] = ckpt.get('samples')
             info['created_at'] = ckpt.get('created_at')
             info['epoch_history'] = ckpt.get('epoch_history')
@@ -741,6 +746,57 @@ def _get_performer_images_for_rank(image_path, max_images=300):
         
     return img_paths
 
+@app.route('/rank_performer', methods=['POST'])
+def rank_performer():
+    """Run the performer ranker on up to 200 images and cache the result."""
+    data = request.json
+    image_paths = data.get('image_paths', [])[:200]
+    performer_name = data.get('performer_name', 'unknown')
+    app_base_url = data.get('app_base_url')
+
+    if RANKER_MODEL is None:
+        return jsonify({'success': False, 'error': 'No ranker model loaded'}), 400
+    if not image_paths:
+        return jsonify({'success': False, 'error': 'No image paths provided'}), 400
+
+    loaded_data = []
+    for p in image_paths:
+        img = _load_image(p, app_base_url)
+        if img:
+            loaded_data.append((p, img))
+
+    if not loaded_data:
+        return jsonify({'success': False, 'error': 'Could not load any images'}), 400
+
+    rank_preds = []
+    with MODEL_LOCK:
+        try:
+            for i in range(0, len(loaded_data), 8):
+                batch = loaded_data[i:i+8]
+                imgs = [it[1] for it in batch]
+                with torch.no_grad():
+                    proc = RANKER_PROCESSOR or PROCESSOR
+                    inputs = proc(images=imgs, return_tensors="pt")
+                    pv = inputs['pixel_values'].to(DEVICE)
+                    ranks = RANKER_MODEL.predict_rank(pv)
+                    rank_preds.extend(ranks.cpu().tolist())
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+        finally:
+            for _, img in loaded_data: img.close()
+            import gc; gc.collect()
+
+    avg_rank = sum(rank_preds) / max(len(rank_preds), 1)
+    CONTEXT_STAR_CACHE[performer_name] = avg_rank
+    log(f"⭐ Pre-ranked '{performer_name}': {avg_rank:.2f} stars (from {len(rank_preds)} images)")
+
+    return jsonify({
+        'success': True,
+        'rank': round(avg_rank, 2),
+        'images_used': len(rank_preds),
+        'performer': performer_name
+    })
+
+
 @app.route('/classify_batch', methods=['POST'])
 def classify_batch():
     """Binary classification (Keep/Delete) for Smart Filtering."""
@@ -877,7 +933,7 @@ def classify_batch():
                     time.sleep(0.005)
 
             # ── Rank-Conditioned Binary: Two-pass (ranker + classifier) ────
-            elif RANK_CONDITIONED and isinstance(MODEL, RankedBinaryClassifier):
+            elif isinstance(MODEL, RankedBinaryClassifier):
                 # Pass 0: Get performer ranks via RANKER_MODEL or fallback to 2.5
                 performer_data = {}
                 for p, img in loaded_data:
@@ -944,7 +1000,7 @@ def classify_batch():
                     time.sleep(0.005)
 
             # ── Rank-Conditioned Siamese: Two-pass ────────────────────────────
-            elif RANK_CONDITIONED and isinstance(MODEL, RankedSiameseModel):
+            elif isinstance(MODEL, RankedSiameseModel):
                 performer_data = {}
                 for p, img in loaded_data:
                     perf = _get_performer_name(p)
@@ -1177,7 +1233,7 @@ def classify_single():
                 pixel_values = inputs['pixel_values'].to(DEVICE)
                 
                 # Dispatch based on model type
-                if RANK_CONDITIONED and isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
+                if isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
                     # Get rank for this performer
                     perf = _get_performer_name(image_path)
                     if perf not in CONTEXT_STAR_CACHE:
@@ -1271,9 +1327,7 @@ def score_images():
                     pv = inputs['pixel_values'].to(DEVICE)
                     
                     # Get scores — handle all model types
-                    if RANK_CONDITIONED and isinstance(MODEL, RankedBinaryClassifier):
-                        raw_scores = MODEL.forward_no_rank(pv)
-                    elif RANK_CONDITIONED and isinstance(MODEL, RankedSiameseModel):
+                    if isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
                         raw_scores = MODEL.forward_no_rank(pv)
                     elif hasattr(MODEL, 'forward_single'):
                         raw_scores = MODEL.forward_single(pv)

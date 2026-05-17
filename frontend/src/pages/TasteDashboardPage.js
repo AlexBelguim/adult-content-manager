@@ -76,6 +76,7 @@ function TasteDashboardPage() {
   const [preferredContextModel, setPreferredContextModel] = useState('');
   const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
   const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
+  const [preferredRankedSiameseModel, setPreferredRankedSiameseModel] = useState('');
   const [preferredRankerModel, setPreferredRankerModel] = useState('');
   const [useHardExamples, setUseHardExamples] = useState(true);
   const [enableMining, setEnableMining] = useState(false);
@@ -145,6 +146,7 @@ function TasteDashboardPage() {
     fetch('/api/settings/preferred_context_model').then(r => r.json()).then(d => d.value && setPreferredContextModel(d.value)).catch(() => {});
     fetch('/api/settings/preferred_siamese_model').then(r => r.json()).then(d => d.value && setPreferredSiameseModel(d.value)).catch(() => {});
     fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).then(d => d.value && setPreferredRankSiameseModel(d.value)).catch(() => {});
+    fetch('/api/settings/preferred_ranked_siamese_model').then(r => r.json()).then(d => d.value && setPreferredRankedSiameseModel(d.value)).catch(() => {});
     fetch('/api/settings/preferred_ranker_model').then(r => r.json()).then(d => d.value && setPreferredRankerModel(d.value)).catch(() => {});
 
     fetchData();
@@ -256,7 +258,8 @@ function TasteDashboardPage() {
     if (type === 'pairwise') key = 'preferred_pairwise_model';
     if (type === 'context_binary') key = 'preferred_context_model';
     if (type === 'siamese_binary') key = 'preferred_siamese_model';
-    if (type === 'rank_aware_siamese' || type === 'ranked_siamese_binary') key = 'preferred_rank_siamese_model';
+    if (type === 'rank_aware_siamese') key = 'preferred_rank_siamese_model';
+    if (type === 'ranked_siamese_binary') key = 'preferred_ranked_siamese_model';
     if (type === 'performer_ranker') key = 'preferred_ranker_model';
 
     try {
@@ -270,7 +273,8 @@ function TasteDashboardPage() {
       else if (type === 'pairwise') setPreferredPairwiseModel(modelName);
       else if (type === 'context_binary') setPreferredContextModel(modelName);
       else if (type === 'siamese_binary') setPreferredSiameseModel(modelName);
-      else if (type === 'rank_aware_siamese' || type === 'ranked_siamese_binary') setPreferredRankSiameseModel(modelName);
+      else if (type === 'rank_aware_siamese') setPreferredRankSiameseModel(modelName);
+      else if (type === 'ranked_siamese_binary') setPreferredRankedSiameseModel(modelName);
       else if (type === 'performer_ranker') setPreferredRankerModel(modelName);
     } catch (err) {
       alert('Failed to save preferred model: ' + err.message);
@@ -1000,6 +1004,7 @@ function TasteDashboardPage() {
                 preferredContext={preferredContextModel}
                 preferredSiamese={preferredSiameseModel}
                 preferredRankSiamese={preferredRankSiameseModel}
+                preferredRankedSiamese={preferredRankedSiameseModel}
                 preferredRanker={preferredRankerModel}
                 onSetPreferred={handleSetPreferred}
               />
@@ -1061,7 +1066,7 @@ export default TasteDashboardPage;
 // ── Model Arsenal sub-component ──
 function ModelArsenal({ 
   models, aiUrl, aiHealth, testingModel, setTestingModel, testResults, setTestResults, onModelLoaded,
-  preferredBinary, preferredRankedBinary, preferredPairwise, preferredContext, preferredSiamese, preferredRankSiamese, preferredRanker, onSetPreferred
+  preferredBinary, preferredRankedBinary, preferredPairwise, preferredContext, preferredSiamese, preferredRankSiamese, preferredRankedSiamese, preferredRanker, onSetPreferred
 }) {
   const [loadingModel, setLoadingModel] = useState(null);
   const [quantizeLoad, setQuantizeLoad] = useState(false);
@@ -1218,7 +1223,8 @@ function ModelArsenal({
                          type === 'pairwise' ? preferredPairwise :
                          type === 'context_binary' ? preferredContext :
                          type === 'siamese_binary' ? preferredSiamese :
-                         type === 'rank_aware_siamese' || type === 'ranked_siamese_binary' ? preferredRankSiamese :
+                         type === 'rank_aware_siamese' ? preferredRankSiamese :
+                         type === 'ranked_siamese_binary' ? preferredRankedSiamese :
                          type === 'performer_ranker' ? preferredRanker : '') === m.filename ? "contained" : "outlined"
                       }
                       onClick={() => onSetPreferred(m.filename, type)}
@@ -1229,32 +1235,36 @@ function ModelArsenal({
                          type === 'pairwise' ? (preferredPairwise === m.filename ? <CheckCircle /> : <Compare />) :
                          type === 'context_binary' ? (preferredContext === m.filename ? <CheckCircle /> : <Psychology />) :
                          type === 'siamese_binary' ? (preferredSiamese === m.filename ? <CheckCircle /> : <AutoAwesome />) :
-                         type === 'rank_aware_siamese' || type === 'ranked_siamese_binary' ? (preferredRankSiamese === m.filename ? <CheckCircle /> : <EmojiEvents />) :
+                         type === 'rank_aware_siamese' ? (preferredRankSiamese === m.filename ? <CheckCircle /> : <EmojiEvents />) :
+                         type === 'ranked_siamese_binary' ? (preferredRankedSiamese === m.filename ? <CheckCircle /> : <EmojiEvents />) :
                          type === 'performer_ranker' ? (preferredRanker === m.filename ? <CheckCircle /> : <Star />) : null)
                       }
-                      sx={{ 
-                        fontSize: '0.65rem', 
+                      sx={{
+                        fontSize: '0.65rem',
                         justifyContent: 'center',
                         bgcolor: (type === 'binary' ? preferredBinary :
                                   type === 'ranked_binary' ? preferredRankedBinary :
                                   type === 'pairwise' ? preferredPairwise :
                                   type === 'context_binary' ? preferredContext :
                                   type === 'siamese_binary' ? preferredSiamese :
-                                  type === 'rank_aware_siamese' || type === 'ranked_siamese_binary' ? preferredRankSiamese :
+                                  type === 'rank_aware_siamese' ? preferredRankSiamese :
+                                  type === 'ranked_siamese_binary' ? preferredRankedSiamese :
                                   type === 'performer_ranker' ? preferredRanker : '') === m.filename ? `${tInfo.color}20` : 'transparent',
                         color: (type === 'binary' ? preferredBinary :
                                 type === 'ranked_binary' ? preferredRankedBinary :
                                 type === 'pairwise' ? preferredPairwise :
                                 type === 'context_binary' ? preferredContext :
                                 type === 'siamese_binary' ? preferredSiamese :
-                                type === 'rank_aware_siamese' || type === 'ranked_siamese_binary' ? preferredRankSiamese :
+                                type === 'rank_aware_siamese' ? preferredRankSiamese :
+                                type === 'ranked_siamese_binary' ? preferredRankedSiamese :
                                 type === 'performer_ranker' ? preferredRanker : '') === m.filename ? tInfo.color : '#888',
                         borderColor: (type === 'binary' ? preferredBinary :
                                       type === 'ranked_binary' ? preferredRankedBinary :
                                       type === 'pairwise' ? preferredPairwise :
                                       type === 'context_binary' ? preferredContext :
                                       type === 'siamese_binary' ? preferredSiamese :
-                                      type === 'rank_aware_siamese' || type === 'ranked_siamese_binary' ? preferredRankSiamese :
+                                      type === 'rank_aware_siamese' ? preferredRankSiamese :
+                                      type === 'ranked_siamese_binary' ? preferredRankedSiamese :
                                       type === 'performer_ranker' ? preferredRanker : '') === m.filename ? tInfo.color : 'rgba(255,255,255,0.1)',
                         '&:hover': { bgcolor: `${tInfo.color}30`, borderColor: tInfo.color }
                       }}
@@ -1264,9 +1274,10 @@ function ModelArsenal({
                         type === 'pairwise' ? preferredPairwise :
                         type === 'context_binary' ? preferredContext :
                         type === 'siamese_binary' ? preferredSiamese :
-                        type === 'rank_aware_siamese' || type === 'ranked_siamese_binary' ? preferredRankSiamese :
-                        type === 'performer_ranker' ? preferredRanker : '') === m.filename 
-                        ? `Default ${tInfo.label} Model` 
+                        type === 'rank_aware_siamese' ? preferredRankSiamese :
+                        type === 'ranked_siamese_binary' ? preferredRankedSiamese :
+                        type === 'performer_ranker' ? preferredRanker : '') === m.filename
+                        ? `Default ${tInfo.label} Model`
                         : `Use as Default ${tInfo.label}`}
                     </Button>
                   )}

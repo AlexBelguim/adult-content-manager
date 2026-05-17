@@ -44,6 +44,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [preferredContextModel, setPreferredContextModel] = useState('');
   const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
   const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
+  const [preferredRankedSiameseModel, setPreferredRankedSiameseModel] = useState('');
+  const [preferredRankerModel, setPreferredRankerModel] = useState('');
+  const [rankerLoaded, setRankerLoaded] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('');
+  const [performerRank, setPerformerRank] = useState(null);
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
   const [inferenceUrl, setInferenceUrl] = useState('');
@@ -154,7 +159,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         fetchBatch(true, newThreshold);
         
         // Siamese/Rank-Aware: apply zone logic to just-received results
-        if (['siamese', 'rank_aware_siamese'].includes(modelType) && data.results) {
+        if (['siamese', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(modelType) && data.results) {
           const zoned = data.results.map(r => ({
             ...r,
             originalDecision: r.decision,
@@ -176,7 +181,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         }));
         
         // Siamese modes: re-classify into keep / uncertain / delete zones
-        const finalResults = ['siamese', 'rank_aware_siamese'].includes(modelType) 
+        const finalResults = ['siamese', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(modelType) 
           ? resultsWithOriginal.map(r => ({
               ...r,
               decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
@@ -229,30 +234,38 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     if (!inferenceUrl) return;
     
     const fetchModels = async () => {
+      // Reset ranker/rank status when mode changes
+      if (!['ranked_binary', 'ranked_siamese_binary'].includes(modelType)) { setRankerLoaded(false); setPerformerRank(null); }
       try {
         // 1. Fetch preferences from backend
-        const [binPref, rankBinPref, pairPref, contextPref, siamesePref, rankSiamesePref] = await Promise.all([
+        const [binPref, rankBinPref, pairPref, contextPref, siamesePref, rankSiamesePref, rankedSiamesePref, rankerPref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
           fetch('/api/settings/preferred_ranked_binary_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_pairwise_model').then(r => r.json()),
           fetch('/api/settings/preferred_context_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
-          fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).catch(() => ({ value: '' }))
+          fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
+          fetch('/api/settings/preferred_ranked_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
+          fetch('/api/settings/preferred_ranker_model').then(r => r.json()).catch(() => ({ value: '' }))
         ]);
-        
+
         const pBin = binPref.value || 'binary_filtering.pt';
         const pRankBin = rankBinPref.value || 'ranked_binary.pt';
         const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
         const pContext = contextPref.value || 'context_binary.pt';
         const pSiamese = siamesePref.value || 'siamese_binary.pt';
         const pRankSiamese = rankSiamesePref.value || 'rank_siamese.pt';
-        
+        const pRankedSiamese = rankedSiamesePref.value || 'ranked_siamese.pt';
+        const pRanker = rankerPref.value || '';
+
         setPreferredBinaryModel(pBin);
         setPreferredRankedBinaryModel(pRankBin);
         setPreferredPairwiseModel(pPair);
         setPreferredContextModel(pContext);
         setPreferredSiameseModel(pSiamese);
         setPreferredRankSiameseModel(pRankSiamese);
+        setPreferredRankedSiameseModel(pRankedSiamese);
+        setPreferredRankerModel(pRanker);
 
         // 2. Fetch available models from AI server
         const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
@@ -267,7 +280,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           else if (modelType === 'pairwise') targetModel = pPair;
           else if (modelType === 'context_binary') targetModel = pContext;
           else if (modelType === 'siamese') targetModel = pSiamese;
-          else if (modelType === 'rank_aware_siamese' || modelType === 'ranked_siamese_binary') targetModel = pRankSiamese;
+          else if (modelType === 'rank_aware_siamese') targetModel = pRankSiamese;
+          else if (modelType === 'ranked_siamese_binary') targetModel = pRankedSiamese;
           
           // If preferred model not found, pick the first one of matching type
           if (!models.find(m => m.filename === targetModel)) {
@@ -280,18 +294,62 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           
           setSelectedModel(targetModel);
           setIsLoadingModel(true);
-          
+
+          const isRankedMode = ['ranked_binary', 'ranked_siamese_binary'].includes(modelType);
+
           try {
+            // For rank-conditioned modes, load the ranker first (it goes into RANKER_MODEL,
+            // separate from the classification model), then load the rank-conditioned model.
+            if (isRankedMode && pRanker) {
+              // Check if ranker is already loaded to avoid redundant loads
+              let rankerAlreadyLoaded = false;
+              try {
+                const health = await fetch(`/api/training/ai-health?url=${encodeURIComponent(inferenceUrl)}`).then(r => r.json());
+                rankerAlreadyLoaded = health.ranker_loaded && health.ranker_model === pRanker;
+              } catch (_) {}
+
+              if (!rankerAlreadyLoaded) {
+                setLoadingStage('Loading performer ranker...');
+                await fetch('/api/filter/load-model', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ modelId: pRanker, ai_server_url: inferenceUrl })
+                });
+              }
+              setRankerLoaded(true);
+              setLoadingStage('Loading rank-conditioned model...');
+            } else if (isRankedMode) {
+              setLoadingStage('Loading rank-conditioned model (no ranker set)...');
+            } else {
+              setLoadingStage('');
+            }
+
             await fetch('/api/filter/load-model', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
+              body: JSON.stringify({
                 modelId: targetModel,
-                ai_server_url: inferenceUrl 
+                ai_server_url: inferenceUrl
               })
             });
+          // For ranked modes, pre-rank the performer immediately after loading
+          if (isRankedMode && performer?.id) {
+            setLoadingStage('Ranking performer...');
+            try {
+              const params = new URLSearchParams({
+                ai_server_url: inferenceUrl,
+                app_base_url: window.location.origin
+              });
+              const rankRes = await fetch(`/api/filter/pre-rank-performer/${performer.id}?${params}`).then(r => r.json());
+              if (rankRes.success) {
+                setPerformerRank(rankRes.rank);
+                alert(`⭐ Performer rank determined: ${rankRes.rank.toFixed(1)} / 5.0\n(based on ${rankRes.images_used} images)\n\nThe rank-conditioned model will use this to calibrate its decisions.`);
+              }
+            } catch (_) {}
+          }
           } finally {
             setIsLoadingModel(false);
+            setLoadingStage('');
             // If started, trigger a fresh fetch after model is loaded
             if (isStarted) {
               setResults([]);
@@ -367,7 +425,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const handleSaveBatch = async () => {
     if (results.length === 0) return;
     // For siamese modes, only save decided items (skip uncertain ones)
-    const isSiamese = ['siamese', 'rank_aware_siamese'].includes(modelType);
+    const isSiamese = ['siamese', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(modelType);
     const toSave = isSiamese ? results.filter(r => r.decision !== 'uncertain') : results;
     if (toSave.length === 0) {
       alert('No decided images to save. All are in the uncertain zone — please manually classify them first.');
@@ -560,17 +618,47 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           </ToggleButtonGroup>
           
           <Fade in={true} key={modelType}>
-            <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 500, fontStyle: 'italic' }}>
-              {modelType === 'binary' 
-                ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)' 
-                : modelType === 'ranked_binary'
-                ? '📊 Rank-Conditioned Binary — automatically adjusts Keep standards based on performer stars'
-                : modelType === 'pairwise'
-                ? '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'
-                : modelType === 'siamese'
-                ? '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'
-                : '👑 Rank-Conditioned Siamese — top-% filtering adjusted by performer star-rating'}
-            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 500, fontStyle: 'italic' }}>
+                {modelType === 'binary'
+                  ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)'
+                  : modelType === 'ranked_binary'
+                  ? '📊 Rank-Conditioned Binary — automatically adjusts Keep standards based on performer stars'
+                  : modelType === 'pairwise'
+                  ? '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'
+                  : modelType === 'siamese'
+                  ? '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'
+                  : '👑 Rank-Conditioned Siamese — top-% filtering adjusted by performer star-rating'}
+              </Typography>
+              {['ranked_binary', 'ranked_siamese_binary'].includes(modelType) && (
+                isLoadingModel ? (
+                  <Chip
+                    icon={<CircularProgress size={10} sx={{ color: '#ff9800 !important' }} />}
+                    label={loadingStage || 'Loading...'}
+                    size="small"
+                    sx={{ bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800', borderColor: 'rgba(255,152,0,0.3)', border: '1px solid' }}
+                  />
+                ) : rankerLoaded ? (
+                  <Chip
+                    label={performerRank !== null ? `⭐ Performer Rank: ${performerRank.toFixed(1)} / 5.0` : '⭐ Performer Ranker Ready'}
+                    size="small"
+                    sx={{ bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50', borderColor: 'rgba(76,175,80,0.3)', border: '1px solid' }}
+                  />
+                ) : preferredRankerModel ? (
+                  <Chip
+                    label="⚠ No ranker loaded — will use neutral rank"
+                    size="small"
+                    sx={{ bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800', borderColor: 'rgba(255,152,0,0.3)', border: '1px solid' }}
+                  />
+                ) : (
+                  <Chip
+                    label="⚠ No ranker model set — set one in Model Arsenal"
+                    size="small"
+                    sx={{ bgcolor: 'rgba(244,67,54,0.1)', color: '#f44336', borderColor: 'rgba(244,67,54,0.3)', border: '1px solid' }}
+                  />
+                )
+              )}
+            </Box>
           </Fade>
         </Box>
 
