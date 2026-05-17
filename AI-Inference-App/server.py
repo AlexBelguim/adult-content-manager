@@ -824,7 +824,41 @@ def classify_batch():
     start_time = time.time()
     import math
 
-    # 2. RUN INFERENCE (Inside lock)
+    # 2. PRE-COMPUTE PERFORMER RANKS (Outside lock — avoids holding MODEL_LOCK during heavy I/O)
+    # If a rank-conditioned model is loaded and RANKER_MODEL is available, compute every
+    # unique performer's rank now so classify_batch only needs a fast cache lookup inside the lock.
+    if RANKER_MODEL is not None and isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
+        performers_to_rank = {}
+        for p, _ in loaded_data:
+            perf = _get_performer_name(p)
+            if perf not in CONTEXT_STAR_CACHE and perf not in performers_to_rank:
+                performers_to_rank[perf] = p  # store one sample path per performer
+
+        for perf, sample_path in performers_to_rank.items():
+            if perf in CONTEXT_STAR_CACHE:
+                continue  # another request may have filled it in the meantime
+            performer_img_paths = _get_performer_images_for_rank(sample_path, max_images=200)
+            rank_preds = []
+            for ri in range(0, len(performer_img_paths), 8):
+                chunk_paths = performer_img_paths[ri:ri+8]
+                chunk_imgs = []
+                for cp in chunk_paths:
+                    cimg = _load_image(cp, app_base_url)
+                    if cimg: chunk_imgs.append(cimg)
+                if not chunk_imgs: continue
+                with torch.no_grad():
+                    proc = RANKER_PROCESSOR or PROCESSOR
+                    inputs = proc(images=chunk_imgs, return_tensors="pt")
+                    pv = inputs['pixel_values'].to(DEVICE)
+                    ranks = RANKER_MODEL.predict_rank(pv)
+                    rank_preds.extend(ranks.cpu().tolist())
+                for cimg in chunk_imgs: cimg.close()
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+            avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
+            CONTEXT_STAR_CACHE[perf] = avg_rank
+            log(f"  ⭐ {perf}: rank {avg_rank:.2f} (pre-computed from {len(rank_preds)} images, outside lock)")
+
+    # 3. RUN INFERENCE (Inside lock)
     with MODEL_LOCK:
         if MODEL is None or PROCESSOR is None:
             return jsonify({'error': 'Model not loaded'}), 500
