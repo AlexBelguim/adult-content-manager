@@ -704,6 +704,43 @@ def _get_performer_name(image_path):
         name = p.parent.parent.name
     return name
 
+def _get_performer_images_for_rank(image_path, max_images=300):
+    """Find up to 300 images for the same performer to get a better rank average."""
+    mapped_p = map_path(image_path)
+    p = Path(mapped_p)
+    
+    # Try to find the 'pics' folder or performer root
+    dir_to_scan = None
+    if p.parent.name == 'pics':
+        dir_to_scan = p.parent
+    elif (p.parent / 'pics').exists() and (p.parent / 'pics').is_dir():
+        dir_to_scan = p.parent / 'pics'
+    else:
+        dir_to_scan = p.parent
+        
+    if not dir_to_scan or not dir_to_scan.exists():
+        return [image_path]
+        
+    valid_exts = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
+    img_paths = []
+    try:
+        # Shallow scan for speed
+        for f in dir_to_scan.iterdir():
+            if f.is_file() and f.suffix.lower() in valid_exts:
+                img_paths.append(str(f))
+    except Exception as e:
+        log(f"⚠️ Error scanning performer images for rank: {e}")
+        return [image_path]
+        
+    if not img_paths:
+        return [image_path]
+        
+    import random
+    if len(img_paths) > max_images:
+        img_paths = random.sample(img_paths, max_images)
+        
+    return img_paths
+
 @app.route('/classify_batch', methods=['POST'])
 def classify_batch():
     """Binary classification (Keep/Delete) for Smart Filtering."""
@@ -850,23 +887,38 @@ def classify_batch():
                 for perf, items in performer_data.items():
                     if perf in CONTEXT_STAR_CACHE: continue
                     if RANKER_MODEL is not None:
-                        sample_items = items[:20]
+                        # NEW: Load up to 300 images for this performer to get a robust rank
+                        log(f"  🔍 Gathering images for {perf} to establish robust rank...")
+                        performer_img_paths = _get_performer_images_for_rank(items[0][0], max_images=300)
+                        log(f"  🔍 Running ranker on {len(performer_img_paths)} images for {perf}...")
+                        
                         rank_preds = []
-                        for ri in range(0, len(sample_items), 4):
-                            batch = sample_items[ri:ri+4]
-                            imgs = [it[1] for it in batch]
+                        # Process in chunks of 8 for efficiency
+                        for ri in range(0, len(performer_img_paths), 8):
+                            chunk_paths = performer_img_paths[ri:ri+8]
+                            chunk_imgs = []
+                            for cp in chunk_paths:
+                                cimg = _load_image(cp, app_base_url)
+                                if cimg: chunk_imgs.append(cimg)
+                            
+                            if not chunk_imgs: continue
+                            
                             with torch.no_grad():
                                 proc = RANKER_PROCESSOR or PROCESSOR
-                                inputs = proc(images=imgs, return_tensors="pt")
+                                inputs = proc(images=chunk_imgs, return_tensors="pt")
                                 pv = inputs['pixel_values'].to(DEVICE)
                                 ranks = RANKER_MODEL.predict_rank(pv)
                                 rank_preds.extend(ranks.cpu().tolist())
+                            
+                            # Clean up chunk images immediately
+                            for cimg in chunk_imgs: cimg.close()
                             if torch.cuda.is_available(): torch.cuda.synchronize()
+                            
                         avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
                     else:
                         avg_rank = 2.5  # No ranker loaded — neutral fallback
                     CONTEXT_STAR_CACHE[perf] = avg_rank
-                    log(f"  ⭐ {perf}: rank {avg_rank:.2f}" + (" (ranker)" if RANKER_MODEL else " (fallback)"))
+                    log(f"  ⭐ {perf}: rank {avg_rank:.2f} (based on {len(rank_preds) if RANKER_MODEL else 0} images)")
                 
                 # Pass 1: Classify with rank
                 for i in range(0, len(loaded_data), 4):
@@ -901,23 +953,36 @@ def classify_batch():
                 for perf, items in performer_data.items():
                     if perf in CONTEXT_STAR_CACHE: continue
                     if RANKER_MODEL is not None:
-                        sample_items = items[:20]
+                        # NEW: Load up to 300 images for this performer
+                        log(f"  🔍 Gathering images for {perf} to establish robust rank...")
+                        performer_img_paths = _get_performer_images_for_rank(items[0][0], max_images=300)
+                        log(f"  🔍 Running ranker on {len(performer_img_paths)} images for {perf}...")
+                        
                         rank_preds = []
-                        for ri in range(0, len(sample_items), 4):
-                            batch = sample_items[ri:ri+4]
-                            imgs = [it[1] for it in batch]
+                        for ri in range(0, len(performer_img_paths), 8):
+                            chunk_paths = performer_img_paths[ri:ri+8]
+                            chunk_imgs = []
+                            for cp in chunk_paths:
+                                cimg = _load_image(cp, app_base_url)
+                                if cimg: chunk_imgs.append(cimg)
+                            
+                            if not chunk_imgs: continue
+                            
                             with torch.no_grad():
                                 proc = RANKER_PROCESSOR or PROCESSOR
-                                inputs = proc(images=imgs, return_tensors="pt")
+                                inputs = proc(images=chunk_imgs, return_tensors="pt")
                                 pv = inputs['pixel_values'].to(DEVICE)
                                 ranks = RANKER_MODEL.predict_rank(pv)
                                 rank_preds.extend(ranks.cpu().tolist())
+                            
+                            for cimg in chunk_imgs: cimg.close()
                             if torch.cuda.is_available(): torch.cuda.synchronize()
+                            
                         avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
                     else:
                         avg_rank = 2.5
                     CONTEXT_STAR_CACHE[perf] = avg_rank
-                    log(f"  ⭐ {perf}: rank {avg_rank:.2f}" + (" (ranker)" if RANKER_MODEL else " (fallback)"))
+                    log(f"  ⭐ {perf}: rank {avg_rank:.2f} (based on {len(rank_preds) if RANKER_MODEL else 0} images)")
                 
                 for i in range(0, len(loaded_data), 4):
                     batch = loaded_data[i:i+4]
@@ -1117,8 +1182,29 @@ def classify_single():
                     perf = _get_performer_name(image_path)
                     if perf not in CONTEXT_STAR_CACHE:
                         if RANKER_MODEL is not None:
-                            rank_pred = RANKER_MODEL.predict_rank(pixel_values)
-                            CONTEXT_STAR_CACHE[perf] = rank_pred.item()
+                            # NEW: Also use up to 300 images for single classification if not cached
+                            log(f"  🔍 Establishing robust rank for {perf} using up to 300 images...")
+                            performer_img_paths = _get_performer_images_for_rank(image_path, max_images=300)
+                            rank_preds = []
+                            for ri in range(0, len(performer_img_paths), 8):
+                                chunk_paths = performer_img_paths[ri:ri+8]
+                                chunk_imgs = []
+                                for cp in chunk_paths:
+                                    cimg = _load_image(cp)
+                                    if cimg: chunk_imgs.append(cimg)
+                                if not chunk_imgs: continue
+                                with torch.no_grad():
+                                    proc = RANKER_PROCESSOR or PROCESSOR
+                                    inp = proc(images=chunk_imgs, return_tensors="pt")
+                                    p_val = inp['pixel_values'].to(DEVICE)
+                                    ranks = RANKER_MODEL.predict_rank(p_val)
+                                    rank_preds.extend(ranks.cpu().tolist())
+                                for cimg in chunk_imgs: cimg.close()
+                                if torch.cuda.is_available(): torch.cuda.synchronize()
+                            
+                            avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
+                            CONTEXT_STAR_CACHE[perf] = avg_rank
+                            log(f"  ⭐ {perf}: robust rank {avg_rank:.2f}")
                         else:
                             CONTEXT_STAR_CACHE[perf] = 2.5
                     rank = CONTEXT_STAR_CACHE[perf]
