@@ -46,14 +46,19 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
   const [preferredRankedSiameseModel, setPreferredRankedSiameseModel] = useState('');
   const [preferredRankerModel, setPreferredRankerModel] = useState('');
-  const [rankerLoaded, setRankerLoaded] = useState(false);
-  const [loadingStage, setLoadingStage] = useState('');
+  // Loading state: which model type is currently loading (null when idle)
+  const [loadingModelType, setLoadingModelType] = useState(null);
+  // Active model type loaded server-side (null = nothing loaded)
+  const [activeModelType, setActiveModelType] = useState(null);
+  // Ranker pipeline status: 'idle' | 'loading' | 'ranking' | 'unloading' | 'done' | 'error'
+  const [rankerStatus, setRankerStatus] = useState('idle');
   const [performerRank, setPerformerRank] = useState(null);
   const [isStarted, setIsStarted] = useState(false);
   const [firstBatchDone, setFirstBatchDone] = useState(false);
   const [inferenceUrl, setInferenceUrl] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [isLoadingModel, setIsLoadingModel] = useState(false);
+  // Derived: any loading is in-flight (used as a guard across the page)
+  const isLoadingModel = loadingModelType !== null || ['loading', 'ranking', 'unloading'].includes(rankerStatus);
   const isFetchingRef = useRef(false);
   const isPrefetchUrgentRef = useRef(false);
   const abortControllerRef = useRef(null);
@@ -235,15 +240,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   }, [performer?.id, isStarted, results.length, nextBatch, isLoadingModel, fetchBatch]);
 
   // Fetch preferences and available models — DOES NOT load any model.
-  // Actual loading happens in prepareForFiltering() when user clicks Start Scanning.
+  // Actual loading happens when the user clicks a model button in the pre-start screen.
   useEffect(() => {
     if (!inferenceUrl) return;
 
     const fetchPrefs = async () => {
-      // Reset ranker/rank status — these only become valid after Start Scanning runs the load flow
-      setRankerLoaded(false);
-      setPerformerRank(null);
-
       try {
         const [binPref, rankBinPref, pairPref, contextPref, siamesePref, rankSiamesePref, rankedSiamesePref, rankerPref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
@@ -300,100 +301,111 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     };
   }, [inferenceUrl, modelType]);
 
-  // Sequential model load + pre-rank flow.
-  // For ranked modes: load ranker → pre-rank performer → unload ranker → load classifier
-  // For other modes: just load the classifier
-  // Returns the determined performer rank (or null) so it can be passed to classify_batch.
-  const prepareForFiltering = useCallback(async () => {
-    if (!inferenceUrl || !performer?.id) return null;
+  // Pick the preferred model filename for a given classifier type
+  const getPreferredFor = useCallback((type) => {
+    if (type === 'binary') return preferredBinaryModel;
+    if (type === 'pairwise') return preferredPairwiseModel;
+    if (type === 'siamese') return preferredSiameseModel;
+    if (type === 'ranked_binary') return preferredRankedBinaryModel;
+    if (type === 'ranked_siamese_binary') return preferredRankedSiameseModel;
+    return null;
+  }, [preferredBinaryModel, preferredPairwiseModel, preferredSiameseModel, preferredRankedBinaryModel, preferredRankedSiameseModel]);
 
-    const isRankedMode = ['ranked_binary', 'ranked_siamese_binary'].includes(modelType);
-    const targetModel = selectedModel;
-    let determinedRank = null;
+  // Load a classifier model. For ranked modes the ranker must have already run.
+  const loadClassifier = useCallback(async (type) => {
+    if (isLoadingModel) return;
+    const modelId = getPreferredFor(type);
+    if (!modelId) {
+      alert(`No default model set for ${type}.\nSet one in Taste Dashboard → Model Arsenal.`);
+      return;
+    }
+    if (['ranked_binary', 'ranked_siamese_binary'].includes(type) && performerRank === null) {
+      alert('Run the ⭐ Performer Ranker first (Step 1) so the model can be calibrated for this performer.');
+      return;
+    }
 
-    setIsLoadingModel(true);
-    setRankerLoaded(false);
+    setLoadingModelType(type);
+    setActiveModelType(null);
+    try {
+      const res = await fetch('/api/filter/load-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelId, ai_server_url: inferenceUrl })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSelectedModel(modelId);
+      setModelType(type);
+      setActiveModelType(type);
+    } catch (err) {
+      console.error('loadClassifier failed:', err);
+      alert(`Failed to load ${type}: ${err.message}`);
+    } finally {
+      setLoadingModelType(null);
+    }
+  }, [isLoadingModel, inferenceUrl, performerRank, getPreferredFor]);
+
+  // Run the performer-ranking pipeline: load ranker → predict → unload ranker.
+  // After this completes, performerRank is set and rank-conditioned models can be loaded.
+  const runRanker = useCallback(async () => {
+    if (isLoadingModel) return;
+    if (!performer?.id) {
+      alert('No performer selected.');
+      return;
+    }
+    if (!preferredRankerModel) {
+      alert('No default Performer Ranker set.\nSet one in Taste Dashboard → Model Arsenal → Performer Ranker.');
+      return;
+    }
+
+    setRankerStatus('loading');
+    setActiveModelType(null);
     setPerformerRank(null);
 
     try {
-      if (isRankedMode) {
-        if (!preferredRankerModel) {
-          alert('⚠️ No Performer Ranker model is set as default.\n\nSet one in the Taste Dashboard → Model Arsenal → Performer Ranker section, then try again.');
-          return null;
-        }
+      // 1. Load ranker
+      await fetch('/api/filter/load-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelId: preferredRankerModel, ai_server_url: inferenceUrl })
+      });
 
-        // 1. Load ranker
-        setLoadingStage('Loading performer ranker...');
-        await fetch('/api/filter/load-model', {
+      // 2. Run ranking on up to 200 images
+      setRankerStatus('ranking');
+      const params = new URLSearchParams({
+        ai_server_url: inferenceUrl,
+        app_base_url: window.location.origin
+      });
+      const rankRes = await fetch(`/api/filter/pre-rank-performer/${performer.id}?${params}`).then(r => r.json());
+      if (!rankRes.success) throw new Error(rankRes.error || 'Pre-rank failed');
+
+      // 3. Unload ranker to free VRAM for the classifier
+      setRankerStatus('unloading');
+      try {
+        await fetch('/api/filter/unload-ranker', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelId: preferredRankerModel, ai_server_url: inferenceUrl })
+          body: JSON.stringify({ ai_server_url: inferenceUrl })
         });
-        setRankerLoaded(true);
+      } catch (_) {}
 
-        // 2. Pre-rank performer (up to 200 images)
-        setLoadingStage('Analyzing performer (up to 200 images)...');
-        try {
-          const params = new URLSearchParams({
-            ai_server_url: inferenceUrl,
-            app_base_url: window.location.origin
-          });
-          const rankRes = await fetch(`/api/filter/pre-rank-performer/${performer.id}?${params}`).then(r => r.json());
-          if (rankRes.success) {
-            determinedRank = rankRes.rank;
-            setPerformerRank(rankRes.rank);
-            alert(`⭐ Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nThe ${modelType === 'ranked_binary' ? 'Ranked Binary' : 'Ranked Siamese'} model will be calibrated with this rank.`);
-          } else {
-            alert(`⚠️ Could not determine performer rank: ${rankRes.error || 'unknown error'}\n\nFalling back to neutral rank (2.5).`);
-            determinedRank = 2.5;
-          }
-        } catch (err) {
-          console.error('Pre-rank failed:', err);
-          determinedRank = 2.5;
-        }
-
-        // 3. Unload ranker to free VRAM before loading the classifier
-        setLoadingStage('Freeing VRAM...');
-        try {
-          await fetch('/api/filter/unload-ranker', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ai_server_url: inferenceUrl })
-          });
-        } catch (_) {}
-        setRankerLoaded(false);
-
-        // 4. Load rank-conditioned classifier
-        setLoadingStage('Loading rank-conditioned model...');
-        await fetch('/api/filter/load-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelId: targetModel, ai_server_url: inferenceUrl })
-        });
-      } else {
-        // Non-ranked mode: just load the classifier
-        setLoadingStage('Loading model...');
-        await fetch('/api/filter/load-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelId: targetModel, ai_server_url: inferenceUrl })
-        });
-      }
-      return determinedRank;
+      setPerformerRank(rankRes.rank);
+      setRankerStatus('done');
+      alert(`⭐ Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nYou can now load Ranked Binary or Ranked Siamese.`);
     } catch (err) {
-      console.error('prepareForFiltering failed:', err);
-      alert(`Model load failed: ${err.message}`);
-      return null;
-    } finally {
-      setIsLoadingModel(false);
-      setLoadingStage('');
+      console.error('Ranker pipeline failed:', err);
+      setRankerStatus('error');
+      alert(`Ranker failed: ${err.message}`);
     }
-  }, [inferenceUrl, modelType, selectedModel, preferredRankerModel, performer?.id]);
+  }, [isLoadingModel, performer?.id, preferredRankerModel, inferenceUrl]);
 
-  const handleStartScanning = useCallback(async () => {
-    await prepareForFiltering();
+  const handleStartScanning = useCallback(() => {
+    if (!activeModelType) {
+      alert('Pick and load a model first.');
+      return;
+    }
+    if (isLoadingModel) return; // ignore clicks while loading
     setIsStarted(true);
-  }, [prepareForFiltering]);
+  }, [activeModelType, isLoadingModel]);
 
   // Handle Unload ONLY on Unmount
   useEffect(() => {
@@ -411,19 +423,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   }, [inferenceUrl]); // Only depends on inferenceUrl so it doesn't trigger on modelType changes
 
 
+  // Used by the in-flight AppBar toggle: changing mode while filtering returns
+  // the user to the pre-start screen so they can re-load the appropriate model.
   const handleModeChange = async (event, newMode) => {
     if (!newMode || newMode === modelType) return;
-
     setModelType(newMode);
-    // Reset first batch state to allow threshold recalculation for pairwise
     setFirstBatchDone(false);
     setResults([]);
     setNextBatch(null);
-
-    // If already filtering, the pref-fetch useEffect will run for the new mode;
-    // wait a tick for selectedModel to update, then re-run the load flow.
     if (isStarted) {
-      setTimeout(() => { prepareForFiltering(); }, 50);
+      // Stop active filtering — user must re-load and press Start Scanning again
+      setIsStarted(false);
+      setActiveModelType(null);
     }
   };
 
@@ -583,111 +594,108 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           </Typography>
         </Box>
 
-        <Box sx={{ mb: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2 }}>
-            Choose Filtering Method
-          </Typography>
-          <ToggleButtonGroup
-            value={modelType}
-            exclusive
-            onChange={handleModeChange}
-            sx={{ 
-              bgcolor: 'rgba(0,0,0,0.3)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '20px',
-              p: 0.75,
-              '& .MuiToggleButton-root': {
-                color: 'rgba(255,255,255,0.4)',
-                border: 'none',
-                borderRadius: '16px !important',
-                px: 5,
-                py: 2,
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                '&.Mui-selected': {
-                  color: '#fff',
-                  bgcolor: 'rgba(0, 217, 255, 0.15)',
-                  boxShadow: 'inset 0 0 0 1px rgba(0, 217, 255, 0.3)',
-                  '&:hover': { bgcolor: 'rgba(0, 217, 255, 0.2)' }
-                },
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.7)' }
-              }
-            }}
-          >
-            <ToggleButton value="binary">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                <FilterAlt />
-                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>BINARY</Typography>
-              </Box>
-            </ToggleButton>
-            <ToggleButton value="ranked_binary">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                <FilterAlt sx={{ color: '#00d9ff' }} />
-                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>RANK BINARY</Typography>
-              </Box>
-            </ToggleButton>
-            <ToggleButton value="pairwise">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                <Compare />
-                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>PAIRWISE</Typography>
-              </Box>
-            </ToggleButton>
-            <ToggleButton value="siamese">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                <MagicIcon />
-                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>SIAMESE</Typography>
-              </Box>
-            </ToggleButton>
-            <ToggleButton value="ranked_siamese_binary">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                <MagicIcon sx={{ color: '#673ab7' }} />
-                <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem' }}>RANK SIAMESE</Typography>
-              </Box>
-            </ToggleButton>
-          </ToggleButtonGroup>
-          
-          <Fade in={true} key={modelType}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" sx={{ color: '#00d9ff', opacity: 0.8, maxWidth: 500, fontStyle: 'italic' }}>
-                {modelType === 'binary'
-                  ? '⚡ Fast, fixed-threshold classification (Best for general cleanup)'
-                  : modelType === 'ranked_binary'
-                  ? '📊 Rank-Conditioned Binary — automatically adjusts Keep standards based on performer stars'
-                  : modelType === 'pairwise'
-                  ? '🎨 Advanced ranking based on your aesthetic taste (Dynamic thresholding)'
-                  : modelType === 'siamese'
-                  ? '🔬 Siamese Ranker trained from Keep/Delete pairs — granular top-% filtering'
-                  : '👑 Rank-Conditioned Siamese — top-% filtering adjusted by performer star-rating'}
-              </Typography>
-              {['ranked_binary', 'ranked_siamese_binary'].includes(modelType) && (
-                isLoadingModel ? (
-                  <Chip
-                    icon={<CircularProgress size={10} sx={{ color: '#ff9800 !important' }} />}
-                    label={loadingStage || 'Loading...'}
-                    size="small"
-                    sx={{ bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800', borderColor: 'rgba(255,152,0,0.3)', border: '1px solid' }}
-                  />
-                ) : rankerLoaded ? (
-                  <Chip
-                    label={performerRank !== null ? `⭐ Performer Rank: ${performerRank.toFixed(1)} / 5.0` : '⭐ Performer Ranker Ready'}
-                    size="small"
-                    sx={{ bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50', borderColor: 'rgba(76,175,80,0.3)', border: '1px solid' }}
-                  />
-                ) : preferredRankerModel ? (
-                  <Chip
-                    label="⚠ No ranker loaded — will use neutral rank"
-                    size="small"
-                    sx={{ bgcolor: 'rgba(255,152,0,0.1)', color: '#ff9800', borderColor: 'rgba(255,152,0,0.3)', border: '1px solid' }}
-                  />
-                ) : (
-                  <Chip
-                    label="⚠ No ranker model set — set one in Model Arsenal"
-                    size="small"
-                    sx={{ bgcolor: 'rgba(244,67,54,0.1)', color: '#f44336', borderColor: 'rgba(244,67,54,0.3)', border: '1px solid' }}
-                  />
-                )
-              )}
+        <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%', maxWidth: 800 }}>
+          {/* ============ STANDARD MODELS ============ */}
+          <Box sx={{ width: '100%', p: 2.5, bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2, mb: 1.5, textAlign: 'center' }}>
+              Standard Models
+            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              {[
+                { type: 'binary', label: 'Binary', icon: <FilterAlt />, color: '#00d9ff' },
+                { type: 'pairwise', label: 'Pairwise', icon: <Compare />, color: '#00d9ff' },
+                { type: 'siamese', label: 'Siamese', icon: <MagicIcon />, color: '#00d9ff' }
+              ].map(m => {
+                const isActive = activeModelType === m.type;
+                const isLoading = loadingModelType === m.type;
+                return (
+                  <Button
+                    key={m.type}
+                    variant={isActive ? 'contained' : 'outlined'}
+                    disabled={isLoadingModel && !isLoading}
+                    onClick={() => loadClassifier(m.type)}
+                    startIcon={isLoading ? <CircularProgress size={16} sx={{ color: m.color }} /> : (isActive ? <KeepIcon /> : m.icon)}
+                    sx={{
+                      minWidth: 150, py: 1.5, borderRadius: 2, fontWeight: 800, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: 1,
+                      ...(isActive
+                        ? { bgcolor: m.color, color: '#000', '&:hover': { bgcolor: '#fff' } }
+                        : { borderColor: `${m.color}50`, color: m.color, '&:hover': { borderColor: m.color, bgcolor: `${m.color}10` } })
+                    }}
+                  >
+                    {isLoading ? 'Loading…' : isActive ? `${m.label} Active` : `Load ${m.label}`}
+                  </Button>
+                );
+              })}
             </Box>
-          </Fade>
+          </Box>
+
+          {/* ============ RANK-CONDITIONED MODELS ============ */}
+          <Box sx={{ width: '100%', p: 2.5, bgcolor: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 3 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#b388ff', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2, mb: 1.5, textAlign: 'center' }}>
+              Rank-Conditioned Models
+            </Typography>
+
+            {/* Step 1: Rank the performer */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, mb: 2 }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>STEP 1 — Analyze performer</Typography>
+              <Button
+                variant={rankerStatus === 'done' ? 'outlined' : 'contained'}
+                disabled={isLoadingModel}
+                onClick={runRanker}
+                startIcon={
+                  ['loading', 'ranking', 'unloading'].includes(rankerStatus)
+                    ? <CircularProgress size={16} sx={{ color: '#fff' }} />
+                    : rankerStatus === 'done' ? <KeepIcon /> : <span style={{ fontSize: '1rem' }}>⭐</span>
+                }
+                sx={{
+                  minWidth: 280, py: 1.5, borderRadius: 2, fontWeight: 800, textTransform: 'none', fontSize: '0.85rem',
+                  ...(rankerStatus === 'done'
+                    ? { borderColor: '#4caf5080', color: '#4caf50', '&:hover': { borderColor: '#4caf50', bgcolor: 'rgba(76,175,80,0.1)' } }
+                    : { bgcolor: '#7c4dff', color: '#fff', '&:hover': { bgcolor: '#651fff' } })
+                }}
+              >
+                {rankerStatus === 'idle' && 'Run Performer Ranker'}
+                {rankerStatus === 'loading' && 'Loading ranker…'}
+                {rankerStatus === 'ranking' && 'Analyzing 200 images…'}
+                {rankerStatus === 'unloading' && 'Freeing VRAM…'}
+                {rankerStatus === 'done' && performerRank !== null && `⭐ Rank: ${performerRank.toFixed(2)} / 5.0 (re-run)`}
+                {rankerStatus === 'error' && '⚠ Retry Ranker'}
+              </Button>
+            </Box>
+
+            {/* Step 2: Pick a rank-conditioned classifier (gated on Step 1 completion) */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, opacity: rankerStatus === 'done' ? 1 : 0.4 }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>
+                STEP 2 — Load classifier {rankerStatus !== 'done' && '(run ranker first)'}
+              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                {[
+                  { type: 'ranked_binary', label: 'Ranked Binary', icon: <FilterAlt /> },
+                  { type: 'ranked_siamese_binary', label: 'Ranked Siamese', icon: <MagicIcon /> }
+                ].map(m => {
+                  const isActive = activeModelType === m.type;
+                  const isLoading = loadingModelType === m.type;
+                  return (
+                    <Button
+                      key={m.type}
+                      variant={isActive ? 'contained' : 'outlined'}
+                      disabled={rankerStatus !== 'done' || (isLoadingModel && !isLoading)}
+                      onClick={() => loadClassifier(m.type)}
+                      startIcon={isLoading ? <CircularProgress size={16} sx={{ color: '#b388ff' }} /> : (isActive ? <KeepIcon /> : m.icon)}
+                      sx={{
+                        minWidth: 180, py: 1.5, borderRadius: 2, fontWeight: 800, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: 1,
+                        ...(isActive
+                          ? { bgcolor: '#b388ff', color: '#000', '&:hover': { bgcolor: '#fff' } }
+                          : { borderColor: '#b388ff50', color: '#b388ff', '&:hover': { borderColor: '#b388ff', bgcolor: 'rgba(179,136,255,0.1)' } })
+                      }}
+                    >
+                      {isLoading ? 'Loading…' : isActive ? `${m.label} Active` : `Load ${m.label}`}
+                    </Button>
+                  );
+                })}
+              </Box>
+            </Box>
+          </Box>
         </Box>
 
         <Box sx={{ flexShrink: 0, minWidth: 200, px: 2 }}>
@@ -710,10 +718,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             variant="contained"
             size="large"
             onClick={handleStartScanning}
-            disabled={isLoadingModel}
-            startIcon={isLoadingModel ? <CircularProgress size={20} sx={{ color: '#000' }} /> : null}
+            disabled={isLoadingModel || !activeModelType}
             sx={{
-              bgcolor: '#00d9ff',
+              bgcolor: activeModelType ? '#00d9ff' : 'rgba(0,217,255,0.2)',
               color: '#000',
               fontWeight: 900,
               px: 8,
@@ -721,20 +728,20 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               borderRadius: '50px',
               fontSize: '1.1rem',
               letterSpacing: 1,
-              boxShadow: '0 10px 30px rgba(0, 217, 255, 0.3)',
+              boxShadow: activeModelType ? '0 10px 30px rgba(0, 217, 255, 0.3)' : 'none',
               transition: 'all 0.3s ease',
               '&:hover': {
-                bgcolor: '#fff',
-                transform: 'translateY(-3px)',
-                boxShadow: '0 15px 40px rgba(0, 217, 255, 0.4)'
+                bgcolor: activeModelType ? '#fff' : 'rgba(0,217,255,0.2)',
+                transform: activeModelType ? 'translateY(-3px)' : 'none',
+                boxShadow: activeModelType ? '0 15px 40px rgba(0, 217, 255, 0.4)' : 'none'
               },
               '&.Mui-disabled': {
-                bgcolor: 'rgba(0, 217, 255, 0.3)',
-                color: 'rgba(0, 0, 0, 0.5)'
+                bgcolor: 'rgba(0, 217, 255, 0.15)',
+                color: 'rgba(0, 0, 0, 0.4)'
               }
             }}
           >
-            {isLoadingModel ? (loadingStage || 'PREPARING...') : 'START SCANNING'}
+            {!activeModelType ? 'LOAD A MODEL FIRST' : isLoadingModel ? 'LOADING…' : 'START SCANNING'}
           </Button>
           
           <Button 
