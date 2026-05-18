@@ -130,7 +130,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     abortControllerRef.current = new AbortController();
 
     try {
-      const targetThreshold = modelType === 'binary' ? 50 : (overrideThreshold !== null ? overrideThreshold : ((!firstBatchDone && !isPrefetch) ? -1 : threshold));
+      // Binary classifiers (regular + rank-conditioned) output calibrated probabilities,
+      // so use the trained-in 50% threshold. Pairwise/siamese output relative ranking
+      // scores and need dynamic calibration (-1 → server picks, then reused).
+      const isBinaryClassifier = modelType === 'binary' || modelType === 'ranked_binary';
+      const targetThreshold = isBinaryClassifier ? 50 : (overrideThreshold !== null ? overrideThreshold : ((!firstBatchDone && !isPrefetch) ? -1 : threshold));
       const queryParams = new URLSearchParams({
         threshold: targetThreshold,
         modelId: selectedModel,
@@ -158,7 +162,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       }
 
       // Update threshold ONLY on the very first real batch fetch, and ONLY for pairwise/siamese
-      if (modelType !== 'binary' && data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
+      // (binary classifiers — regular and rank-conditioned — use a fixed 50% threshold)
+      if (!isBinaryClassifier && data.threshold !== undefined && !firstBatchDone && !isPrefetch) {
         const newThreshold = Math.round(data.threshold);
         console.log(`[SmartFilter] Updating threshold from ${threshold} to ${newThreshold}`);
         setThreshold(newThreshold);
@@ -202,7 +207,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setLoading(false);
         setLoadingNext(false);
         isPrefetchUrgentRef.current = false;
-        if (modelType === 'binary') setFirstBatchDone(true);
+        // Binary classifiers skip dynamic-threshold prefetch — mark first-batch done so the
+        // normal next-batch flow kicks in
+        if (modelType === 'binary' || modelType === 'ranked_binary') setFirstBatchDone(true);
         
         // If this was an upgraded prefetch, we should probably start a NEW prefetch now
         if (isPrefetch) {
@@ -865,18 +872,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             
             <Box sx={{ width: 120 }}>
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', lineHeight: 1, textTransform: 'uppercase', fontWeight: 'bold' }}>
-                {modelType}: {modelType === 'binary' ? 'Fixed 50%' : `${threshold}%`}
+                {modelType}: {(modelType === 'binary' || modelType === 'ranked_binary') ? 'Fixed 50%' : `${threshold}%`}
               </Typography>
-              <Slider 
-                value={modelType === 'binary' ? 50 : threshold} 
-                onChange={(e, v) => setThreshold(v)} 
+              <Slider
+                value={(modelType === 'binary' || modelType === 'ranked_binary') ? 50 : threshold}
+                onChange={(e, v) => setThreshold(v)}
                 onChangeCommitted={() => fetchBatch()}
-                size="small" 
-                disabled={modelType === 'binary'}
-                sx={{ 
-                  color: modelType === 'binary' ? 'rgba(255,255,255,0.2)' : '#00d9ff', 
+                size="small"
+                disabled={modelType === 'binary' || modelType === 'ranked_binary'}
+                sx={{
+                  color: (modelType === 'binary' || modelType === 'ranked_binary') ? 'rgba(255,255,255,0.2)' : '#00d9ff',
                   py: 1,
-                  '& .MuiSlider-thumb': { display: modelType === 'binary' ? 'none' : 'block' }
+                  '& .MuiSlider-thumb': { display: (modelType === 'binary' || modelType === 'ranked_binary') ? 'none' : 'block' }
                 }} 
               />
             </Box>
