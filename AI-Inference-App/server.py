@@ -286,6 +286,28 @@ def api_load_model():
     success, msg = load_model(str(target), model_id=rel_id, quantize=data.get('quantize', False))
     return jsonify({"success": success, "message": msg, "model": MODEL_NAME})
 
+@app.route('/unload_ranker', methods=['POST'])
+def api_unload_ranker():
+    """Unload only RANKER_MODEL (frees VRAM) — preserves CONTEXT_STAR_CACHE so
+    pre-computed performer ranks survive into the classifier-only phase."""
+    global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
+    with MODEL_LOCK:
+        if RANKER_MODEL is None:
+            return jsonify({'success': True, 'message': 'No ranker loaded'})
+        log(f"♻️ Unloading ranker {RANKER_MODEL_ID} to free VRAM...")
+        try: RANKER_MODEL.to('cpu')
+        except Exception: pass
+        RANKER_MODEL = None
+        RANKER_PROCESSOR = None
+        RANKER_MODEL_ID = None
+        import gc; gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            log(f"♻️ VRAM after ranker unload: {torch.cuda.memory_allocated(DEVICE)/1024**2:.0f} MB")
+    return jsonify({'success': True, 'message': 'Ranker unloaded'})
+
+
 @app.route('/unload_model', methods=['POST'])
 def api_unload_model():
     global MODEL, PROCESSOR, MODEL_NAME, LOADED_MODEL_ID, LOADED_MODEL_TYPE, CONTEXT_STAR_CACHE, RANK_CONDITIONED
@@ -804,8 +826,22 @@ def classify_batch():
     image_paths = data.get('images', [])
     threshold = data.get('threshold', 50.0)
     app_base_url = data.get('app_base_url')
-    
+    # Optional: caller-provided performer rank (used when the ranker has already
+    # been run and unloaded — avoids needing RANKER_MODEL loaded during classification)
+    performer_rank_override = data.get('performer_rank')
+
     if not image_paths: return jsonify({'error': 'No images'}), 400
+
+    # If caller provided a rank, populate CONTEXT_STAR_CACHE for every performer
+    # in this batch so the existing inside-lock logic uses it directly.
+    if performer_rank_override is not None:
+        try:
+            r = float(performer_rank_override)
+            for p in image_paths:
+                CONTEXT_STAR_CACHE[_get_performer_name(p)] = r
+            log(f"🎯 Using caller-provided performer rank: {r:.2f}")
+        except (TypeError, ValueError):
+            log(f"⚠️ Invalid performer_rank '{performer_rank_override}' — falling back to computed rank")
 
     # 1. PRE-LOAD IMAGES (Outside lock to avoid blocking and system lag)
     # We do this in smaller chunks to avoid memory spikes

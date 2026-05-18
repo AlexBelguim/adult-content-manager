@@ -155,7 +155,7 @@ router.post('/delete', async (req, res) => {
 // GET /api/filter/smart-batch/:performerId
 router.get('/smart-batch/:performerId', async (req, res) => {
   const { performerId } = req.params;
-  const { threshold, modelId, ai_server_url, app_base_url, modelType, limit } = req.query;
+  const { threshold, modelId, ai_server_url, app_base_url, modelType, limit, performer_rank } = req.query;
 
   // Determine TrueNAS IP for image fetching
   const protocol = req.protocol;
@@ -169,7 +169,8 @@ router.get('/smart-batch/:performerId', async (req, res) => {
       ai_server_url: ai_server_url || getAiServerUrl(),
       app_base_url: myBaseUrl,
       modelType,
-      limit: limit ? parseInt(limit) : 100
+      limit: limit ? parseInt(limit) : 100,
+      performer_rank: performer_rank ? parseFloat(performer_rank) : undefined
     });
     res.send(result);
   } catch (err) {
@@ -211,6 +212,19 @@ router.post('/load-model', async (req, res) => {
   try {
     const axios = require('axios');
     const response = await axios.post(`${AI_URL}/load_model`, { model_id: modelId });
+    res.send(response.data);
+  } catch (err) {
+    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
+  }
+});
+
+// POST /api/filter/unload-ranker - Proxy to AI server to unload only the ranker
+router.post('/unload-ranker', async (req, res) => {
+  const { ai_server_url } = req.body;
+  const AI_URL = ai_server_url || getAiServerUrl();
+  try {
+    const axios = require('axios');
+    const response = await axios.post(`${AI_URL}/unload_ranker`);
     res.send(response.data);
   } catch (err) {
     res.status(500).send({ error: 'AI Server not reachable', message: err.message });

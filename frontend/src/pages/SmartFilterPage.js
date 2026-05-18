@@ -134,6 +134,11 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         modelType,
         limit: batchSize
       });
+      // For ranked modes, pass the pre-computed performer rank so the AI server
+      // doesn't need RANKER_MODEL loaded during classification
+      if (performerRank !== null && ['ranked_binary', 'ranked_siamese_binary'].includes(modelType)) {
+        queryParams.set('performer_rank', performerRank);
+      }
       console.log(`[SmartFilter] Fetching /api/filter/smart-batch/${performer.id}?${queryParams}`);
       const response = await fetch(`/api/filter/smart-batch/${performer.id}?${queryParams}`, {
         signal: abortControllerRef.current.signal
@@ -211,7 +216,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       isFetchingRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [performer?.id, isStarted, firstBatchDone, threshold, inferenceUrl, modelType, selectedModel]); 
+  }, [performer?.id, isStarted, firstBatchDone, threshold, inferenceUrl, modelType, selectedModel, performerRank]); 
 
   // Initial trigger - when started or performer changes or fetchBatch updates
   useEffect(() => {
@@ -229,15 +234,17 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [performer?.id, isStarted, results.length, nextBatch, isLoadingModel, fetchBatch]);
 
+  // Fetch preferences and available models — DOES NOT load any model.
+  // Actual loading happens in prepareForFiltering() when user clicks Start Scanning.
   useEffect(() => {
-    // Don't run until inferenceUrl is loaded from settings
     if (!inferenceUrl) return;
-    
-    const fetchModels = async () => {
-      // Reset ranker/rank status when mode changes
-      if (!['ranked_binary', 'ranked_siamese_binary'].includes(modelType)) { setRankerLoaded(false); setPerformerRank(null); }
+
+    const fetchPrefs = async () => {
+      // Reset ranker/rank status — these only become valid after Start Scanning runs the load flow
+      setRankerLoaded(false);
+      setPerformerRank(null);
+
       try {
-        // 1. Fetch preferences from backend
         const [binPref, rankBinPref, pairPref, contextPref, siamesePref, rankSiamesePref, rankedSiamesePref, rankerPref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
           fetch('/api/settings/preferred_ranked_binary_model').then(r => r.json()).catch(() => ({ value: '' })),
@@ -267,109 +274,126 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setPreferredRankedSiameseModel(pRankedSiamese);
         setPreferredRankerModel(pRanker);
 
-        // 2. Fetch available models from AI server
-        const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
-        const data = await response.json();
-        if (data.success) {
-          const models = data.models || [];
-          setAvailableModels(models);
-          
-          // Load the model for the current type
-          let targetModel = pBin;
-          if (modelType === 'ranked_binary') targetModel = pRankBin;
-          else if (modelType === 'pairwise') targetModel = pPair;
-          else if (modelType === 'context_binary') targetModel = pContext;
-          else if (modelType === 'siamese') targetModel = pSiamese;
-          else if (modelType === 'rank_aware_siamese') targetModel = pRankSiamese;
-          else if (modelType === 'ranked_siamese_binary') targetModel = pRankedSiamese;
-          
-          // If preferred model not found, pick the first one of matching type
-          if (!models.find(m => m.filename === targetModel)) {
-            const bestMatch = models.find(m => m.type === modelType);
-            if (bestMatch) {
-              console.log(`[SmartFilter] Preferred model ${targetModel} not found. Falling back to ${bestMatch.filename}`);
-              targetModel = bestMatch.filename;
-            }
-          }
-          
-          setSelectedModel(targetModel);
-          setIsLoadingModel(true);
+        try {
+          const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
+          const data = await response.json();
+          if (data.success) setAvailableModels(data.models || []);
+        } catch (_) {}
 
-          const isRankedMode = ['ranked_binary', 'ranked_siamese_binary'].includes(modelType);
-
-          try {
-            // For rank-conditioned modes, load the ranker first (it goes into RANKER_MODEL,
-            // separate from the classification model), then load the rank-conditioned model.
-            if (isRankedMode && pRanker) {
-              // Check if ranker is already loaded to avoid redundant loads
-              let rankerAlreadyLoaded = false;
-              try {
-                const health = await fetch(`/api/training/ai-health?url=${encodeURIComponent(inferenceUrl)}`).then(r => r.json());
-                rankerAlreadyLoaded = health.ranker_loaded && health.ranker_model === pRanker;
-              } catch (_) {}
-
-              if (!rankerAlreadyLoaded) {
-                setLoadingStage('Loading performer ranker...');
-                await fetch('/api/filter/load-model', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ modelId: pRanker, ai_server_url: inferenceUrl })
-                });
-              }
-              setRankerLoaded(true);
-              setLoadingStage('Loading rank-conditioned model...');
-            } else if (isRankedMode) {
-              setLoadingStage('Loading rank-conditioned model (no ranker set)...');
-            } else {
-              setLoadingStage('');
-            }
-
-            await fetch('/api/filter/load-model', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                modelId: targetModel,
-                ai_server_url: inferenceUrl
-              })
-            });
-          // For ranked modes, pre-rank the performer immediately after loading
-          if (isRankedMode && performer?.id) {
-            setLoadingStage('Ranking performer...');
-            try {
-              const params = new URLSearchParams({
-                ai_server_url: inferenceUrl,
-                app_base_url: window.location.origin
-              });
-              const rankRes = await fetch(`/api/filter/pre-rank-performer/${performer.id}?${params}`).then(r => r.json());
-              if (rankRes.success) {
-                setPerformerRank(rankRes.rank);
-                alert(`⭐ Performer rank determined: ${rankRes.rank.toFixed(1)} / 5.0\n(based on ${rankRes.images_used} images)\n\nThe rank-conditioned model will use this to calibrate its decisions.`);
-              }
-            } catch (_) {}
-          }
-          } finally {
-            setIsLoadingModel(false);
-            setLoadingStage('');
-            // If started, trigger a fresh fetch after model is loaded
-            if (isStarted) {
-              setResults([]);
-              setNextBatch(null);
-              setFirstBatchDone(false);
-              fetchBatch();
-            }
-          }
-        }
+        // Pre-select target model name (visible in UI), but don't load it yet
+        let targetModel = pBin;
+        if (modelType === 'ranked_binary') targetModel = pRankBin;
+        else if (modelType === 'pairwise') targetModel = pPair;
+        else if (modelType === 'context_binary') targetModel = pContext;
+        else if (modelType === 'siamese') targetModel = pSiamese;
+        else if (modelType === 'rank_aware_siamese') targetModel = pRankSiamese;
+        else if (modelType === 'ranked_siamese_binary') targetModel = pRankedSiamese;
+        setSelectedModel(targetModel);
       } catch (err) {
-        console.error('Error fetching models:', err);
+        console.error('Error fetching prefs:', err);
       }
     };
-    fetchModels();
+    fetchPrefs();
 
-    // Abort ongoing requests on change
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [inferenceUrl, modelType]);
+
+  // Sequential model load + pre-rank flow.
+  // For ranked modes: load ranker → pre-rank performer → unload ranker → load classifier
+  // For other modes: just load the classifier
+  // Returns the determined performer rank (or null) so it can be passed to classify_batch.
+  const prepareForFiltering = useCallback(async () => {
+    if (!inferenceUrl || !performer?.id) return null;
+
+    const isRankedMode = ['ranked_binary', 'ranked_siamese_binary'].includes(modelType);
+    const targetModel = selectedModel;
+    let determinedRank = null;
+
+    setIsLoadingModel(true);
+    setRankerLoaded(false);
+    setPerformerRank(null);
+
+    try {
+      if (isRankedMode) {
+        if (!preferredRankerModel) {
+          alert('⚠️ No Performer Ranker model is set as default.\n\nSet one in the Taste Dashboard → Model Arsenal → Performer Ranker section, then try again.');
+          return null;
+        }
+
+        // 1. Load ranker
+        setLoadingStage('Loading performer ranker...');
+        await fetch('/api/filter/load-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelId: preferredRankerModel, ai_server_url: inferenceUrl })
+        });
+        setRankerLoaded(true);
+
+        // 2. Pre-rank performer (up to 200 images)
+        setLoadingStage('Analyzing performer (up to 200 images)...');
+        try {
+          const params = new URLSearchParams({
+            ai_server_url: inferenceUrl,
+            app_base_url: window.location.origin
+          });
+          const rankRes = await fetch(`/api/filter/pre-rank-performer/${performer.id}?${params}`).then(r => r.json());
+          if (rankRes.success) {
+            determinedRank = rankRes.rank;
+            setPerformerRank(rankRes.rank);
+            alert(`⭐ Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nThe ${modelType === 'ranked_binary' ? 'Ranked Binary' : 'Ranked Siamese'} model will be calibrated with this rank.`);
+          } else {
+            alert(`⚠️ Could not determine performer rank: ${rankRes.error || 'unknown error'}\n\nFalling back to neutral rank (2.5).`);
+            determinedRank = 2.5;
+          }
+        } catch (err) {
+          console.error('Pre-rank failed:', err);
+          determinedRank = 2.5;
+        }
+
+        // 3. Unload ranker to free VRAM before loading the classifier
+        setLoadingStage('Freeing VRAM...');
+        try {
+          await fetch('/api/filter/unload-ranker', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ai_server_url: inferenceUrl })
+          });
+        } catch (_) {}
+        setRankerLoaded(false);
+
+        // 4. Load rank-conditioned classifier
+        setLoadingStage('Loading rank-conditioned model...');
+        await fetch('/api/filter/load-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelId: targetModel, ai_server_url: inferenceUrl })
+        });
+      } else {
+        // Non-ranked mode: just load the classifier
+        setLoadingStage('Loading model...');
+        await fetch('/api/filter/load-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelId: targetModel, ai_server_url: inferenceUrl })
+        });
+      }
+      return determinedRank;
+    } catch (err) {
+      console.error('prepareForFiltering failed:', err);
+      alert(`Model load failed: ${err.message}`);
+      return null;
+    } finally {
+      setIsLoadingModel(false);
+      setLoadingStage('');
+    }
+  }, [inferenceUrl, modelType, selectedModel, preferredRankerModel, performer?.id]);
+
+  const handleStartScanning = useCallback(async () => {
+    await prepareForFiltering();
+    setIsStarted(true);
+  }, [prepareForFiltering]);
 
   // Handle Unload ONLY on Unmount
   useEffect(() => {
@@ -389,14 +413,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   const handleModeChange = async (event, newMode) => {
     if (!newMode || newMode === modelType) return;
-    
+
     setModelType(newMode);
-    // Note: useEffect handles the actual model loading when modelType changes
-    
     // Reset first batch state to allow threshold recalculation for pairwise
     setFirstBatchDone(false);
     setResults([]);
     setNextBatch(null);
+
+    // If already filtering, the pref-fetch useEffect will run for the new mode;
+    // wait a tick for selectedModel to update, then re-run the load flow.
+    if (isStarted) {
+      setTimeout(() => { prepareForFiltering(); }, 50);
+    }
   };
 
   const handleUnloadModel = async () => {
@@ -678,29 +706,35 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         </Box>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             size="large"
-            onClick={() => setIsStarted(true)}
-            sx={{ 
-              bgcolor: '#00d9ff', 
-              color: '#000', 
-              fontWeight: 900, 
-              px: 8, 
-              py: 2.5, 
+            onClick={handleStartScanning}
+            disabled={isLoadingModel}
+            startIcon={isLoadingModel ? <CircularProgress size={20} sx={{ color: '#000' }} /> : null}
+            sx={{
+              bgcolor: '#00d9ff',
+              color: '#000',
+              fontWeight: 900,
+              px: 8,
+              py: 2.5,
               borderRadius: '50px',
               fontSize: '1.1rem',
               letterSpacing: 1,
               boxShadow: '0 10px 30px rgba(0, 217, 255, 0.3)',
               transition: 'all 0.3s ease',
-              '&:hover': { 
-                bgcolor: '#fff', 
+              '&:hover': {
+                bgcolor: '#fff',
                 transform: 'translateY(-3px)',
                 boxShadow: '0 15px 40px rgba(0, 217, 255, 0.4)'
+              },
+              '&.Mui-disabled': {
+                bgcolor: 'rgba(0, 217, 255, 0.3)',
+                color: 'rgba(0, 0, 0, 0.5)'
               }
             }}
           >
-            START SCANNING
+            {isLoadingModel ? (loadingStage || 'PREPARING...') : 'START SCANNING'}
           </Button>
           
           <Button 

@@ -1059,7 +1059,8 @@ class FilterService {
       const response = await axios.post(`${AI_URL}/classify_batch`, {
         images: imagePaths,
         threshold: parseFloat(threshold),
-        app_base_url: options.app_base_url
+        app_base_url: options.app_base_url,
+        performer_rank: options.performer_rank
       }, { timeout: 120000 });
 
       if (response.data.success) {
