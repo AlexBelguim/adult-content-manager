@@ -12,7 +12,8 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
 from model_dinov2 import (
     DinoV2PreferenceModel, RankAwareSiameseModel,
-    PerformerRankerModel, RankedBinaryClassifier, RankedSiameseModel
+    PerformerRankerModel, PerformerAttentionRanker,
+    RankedBinaryClassifier, RankedSiameseModel
 )
 
 IMAGE_EXTS = {'.jpg','.jpeg','.png','.webp','.gif','.bmp'}
@@ -1491,6 +1492,268 @@ def train_performer_ranker(config):
     return {'model': str(out_path.name), 'best_val_acc': max(0, 1.0 - best_mae / 5.0)}
 
 
+def train_performer_attention_ranker(config):
+    """Train the gallery-level attention ranker.
+
+    One training sample = (one performer's gallery, that performer's star rating).
+    Each epoch resamples K images per performer (the augmentation).
+    Loss is MSE, optionally weighted by the performer's comparison_count.
+
+    Manifest fields read:
+      - performer_ratings: {name: star}            (required)
+      - performer_comparison_counts: {name: int}   (optional; enables weighting)
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 12)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
+    k_per_gallery = config.get('gallery_size', 32)
+    attn_dropout = config.get('attn_dropout', 0.1)
+    min_comparisons = config.get('min_comparisons', 2)
+    base_path = config.get('base_path', '')
+
+    tlog(f"📋 Attention Ranker | {epochs} epochs | K={k_per_gallery} | backbone: {backbone}")
+
+    # 1. Gather images per performer
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+
+    # 2. Load star ratings + comparison counts from manifest
+    star_ratings = config.get('performer_ratings', {})
+    comparison_counts = config.get('performer_comparison_counts', {})
+    manifest_path = Path(base_path) / 'manifest.json'
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            if not star_ratings:
+                star_ratings = manifest.get('performer_ratings', {})
+                tlog(f"  ⭐ Loaded {len(star_ratings)} star ratings from manifest")
+            if not comparison_counts:
+                comparison_counts = manifest.get('performer_comparison_counts', {})
+                if comparison_counts:
+                    tlog(f"  ⚖️ Loaded {len(comparison_counts)} comparison counts from manifest")
+        except Exception as e:
+            tlog(f"  ⚠️ Manifest read failed: {e}")
+
+    if not star_ratings:
+        raise ValueError("No performer ratings found. Need manifest.json with performer_ratings.")
+
+    star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
+    comparison_counts_norm = {k.lower().strip(): v for k, v in comparison_counts.items()}
+
+    # 3. Build per-performer image lists
+    performer_to_images = {}
+    performer_to_target = {}
+    performer_to_weight = {}
+    skipped_low_data = 0
+    all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
+
+    for perf in all_performers:
+        perf_key = perf.lower().strip()
+        if perf_key not in star_ratings_norm:
+            continue
+        stars = star_ratings_norm[perf_key]
+        n_comparisons = comparison_counts_norm.get(perf_key, None)
+
+        # Hard floor: skip undertrained ratings IF comparison data exists
+        if n_comparisons is not None and n_comparisons < min_comparisons:
+            skipped_low_data += 1
+            continue
+
+        images = list(keep_map.get(perf, [])) + list(delete_map.get(perf, []))
+        if len(images) < 2:
+            continue  # need at least 2 to learn anything from a gallery
+
+        performer_to_images[perf] = images
+        performer_to_target[perf] = float(stars)
+        # Soft weighting: cap at 1.0, ramps up linearly to 10 comparisons.
+        # If counts aren't provided, everyone gets weight 1.0.
+        if n_comparisons is None:
+            performer_to_weight[perf] = 1.0
+        else:
+            performer_to_weight[perf] = min(n_comparisons / 10.0, 1.0)
+
+    n_performers = len(performer_to_images)
+    tlog(f"  📊 {n_performers} performers (skipped {skipped_low_data} with < {min_comparisons} comparisons)")
+    if n_performers < 5:
+        raise ValueError(f"Too few rated performers ({n_performers}). Need at least 5 with images.")
+
+    # Side-channel for history saving
+    config['_keep_count'] = sum(len(v) for v in keep_map.values())
+    config['_delete_count'] = sum(len(v) for v in delete_map.values())
+
+    # 4. Performer-level train/val split — deterministic, shared across trainers
+    train_names, val_names_list = split_performers(
+        list(performer_to_images.keys()), val_frac=0.15
+    )
+    val_names = set(val_names_list)
+    tlog(f"  🎭 Performer split: {len(train_names)} train / {len(val_names)} val (holdout)")
+
+    processor = AutoImageProcessor.from_pretrained(backbone)
+
+    class GalleryDS(Dataset):
+        def __init__(self, names, training):
+            self.names = names
+            self.training = training
+            self.aug = T.Compose([
+                T.RandomHorizontalFlip(0.5),
+                T.RandomResizedCrop(224, scale=(0.85, 1.0)),
+                T.ColorJitter(0.08, 0.08, 0.05, 0.02),
+            ]) if training else None
+
+        def __len__(self): return len(self.names)
+
+        def __getitem__(self, idx):
+            name = self.names[idx]
+            paths = performer_to_images[name]
+            # Subsample K (with replacement if too few)
+            if len(paths) >= k_per_gallery:
+                chosen = random.sample(paths, k_per_gallery)
+            else:
+                chosen = list(paths) + random.choices(paths, k=k_per_gallery - len(paths))
+
+            tensors = []
+            for p in chosen:
+                try:
+                    img = Image.open(p).convert('RGB')
+                except Exception:
+                    continue
+                if self.aug is not None:
+                    img = self.aug(img)
+                inp = processor(images=img, return_tensors='pt')
+                tensors.append(inp['pixel_values'].squeeze(0))
+
+            if not tensors:
+                # last resort: return a black image
+                tensors = [torch.zeros(3, 224, 224)]
+            pv = torch.stack(tensors)  # (K, 3, H, W) — K may be < k_per_gallery if loads failed
+
+            return {
+                'name': name,
+                'pixel_values': pv,
+                'target': torch.tensor(performer_to_target[name], dtype=torch.float32),
+                'weight': torch.tensor(performer_to_weight[name], dtype=torch.float32),
+            }
+
+    train_ds = GalleryDS(train_names, training=True)
+    val_ds = GalleryDS(list(val_names), training=False)
+    # Each sample is already a gallery → effective batch on the GPU is K.
+    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True, num_workers=0,
+                              collate_fn=lambda b: b[0])
+    val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=0,
+                            collate_fn=lambda b: b[0])
+
+    # 5. Model — warm-start from existing performer_ranker if backbone weights are around
+    model = PerformerAttentionRanker(backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
+    if not quantize:
+        model.freeze_backbone()
+    criterion = nn.MSELoss(reduction='none')
+    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+    optimizer = torch.optim.AdamW(
+        list(model.attention.parameters()) + list(model.rank_head.parameters()),
+        lr=1e-3,
+    )
+
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'performer_attention_ranker_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
+
+    best_val_mae = float('inf')
+
+    for epoch in range(1, epochs + 1):
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Unfreezing backbone at epoch {epoch}")
+            model.unfreeze_backbone()
+            optimizer = torch.optim.AdamW([
+                {'params': list(model.attention.parameters()) + list(model.rank_head.parameters()), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5},
+            ])
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
+
+        # Train
+        model.train()
+        total_loss = 0.0
+        total_w = 0.0
+        n_batches = len(train_loader)
+        training_state['total_batches'] = n_batches
+
+        for bi, sample in enumerate(train_loader, 1):
+            pv = sample['pixel_values'].to(device)        # (K, 3, H, W)
+            target = sample['target'].to(device)          # scalar
+            weight = sample['weight'].to(device)          # scalar
+
+            optimizer.zero_grad()
+            if scaler:
+                with torch.amp.autocast('cuda'):
+                    rating, _ = model(pv, attn_dropout=attn_dropout)
+                    loss = criterion(rating, target) * weight
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                rating, _ = model(pv, attn_dropout=attn_dropout)
+                loss = criterion(rating, target) * weight
+                loss.backward()
+                optimizer.step()
+
+            total_loss += loss.item()
+            total_w += weight.item()
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / max(total_w, 1e-6)
+
+        # Validate
+        model.eval()
+        val_err = 0.0
+        val_n = 0
+        with torch.no_grad():
+            for sample in val_loader:
+                pv = sample['pixel_values'].to(device)
+                target = sample['target'].to(device)
+                rating, _ = model(pv)
+                val_err += (rating - target).abs().item()
+                val_n += 1
+        val_mae = val_err / max(val_n, 1)
+        val_acc_proxy = max(0.0, 1.0 - val_mae / 5.0)
+        training_state['val_acc'] = val_acc_proxy
+        training_state['epoch_history'].append({
+            'epoch': epoch,
+            'train_loss': round(total_loss / max(total_w, 1e-6), 4),
+            'val_mae': round(val_mae, 3),
+            'val_acc_proxy': round(val_acc_proxy, 4),
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Train Loss: {total_loss / max(total_w, 1e-6):.4f} | Val MAE: {val_mae:.3f} (n={val_n})")
+
+        if val_mae < best_val_mae:
+            best_val_mae = val_mae
+            training_state['best_val_acc'] = val_acc_proxy
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'val_mae': val_mae,
+                'backbone': backbone,
+                'model_type': 'performer_attention_ranker',
+                'performer_ratings': star_ratings,
+                'holdout_performers': val_names_list,
+                'config': {
+                    'model_name': backbone,
+                    'epochs': epochs,
+                    'gallery_size': k_per_gallery,
+                    'attn_dropout': attn_dropout,
+                    'min_comparisons': min_comparisons,
+                },
+                'created_at': time.time(),
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} (MAE: {val_mae:.3f})")
+
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+    return {'model': str(out_path.name), 'best_val_acc': max(0, 1.0 - best_val_mae / 5.0)}
+
+
 def train_ranked_binary(config):
     """Train a rank-conditioned binary classifier.
     Same as train_binary but the model takes (image, performer_rank) as input.
@@ -1845,6 +2108,7 @@ TRAIN_FNS = {
     'pairwise': train_pairwise,
     'pairwise_siamese_binary': train_siamese_binary,
     'performer_ranker': train_performer_ranker,
+    'performer_attention_ranker': train_performer_attention_ranker,
     'ranked_binary': train_ranked_binary,
     'ranked_siamese_binary': train_ranked_siamese_binary,
     # Legacy: kept for backward compat — functions still exist but not recommended
