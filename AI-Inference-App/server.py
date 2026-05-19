@@ -49,7 +49,7 @@ except Exception as e:
 
 # ── Module Imports ────────────────────────────────────────────────────────────
 from model_dinov2 import (
-    DinoV2PreferenceModel, PerformerRankerModel,
+    DinoV2PreferenceModel, PerformerRankerModel, PerformerAttentionRanker,
     RankedBinaryClassifier, RankedSiameseModel
 )
 
@@ -155,10 +155,13 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             
             # Initialize the correct model class based on type + rank flag
             try:
-                if model_type == 'performer_ranker':
-                    # This is a ranker, not a filtering model — load into RANKER_MODEL
+                if model_type in ('performer_ranker', 'performer_attention_ranker'):
+                    # Ranker (per-image or gallery-level) — load into RANKER_MODEL slot
                     global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
-                    ranker = PerformerRankerModel(MODEL_NAME, quantize=quantize)
+                    if model_type == 'performer_attention_ranker':
+                        ranker = PerformerAttentionRanker(MODEL_NAME, quantize=quantize)
+                    else:
+                        ranker = PerformerRankerModel(MODEL_NAME, quantize=quantize)
                     ranker.load_state_dict(checkpoint['model_state_dict'], strict=False)
                     ranker.to(DEVICE)
                     ranker.eval()
@@ -170,7 +173,8 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                     del checkpoint
                     import gc; gc.collect()
                     if torch.cuda.is_available(): torch.cuda.empty_cache()
-                    log(f"✅ Performer Ranker loaded on {DEVICE}")
+                    label = "Attention Ranker" if model_type == 'performer_attention_ranker' else "Performer Ranker"
+                    log(f"✅ {label} loaded on {DEVICE}")
                     LOADED_MODEL_ID = model_id  # Track for UI
                     return True, "Ranker loaded"
                 elif model_type == 'binary' and rank_conditioned:
@@ -366,6 +370,7 @@ def api_list_models():
                 name_low = m.name.lower()
                 if 'pairwise' in name_low or 'preference' in name_low: m_type = 'pairwise'
                 elif 'context' in name_low: m_type = 'context_binary'
+                elif 'attention_ranker' in name_low: m_type = 'performer_attention_ranker'
                 elif 'ranker' in name_low: m_type = 'performer_ranker'
                 elif 'siamese' in name_low: m_type = 'siamese_binary'
                 elif 'binary' in name_low or 'filtering' in name_low: m_type = 'binary'
@@ -1309,26 +1314,33 @@ def predict_rank():
                 method_name = 'predict_rank'
             
             if not target_model:
-                # Try auto-loading a ranker (find latest performer_ranker*.pt)
+                # Try auto-loading a ranker. Prefer attention ranker if any exist.
                 try:
-                    ranker_files = [f for f in os.listdir(MODELS_DIR) if f.startswith('performer_ranker') and f.endswith('.pt')]
+                    all_files = os.listdir(MODELS_DIR)
+                    attn_files = [f for f in all_files if f.startswith('performer_attention_ranker') and f.endswith('.pt')]
+                    legacy_files = [f for f in all_files if f.startswith('performer_ranker') and f.endswith('.pt')]
+                    ranker_files = attn_files if attn_files else legacy_files
+                    is_attention = bool(attn_files)
                     if ranker_files:
                         # Sort by modification time to get the newest
                         ranker_files.sort(key=lambda x: os.path.getmtime(os.path.join(MODELS_DIR, x)), reverse=True)
                         ranker_filename = ranker_files[0]
                         ranker_path = os.path.join(MODELS_DIR, ranker_filename)
-                        
+
                         log(f"🔄 No ranker loaded. Auto-loading latest ranker: {ranker_filename}...")
                         checkpoint = torch.load(ranker_path, map_location=DEVICE)
                         config = checkpoint.get('config', {})
                         model_name = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
-                        
-                        RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
+
+                        if is_attention or checkpoint.get('model_type') == 'performer_attention_ranker':
+                            RANKER_MODEL = PerformerAttentionRanker(model_name).to(DEVICE)
+                        else:
+                            RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
                         RANKER_MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
                         RANKER_MODEL.eval()
                         RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(model_name)
                         RANKER_MODEL_ID = ranker_filename
-                        
+
                         target_model = RANKER_MODEL
                         target_processor = RANKER_PROCESSOR
                         method_name = 'predict_rank'
@@ -1339,29 +1351,56 @@ def predict_rank():
             if not target_model:
                 return jsonify({"success": False, "error": "No rank-capable model loaded (load a Ranker first)"}), 400
                 
+            # Gallery-level attention ranker: embed all images in chunks,
+            # then a single attention-aggregation produces one rating.
+            if isinstance(target_model, PerformerAttentionRanker):
+                cls_chunks = []
+                for i in range(0, len(loaded_imgs), 8):
+                    batch = loaded_imgs[i:i+8]
+                    with torch.no_grad():
+                        inputs = target_processor(images=batch, return_tensors="pt")
+                        pv = inputs['pixel_values'].to(DEVICE)
+                        cls_chunks.append(target_model._embed(pv))
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                cls_all = torch.cat(cls_chunks, dim=0)  # (K, D)
+                with torch.no_grad():
+                    gallery, weights = target_model._aggregate(cls_all)
+                    rating = target_model.rank_head(gallery).clamp(0.0, 5.0).item()
+                # Surface top-3 most-weighted images for transparency
+                top_idx = torch.topk(weights, k=min(3, weights.numel())).indices.cpu().tolist()
+                log(f"  ✅ Prediction: {rating:.2f} stars (gallery of {len(loaded_imgs)}, top attn idx: {top_idx})")
+                return jsonify({
+                    'success': True,
+                    'predicted_rank': round(rating, 3),
+                    'sample_size': len(loaded_imgs),
+                    'aggregation': 'attention',
+                    'attention_top_indices': top_idx,
+                })
+
+            # Legacy per-image ranker: predict each, then average.
             rank_preds = []
-            # Process in batches of 8 for speed
             for i in range(0, len(loaded_imgs), 8):
                 batch = loaded_imgs[i:i+8]
                 with torch.no_grad():
                     inputs = target_processor(images=batch, return_tensors="pt")
                     pv = inputs['pixel_values'].to(DEVICE)
-                    
+
                     if method_name == 'predict_stars':
                         ranks = target_model.predict_stars(pv)
                     else:
                         ranks = target_model.predict_rank(pv)
-                        
+
                     rank_preds.extend(ranks.cpu().tolist())
                 if torch.cuda.is_available(): torch.cuda.synchronize()
-            
+
             avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
-            log(f"  ✅ Prediction: {avg_rank:.2f} stars (based on {len(rank_preds)} images)")
-            
+            log(f"  ✅ Prediction: {avg_rank:.2f} stars (based on {len(rank_preds)} images, per-image avg)")
+
             return jsonify({
                 'success': True,
                 'predicted_rank': round(avg_rank, 3),
-                'sample_size': len(rank_preds)
+                'sample_size': len(rank_preds),
+                'aggregation': 'mean',
             })
             
         except Exception as e:

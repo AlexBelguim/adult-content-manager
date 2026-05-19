@@ -406,7 +406,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (['binary', 'context_binary', 'pairwise_siamese_binary', 'performer_ranker', 'ranked_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(type)) {
+    } else if (['binary', 'context_binary', 'pairwise_siamese_binary', 'performer_ranker', 'performer_attention_ranker', 'ranked_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -416,7 +416,8 @@ router.post('/start', async (req, res) => {
         batch_size,
         backbone,
         learning_rate,
-        performer_ratings: collectPerformerRatings()
+        performer_ratings: collectPerformerRatings(),
+      performer_comparison_counts: collectPerformerComparisonCounts()
       };
       
       if (req.body.use_hard_examples) {
@@ -688,6 +689,22 @@ function collectPerformerRatings() {
   return ratings;
 }
 
+function collectPerformerComparisonCounts() {
+  const counts = {};
+  try {
+    const rows = db.prepare(`
+      SELECT p.name, COALESCE(r.comparison_count, 0) AS comparison_count
+      FROM performers p
+      JOIN ratings r ON r.performer_id = p.id
+      WHERE r.manual_star IS NOT NULL
+    `).all();
+    for (const row of rows) {
+      counts[row.name] = row.comparison_count;
+    }
+  } catch (_) { /* column may not exist on older schemas */ }
+  return counts;
+}
+
 
 // ── GET /api/training/export-zip ─────────────────────────────
 // Download training data as a ZIP file
@@ -714,7 +731,8 @@ router.get('/export-zip', async (req, res) => {
       keep_count: keepCount,
       delete_count: deleteCount,
       total: keepCount + deleteCount,
-      performer_ratings: collectPerformerRatings()
+      performer_ratings: collectPerformerRatings(),
+      performer_comparison_counts: collectPerformerComparisonCounts()
     };
 
     // Include pairwise data
@@ -794,7 +812,8 @@ router.get('/export-manifest', async (req, res) => {
       keep_count: images.keep.length,
       delete_count: images.delete.length,
       total: images.keep.length + images.delete.length,
-      performer_ratings: collectPerformerRatings()
+      performer_ratings: collectPerformerRatings(),
+      performer_comparison_counts: collectPerformerComparisonCounts()
     };
 
     // Include pairwise data
@@ -855,7 +874,8 @@ router.post('/push-labels', async (req, res) => {
       created: new Date().toISOString(),
       keep_count: images.keep.length,
       delete_count: images.delete.length,
-      performer_ratings: collectPerformerRatings()
+      performer_ratings: collectPerformerRatings(),
+      performer_comparison_counts: collectPerformerComparisonCounts()
     };
 
     try {
@@ -939,7 +959,8 @@ router.post('/push-data', async (req, res) => {
       created: new Date().toISOString(),
       keep_count: images.keep.length,
       delete_count: images.delete.length,
-      performer_ratings: collectPerformerRatings()
+      performer_ratings: collectPerformerRatings(),
+      performer_comparison_counts: collectPerformerComparisonCounts()
     };
 
     // Always include pairwise data with remapped paths

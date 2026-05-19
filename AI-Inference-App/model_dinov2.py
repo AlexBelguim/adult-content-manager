@@ -257,3 +257,113 @@ class RankAwareSiameseModel(nn.Module):
 
 
 SiamesePreferenceModel = DinoV2PreferenceModel
+
+
+class PerformerAttentionRanker(nn.Module):
+    """
+    Gallery-level performer ranker. Looks at K images from one performer
+    and emits one star rating (0-5) via learned attention pooling.
+
+    Attention is internal — the model chooses how to weight images
+    when forming its gallery representation. Mean pooling, top-K,
+    or content-conditioned focus all fall out as special cases.
+
+    Training: one sample = (K images, performer_star_rating).
+    Inference: single forward per performer; no Python-side averaging.
+    """
+    def __init__(self, model_name="facebook/dinov2-large", freeze_backbone=True, quantize=False):
+        super().__init__()
+        if quantize:
+            print(f"💎 Loading {model_name} with 8-bit quantization...")
+            self.backbone = AutoModel.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+        else:
+            self.backbone = AutoModel.from_pretrained(model_name)
+        hidden_dim = self.backbone.config.hidden_size
+
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_dim, 128),
+            nn.Tanh(),
+            nn.Linear(128, 1),
+        )
+
+        self.rank_head = nn.Sequential(
+            nn.Linear(hidden_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 1),
+        )
+        nn.init.zeros_(self.rank_head[-1].bias)
+
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+    def freeze_backbone(self):
+        for p in self.backbone.parameters(): p.requires_grad = False
+
+    def unfreeze_backbone(self):
+        for p in self.backbone.parameters(): p.requires_grad = True
+
+    def _embed(self, pixel_values):
+        # pixel_values: (K, 3, H, W) → (K, D)
+        out = self.backbone(pixel_values)
+        return out.last_hidden_state[:, 0, :]
+
+    def _aggregate(self, cls_tokens, mask=None, attn_dropout=0.0):
+        """
+        cls_tokens: (K, D) or (B, K, D)
+        mask: optional same-shape-minus-D, 1 = real, 0 = padding
+        Returns: (gallery_embedding, attention_weights)
+        """
+        squeeze = False
+        if cls_tokens.dim() == 2:
+            cls_tokens = cls_tokens.unsqueeze(0)
+            squeeze = True
+        if mask is not None and mask.dim() == 1:
+            mask = mask.unsqueeze(0)
+
+        scores = self.attention(cls_tokens).squeeze(-1)  # (B, K)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+
+        if self.training and attn_dropout > 0:
+            keep = torch.rand_like(scores) > attn_dropout
+            # Detect "all real positions dropped" — checking keep alone would
+            # be fooled if padding positions happen to be kept by chance.
+            if mask is not None:
+                real_kept = keep & (mask == 1)
+                all_dropped = ~(real_kept.any(dim=-1, keepdim=True))
+            else:
+                all_dropped = ~(keep.any(dim=-1, keepdim=True))
+            # Recover by un-dropping the row; padding scores stay -inf from the earlier mask
+            keep = keep | all_dropped
+            scores = scores.masked_fill(~keep, float('-inf'))
+
+        weights = torch.softmax(scores, dim=-1)  # (B, K)
+        gallery = (weights.unsqueeze(-1) * cls_tokens).sum(dim=1)  # (B, D)
+        if squeeze:
+            gallery = gallery.squeeze(0)
+            weights = weights.squeeze(0)
+        return gallery, weights
+
+    def forward(self, pixel_values, mask=None, attn_dropout=0.0):
+        """
+        pixel_values: (K, 3, H, W) for one performer
+                  or (B, K, 3, H, W) for B performers
+        Returns: (rating, attention_weights)
+        """
+        if pixel_values.dim() == 4:
+            cls = self._embed(pixel_values)
+            gallery, weights = self._aggregate(cls, mask=mask, attn_dropout=attn_dropout)
+            rating = self.rank_head(gallery).squeeze(-1)
+        else:
+            B, K = pixel_values.shape[:2]
+            cls = self._embed(pixel_values.flatten(0, 1)).view(B, K, -1)
+            gallery, weights = self._aggregate(cls, mask=mask, attn_dropout=attn_dropout)
+            rating = self.rank_head(gallery).squeeze(-1)
+        return torch.clamp(rating, 0.0, 5.0), weights
+
+    def predict_rank(self, pixel_values, mask=None):
+        """Inference helper — returns just the rating tensor."""
+        rating, _ = self.forward(pixel_values, mask=mask)
+        return rating
