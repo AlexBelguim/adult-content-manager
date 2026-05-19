@@ -1187,13 +1187,47 @@ function ModelArsenal({
                   </Box>
                 )}
                 {result && !result.error && (
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1, p: 1, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
-                    <Box sx={{ textAlign: 'center', minWidth: 50 }}>
-                      <CircularProgress variant="determinate" value={(result.accuracy || 0) * 100} size={40}
-                        sx={{ color: result.accuracy >= 0.8 ? '#4caf50' : result.accuracy >= 0.6 ? '#ff9800' : '#f44336' }} />
-                      <Typography variant="caption" sx={{ display: 'block', color: '#888', fontSize: '0.6rem' }}>Accuracy</Typography>
-                    </Box>
-                    {result.total_tested && <Typography variant="caption" sx={{ color: '#888' }}>{result.total_tested} tested</Typography>}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 1, p: 1, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
+                    {result.metric_type === 'regression' ? (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Box sx={{ textAlign: 'center', minWidth: 50 }}>
+                          <CircularProgress variant="determinate" value={(result.within_half_star || 0) * 100} size={40}
+                            sx={{ color: result.within_half_star >= 0.7 ? '#4caf50' : result.within_half_star >= 0.5 ? '#ff9800' : '#f44336' }} />
+                          <Typography variant="caption" sx={{ display: 'block', color: '#888', fontSize: '0.6rem' }}>±0.5★</Typography>
+                        </Box>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="caption" sx={{ display: 'block', color: '#fff', fontSize: '0.7rem' }}>MAE: <b>{result.mae?.toFixed(3)}</b></Typography>
+                          {result.spearman_rho != null && (
+                            <Typography variant="caption" sx={{ display: 'block', color: '#aaa', fontSize: '0.65rem' }}>ρ: {result.spearman_rho.toFixed(2)}</Typography>
+                          )}
+                          {result.total_tested != null && <Typography variant="caption" sx={{ color: '#666', fontSize: '0.6rem' }}>{result.total_tested} perfs</Typography>}
+                        </Box>
+                      </Box>
+                    ) : (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Box sx={{ textAlign: 'center', minWidth: 50 }}>
+                          <CircularProgress variant="determinate" value={(result.accuracy || 0) * 100} size={40}
+                            sx={{ color: result.accuracy >= 0.8 ? '#4caf50' : result.accuracy >= 0.6 ? '#ff9800' : '#f44336' }} />
+                          <Typography variant="caption" sx={{ display: 'block', color: '#888', fontSize: '0.6rem' }}>
+                            {result.metric_type === 'pair_ranking' ? 'Pair Acc' : 'Accuracy'}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ flex: 1 }}>
+                          {result.total_tested != null && <Typography variant="caption" sx={{ display: 'block', color: '#888', fontSize: '0.65rem' }}>{result.total_tested} {result.metric_type === 'pair_ranking' ? 'pairs' : 'images'}</Typography>}
+                          {result.separation != null && (
+                            <Typography variant="caption" sx={{ display: 'block', color: '#aaa', fontSize: '0.65rem' }}>sep: {result.separation.toFixed(2)}</Typography>
+                          )}
+                        </Box>
+                      </Box>
+                    )}
+                    {result.in_distribution && (
+                      <Tooltip title="This checkpoint has no held-out performers — test images came from the same performers it trained on. Result is optimistic, not a true generalization measurement.">
+                        <Chip label="⚠ in-distribution" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,152,0,0.12)', color: '#ff9800', fontWeight: 700 }} />
+                      </Tooltip>
+                    )}
+                    {!result.in_distribution && result.holdout_performers_count > 0 && (
+                      <Typography variant="caption" sx={{ color: '#4caf50', fontSize: '0.6rem' }}>✓ held-out: {result.holdout_performers_count} perfs</Typography>
+                    )}
                   </Box>
                 )}
                 {result?.error && <Alert severity="error" sx={{ py: 0, mb: 1, fontSize: '0.7rem' }}>{result.error}</Alert>}

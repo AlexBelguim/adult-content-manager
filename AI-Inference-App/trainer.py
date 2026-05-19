@@ -85,6 +85,32 @@ def scan_performer_dirs(base_dir):
                 result[d.name] = pics
     return result
 
+def performer_from_path(path):
+    """Extract performer name from an image path. Handles both
+    `base/keep/performer/img.jpg` and `base/keep/performer/pics/img.jpg`."""
+    p = Path(path)
+    perf = p.parent.name
+    if perf == 'pics':
+        perf = p.parent.parent.name
+    return perf
+
+def split_performers(performer_names, val_frac=0.15, seed=42):
+    """Hold out a fraction of performers entirely. Returns (train, val)
+    as sorted lists. Uses a fixed seed so the same dataset yields a
+    stable split across runs — important if you want to compare models
+    trained against each other.
+    """
+    perfs = sorted(set(performer_names))
+    rng = random.Random(seed)
+    shuffled = perfs[:]
+    rng.shuffle(shuffled)
+    n_val = max(1, int(len(shuffled) * val_frac))
+    if n_val >= len(shuffled):  # tiny dataset — keep at least one for train
+        n_val = max(1, len(shuffled) - 1)
+    val = sorted(shuffled[:n_val])
+    train = sorted(shuffled[n_val:])
+    return train, val
+
 # ── Models ───────────────────────────────────────────────────────────────────
 
 class BinaryClassifier(nn.Module):
@@ -258,25 +284,48 @@ class BinaryDataset(Dataset):
                 'path': path}
 
 class PairwiseDataset(Dataset):
+    """Pairs are either (winner_path, loser_path) — plain pairwise —
+    or (winner_path, rank_w, loser_path, rank_l) — rank-conditioned siamese.
+    When ranks are present, the batch also yields rank_winner / rank_loser tensors.
+    """
     def __init__(self, pairs, processor, augment=True, deduplicate=False):
+        self.has_ranks = len(pairs) > 0 and len(pairs[0]) == 4
         resolved_pairs = []
-        for w, l in pairs:
-            rw = resolve_path(w)
-            rl = resolve_path(l)
-            if rw and rl:
-                resolved_pairs.append((rw, rl))
-        
+        for tup in pairs:
+            if self.has_ranks:
+                w, rw_, l, rl_ = tup
+                rw = resolve_path(w)
+                rl = resolve_path(l)
+                if rw and rl:
+                    resolved_pairs.append((rw, float(rw_), rl, float(rl_)))
+            else:
+                w, l = tup
+                rw = resolve_path(w)
+                rl = resolve_path(l)
+                if rw and rl:
+                    resolved_pairs.append((rw, rl))
+
         if deduplicate:
             resolved_pairs = list(set(resolved_pairs))
-            
+
         self.pairs = resolved_pairs
         self.processor = processor
         self.augment = augment
-        self.aug_t = T.Compose([T.RandomHorizontalFlip(0.5), T.ColorJitter(0.1, 0.1, 0.1, 0.05)])
+        # Pre-resize to 224 in the dataset so the processor doesn't have to decode
+        # and downsample full-resolution JPEGs every step — major perf win for siamese.
+        self.aug_t = T.Compose([
+            T.RandomHorizontalFlip(0.5),
+            T.RandomResizedCrop(224, scale=(0.85, 1.0)),
+            T.ColorJitter(0.1, 0.1, 0.1, 0.05),
+        ])
 
     def __len__(self): return len(self.pairs)
     def __getitem__(self, idx):
-        w, l = self.pairs[idx]
+        tup = self.pairs[idx]
+        if self.has_ranks:
+            w, rw_, l, rl_ = tup
+        else:
+            w, l = tup
         try:
             wimg = Image.open(w).convert('RGB')
             limg = Image.open(l).convert('RGB')
@@ -285,7 +334,13 @@ class PairwiseDataset(Dataset):
             wimg, limg = self.aug_t(wimg), self.aug_t(limg)
         wi = self.processor(images=wimg, return_tensors='pt')
         li = self.processor(images=limg, return_tensors='pt')
-        return {'winner': wi['pixel_values'].squeeze(0), 'loser': li['pixel_values'].squeeze(0), 'idx': idx}
+        out = {'winner': wi['pixel_values'].squeeze(0),
+               'loser': li['pixel_values'].squeeze(0),
+               'idx': idx}
+        if self.has_ranks:
+            out['rank_winner'] = torch.tensor(rw_, dtype=torch.float32)
+            out['rank_loser'] = torch.tensor(rl_, dtype=torch.float32)
+        return out
 
 # ── Training Functions ───────────────────────────────────────────────────────
 
@@ -320,8 +375,23 @@ def train_binary(config):
 
     base_keep = scan_images(keep_dir)
     base_delete = scan_images(delete_dir)
-    
-    # Integrate Human Corrections (Hard Examples)
+
+    # Performer-held-out split: group images by performer, then split the
+    # PERFORMER list. Prevents the model from cheating by memorizing
+    # "this performer = always keep" — the val set is now performers it
+    # has literally never seen.
+    all_performers = sorted(set(performer_from_path(p) for p in base_keep + base_delete))
+    train_performers, val_performers = split_performers(all_performers, val_frac=0.15)
+    train_set = set(train_performers)
+    val_set = set(val_performers)
+    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout)")
+
+    train_keep = [p for p in base_keep if performer_from_path(p) in train_set]
+    train_delete = [p for p in base_delete if performer_from_path(p) in train_set]
+    val_keep = [p for p in base_keep if performer_from_path(p) in val_set]
+    val_delete = [p for p in base_delete if performer_from_path(p) in val_set]
+
+    # Integrate Human Corrections (Hard Examples) — always train, never val.
     hard_examples = config.get('hard_examples', [])
     hard_keep = []
     hard_delete = []
@@ -334,29 +404,30 @@ def train_binary(config):
             for _ in range(mult):
                 if h['corrected_label'] == 'keep': hard_keep.append(p)
                 else: hard_delete.append(p)
+    train_keep += hard_keep
+    train_delete += hard_delete
 
-    all_keep = base_keep + hard_keep
-    all_delete = base_delete + hard_delete
-    
-    config['_keep_count'] = len(all_keep)
-    config['_delete_count'] = len(all_delete)
-    tlog(f"  📊 Dataset: Keep={len(all_keep)}, Delete={len(all_delete)}")
+    config['_keep_count'] = len(train_keep) + len(val_keep)
+    config['_delete_count'] = len(train_delete) + len(val_delete)
+    tlog(f"  📊 Train: Keep={len(train_keep)}, Delete={len(train_delete)} | Val: Keep={len(val_keep)}, Delete={len(val_delete)}")
 
-    if not all_keep or not all_delete:
-        raise ValueError("Need both keep and delete images")
+    if not train_keep or not train_delete:
+        raise ValueError("Need both keep and delete images in train split")
+    if not val_keep or not val_delete:
+        tlog("  ⚠️ Val split missing one class — val_acc will be unreliable")
 
     processor = AutoImageProcessor.from_pretrained(backbone)
-    
+
     # Mining setup
     mining_pool = [] # list of (path, label)
     mining_mult = config.get('mining_multiplier', 4)
 
-    # Initial split
-    full_ds = BinaryDataset(all_keep, all_delete, processor, deduplicate=config.get('deduplicate', False))
-    vs = max(1, int(len(full_ds) * 0.15))
-    train_ds_base, val_ds = random_split(full_ds, [len(full_ds)-vs, vs])
-    
-    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+    # Build the train base dataset once (its sample list drives per-epoch
+    # mining rebuilds). Val dataset is built from val performers only.
+    train_ds_base = BinaryDataset(train_keep, train_delete, processor, deduplicate=config.get('deduplicate', False))
+    val_ds = BinaryDataset(val_keep, val_delete, processor, augment=False, deduplicate=False) if (val_keep and val_delete) else None
+
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0) if val_ds is not None else None
     model = BinaryClassifier(backbone_name=backbone, quantize=quantize).to(device)
     if not quantize: model.freeze_backbone()
     criterion = nn.BCEWithLogitsLoss()
@@ -381,9 +452,9 @@ def train_binary(config):
         training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
 
         # Create loader for this epoch (potentially with mining pool)
-        current_keep = [s[0] for s in train_ds_base.dataset.samples if s[1] == 1.0]
-        current_delete = [s[0] for s in train_ds_base.dataset.samples if s[1] == 0.0]
-        
+        current_keep = [s[0] for s in train_ds_base.samples if s[1] == 1.0]
+        current_delete = [s[0] for s in train_ds_base.samples if s[1] == 0.0]
+
         if config.get('enable_mining') and mining_pool:
             tlog(f"  ⛏️ Mining: adding {len(mining_pool)} previous failures (x{mining_mult})")
             for p, l in mining_pool:
@@ -434,30 +505,34 @@ def train_binary(config):
             if mining_pool:
                 tlog(f"  🚩 Epoch {epoch} failures tracked: {len(mining_pool)}")
 
-        # Validate
-        model.eval()
-        vc = vt = 0
-        with torch.no_grad():
-            for batch in val_loader:
-                pv = batch['pixel_values'].to(device)
-                labels = batch['label'].to(device)
-                logits = model(pv)
-                vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
-                vt += labels.size(0)
-        val_acc = vc / max(vt, 1)
+        # Validate on held-out performers
+        if val_loader is not None:
+            model.eval()
+            vc = vt = 0
+            with torch.no_grad():
+                for batch in val_loader:
+                    pv = batch['pixel_values'].to(device)
+                    labels = batch['label'].to(device)
+                    logits = model(pv)
+                    vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
+                    vt += labels.size(0)
+            val_acc = vc / max(vt, 1)
+        else:
+            val_acc = 0.0
         train_acc = correct / max(total, 1)
         training_state['val_acc'] = val_acc
         training_state['epoch_history'].append({
             'epoch': epoch, 'train_loss': total_loss / num_batches,
             'train_acc': round(train_acc, 4), 'val_acc': round(val_acc, 4)
         })
-        tlog(f"  Epoch {epoch}/{epochs} | Train: {train_acc:.1%} | Val: {val_acc:.1%}")
+        tlog(f"  Epoch {epoch}/{epochs} | Train: {train_acc:.1%} | Val (held-out): {val_acc:.1%}")
 
         if val_acc > best_acc:
             best_acc = val_acc
             training_state['best_val_acc'] = best_acc
             torch.save({'model_state_dict': model.state_dict(), 'val_acc': val_acc,
                         'backbone': backbone, 'model_type': 'binary',
+                        'holdout_performers': val_performers,
                         'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs}}, out_path)
             tlog(f"  ⭐ Saved best → {out_path.name} ({val_acc:.1%})")
 
@@ -475,7 +550,7 @@ def train_pairwise(config):
     epochs = config.get('epochs', 10)
     finetune_start = config.get('finetune_start_epoch', 3)
     quantize = config.get('quantize', False)
-    bs = config.get('batch_size', 8)
+    bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
     pairs = config.get('pairs', [])
 
@@ -825,7 +900,7 @@ def train_siamese_binary(config):
     epochs = config.get('epochs', 8)
     finetune_start = config.get('finetune_start_epoch', 3)
     quantize = config.get('quantize', False)
-    bs = config.get('batch_size', 8)
+    bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
     use_cached = config.get('use_cached', False)
     synthetic_pairs_per_epoch = config.get('synthetic_pairs_per_epoch', 500)
@@ -875,9 +950,25 @@ def train_siamese_binary(config):
     keep_by_perf = group_by_performer(keep_imgs)
     delete_by_perf = group_by_performer(delete_imgs)
     all_performers = sorted(set(list(keep_by_perf.keys()) + list(delete_by_perf.keys())))
+
+    # Performer-held-out split. Train pools = only train performers' images;
+    # val pairs are synthesized from val performers only.
+    train_performers, val_performers = split_performers(all_performers, val_frac=0.15)
+    train_set = set(train_performers); val_set = set(val_performers)
+    keep_by_perf_train = {p: keep_by_perf[p] for p in train_set if p in keep_by_perf}
+    delete_by_perf_train = {p: delete_by_perf[p] for p in train_set if p in delete_by_perf}
+    keep_by_perf_val = {p: keep_by_perf[p] for p in val_set if p in keep_by_perf}
+    delete_by_perf_val = {p: delete_by_perf[p] for p in val_set if p in delete_by_perf}
+    keep_imgs_train = [p for perf, ps in keep_by_perf_train.items() for p in ps]
+    delete_imgs_train = [p for perf, ps in delete_by_perf_train.items() for p in ps]
+    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout)")
     tlog(f"  👤 Performers: {len(all_performers)} | Mode: {'Per-Performer' if per_performer else 'Global'}")
     if per_performer:
-        tlog(f"  📐 Total pairs/epoch: ~{synthetic_pairs_per_epoch} × {len(all_performers)} = {synthetic_pairs_per_epoch * len(all_performers)}")
+        perf_both_train = [p for p in train_set if p in keep_by_perf and p in delete_by_perf]
+        tlog(f"  📐 Total pairs/epoch: ~{synthetic_pairs_per_epoch} × {len(perf_both_train)} = {synthetic_pairs_per_epoch * len(perf_both_train)}")
+
+    if not keep_imgs_train or not delete_imgs_train:
+        raise ValueError("Training pool empty after performer split — too few performers?")
 
     processor = AutoImageProcessor.from_pretrained(backbone)
     model = DinoV2PreferenceModel(model_name=backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
@@ -891,6 +982,20 @@ def train_siamese_binary(config):
     out_path.parent.mkdir(exist_ok=True)
     mining_pool = []
     mining_mult = config.get('mining_multiplier', 4)
+
+    # Build a stable val pair set from held-out performers. Reused every epoch.
+    val_pairs = []
+    perf_both_val = [p for p in val_set if p in keep_by_perf_val and p in delete_by_perf_val]
+    val_pairs_per_perf = min(50, synthetic_pairs_per_epoch)
+    for perf in perf_both_val:
+        p_keep = keep_by_perf_val[perf]
+        p_del = delete_by_perf_val[perf]
+        n = min(val_pairs_per_perf, len(p_keep) * len(p_del))
+        for _ in range(n):
+            val_pairs.append((random.choice(p_keep), random.choice(p_del)))
+    val_ds = PairwiseDataset(val_pairs, processor, augment=False, deduplicate=False) if val_pairs else None
+    val_loader_ep = DataLoader(val_ds, batch_size=bs, num_workers=0) if val_ds is not None else None
+    tlog(f"  🧪 Val pair set: {len(val_pairs)} pairs from {len(perf_both_val)} held-out performers")
 
     for epoch in range(1, epochs + 1):
         # Unfreeze backbone after warmup
@@ -906,26 +1011,24 @@ def train_siamese_binary(config):
         is_finetuning = finetune_start > 0 and epoch >= finetune_start
         training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
 
-        # ── Sample synthetic pairs ──────────────────────────────────
+        # ── Sample synthetic pairs from TRAIN performers only ──────────
         pairs = []
         if per_performer:
-            # Per-performer: only use performers who have BOTH keep and delete images
-            # This ensures we learn the specific "before and after" differences for each person
-            performers_with_both = [p for p in all_performers if p in keep_by_perf and p in delete_by_perf]
+            performers_with_both = [p for p in train_set if p in keep_by_perf_train and p in delete_by_perf_train]
             if epoch == 1:
-                tlog(f"  🎯 Siamese Mode: Strictly Per-Performer ({len(performers_with_both)} performers with both sides)")
-            
+                tlog(f"  🎯 Siamese Mode: Strictly Per-Performer ({len(performers_with_both)} train performers with both sides)")
+
             for perf in performers_with_both:
-                p_keep = keep_by_perf[perf]
-                p_del  = delete_by_perf[perf]
+                p_keep = keep_by_perf_train[perf]
+                p_del  = delete_by_perf_train[perf]
                 n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
                 for _ in range(n):
                     pairs.append((random.choice(p_keep), random.choice(p_del)))
         else:
-            # Global: random draw from the full flat pool
-            n = min(synthetic_pairs_per_epoch, len(keep_imgs) * len(delete_imgs))
+            # Global: random draw from the train pool only
+            n = min(synthetic_pairs_per_epoch, len(keep_imgs_train) * len(delete_imgs_train))
             for _ in range(n):
-                pairs.append((random.choice(keep_imgs), random.choice(delete_imgs)))
+                pairs.append((random.choice(keep_imgs_train), random.choice(delete_imgs_train)))
 
         # Add mining failures from previous epoch
         if config.get('enable_mining') and mining_pool:
@@ -935,11 +1038,7 @@ def train_siamese_binary(config):
                     pairs.append(pair)
 
         train_ds = PairwiseDataset(pairs, processor, augment=True, deduplicate=False)
-        vs = max(1, int(len(train_ds) * 0.15))
-        train_split, val_split = random_split(train_ds, [len(train_ds) - vs, vs])
-        train_loader = DataLoader(train_split, batch_size=bs, shuffle=True, num_workers=0)
-        val_loader_ep = DataLoader(val_split, batch_size=bs, num_workers=0)
-
+        train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
         num_batches = len(train_loader)
         training_state['total_batches'] = num_batches
 
@@ -983,17 +1082,20 @@ def train_siamese_binary(config):
             if mining_pool:
                 tlog(f"  🚩 Failures tracked: {len(mining_pool)}")
 
-        # Validate
-        model.eval()
-        correct = total = 0
-        with torch.no_grad():
-            for batch in val_loader_ep:
-                w = batch['winner'].to(device)
-                l = batch['loser'].to(device)
-                sw, sl = model(w, l)
-                correct += (sw > sl).sum().item()
-                total += sw.size(0)
-        val_acc = correct / max(total, 1)
+        # Validate on held-out performer pair set
+        if val_loader_ep is not None:
+            model.eval()
+            correct = total = 0
+            with torch.no_grad():
+                for batch in val_loader_ep:
+                    w = batch['winner'].to(device)
+                    l = batch['loser'].to(device)
+                    sw, sl = model(w, l)
+                    correct += (sw > sl).sum().item()
+                    total += sw.size(0)
+            val_acc = correct / max(total, 1)
+        else:
+            val_acc = 0.0
         training_state['val_acc'] = val_acc
         training_state['epoch_history'].append({
             'epoch': epoch,
@@ -1001,7 +1103,7 @@ def train_siamese_binary(config):
             'val_acc': round(val_acc, 4),
             'pairs_generated': len(pairs)
         })
-        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val Acc: {val_acc:.1%} | Pairs: {len(pairs)}")
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val Acc (held-out): {val_acc:.1%} | Pairs: {len(pairs)}")
 
         if val_acc > best_acc:
             best_acc = val_acc
@@ -1011,6 +1113,7 @@ def train_siamese_binary(config):
                 'val_acc': val_acc,
                 'backbone': backbone,
                 'model_type': 'siamese_binary',
+                'holdout_performers': val_performers,
                 'config': {
                     'model_name': backbone,
                     'epochs': epochs,
@@ -1079,7 +1182,14 @@ def train_rank_aware_siamese(config):
     backbone_short = backbone.split('/')[-1]
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     out_path = Path(__file__).parent / 'models' / f'rank_siamese_{backbone_short}_{timestamp}.pt'
-    
+
+    # Build transform once outside the batch loop — was being re-created per batch.
+    transform = T.Compose([
+        T.Resize((224,224)),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+    ])
+
     for epoch in range(1, epochs + 1):
         if finetune_start > 0 and epoch == finetune_start:
             tlog(f"  🔥 Starting Fine-tuning at epoch {epoch}")
@@ -1102,33 +1212,27 @@ def train_rank_aware_siamese(config):
             n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
             for _ in range(n):
                 pairs.append((random.choice(p_keep), rank, random.choice(p_del), rank))
-        
+
         random.shuffle(pairs)
-        
+
         # Training loop
         model.train()
         total_loss = 0
         correct = 0
         total = 0
-        
+
         training_state['total_batches'] = (len(pairs) + bs - 1) // bs
-        
+
         for i in range(0, len(pairs), bs):
             batch = pairs[i:i+bs]
             training_state['batch'] = (i // bs) + 1
-            
+
             # Load images and ranks
             imgs_a = []
             ranks_a = []
             imgs_b = []
             ranks_b = []
-            
-            transform = T.Compose([
-                T.Resize((224,224)),
-                T.ToTensor(),
-                T.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
-            ])
-            
+
             for path_a, r_a, path_b, r_b in batch:
                 try:
                     imgs_a.append(transform(Image.open(path_a).convert('RGB')))
@@ -1238,38 +1342,43 @@ def train_performer_ranker(config):
     # Normalize keys for case-insensitive matching
     star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
 
-    # 3. Build dataset: ALL images of each rated performer (keep + delete)
-    all_samples = []  # (path, star_rating)
-    all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
-    rated_count = 0
+    # Performer-held-out split among RATED performers only — unrated ones
+    # can't contribute to either split because we'd have no label.
+    all_performers_with_images = set(list(keep_map.keys()) + list(delete_map.keys()))
+    rated_performers = sorted([p for p in all_performers_with_images
+                               if p.lower().strip() in star_ratings_norm])
+    train_performers, val_performers = split_performers(rated_performers, val_frac=0.15)
+    train_set = set(train_performers); val_set = set(val_performers)
+    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout) from {len(rated_performers)} rated")
 
-    for perf in all_performers:
-        perf_key = perf.lower().strip()
-        if perf_key not in star_ratings_norm:
-            continue  # skip unrated performers
-        stars = star_ratings_norm[perf_key]
-        rated_count += 1
-        # Add all keep images
-        for p in keep_map.get(perf, []):
-            all_samples.append((p, stars))
-        # Add all delete images
-        for p in delete_map.get(perf, []):
-            all_samples.append((p, stars))
+    def build_samples(performer_subset):
+        out = []
+        for perf in performer_subset:
+            stars = star_ratings_norm[perf.lower().strip()]
+            for p in keep_map.get(perf, []):
+                out.append((p, stars))
+            for p in delete_map.get(perf, []):
+                out.append((p, stars))
+        return out
 
-    random.shuffle(all_samples)
-    tlog(f"  📊 {len(all_samples)} images from {rated_count} rated performers")
+    train_samples = build_samples(train_set)
+    val_samples = build_samples(val_set)
+    random.shuffle(train_samples)
+
+    tlog(f"  📊 Train: {len(train_samples)} images | Val: {len(val_samples)} images")
     config['_keep_count'] = sum(len(v) for v in keep_map.values())
     config['_delete_count'] = sum(len(v) for v in delete_map.values())
 
-    if len(all_samples) < 10:
-        raise ValueError(f"Too few samples ({len(all_samples)}). Need rated performers with images.")
+    if len(train_samples) < 10:
+        raise ValueError(f"Too few training samples ({len(train_samples)}) after performer split.")
 
     # 4. Dataset
     processor = AutoImageProcessor.from_pretrained(backbone)
 
     class RankerDS(Dataset):
-        def __init__(self, samples):
+        def __init__(self, samples, augment=True):
             self.samples = samples
+            self.augment = augment
             self.aug = T.Compose([T.RandomHorizontalFlip(0.5),
                                   T.RandomResizedCrop(224, scale=(0.85, 1.0)),
                                   T.ColorJitter(0.08, 0.08, 0.05, 0.02)])
@@ -1278,16 +1387,16 @@ def train_performer_ranker(config):
             path, stars = self.samples[idx]
             try: img = Image.open(path).convert('RGB')
             except: return self.__getitem__((idx+1) % len(self))
-            img = self.aug(img)
+            if self.augment:
+                img = self.aug(img)
             inp = processor(images=img, return_tensors='pt')
             return {'pixel_values': inp['pixel_values'].squeeze(0),
                     'star_rating': torch.tensor(stars, dtype=torch.float32)}
 
-    ds = RankerDS(all_samples)
-    vs = max(1, int(len(ds) * 0.15))
-    train_ds, val_ds = random_split(ds, [len(ds)-vs, vs])
+    train_ds = RankerDS(train_samples, augment=True)
+    val_ds = RankerDS(val_samples, augment=False) if val_samples else None
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0) if val_ds is not None else None
 
     # 5. Model
     model = PerformerRankerModel(backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
@@ -1337,26 +1446,29 @@ def train_performer_ranker(config):
             training_state['batch'] = bi
             training_state['train_loss'] = total_loss / bi
 
-        # Validate
-        model.eval()
-        val_err = val_n = 0
-        with torch.no_grad():
-            for batch in val_loader:
-                pv = batch['pixel_values'].to(device)
-                stars_gt = batch['star_rating'].to(device)
-                pred = model(pv)
-                val_err += (pred - stars_gt).abs().sum().item()
-                val_n += stars_gt.size(0)
-
-        val_mae = val_err / max(val_n, 1)
+        # Validate on held-out performers
+        if val_loader is not None:
+            model.eval()
+            val_err = val_n = 0
+            with torch.no_grad():
+                for batch in val_loader:
+                    pv = batch['pixel_values'].to(device)
+                    stars_gt = batch['star_rating'].to(device)
+                    pred = model(pv)
+                    val_err += (pred - stars_gt).abs().sum().item()
+                    val_n += stars_gt.size(0)
+            val_mae = val_err / max(val_n, 1)
+        else:
+            val_mae = float('inf')
         # Use inverse MAE as "accuracy" for the training state UI
-        val_acc_proxy = max(0.0, 1.0 - val_mae / 5.0)
+        val_acc_proxy = max(0.0, 1.0 - val_mae / 5.0) if val_mae != float('inf') else 0.0
         training_state['val_acc'] = val_acc_proxy
         training_state['epoch_history'].append({
             'epoch': epoch, 'train_loss': total_loss / max(num_batches, 1),
-            'val_mae': round(val_mae, 3), 'val_acc_proxy': round(val_acc_proxy, 4)
+            'val_mae': round(val_mae, 3) if val_mae != float('inf') else None,
+            'val_acc_proxy': round(val_acc_proxy, 4)
         })
-        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val MAE: {val_mae:.3f}")
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val MAE (held-out): {val_mae:.3f}")
 
         if val_mae < best_mae:
             best_mae = val_mae
@@ -1367,6 +1479,7 @@ def train_performer_ranker(config):
                 'backbone': backbone,
                 'model_type': 'performer_ranker',
                 'performer_ratings': star_ratings,
+                'holdout_performers': val_performers,
                 'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
                 'created_at': time.time()
             }, out_path)
@@ -1415,26 +1528,39 @@ def train_ranked_binary(config):
 
     star_ratings_norm = {k.lower().strip(): v for k, v in star_ratings.items()}
 
-    # Build samples: (path, star_rating, label)
-    all_samples = []
-    all_performers = set(list(keep_map.keys()) + list(delete_map.keys()))
-    for perf in all_performers:
-        stars = star_ratings_norm.get(perf.lower().strip(), 2.5)
-        for p in keep_map.get(perf, []):
-            all_samples.append((p, stars, 1.0))
-        for p in delete_map.get(perf, []):
-            all_samples.append((p, stars, 0.0))
-    random.shuffle(all_samples)
+    # Performer-held-out split before building samples.
+    all_performers = sorted(set(list(keep_map.keys()) + list(delete_map.keys())))
+    train_performers, val_performers = split_performers(all_performers, val_frac=0.15)
+    train_set = set(train_performers); val_set = set(val_performers)
+    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout)")
+
+    def build_samples(performer_subset):
+        out = []
+        for perf in performer_subset:
+            stars = star_ratings_norm.get(perf.lower().strip(), 2.5)
+            for p in keep_map.get(perf, []):
+                out.append((p, stars, 1.0))
+            for p in delete_map.get(perf, []):
+                out.append((p, stars, 0.0))
+        return out
+
+    train_samples = build_samples(train_set)
+    val_samples = build_samples(val_set)
+    random.shuffle(train_samples)
 
     config['_keep_count'] = sum(len(v) for v in keep_map.values())
     config['_delete_count'] = sum(len(v) for v in delete_map.values())
-    tlog(f"  📊 Total samples: {len(all_samples)}")
+    tlog(f"  📊 Train: {len(train_samples)} samples | Val: {len(val_samples)} samples (held-out)")
+
+    if not train_samples:
+        raise ValueError("No training samples after performer split")
 
     processor = AutoImageProcessor.from_pretrained(backbone)
 
     class RankedBinaryDS(Dataset):
-        def __init__(self, samples):
+        def __init__(self, samples, augment=True):
             self.samples = samples
+            self.augment = augment
             self.aug = T.Compose([T.RandomHorizontalFlip(0.5),
                                   T.RandomResizedCrop(224, scale=(0.85, 1.0)),
                                   T.ColorJitter(0.08, 0.08, 0.05, 0.02)])
@@ -1443,17 +1569,17 @@ def train_ranked_binary(config):
             path, stars, label = self.samples[idx]
             try: img = Image.open(path).convert('RGB')
             except: return self.__getitem__((idx+1) % len(self))
-            img = self.aug(img)
+            if self.augment:
+                img = self.aug(img)
             inp = processor(images=img, return_tensors='pt')
             return {'pixel_values': inp['pixel_values'].squeeze(0),
                     'star_rating': torch.tensor(stars, dtype=torch.float32),
                     'label': torch.tensor(label, dtype=torch.float32)}
 
-    ds = RankedBinaryDS(all_samples)
-    vs = max(1, int(len(ds) * 0.15))
-    train_ds, val_ds = random_split(ds, [len(ds)-vs, vs])
+    train_ds = RankedBinaryDS(train_samples, augment=True)
+    val_ds = RankedBinaryDS(val_samples, augment=False) if val_samples else None
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0) if val_ds is not None else None
 
     model = RankedBinaryClassifier(backbone, quantize=quantize).to(device)
     if not quantize: model.freeze_backbone()
@@ -1505,24 +1631,27 @@ def train_ranked_binary(config):
             training_state['train_loss'] = total_loss / bi
             training_state['train_acc'] = correct / max(total, 1)
 
-        # Validate
-        model.eval()
-        vc = vt = 0
-        with torch.no_grad():
-            for batch in val_loader:
-                pv = batch['pixel_values'].to(device)
-                stars = batch['star_rating'].to(device)
-                labels = batch['label'].to(device)
-                logits = model(pv, stars)
-                vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
-                vt += labels.size(0)
-        val_acc = vc / max(vt, 1)
+        # Validate on held-out performers
+        if val_loader is not None:
+            model.eval()
+            vc = vt = 0
+            with torch.no_grad():
+                for batch in val_loader:
+                    pv = batch['pixel_values'].to(device)
+                    stars = batch['star_rating'].to(device)
+                    labels = batch['label'].to(device)
+                    logits = model(pv, stars)
+                    vc += ((torch.sigmoid(logits) > 0.5).float() == labels).sum().item()
+                    vt += labels.size(0)
+            val_acc = vc / max(vt, 1)
+        else:
+            val_acc = 0.0
         training_state['val_acc'] = val_acc
         training_state['epoch_history'].append({
             'epoch': epoch, 'train_loss': total_loss / num_batches,
             'train_acc': round(correct / max(total, 1), 4), 'val_acc': round(val_acc, 4)
         })
-        tlog(f"  Epoch {epoch}/{epochs} | Train: {correct/max(total,1):.1%} | Val: {val_acc:.1%}")
+        tlog(f"  Epoch {epoch}/{epochs} | Train: {correct/max(total,1):.1%} | Val (held-out): {val_acc:.1%}")
 
         if val_acc > best_acc:
             best_acc = val_acc
@@ -1531,6 +1660,8 @@ def train_ranked_binary(config):
                 'model_state_dict': model.state_dict(), 'val_acc': val_acc,
                 'backbone': backbone, 'model_type': 'binary',
                 'rank_conditioned': True,
+                'holdout_performers': val_performers,
+                'performer_ratings': star_ratings,
                 'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
                 'created_at': time.time()
             }, out_path)
@@ -1550,7 +1681,7 @@ def train_ranked_siamese_binary(config):
     epochs = config.get('epochs', 8)
     finetune_start = config.get('finetune_start_epoch', 3)
     quantize = config.get('quantize', False)
-    bs = config.get('batch_size', 8)
+    bs = config.get('batch_size', 16)
     base_path = config.get('base_path', '')
     synthetic_pairs_per_epoch = config.get('synthetic_pairs_per_epoch', 500)
 
@@ -1576,6 +1707,11 @@ def train_ranked_siamese_binary(config):
     if not all_performers:
         raise ValueError("No performers have both keep and delete images.")
 
+    # Performer-held-out split — val pairs come from never-seen performers.
+    train_performers, val_performers = split_performers(all_performers, val_frac=0.15)
+    train_set = set(train_performers); val_set = set(val_performers)
+    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout)")
+
     config['_keep_count'] = sum(len(v) for v in keep_map.values())
     config['_delete_count'] = sum(len(v) for v in delete_map.values())
 
@@ -1590,7 +1726,20 @@ def train_ranked_siamese_binary(config):
     out_path = Path(__file__).parent / 'models' / f'siamese_binary_{backbone_short}_{timestamp}.pt'
     out_path.parent.mkdir(exist_ok=True)
 
-    aug_t = T.Compose([T.RandomHorizontalFlip(0.5), T.ColorJitter(0.1, 0.1, 0.1, 0.05)])
+    # Build stable val pair set from held-out performers
+    val_pairs = []
+    val_pairs_per_perf = min(50, synthetic_pairs_per_epoch)
+    for perf in val_performers:
+        p_keep = keep_map.get(perf, [])
+        p_del = delete_map.get(perf, [])
+        if not p_keep or not p_del: continue
+        rank = star_ratings_norm.get(perf.lower().strip(), 2.5)
+        n = min(val_pairs_per_perf, len(p_keep) * len(p_del))
+        for _ in range(n):
+            val_pairs.append((random.choice(p_keep), rank, random.choice(p_del), rank))
+    val_ds = PairwiseDataset(val_pairs, processor, augment=False, deduplicate=False) if val_pairs else None
+    val_loader_ep = DataLoader(val_ds, batch_size=bs, num_workers=0) if val_ds is not None else None
+    tlog(f"  🧪 Val pair set: {len(val_pairs)} pairs from held-out performers")
 
     for epoch in range(1, epochs+1):
         if finetune_start > 0 and epoch == finetune_start:
@@ -1604,84 +1753,87 @@ def train_ranked_siamese_binary(config):
         is_finetuning = finetune_start > 0 and epoch >= finetune_start
         training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
 
-        # Generate synthetic pairs with ranks
-        pairs = []  # (keep_path, rank, delete_path, rank)
-        for perf in all_performers:
-            p_keep = keep_map[perf]
-            p_del = delete_map[perf]
+        # Generate synthetic pairs from TRAIN performers only.
+        pairs = []
+        for perf in train_performers:
+            p_keep = keep_map.get(perf, [])
+            p_del = delete_map.get(perf, [])
+            if not p_keep or not p_del: continue
             rank = star_ratings_norm.get(perf.lower().strip(), 2.5)
             n = min(synthetic_pairs_per_epoch, len(p_keep) * len(p_del))
             for _ in range(n):
                 pairs.append((random.choice(p_keep), rank, random.choice(p_del), rank))
-        random.shuffle(pairs)
 
-        training_state['total_batches'] = (len(pairs) + bs - 1) // bs
+        train_ds = PairwiseDataset(pairs, processor, augment=True, deduplicate=False)
+        train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
 
         model.train()
         total_loss = correct = total = 0
-
-        for i in range(0, len(pairs), bs):
-            batch = pairs[i:i+bs]
-            training_state['batch'] = (i // bs) + 1
-            imgs_a, ranks_a, imgs_b, ranks_b = [], [], [], []
-
-            for path_a, r_a, path_b, r_b in batch:
-                try:
-                    img_a = aug_t(Image.open(path_a).convert('RGB'))
-                    img_b = aug_t(Image.open(path_b).convert('RGB'))
-                    inp_a = processor(images=img_a, return_tensors='pt')
-                    inp_b = processor(images=img_b, return_tensors='pt')
-                    imgs_a.append(inp_a['pixel_values'].squeeze(0))
-                    imgs_b.append(inp_b['pixel_values'].squeeze(0))
-                    ranks_a.append(float(r_a))
-                    ranks_b.append(float(r_b))
-                except: continue
-
-            if not imgs_a: continue
-
-            x_a = torch.stack(imgs_a).to(device)
-            r_a = torch.tensor(ranks_a, dtype=torch.float32).to(device)
-            x_b = torch.stack(imgs_b).to(device)
-            r_b = torch.tensor(ranks_b, dtype=torch.float32).to(device)
-
+        for bi, batch in enumerate(train_loader, 1):
+            w = batch['winner'].to(device)
+            l = batch['loser'].to(device)
+            rw = batch['rank_winner'].to(device)
+            rl = batch['rank_loser'].to(device)
             optimizer.zero_grad()
             if scaler:
                 with torch.amp.autocast('cuda'):
-                    sa, sb = model(x_a, r_a, x_b, r_b)
-                    target = torch.ones(sa.size(0), device=device)
-                    loss = criterion(sa, sb, target)
+                    sw, sl = model(w, rw, l, rl)
+                    target = torch.ones(sw.size(0), device=device)
+                    loss = criterion(sw, sl, target)
                 scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
             else:
-                sa, sb = model(x_a, r_a, x_b, r_b)
-                target = torch.ones(sa.size(0), device=device)
-                loss = criterion(sa, sb, target)
+                sw, sl = model(w, rw, l, rl)
+                target = torch.ones(sw.size(0), device=device)
+                loss = criterion(sw, sl, target)
                 loss.backward(); optimizer.step()
-
             total_loss += loss.item()
-            correct += (sa > sb).sum().item()
-            total += sa.size(0)
-            training_state['train_loss'] = total_loss / ((i // bs) + 1)
+            correct += (sw > sl).sum().item()
+            total += sw.size(0)
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
             training_state['train_acc'] = correct / max(total, 1)
 
-        epoch_acc = correct / max(total, 1)
-        training_state['val_acc'] = epoch_acc
+        # Validate on held-out performer pair set
+        if val_loader_ep is not None:
+            model.eval()
+            vc = vt = 0
+            with torch.no_grad():
+                for batch in val_loader_ep:
+                    w = batch['winner'].to(device)
+                    l = batch['loser'].to(device)
+                    rw = batch['rank_winner'].to(device)
+                    rl = batch['rank_loser'].to(device)
+                    sw, sl = model(w, rw, l, rl)
+                    vc += (sw > sl).sum().item()
+                    vt += sw.size(0)
+            val_acc = vc / max(vt, 1)
+        else:
+            val_acc = 0.0
+        training_state['val_acc'] = val_acc
         training_state['epoch_history'].append({
-            'epoch': epoch, 'train_loss': total_loss / max(1, training_state['total_batches']),
-            'val_acc': round(epoch_acc, 4), 'pairs': len(pairs)
+            'epoch': epoch,
+            'train_loss': total_loss / max(num_batches, 1),
+            'train_acc': round(correct / max(total, 1), 4),
+            'val_acc': round(val_acc, 4),
+            'pairs': len(pairs)
         })
-        tlog(f"  Epoch {epoch}/{epochs} | Loss: {training_state['train_loss']:.4f} | Acc: {epoch_acc:.1%}")
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Train: {correct/max(total,1):.1%} | Val (held-out): {val_acc:.1%} | Pairs: {len(pairs)}")
 
-        if epoch_acc > best_acc:
-            best_acc = epoch_acc
+        if val_acc > best_acc:
+            best_acc = val_acc
             training_state['best_val_acc'] = best_acc
             torch.save({
                 'model_state_dict': model.state_dict(), 'val_acc': best_acc,
                 'backbone': backbone, 'model_type': 'siamese_binary',
                 'rank_conditioned': True,
+                'holdout_performers': val_performers,
+                'performer_ratings': star_ratings,
                 'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
                 'created_at': time.time()
             }, out_path)
-            tlog(f"  ⭐ Saved → {out_path.name} ({epoch_acc:.1%})")
+            tlog(f"  ⭐ Saved → {out_path.name} ({val_acc:.1%})")
 
         if device.type == 'cuda': torch.cuda.empty_cache()
 

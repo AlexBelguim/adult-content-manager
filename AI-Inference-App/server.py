@@ -492,15 +492,35 @@ def api_test_model():
             config = checkpoint_cpu.get('config', {})
             model_name = config.get('model_name') or checkpoint_cpu.get('backbone') or 'facebook/dinov2-large'
             model_type = m_type
-            
+            rank_conditioned = bool(checkpoint_cpu.get('rank_conditioned', False))
+            holdout_performers = checkpoint_cpu.get('holdout_performers') or []
+            holdout_set = set(p.lower().strip() for p in holdout_performers)
+            performer_ratings = checkpoint_cpu.get('performer_ratings', {})
+            perf_ratings_norm = {k.lower().strip(): float(v) for k, v in performer_ratings.items()}
+
             from model_dinov2 import DinoV2PreferenceModel
-            
-            if model_type == 'binary':
+
+            if model_type == 'binary' and not rank_conditioned:
                 from trainer import BinaryClassifier
                 test_model = BinaryClassifier(model_name)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+            elif model_type == 'binary' and rank_conditioned:
+                from model_dinov2 import RankedBinaryClassifier
+                test_model = RankedBinaryClassifier(model_name)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             elif model_type == 'pairwise':
                 test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+            elif model_type in ('siamese_binary', 'pairwise_siamese_binary') and not rank_conditioned:
+                test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+            elif model_type in ('siamese_binary', 'pairwise_siamese_binary') and rank_conditioned:
+                from model_dinov2 import RankedSiameseModel
+                test_model = RankedSiameseModel(model_name=model_name, freeze_backbone=True)
+                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+            elif model_type == 'performer_ranker':
+                from model_dinov2 import PerformerRankerModel
+                test_model = PerformerRankerModel(model_name, freeze_backbone=True)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             elif model_type == 'context_binary':
                 from trainer import ContextBinaryClassifier
@@ -508,150 +528,220 @@ def api_test_model():
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             else:
                 return jsonify({'success': False, 'error': f'Testing not supported for type: {model_type}'}), 400
-            
+
             test_model.to(DEVICE)
             test_model.eval()
-            
+
             processor = AutoImageProcessor.from_pretrained(model_name)
-            
+
             # Helper to load image from sample object
             def load_img(sample_obj):
                 if 'data' in sample_obj:
-                    # Base64 data
                     img_data = base64.b64decode(sample_obj['data'].split(',')[-1])
                     return Image.open(io.BytesIO(img_data)).convert('RGB')
                 else:
-                    # Local path
                     return Image.open(sample_obj['path']).convert('RGB')
 
-            # Test binary models
-            if model_type == 'binary':
-                correct = 0
-                total = 0
-                keep_scores = []
-                delete_scores = []
-                
+            # Extract performer name from a sample (caller may have set it, or we derive from path)
+            def get_performer(sample):
+                if sample.get('performer'): return sample['performer']
+                if 'path' in sample:
+                    parts = Path(sample['path']).parts
+                    for i, p in enumerate(parts):
+                        if p == 'pics' and i > 0: return parts[i-1]
+                    if len(parts) >= 2: return parts[-2]
+                return None
+
+            # Tag every sample with a performer, filter to held-out if available.
+            for s in test_samples:
+                s['_performer'] = get_performer(s)
+            in_distribution = False
+            if holdout_set:
+                filtered = [s for s in test_samples
+                            if s['_performer'] and s['_performer'].lower().strip() in holdout_set]
+                if not filtered:
+                    return jsonify({'success': False,
+                                    'error': 'No test images match this model\'s held-out performers'}), 400
+                test_samples = filtered
+                log(f"  🎯 Filtered to {len(test_samples)} images from {len(holdout_set)} held-out performers")
+            else:
+                # Old checkpoint with no holdout list — fall back to whatever was sampled.
+                in_distribution = True
+                log(f"  ⚠️ No holdout_performers in checkpoint — test set is in-distribution")
+
+            # ── Unified scorer ─────────────────────────────────────────
+            def get_rank(performer):
+                if performer and performer.lower().strip() in perf_ratings_norm:
+                    return perf_ratings_norm[performer.lower().strip()]
+                return 2.5
+
+            def score_image(img, performer=None):
+                """Score one image. For keep/delete models returns sigmoid keep-prob;
+                for performer_ranker returns predicted stars (0-5)."""
+                inp = processor(images=img, return_tensors='pt').to(DEVICE)
                 with torch.no_grad():
-                    for sample in test_samples:
-                        try:
-                            img = load_img(sample)
-                            label = sample['label']
-                            inp = processor(images=img, return_tensors='pt').to(DEVICE)
-                            logit = test_model(inp['pixel_values'])
-                            prob = torch.sigmoid(logit).item()
-                            pred = 1 if prob > 0.5 else 0
-                            if pred == label: correct += 1
-                            total += 1
-                            if label == 1: keep_scores.append(prob)
-                            else: delete_scores.append(prob)
-                            
-                            # Breathing room
-                            if torch.cuda.is_available(): torch.cuda.synchronize()
-                            time.sleep(0.005)
-                        except: continue
-                
-                accuracy = correct / max(total, 1)
-                avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
-                avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
-                separation = avg_keep - avg_delete
-                
+                    if model_type == 'binary' and not rank_conditioned:
+                        return torch.sigmoid(test_model(inp['pixel_values'])).item()
+                    if model_type == 'binary' and rank_conditioned:
+                        r = torch.tensor([get_rank(performer)], dtype=torch.float32, device=DEVICE)
+                        return torch.sigmoid(test_model(inp['pixel_values'], r)).item()
+                    if model_type == 'pairwise':
+                        return torch.sigmoid(test_model.forward_single(inp['pixel_values'])).item()
+                    if model_type in ('siamese_binary', 'pairwise_siamese_binary') and not rank_conditioned:
+                        return torch.sigmoid(test_model.forward_single(inp['pixel_values'])).item()
+                    if model_type in ('siamese_binary', 'pairwise_siamese_binary') and rank_conditioned:
+                        r = torch.tensor([get_rank(performer)], dtype=torch.float32, device=DEVICE)
+                        return torch.sigmoid(test_model.forward_single(inp['pixel_values'], r)).item()
+                    if model_type == 'performer_ranker':
+                        return test_model(inp['pixel_values']).item()
+                return 0.0
+
+            # ── Branch by metric type ──────────────────────────────────
+            if model_type == 'performer_ranker':
+                # Regression metric: per-performer MAE / within-0.5 / Spearman ρ.
+                from collections import defaultdict
+                perf_preds = defaultdict(list)
+                for sample in test_samples:
+                    perf = sample.get('_performer')
+                    if not perf: continue
+                    try:
+                        img = load_img(sample)
+                        perf_preds[perf].append(score_image(img, perf))
+                        if torch.cuda.is_available(): torch.cuda.synchronize()
+                        time.sleep(0.005)
+                    except: continue
+
+                errors, within_half, pred_list, actual_list = [], 0, [], []
+                for perf, scores in perf_preds.items():
+                    if not scores: continue
+                    actual = perf_ratings_norm.get(perf.lower().strip())
+                    if actual is None: continue
+                    avg_pred = sum(scores) / len(scores)
+                    err = abs(avg_pred - actual)
+                    errors.append(err)
+                    if err <= 0.5: within_half += 1
+                    pred_list.append(avg_pred); actual_list.append(actual)
+
+                if not errors:
+                    return jsonify({'success': False,
+                                    'error': 'No held-out performers with both ratings and images'}), 400
+
+                mae = sum(errors) / len(errors)
+                within_pct = within_half / len(errors)
+                if len(pred_list) >= 2:
+                    p_t = torch.tensor(pred_list, dtype=torch.float32)
+                    a_t = torch.tensor(actual_list, dtype=torch.float32)
+                    pr = p_t.argsort().argsort().float()
+                    ar = a_t.argsort().argsort().float()
+                    rho = torch.corrcoef(torch.stack([pr, ar]))[0, 1].item()
+                else:
+                    rho = 0.0
+
                 result = {
-                    'accuracy': round(accuracy, 4),
-                    'total_tested': total,
-                    'correct': correct,
-                    'avg_keep_score': round(avg_keep, 4),
-                    'avg_delete_score': round(avg_delete, 4),
-                    'separation': round(separation, 4),
+                    'mae': round(mae, 4),
+                    'within_half_star': round(within_pct, 4),
+                    'spearman_rho': round(rho, 4),
+                    'total_tested': len(errors),
+                    'metric_type': 'regression',
                     'model_type': model_type,
-                }
-            elif model_type == 'pairwise':
-                # Pairwise: test by scoring keep vs delete pairs
-                correct = 0
-                total = 0
-                # Split samples back to pairs
-                ks = [s for s in test_samples if s['label'] == 1]
-                ds = [s for s in test_samples if s['label'] == 0]
-                pairs_tested = min(len(ks), len(ds))
-                
-                with torch.no_grad():
-                    for i in range(pairs_tested):
-                        try:
-                            keep_img = load_img(ks[i])
-                            del_img = load_img(ds[i])
-                            k_inp = processor(images=keep_img, return_tensors='pt').to(DEVICE)
-                            d_inp = processor(images=del_img, return_tensors='pt').to(DEVICE)
-                            k_score, d_score = test_model(k_inp['pixel_values'], d_inp['pixel_values'])
-                            if k_score.item() > d_score.item(): correct += 1
-                            total += 1
-                            
-                            # Breathing room
-                            if torch.cuda.is_available(): torch.cuda.synchronize()
-                            time.sleep(0.005)
-                        except: continue
-                
-                result = {
-                    'accuracy': round(correct / max(total, 1), 4),
-                    'total_tested': total,
-                    'correct': correct,
-                    'model_type': model_type,
+                    'in_distribution': in_distribution,
+                    'holdout_performers_count': len(holdout_set),
+                    # Compat fields so existing UI handlers don't crash
+                    'accuracy': round(within_pct, 4),
+                    'correct': within_half,
                 }
             elif model_type == 'context_binary':
-                # Context-aware binary: uses performer context embeddings from checkpoint
+                # Legacy path — per-image accuracy on context-aware binary.
                 saved_contexts = checkpoint_cpu.get('contexts', {})
                 hs = test_model.backbone.config.hidden_size
                 zero_ctx = torch.zeros(1, hs).to(DEVICE)
-                
-                correct = 0
-                total = 0
-                keep_scores = []
-                delete_scores = []
-                
-                # Build mapping: image path -> performer name (from directory structure)
-                def get_performer(sample):
-                    if 'performer' in sample: return sample['performer']
-                    if 'path' in sample:
-                        parts = Path(sample['path']).parts
-                        for i, p in enumerate(parts):
-                            if p in ('pics',):
-                                if i > 0: return parts[i-1]
-                    return None
-                
+                correct = total = 0
+                keep_scores, delete_scores = [], []
                 with torch.no_grad():
                     for sample in test_samples:
                         try:
-                            perf = get_performer(sample)
+                            perf = sample.get('_performer')
                             ctx = saved_contexts.get(perf, zero_ctx.squeeze(0)).unsqueeze(0).to(DEVICE) if perf else zero_ctx
-                            
-                            img = load_img(sample)
-                            label = sample['label']
+                            img = load_img(sample); label = sample['label']
                             inp = processor(images=img, return_tensors='pt').to(DEVICE)
                             logit = test_model(inp['pixel_values'], ctx)
                             prob = torch.sigmoid(logit).item()
                             pred = 1 if prob > 0.5 else 0
                             if pred == label: correct += 1
                             total += 1
-                            if label == 1: keep_scores.append(prob)
-                            else: delete_scores.append(prob)
-                            
-                            # Breathing room
+                            (keep_scores if label == 1 else delete_scores).append(prob)
                             if torch.cuda.is_available(): torch.cuda.synchronize()
                             time.sleep(0.005)
                         except: continue
-                
                 accuracy = correct / max(total, 1)
                 avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
                 avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
-                separation = avg_keep - avg_delete
-                
+                result = {
+                    'accuracy': round(accuracy, 4),
+                    'total_tested': total, 'correct': correct,
+                    'avg_keep_score': round(avg_keep, 4),
+                    'avg_delete_score': round(avg_delete, 4),
+                    'separation': round(avg_keep - avg_delete, 4),
+                    'metric_type': 'per_image',
+                    'model_type': model_type,
+                    'in_distribution': in_distribution,
+                    'holdout_performers_count': len(holdout_set),
+                    'contexts_used': len(saved_contexts),
+                }
+            else:
+                # Unified pair-ranking metric for all keep/delete models.
+                # Build (keep, delete) pairs from the SAME performer — that's the
+                # actual decision the model makes at inference time.
+                from collections import defaultdict
+                by_perf_keep = defaultdict(list)
+                by_perf_del = defaultdict(list)
+                for s in test_samples:
+                    perf = s.get('_performer')
+                    if not perf: continue
+                    if s.get('label') == 1: by_perf_keep[perf].append(s)
+                    else: by_perf_del[perf].append(s)
+
+                pair_cap = max(1, sample_size // max(len(by_perf_keep), 1))
+                test_pairs = []
+                for perf, ks in by_perf_keep.items():
+                    ds = by_perf_del.get(perf, [])
+                    if not ks or not ds: continue
+                    n = min(pair_cap, len(ks) * len(ds))
+                    for _ in range(n):
+                        test_pairs.append((random.choice(ks), random.choice(ds), perf))
+
+                if not test_pairs:
+                    return jsonify({'success': False,
+                                    'error': 'No (keep, delete) pairs available — held-out performers need both classes'}), 400
+
+                correct = 0
+                keep_scores, delete_scores = [], []
+                for k_obj, d_obj, perf in test_pairs:
+                    try:
+                        ks = score_image(load_img(k_obj), perf)
+                        ds = score_image(load_img(d_obj), perf)
+                        if ks > ds: correct += 1
+                        keep_scores.append(ks); delete_scores.append(ds)
+                        if torch.cuda.is_available(): torch.cuda.synchronize()
+                        time.sleep(0.005)
+                    except: continue
+
+                total = len(keep_scores)
+                accuracy = correct / max(total, 1)
+                avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
+                avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
                 result = {
                     'accuracy': round(accuracy, 4),
                     'total_tested': total,
                     'correct': correct,
                     'avg_keep_score': round(avg_keep, 4),
                     'avg_delete_score': round(avg_delete, 4),
-                    'separation': round(separation, 4),
+                    'separation': round(avg_keep - avg_delete, 4),
+                    'metric_type': 'pair_ranking',
                     'model_type': model_type,
-                    'contexts_used': len(saved_contexts),
+                    'rank_conditioned': rank_conditioned,
+                    'in_distribution': in_distribution,
+                    'holdout_performers_count': len(holdout_set),
                 }
             
             # Cleanup
