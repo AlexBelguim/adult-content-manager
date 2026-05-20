@@ -106,10 +106,16 @@ function Toolbar({
 
   const handleModeChange = (newMode) => {
     onModeChange(newMode);
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
   };
 
   const handleSubModeChange = (newSubMode) => {
     onSubModeChange(newSubMode);
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
   };
 
   const handleHandyConnect = () => {

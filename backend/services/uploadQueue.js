@@ -99,7 +99,8 @@ async function processNext() {
     nextJob.status = 'processing';
     nextJob.startedAt = new Date().toISOString();
 
-    console.log(`[UploadQueue] Starting processing job ${nextJob.id} for "${nextJob.performerName}" (local: ${nextJob.isLocalImport})`);
+    const queuedCount = uploadQueue.filter(j => j.status === 'queued').length;
+    console.log(`[UploadQueue] Starting job ${nextJob.id} for "${nextJob.performerName}" (local: ${nextJob.isLocalImport}). ${queuedCount} still queued after this.`);
 
     try {
         if (nextJob.isLocalImport) {
@@ -155,16 +156,23 @@ async function processNext() {
 
     } catch (err) {
         console.error(`[UploadQueue] Job ${nextJob.id} failed:`, err.message);
+        console.error(err.stack);
         nextJob.status = 'error';
         nextJob.error = err.message;
         nextJob.completedAt = new Date().toISOString();
+    } finally {
+        isProcessing = false;
+        currentJob = null;
+        // Schedule next job — setImmediate detaches from this call stack so an error
+        // here can't poison the chain, and the queue keeps moving even after failures.
+        setImmediate(() => {
+            try {
+                processNext();
+            } catch (e) {
+                console.error('[UploadQueue] Failed to schedule next job:', e);
+            }
+        });
     }
-
-    isProcessing = false;
-    currentJob = null;
-
-    // Process next job if any
-    processNext();
 }
 
 /**
@@ -218,16 +226,19 @@ function removeJob(jobId) {
 }
 
 /**
- * Clear completed/error jobs
+ * Clear completed jobs only. Errored jobs stay so they remain visible
+ * for inspection / retry; remove individually via DELETE if needed.
  */
 function clearCompleted() {
     const before = uploadQueue.length;
     for (let i = uploadQueue.length - 1; i >= 0; i--) {
-        if (uploadQueue[i].status === 'completed' || uploadQueue[i].status === 'error') {
+        if (uploadQueue[i].status === 'completed') {
             uploadQueue.splice(i, 1);
         }
     }
-    return { cleared: before - uploadQueue.length };
+    const cleared = before - uploadQueue.length;
+    console.log(`[UploadQueue] Cleared ${cleared} completed job(s). ${uploadQueue.length} remain.`);
+    return { cleared };
 }
 
 module.exports = {

@@ -338,7 +338,7 @@ async function localImportPerformer(folderName, performerName, basePath, uploadI
         throw new Error(`Folder not found: ${sourceDir}`);
     }
 
-    // Recursively collect all files
+    // Recursively collect all files (ignoring empty dirs)
     const fileInfos = [];
     async function collectFiles(dir) {
         const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -357,24 +357,57 @@ async function localImportPerformer(folderName, performerName, basePath, uploadI
     }
     await collectFiles(sourceDir);
 
+    // If the source folder is empty (e.g., a previous interrupted import already moved the files
+    // but failed before cleanup), just remove the empty shell and return — no work to do.
     if (fileInfos.length === 0) {
-        throw new Error(`No files found in folder: ${sourceDir}`);
+        console.log(`[LocalImport] Source folder "${sourceDir}" is already empty — cleaning up shell.`);
+        await tryRemoveIfEmpty(sourceDir);
+        return { name: performerName, alreadyEmpty: true };
     }
 
     console.log(`[LocalImport] Found ${fileInfos.length} files for "${performerName}" in before upload folder`);
 
-    // Use the existing import pipeline (files will be MOVED to before filter performer)
-    const result = await uploadImportPerformer(performerName, basePath, fileInfos, uploadId, createHashes);
-
-    // Clean up the now-empty source folder
+    let result;
     try {
-        await fs.remove(sourceDir);
-        console.log(`[LocalImport] Cleaned up source folder: ${sourceDir}`);
-    } catch (cleanErr) {
-        console.warn(`[LocalImport] Could not remove source folder: ${cleanErr.message}`);
+        // Use the existing import pipeline (files will be MOVED to before filter performer)
+        result = await uploadImportPerformer(performerName, basePath, fileInfos, uploadId, createHashes);
+    } finally {
+        // Always try cleanup — if the import was partially successful and the source folder is
+        // now empty, removing it prevents the "empty-but-not-removed" zombie state. If files
+        // remain, tryRemoveIfEmpty leaves them alone.
+        await tryRemoveIfEmpty(sourceDir);
     }
 
     return result;
+}
+
+/**
+ * Remove a directory only if it (and its subdirectories) contain no files.
+ * Safe to call after a partial import — won't delete folders that still have content.
+ */
+async function tryRemoveIfEmpty(dir) {
+    try {
+        if (!await fs.pathExists(dir)) return;
+        const remaining = [];
+        async function walk(d) {
+            const entries = await fs.readdir(d, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.name.startsWith('.')) continue;
+                const full = path.join(d, entry.name);
+                if (entry.isDirectory()) await walk(full);
+                else if (entry.isFile()) remaining.push(full);
+            }
+        }
+        await walk(dir);
+        if (remaining.length === 0) {
+            await fs.remove(dir);
+            console.log(`[LocalImport] Cleaned up empty source folder: ${dir}`);
+        } else {
+            console.log(`[LocalImport] Source folder still has ${remaining.length} file(s); leaving in place: ${dir}`);
+        }
+    } catch (cleanErr) {
+        console.warn(`[LocalImport] Cleanup check failed for ${dir}: ${cleanErr.message}`);
+    }
 }
 
 async function findThumbnailFromPath(picsPath) {

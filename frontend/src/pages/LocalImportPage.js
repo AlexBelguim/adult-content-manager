@@ -46,9 +46,17 @@ import {
     CloudUpload as CloudUploadIcon
 } from '@mui/icons-material';
 
+const QUEUE_CACHE_KEY = 'uploadQueueCache_v1';
+
 function LocalImportPage({ basePath }) {
     // Server queue state (reused from upload queue)
-    const [serverQueue, setServerQueue] = useState([]);
+    // Initialize from sessionStorage so revisiting the page shows the last-known queue instantly
+    const [serverQueue, setServerQueue] = useState(() => {
+        try {
+            const cached = sessionStorage.getItem(QUEUE_CACHE_KEY);
+            return cached ? JSON.parse(cached) : [];
+        } catch { return []; }
+    });
     const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -116,6 +124,9 @@ function LocalImportPage({ basePath }) {
                 const data = await response.json();
                 setServerQueue(data.queue);
                 setIsProcessing(data.isProcessing);
+                try {
+                    sessionStorage.setItem(QUEUE_CACHE_KEY, JSON.stringify(data.queue));
+                } catch {}
             }
         } catch (err) {
             console.error('Failed to fetch queue status:', err);
@@ -515,7 +526,7 @@ function LocalImportPage({ basePath }) {
     };
 
     return (
-        <Box className="dp-page" sx={{ height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+        <Box className="dp-page" sx={{ height: 'calc(100vh - 64px)', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Box sx={{ mb: 2 }}>
                 <Typography variant="h4" component="h1" className="dp-title">
                     Local Import & Upload Queue
@@ -538,7 +549,7 @@ function LocalImportPage({ basePath }) {
 
             <Box sx={{ display: 'flex', gap: 3, flex: 1, overflow: 'hidden', alignItems: 'flex-start' }}>
                 {/* Queue List (Left Side) */}
-                <Box sx={{ width: 280, minWidth: 280, flexShrink: 0, height: '100%', overflow: 'hidden' }}>
+                <Box sx={{ width: 360, minWidth: 360, flexShrink: 0, height: '100%', overflow: 'hidden' }}>
                     <Paper
                         elevation={0}
                         sx={paperStyles}
@@ -585,17 +596,17 @@ function LocalImportPage({ basePath }) {
                                             <ListItem
                                                 sx={{
                                                     py: 2.5,
-                                                    px: 3,
+                                                    px: 2,
                                                     transition: 'background-color 0.2s',
                                                     '&:hover': { bgcolor: 'action.hover' }
                                                 }}
                                             >
-                                                <Box sx={{ mr: 2.5, minWidth: 40, display: 'flex', justifyContent: 'center' }}>
+                                                <Box sx={{ mr: 1.5, minWidth: 36, display: 'flex', justifyContent: 'center' }}>
                                                     {getStatusIcon(job.status)}
                                                 </Box>
                                                 <ListItemText
                                                     primary={
-                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
+                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
                                                             <Typography variant="subtitle1" fontWeight="500">{job.performerName}</Typography>
                                                             <Chip
                                                                 label={job.status}
