@@ -751,6 +751,11 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
     binary: { label: 'Binary (Keep/Delete)', color: '#4caf50', icon: '🎯' },
     pairwise: { label: 'Pairwise (A vs B)', color: '#2196f3', icon: '⚖️' },
     context_binary: { label: 'Context-Aware Binary', color: '#ff9800', icon: '🧠' },
+    performer_ranker: { label: 'Performer Ranker', color: '#ff6f00', icon: '⭐' },
+    ranked_binary: { label: 'Ranked Binary', color: '#00d9ff', icon: '📊' },
+    ranked_siamese_binary: { label: 'Ranked Siamese', color: '#9c27b0', icon: '👑' },
+    siamese_binary: { label: 'Siamese Ranker', color: '#e91e63', icon: '🔬' },
+    rank_aware_siamese: { label: 'Rank-Aware Siamese', color: '#795548', icon: '📦' },
     unknown: { label: 'Unknown Type', color: '#9e9e9e', icon: '❓' },
   };
 

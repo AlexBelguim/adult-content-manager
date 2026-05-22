@@ -406,7 +406,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (['binary', 'context_binary', 'pairwise_siamese_binary', 'performer_ranker', 'performer_attention_ranker', 'ranked_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(type)) {
+    } else if (['binary', 'context_binary', 'pairwise_siamese_binary', 'performer_ranker', 'performer_attention_ranker', 'performer_pairwise_ranker', 'ranked_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -419,12 +419,39 @@ router.post('/start', async (req, res) => {
         performer_ratings: collectPerformerRatings(),
       performer_comparison_counts: collectPerformerComparisonCounts()
       };
-      
+
       if (req.body.use_hard_examples) {
         try {
           const hard = db.prepare(`SELECT * FROM hard_examples WHERE model_type = 'binary' OR model_type IS NULL`).all();
           trainingPayload.hard_examples = hard;
         } catch (e) {}
+      }
+
+      // performer_pairwise_ranker needs the raw duels from performer_comparisons
+      // (winner/loser performer pairs) in addition to base_path + ratings.
+      if (type === 'performer_pairwise_ranker') {
+        try {
+          const duels = db.prepare(`
+            SELECT
+              pc.winner_id, pc.loser_id, pc.type AS duel_type, pc.source,
+              pc.winner_rating_before, pc.loser_rating_before,
+              pw.name AS winner_name, pl.name AS loser_name
+            FROM performer_comparisons pc
+            JOIN performers pw ON pw.id = pc.winner_id
+            JOIN performers pl ON pl.id = pc.loser_id
+            ORDER BY pc.created_at DESC
+          `).all();
+          trainingPayload.duels = duels;
+          trainingPayload.images_per_side = req.body.images_per_side || 4;
+          trainingPayload.margin = req.body.margin || 1.0;
+        } catch (e) {
+          return res.status(500).json({ error: 'Failed to load duels: ' + e.message });
+        }
+        if (!trainingPayload.duels || trainingPayload.duels.length < 5) {
+          return res.status(400).json({
+            error: `Need at least 5 performer duels in performer_comparisons (have ${trainingPayload.duels?.length || 0}). Use Smart Compare to create more.`
+          });
+        }
       }
 
     } else {

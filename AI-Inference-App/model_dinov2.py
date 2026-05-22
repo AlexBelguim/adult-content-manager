@@ -94,6 +94,79 @@ class PerformerRankerModel(nn.Module):
         return self.forward(pixel_values)
 
 
+class PerformerPairwiseRankerModel(nn.Module):
+    """
+    Siamese pairwise ranker trained on performer-vs-performer duels from
+    Smart Compare (performer_comparisons table). Same twin-tower skeleton as
+    DinoV2PreferenceModel — a single scalar head produces a comparable score
+    per image, trained with MarginRankingLoss.
+
+    At inference, raw scores are mapped to 0-5 stars via an affine calibration
+    (cal_a, cal_b) fit on a held-out set of rated performers after training.
+    Calibration coefficients are saved in the checkpoint so predict_rank()
+    is drop-in compatible with PerformerRankerModel for downstream models.
+    """
+    def __init__(self, model_name="facebook/dinov2-large", freeze_backbone=True, quantize=False):
+        super().__init__()
+        if quantize:
+            self.backbone = AutoModel.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+        else:
+            self.backbone = AutoModel.from_pretrained(model_name)
+        hidden_dim = self.backbone.config.hidden_size
+
+        self.head = nn.Sequential(
+            nn.Linear(hidden_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(128, 1)
+        )
+
+        # Affine calibration raw_score → stars (set after training).
+        # Defaults map a typical raw-score range to ~2.5 ± 1.0 so a freshly
+        # trained model that hasn't been calibrated still returns plausible stars.
+        self.register_buffer('cal_a', torch.tensor(1.0))
+        self.register_buffer('cal_b', torch.tensor(2.5))
+
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+
+    def freeze_backbone(self):
+        for p in self.backbone.parameters(): p.requires_grad = False
+    def unfreeze_backbone(self):
+        for p in self.backbone.parameters(): p.requires_grad = True
+
+    def forward_single(self, pixel_values):
+        """Raw scalar score per image — used during siamese training."""
+        outputs = self.backbone(pixel_values)
+        cls_token = outputs.last_hidden_state[:, 0, :]
+        cls_token = nn.functional.normalize(cls_token, p=2, dim=1)
+        return self.head(cls_token).squeeze(-1)
+
+    def forward(self, pixel_values_a, pixel_values_b):
+        """Siamese forward: raw scores for winner/loser image pair."""
+        score_a = self.forward_single(pixel_values_a)
+        score_b = self.forward_single(pixel_values_b)
+        return score_a, score_b
+
+    def predict_rank(self, pixel_values):
+        """0-5 star prediction — drop-in for PerformerRankerModel.predict_rank.
+        Applies the saved affine calibration to the raw siamese score.
+        """
+        raw = self.forward_single(pixel_values)
+        stars = self.cal_a * raw + self.cal_b
+        return torch.clamp(stars, 0.0, 5.0)
+
+    def set_calibration(self, a, b):
+        """Save affine coefficients after post-training calibration."""
+        self.cal_a = torch.tensor(float(a), dtype=self.cal_a.dtype, device=self.cal_a.device)
+        self.cal_b = torch.tensor(float(b), dtype=self.cal_b.dtype, device=self.cal_b.device)
+
+
 class RankedBinaryClassifier(nn.Module):
     """
     Binary keep/delete classifier conditioned on performer rank.

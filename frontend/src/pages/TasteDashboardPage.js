@@ -27,9 +27,12 @@ const MODEL_TYPES = [
   { id: 'pairwise_siamese_binary', name: 'Siamese Binary Ranking', icon: <AutoAwesome />, desc: 'Trains a pairwise Siamese ranker using dynamic Keep > Delete pairs from your binary folders.',
     color: '#e91e63', output: 'siamese_binary.pt', requirements: 'Needs keep + delete folders',
     pros: ['Granular Ranking', 'Massive Augmentation'], cons: ['Slower Training'] },
-  { id: 'performer_ranker', name: 'Performer Ranker', icon: <Star />, desc: 'Learns to predict performer star ratings from images. Use as a pre-step for ranked models.',
+  { id: 'performer_ranker', name: 'Performer Ranker (Regression)', icon: <Star />, desc: 'Learns to predict performer star ratings from images via MSE regression on manifest stars. Use as a pre-step for ranked models.',
     color: '#ff6f00', output: 'performer_ranker.pt', requirements: 'Needs rated performers (star ratings) with keep + delete images',
-    pros: ['Visual Rank Estimation', 'Enables Context'], cons: ['Needs Star Ratings'] },
+    pros: ['Visual Rank Estimation', 'Enables Context'], cons: ['Needs Star Ratings', 'Averages Pair Signal'] },
+  { id: 'performer_pairwise_ranker', name: 'Performer Ranker (Pairwise)', icon: <Compare />, desc: 'Siamese ranker trained directly on Smart Compare duels. Preserves the pairwise signal; calibrated to 0-5 stars after training so it\'s a drop-in replacement for the regression ranker.',
+    color: '#ff9100', output: 'performer_pairwise_ranker.pt', requirements: 'Needs Smart Compare duels (performer_comparisons) + base folder + ratings for calibration',
+    pros: ['Hard Pairs', 'No Label Collapse', 'Drop-in for Ranked Models'], cons: ['Needs Duels'] },
   { id: 'ranked_binary', name: 'Ranked Binary', icon: <Tune />, desc: 'Binary classifier conditioned on performer rank. Learns that keep/delete thresholds vary by performer tier.',
     color: '#00bfa5', output: 'binary_filtering.pt', requirements: 'Needs keep + delete folders + star ratings in manifest',
     pros: ['Context-Aware', 'Backward Compatible'], cons: ['Needs Ranker at Inference'] },
@@ -1155,6 +1158,21 @@ function ModelArsenal({
                 </Box>
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                   {m.backbone && <Chip label={m.backbone.split('/').pop()} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: '#252525', color: '#888' }} />}
+                  {type === 'performer_ranker' && m.ranker_arch && (
+                    <Tooltip title={m.ranker_arch === 'pairwise'
+                      ? `Siamese ranker trained on Smart Compare duels. Calibrated: stars ≈ ${(m.cal_a ?? 1).toFixed(2)}·raw + ${(m.cal_b ?? 2.5).toFixed(2)}`
+                      : 'MSE regression on manifest star ratings'}>
+                      <Chip
+                        label={m.ranker_arch === 'pairwise' ? '⚖️ Pairwise' : '📈 Regression'}
+                        size="small"
+                        sx={{
+                          height: 18, fontSize: '0.6rem', fontWeight: 800,
+                          bgcolor: m.ranker_arch === 'pairwise' ? 'rgba(33,150,243,0.18)' : 'rgba(255,111,0,0.18)',
+                          color: m.ranker_arch === 'pairwise' ? '#64b5f6' : '#ffab40'
+                        }}
+                      />
+                    </Tooltip>
+                  )}
                    {m.val_acc != null && <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />}
                   {m.val_mae != null && <Chip label={`MAE: ${m.val_mae.toFixed(3)}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,111,0,0.1)', color: '#ff6f00' }} />}
                   {m.rank_conditioned && <Chip label="Rank-Conditioned" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(0,191,165,0.1)', color: '#00bfa5', fontWeight: 700 }} />}

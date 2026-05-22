@@ -156,13 +156,30 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             # Initialize the correct model class based on type + rank flag
             try:
                 if model_type in ('performer_ranker', 'performer_attention_ranker'):
-                    # Ranker (per-image or gallery-level) — load into RANKER_MODEL slot
+                    # Ranker (per-image, pairwise siamese, or gallery-level attention)
+                    # — all load into the RANKER_MODEL slot. Three variants:
+                    #   - performer_attention_ranker:           PerformerAttentionRanker
+                    #   - performer_ranker, arch='regression':  PerformerRankerModel (MSE on stars)
+                    #   - performer_ranker, arch='pairwise':    PerformerPairwiseRankerModel (siamese duels)
+                    # All expose predict_rank() so downstream models don't care which.
                     global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
+                    ranker_arch = checkpoint.get('ranker_arch', 'regression')
                     if model_type == 'performer_attention_ranker':
                         ranker = PerformerAttentionRanker(MODEL_NAME, quantize=quantize)
+                    elif ranker_arch == 'pairwise':
+                        from model_dinov2 import PerformerPairwiseRankerModel
+                        ranker = PerformerPairwiseRankerModel(MODEL_NAME, quantize=quantize)
                     else:
                         ranker = PerformerRankerModel(MODEL_NAME, quantize=quantize)
                     ranker.load_state_dict(checkpoint['model_state_dict'], strict=False)
+                    # Calibration buffers may have been saved as plain floats — re-apply
+                    # so predict_rank produces sensible stars even on older state_dicts.
+                    cal_a = checkpoint.get('cal_a', 1.0)
+                    cal_b = checkpoint.get('cal_b', 2.5)
+                    if model_type == 'performer_ranker' and ranker_arch == 'pairwise':
+                        try: ranker.set_calibration(cal_a, cal_b)
+                        except Exception: pass
+                        log(f"  Pairwise ranker calibration: stars ≈ {cal_a:.3f}·raw + {cal_b:.3f}")
                     ranker.to(DEVICE)
                     ranker.eval()
                     RANKER_MODEL = ranker
@@ -170,10 +187,18 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                     RANKER_MODEL_ID = model_id
                     val_mae = checkpoint.get('val_mae')
                     if val_mae: log(f"  Ranker MAE at save: {val_mae:.3f}")
+                    val_acc = checkpoint.get('val_acc')
+                    if model_type == 'performer_ranker' and ranker_arch == 'pairwise' and val_acc:
+                        log(f"  Pair ranking acc at save: {val_acc:.3f}")
                     del checkpoint
                     import gc; gc.collect()
                     if torch.cuda.is_available(): torch.cuda.empty_cache()
-                    label = "Attention Ranker" if model_type == 'performer_attention_ranker' else "Performer Ranker"
+                    if model_type == 'performer_attention_ranker':
+                        label = "Attention Ranker"
+                    elif ranker_arch == 'pairwise':
+                        label = "Performer Ranker (Pairwise)"
+                    else:
+                        label = "Performer Ranker (Regression)"
                     log(f"✅ {label} loaded on {DEVICE}")
                     LOADED_MODEL_ID = model_id  # Track for UI
                     return True, "Ranker loaded"
@@ -365,13 +390,16 @@ def api_list_models():
             ckpt = torch.load(m, map_location='cpu', weights_only=False)
             m_type = ckpt.get('model_type', 'unknown')
             
-            # Auto-detect type if unknown
+            # Auto-detect type if unknown.
+            # Order matters — check the most specific filename fragments first:
+            #   'attention_ranker' is more specific than 'ranker'
+            #   'ranker' is more specific than 'pairwise' (e.g. 'performer_pairwise_ranker')
             if m_type == 'unknown':
                 name_low = m.name.lower()
-                if 'pairwise' in name_low or 'preference' in name_low: m_type = 'pairwise'
-                elif 'context' in name_low: m_type = 'context_binary'
-                elif 'attention_ranker' in name_low: m_type = 'performer_attention_ranker'
+                if 'attention_ranker' in name_low: m_type = 'performer_attention_ranker'
                 elif 'ranker' in name_low: m_type = 'performer_ranker'
+                elif 'pairwise' in name_low or 'preference' in name_low: m_type = 'pairwise'
+                elif 'context' in name_low: m_type = 'context_binary'
                 elif 'siamese' in name_low: m_type = 'siamese_binary'
                 elif 'binary' in name_low or 'filtering' in name_low: m_type = 'binary'
                 
@@ -387,8 +415,14 @@ def api_list_models():
             info['type'] = m_type
             info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
             info['val_acc'] = ckpt.get('val_acc')
-            info['val_mae'] = ckpt.get('val_mae')  # For performer_ranker
+            info['val_mae'] = ckpt.get('val_mae')  # For performer_ranker (regression)
             info['rank_conditioned'] = rank_conditioned
+            # Sub-architecture for performer_ranker: 'regression' vs 'pairwise'.
+            # Defaults to 'regression' for legacy checkpoints that pre-date the field.
+            if m_type == 'performer_ranker':
+                info['ranker_arch'] = ckpt.get('ranker_arch', 'regression')
+                info['cal_a'] = ckpt.get('cal_a')
+                info['cal_b'] = ckpt.get('cal_b')
             info['samples'] = ckpt.get('samples')
             info['created_at'] = ckpt.get('created_at')
             info['epoch_history'] = ckpt.get('epoch_history')
@@ -524,9 +558,19 @@ def api_test_model():
                 test_model = RankedSiameseModel(model_name=model_name, freeze_backbone=True)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             elif model_type == 'performer_ranker':
-                from model_dinov2 import PerformerRankerModel
-                test_model = PerformerRankerModel(model_name, freeze_backbone=True)
-                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+                ranker_arch = checkpoint_cpu.get('ranker_arch', 'regression')
+                if ranker_arch == 'pairwise':
+                    from model_dinov2 import PerformerPairwiseRankerModel
+                    test_model = PerformerPairwiseRankerModel(model_name, freeze_backbone=True)
+                    test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
+                    cal_a = checkpoint_cpu.get('cal_a', 1.0)
+                    cal_b = checkpoint_cpu.get('cal_b', 2.5)
+                    try: test_model.set_calibration(cal_a, cal_b)
+                    except Exception: pass
+                else:
+                    from model_dinov2 import PerformerRankerModel
+                    test_model = PerformerRankerModel(model_name, freeze_backbone=True)
+                    test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             elif model_type == 'context_binary':
                 from trainer import ContextBinaryClassifier
                 test_model = ContextBinaryClassifier(model_name)
@@ -598,7 +642,9 @@ def api_test_model():
                         r = torch.tensor([get_rank(performer)], dtype=torch.float32, device=DEVICE)
                         return torch.sigmoid(test_model.forward_single(inp['pixel_values'], r)).item()
                     if model_type == 'performer_ranker':
-                        return test_model(inp['pixel_values']).item()
+                        # predict_rank() returns calibrated stars for both
+                        # regression and pairwise sub-architectures.
+                        return test_model.predict_rank(inp['pixel_values']).item()
                 return 0.0
 
             # ── Branch by metric type ──────────────────────────────────

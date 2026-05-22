@@ -1754,6 +1754,254 @@ def train_performer_attention_ranker(config):
     return {'model': str(out_path.name), 'best_val_acc': max(0, 1.0 - best_val_mae / 5.0)}
 
 
+def train_performer_pairwise_ranker(config):
+    """Train a siamese performer ranker on duels from Smart Compare / Group Rate.
+    Input duels are performer-level (winner_id, winner_name, loser_id, loser_name)
+    from the `performer_comparisons` table. We expand each duel into image-level
+    pairs by sampling K images from each side, then train with MarginRankingLoss.
+
+    After training, raw scores are calibrated to 0-5 stars by fitting an affine
+    map on held-out rated performers (manifest stars as ground truth). The
+    coefficients are saved in the checkpoint so predict_rank() is drop-in
+    compatible with PerformerRankerModel for downstream ranked-binary /
+    ranked-siamese models.
+    """
+    from model_dinov2 import PerformerPairwiseRankerModel
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = config.get('backbone', 'facebook/dinov2-large')
+    epochs = config.get('epochs', 8)
+    finetune_start = config.get('finetune_start_epoch', 3)
+    quantize = config.get('quantize', False)
+    bs = config.get('batch_size', 16)
+    base_path = config.get('base_path', '')
+    duels = config.get('duels', [])
+    images_per_side = int(config.get('images_per_side', 4))
+    margin = float(config.get('margin', 1.0))
+
+    tlog(f"📋 Performer Pairwise Ranker | {len(duels)} duels | {epochs} epochs | {images_per_side} imgs/side")
+    if len(duels) < 5:
+        raise ValueError(f"Need at least 5 duels, got {len(duels)}")
+
+    # 1. Build performer → image map (keep + delete folders)
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+    perf_images = {}
+    for name, paths in keep_map.items():
+        perf_images.setdefault(name.lower().strip(), []).extend(paths)
+    for name, paths in delete_map.items():
+        perf_images.setdefault(name.lower().strip(), []).extend(paths)
+
+    # 2. Hold out a fraction of performers ENTIRELY so duels involving them
+    # never appear in training. Same split style as the regression ranker.
+    duel_performers = set()
+    for d in duels:
+        if d.get('winner_name'): duel_performers.add(d['winner_name'].lower().strip())
+        if d.get('loser_name'):  duel_performers.add(d['loser_name'].lower().strip())
+    duel_performers = sorted(p for p in duel_performers if p in perf_images and perf_images[p])
+    train_perfs, val_perfs = split_performers(duel_performers, val_frac=0.15)
+    train_set, val_set = set(train_perfs), set(val_perfs)
+    tlog(f"  🎭 Performer split: {len(train_perfs)} train / {len(val_perfs)} val from {len(duel_performers)} with images")
+
+    def expand_duel(duel, rng):
+        """Sample K images per side → return list of (winner_img, loser_img) pairs."""
+        wname = (duel.get('winner_name') or '').lower().strip()
+        lname = (duel.get('loser_name')  or '').lower().strip()
+        w_imgs = perf_images.get(wname, [])
+        l_imgs = perf_images.get(lname, [])
+        if not w_imgs or not l_imgs:
+            return []
+        k = min(images_per_side, len(w_imgs), len(l_imgs))
+        ws = rng.sample(w_imgs, k)
+        ls = rng.sample(l_imgs, k)
+        return list(zip(ws, ls))
+
+    def partition_duels(duel_list):
+        """Keep duels where BOTH performers fall on the same side of the split."""
+        train_d, val_d = [], []
+        for d in duel_list:
+            w = (d.get('winner_name') or '').lower().strip()
+            l = (d.get('loser_name')  or '').lower().strip()
+            if w in train_set and l in train_set:
+                train_d.append(d)
+            elif w in val_set and l in val_set:
+                val_d.append(d)
+            # Mixed-side duels are dropped — they'd leak info either way.
+        return train_d, val_d
+
+    train_duels, val_duels = partition_duels(duels)
+    tlog(f"  ⚔️ Duel split: {len(train_duels)} train / {len(val_duels)} val (mixed-side dropped)")
+    if len(train_duels) < 5:
+        raise ValueError(f"Too few train duels after split ({len(train_duels)}). Need broader rating coverage.")
+
+    # 3. Expand to image pairs. Validation pairs are sampled once (fixed seed)
+    # so val accuracy is comparable across epochs.
+    val_rng = random.Random(12345)
+    val_pairs = []
+    for d in val_duels:
+        val_pairs.extend(expand_duel(d, val_rng))
+    tlog(f"  📊 Val image-pairs: {len(val_pairs)}")
+
+    processor = AutoImageProcessor.from_pretrained(backbone)
+    val_ds = PairwiseDataset(val_pairs, processor, augment=False, deduplicate=False) if val_pairs else None
+    val_loader = DataLoader(val_ds, batch_size=bs, num_workers=0) if val_ds else None
+
+    # 4. Model + optimizer
+    model = PerformerPairwiseRankerModel(backbone, freeze_backbone=not quantize, quantize=quantize).to(device)
+    if not quantize: model.freeze_backbone()
+    criterion = nn.MarginRankingLoss(margin=margin)
+    optimizer = torch.optim.AdamW(model.head.parameters(), lr=1e-3)
+
+    backbone_short = backbone.split('/')[-1]
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(__file__).parent / 'models' / f'performer_pairwise_ranker_{backbone_short}_{timestamp}.pt'
+    out_path.parent.mkdir(exist_ok=True)
+    best_acc = 0.0
+
+    for epoch in range(1, epochs+1):
+        if finetune_start > 0 and epoch == finetune_start:
+            tlog(f"  🔥 Unfreezing backbone at epoch {epoch}")
+            model.unfreeze_backbone()
+            optimizer = torch.optim.AdamW([
+                {'params': model.head.parameters(), 'lr': 1e-3},
+                {'params': model.backbone.parameters(), 'lr': 1e-5},
+            ])
+        training_state['epoch'] = epoch
+        is_finetuning = finetune_start > 0 and epoch >= finetune_start
+        training_state['phase'] = 'finetune' if is_finetuning else 'warmup'
+
+        # Re-expand train duels each epoch with a fresh sample → cheap augmentation.
+        epoch_rng = random.Random(epoch * 7919)
+        epoch_pairs = []
+        for d in train_duels:
+            epoch_pairs.extend(expand_duel(d, epoch_rng))
+        if not epoch_pairs:
+            raise ValueError("No image pairs generated for this epoch — check performer folders.")
+        random.shuffle(epoch_pairs)
+        train_ds = PairwiseDataset(epoch_pairs, processor, augment=True, deduplicate=False)
+        train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=0)
+        num_batches = len(train_loader)
+        training_state['total_batches'] = num_batches
+
+        model.train()
+        total_loss = 0
+        for bi, batch in enumerate(train_loader, 1):
+            w = batch['winner'].to(device)
+            l = batch['loser'].to(device)
+            optimizer.zero_grad()
+            sw, sl = model(w, l)
+            target = torch.ones(sw.size(0), device=device)
+            loss = criterion(sw, sl, target)
+            loss.backward(); optimizer.step()
+            total_loss += loss.item()
+            training_state['batch'] = bi
+            training_state['train_loss'] = total_loss / bi
+
+        # Validate
+        if val_loader is not None:
+            model.eval()
+            correct = total = 0
+            with torch.no_grad():
+                for batch in val_loader:
+                    w = batch['winner'].to(device); l = batch['loser'].to(device)
+                    sw, sl = model(w, l)
+                    correct += (sw > sl).sum().item()
+                    total += sw.size(0)
+            val_acc = correct / max(total, 1)
+        else:
+            val_acc = 0.0
+
+        training_state['val_acc'] = val_acc
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / max(num_batches, 1),
+            'val_acc': round(val_acc, 4)
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/max(num_batches,1):.4f} | Val pair-acc: {val_acc:.3f}")
+
+        if val_acc >= best_acc:
+            best_acc = val_acc
+            training_state['best_val_acc'] = best_acc
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'val_acc': val_acc,
+                'backbone': backbone,
+                'model_type': 'performer_ranker',
+                'ranker_arch': 'pairwise',
+                'holdout_performers': val_perfs,
+                'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs,
+                           'images_per_side': images_per_side, 'margin': margin},
+                'created_at': time.time(),
+                # Calibration coefficients are filled in below after the final epoch.
+                'cal_a': 1.0, 'cal_b': 2.5
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} (Val pair-acc: {val_acc:.3f})")
+
+        if device.type == 'cuda': torch.cuda.empty_cache()
+
+    # 5. Post-training affine calibration: raw_score → stars.
+    # Use manifest ratings as ground truth on the *held-out* performers when
+    # available — otherwise fall back to train performers (in-distribution,
+    # less honest but better than nothing).
+    star_ratings = config.get('performer_ratings', {})
+    star_ratings_norm = {k.lower().strip(): float(v) for k, v in star_ratings.items()}
+    cal_pool = [p for p in val_perfs if p in star_ratings_norm]
+    if len(cal_pool) < 3:
+        tlog(f"  ⚠️ Only {len(cal_pool)} held-out rated performers — falling back to train pool for calibration")
+        cal_pool = [p for p in train_perfs if p in star_ratings_norm]
+
+    cal_a, cal_b = 1.0, 2.5
+    if len(cal_pool) >= 3:
+        tlog(f"  📐 Calibrating against {len(cal_pool)} rated performers...")
+        # Reload the best checkpoint and score one batch per performer.
+        ckpt = torch.load(out_path, map_location=device)
+        model.load_state_dict(ckpt['model_state_dict'], strict=False)
+        model.eval()
+        cal_rng = random.Random(31415)
+        raw_xs, star_ys = [], []
+        with torch.no_grad():
+            for perf in cal_pool:
+                imgs = perf_images.get(perf, [])
+                if not imgs: continue
+                sample = cal_rng.sample(imgs, min(images_per_side, len(imgs)))
+                pil = []
+                for ip in sample:
+                    try: pil.append(Image.open(ip).convert('RGB'))
+                    except: pass
+                if not pil: continue
+                inp = processor(images=pil, return_tensors='pt')
+                pv = inp['pixel_values'].to(device)
+                raws = model.forward_single(pv)
+                raw_xs.append(float(raws.mean().item()))
+                star_ys.append(star_ratings_norm[perf])
+                for p in pil:
+                    try: p.close()
+                    except: pass
+
+        if len(raw_xs) >= 3:
+            xs = torch.tensor(raw_xs, dtype=torch.float32)
+            ys = torch.tensor(star_ys, dtype=torch.float32)
+            x_mean, y_mean = xs.mean(), ys.mean()
+            denom = ((xs - x_mean) ** 2).sum().item()
+            if denom > 1e-8:
+                cal_a = float(((xs - x_mean) * (ys - y_mean)).sum().item() / denom)
+                cal_b = float(y_mean.item() - cal_a * x_mean.item())
+            tlog(f"  📐 Calibration: stars ≈ {cal_a:.3f} · raw + {cal_b:.3f} (n={len(raw_xs)})")
+        else:
+            tlog(f"  ⚠️ Calibration skipped — too few usable samples ({len(raw_xs)})")
+    else:
+        tlog(f"  ⚠️ Calibration skipped — no rated performers available")
+
+    # 6. Persist calibration into the saved checkpoint AND the live model buffers.
+    model.set_calibration(cal_a, cal_b)
+    ckpt = torch.load(out_path, map_location='cpu')
+    ckpt['cal_a'] = cal_a
+    ckpt['cal_b'] = cal_b
+    ckpt['model_state_dict'] = model.state_dict()  # includes updated cal_a/cal_b buffers
+    torch.save(ckpt, out_path)
+
+    return {'model': str(out_path.name), 'best_val_acc': best_acc, 'cal_a': cal_a, 'cal_b': cal_b}
+
+
 def train_ranked_binary(config):
     """Train a rank-conditioned binary classifier.
     Same as train_binary but the model takes (image, performer_rank) as input.
@@ -2109,6 +2357,7 @@ TRAIN_FNS = {
     'pairwise_siamese_binary': train_siamese_binary,
     'performer_ranker': train_performer_ranker,
     'performer_attention_ranker': train_performer_attention_ranker,
+    'performer_pairwise_ranker': train_performer_pairwise_ranker,
     'ranked_binary': train_ranked_binary,
     'ranked_siamese_binary': train_ranked_siamese_binary,
     # Legacy: kept for backward compat — functions still exist but not recommended
