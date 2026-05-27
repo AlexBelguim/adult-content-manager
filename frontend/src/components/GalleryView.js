@@ -4,13 +4,8 @@ import PerformerCard from './PerformerCard';
 import ContentCard from './ContentCard';
 import PerformerSettingsModal from './PerformerSettingsModal';
 import BackgroundTaskQueue from './BackgroundTaskQueue';
+import FullscreenGalleryDialog from './fullscreenModes/FullscreenGalleryDialog';
 import { smartOpen } from '../utils/pwaNavigation';
-import {
-  generatePhotoWallLayout,
-  generateCameraKeyframes,
-  getCameraAnimationCSS,
-  PHOTO_WALL_CONFIG
-} from '../utils/photoWallGenerator';
 import {
   Box,
   Grid,
@@ -56,10 +51,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
   const pollingIntervalsRef = useRef(new Map());
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [fullscreenMode, setFullscreenMode] = useState(false);
-  const [photoWallLayout, setPhotoWallLayout] = useState([]);
-  const [shrinePositions, setShrinePositions] = useState([]);
-  const [wallKey, setWallKey] = useState(0); // For forcing re-render with fade
-  const performerBagsRef = useRef({}); // 7-bag randomness for each performer
   const [filters, setFilters] = useState({
     age: { min: null, max: null },
     ethnicity: { include: [], exclude: [] },
@@ -120,36 +111,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
     localStorage.setItem('galleryContentSortBy', contentSortBy);
   }, [contentSortBy]);
 
-  // Handle browser fullscreen mode
-  useEffect(() => {
-    const enterFullscreen = async () => {
-      try {
-        if (fullscreenMode && !document.fullscreenElement) {
-          await document.documentElement.requestFullscreen();
-        } else if (!fullscreenMode && document.fullscreenElement) {
-          await document.exitFullscreen();
-        }
-      } catch (err) {
-        console.error('Error toggling fullscreen:', err);
-      }
-    };
-
-    enterFullscreen();
-
-    // Listen for fullscreen changes (e.g., user presses ESC)
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement && fullscreenMode) {
-        setFullscreenMode(false);
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, [fullscreenMode]);
-
   // Cleanup polling intervals on unmount
   useEffect(() => {
     return () => {
@@ -157,40 +118,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
       pollingIntervalsRef.current.clear();
     };
   }, []);
-
-  // Handle fullscreen mode - generate layout and enter browser fullscreen
-  useEffect(() => {
-    if (fullscreenMode) {
-      // Generate initial photo wall layout (async)
-      const initWall = async () => {
-        const { layout, shrinePositions: positions } = await generatePhotoWallLayout(performers, performerBagsRef.current);
-        setPhotoWallLayout(layout);
-        setShrinePositions(positions);
-      };
-      initWall();
-
-      // Instead of regenerating every 10 seconds, we'll use CSS animation to pan continuously
-      // The animation is handled in the Box sx prop below
-
-      // Enter browser fullscreen
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(err => {
-          console.log('Error attempting to enable fullscreen:', err);
-        });
-      }
-
-      return () => {
-        // No interval to clear
-      };
-    } else {
-      // Exit browser fullscreen
-      if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(err => {
-          console.log('Error attempting to exit fullscreen:', err);
-        });
-      }
-    }
-  }, [fullscreenMode, performers]);
 
   const fetchPerformers = () => {
     setLoadingPerformers(true);
@@ -1443,193 +1370,16 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
         </DialogActions>
       </Dialog>
 
-      {/* Fullscreen Idle Mode - Photo Wall */}
-      <Dialog
-        fullScreen
+      {/* Fullscreen Idle Mode - 5 animation modes */}
+      <FullscreenGalleryDialog
         open={fullscreenMode}
         onClose={() => setFullscreenMode(false)}
-        sx={{
-          '& .MuiDialog-paper': {
-            backgroundColor: '#1a1a1a',
-          }
+        performers={sortedPerformers}
+        onPhotoClick={(performer) => {
+          setFullscreenMode(false);
+          handlePerformerClick(performer.name);
         }}
-      >
-        <Box
-          sx={{
-            width: '100vw',
-            height: '100vh',
-            overflow: 'hidden', // Re-enabled for animation
-            position: 'relative',
-            backgroundColor: '#1a1a1a'
-          }}
-        >
-          {/* Close button */}
-          <IconButton
-            onClick={() => setFullscreenMode(false)}
-            sx={{
-              position: 'fixed',
-              top: 16,
-              right: 16,
-              color: 'white',
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              zIndex: 1000,
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.7)',
-              },
-            }}
-          >
-            <CloseIcon />
-          </IconButton>
-
-          {/* Photo Wall - with organic camera-like panning */}
-          <Box
-            sx={{
-              position: 'relative',
-              width: `${PHOTO_WALL_CONFIG.screenMultiplier * 100}%`, // Dynamic based on multiplier
-              height: `${PHOTO_WALL_CONFIG.screenMultiplier * 100}%`, // Dynamic based on multiplier
-              animation: getCameraAnimationCSS(),
-              '@keyframes cameraMove': generateCameraKeyframes()
-            }}
-          >
-            {photoWallLayout.map((item, index) => {
-              // Skip if no selected thumbnail
-              if (!item.selectedThumbnail) {
-                return null;
-              }
-
-              const imageUrl = `/api/files/raw?path=${encodeURIComponent(item.selectedThumbnail)}`;
-              const isHero = item.isHero === true;
-              const isFramed = item.isFramed === true;
-
-              return (
-                <Box
-                  key={`${item.performer.id}-${index}-${wallKey}`}
-                  onClick={() => {
-                    setFullscreenMode(false);
-                    handlePerformerClick(item.performer.name);
-                  }}
-                  sx={{
-                    position: 'absolute',
-                    left: `${item.x}px`,
-                    top: `${item.y}px`,
-                    width: `${item.width}px`,
-                    height: `${item.height}px`,
-                    transform: `rotate(${item.rotation}deg)`,
-                    cursor: 'pointer',
-                    zIndex: item.zIndex,
-                    transition: 'transform 0.3s ease, box-shadow 0.3s ease',
-                    boxShadow: isHero
-                      ? '0 10px 60px rgba(0, 0, 0, 0.8)'
-                      : isFramed
-                        ? '0 6px 25px rgba(0, 0, 0, 0.6)'
-                        : '0 4px 20px rgba(0, 0, 0, 0.5)',
-                    overflow: 'hidden',
-                    backgroundColor: '#222',
-                    // Frame border for framed photos
-                    border: isFramed
-                      ? `${8 + Math.floor(Math.random() * 8)}px solid ${['#8B7355', '#654321', '#D4AF37', '#C0C0C0', '#1a1a1a', '#f5f5dc'][Math.floor(Math.random() * 6)]
-                      }`
-                      : isHero
-                        ? '8px solid rgba(255, 255, 255, 0.1)'
-                        : 'none',
-                    borderRadius: isFramed && item.frameShape === 'oval' ? '50%' : 0,
-                    '&:hover': {
-                      transform: `rotate(${item.rotation}deg) scale(${isHero ? 1.02 : 1.05})`,
-                      boxShadow: isHero
-                        ? '0 15px 80px rgba(0, 0, 0, 0.9)'
-                        : isFramed
-                          ? '0 10px 40px rgba(0, 0, 0, 0.8)'
-                          : '0 8px 30px rgba(0, 0, 0, 0.8)',
-                      zIndex: 100,
-                    },
-                  }}
-                >
-                  <img
-                    src={imageUrl}
-                    alt={item.performer.name}
-                    onError={(e) => {
-                      console.error(`Failed to load image for ${item.performer.name}:`, imageUrl);
-                      e.target.style.display = 'none';
-                    }}
-                    onLoad={() => {
-                      console.log(`✅ Loaded image for ${item.performer.name}`);
-                    }}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      objectPosition: 'center',
-                    }}
-                  />
-
-                  {/* Tape effect for non-framed photos */}
-                  {!isFramed && (
-                    <>
-                      {isHero ? (
-                        <>
-                          <Box sx={{
-                            position: 'absolute',
-                            top: -10,
-                            left: '20%',
-                            width: '100px',
-                            height: '35px',
-                            backgroundColor: 'rgba(200, 180, 140, 0.7)',
-                            transform: 'rotate(-2deg)',
-                            boxShadow: '0 3px 6px rgba(0, 0, 0, 0.4)',
-                          }} />
-                          <Box sx={{
-                            position: 'absolute',
-                            top: -10,
-                            right: '20%',
-                            width: '100px',
-                            height: '35px',
-                            backgroundColor: 'rgba(200, 180, 140, 0.7)',
-                            transform: 'rotate(2deg)',
-                            boxShadow: '0 3px 6px rgba(0, 0, 0, 0.4)',
-                          }} />
-                          <Box sx={{
-                            position: 'absolute',
-                            bottom: -10,
-                            left: '20%',
-                            width: '100px',
-                            height: '35px',
-                            backgroundColor: 'rgba(200, 180, 140, 0.7)',
-                            transform: 'rotate(2deg)',
-                            boxShadow: '0 3px 6px rgba(0, 0, 0, 0.4)',
-                          }} />
-                          <Box sx={{
-                            position: 'absolute',
-                            bottom: -10,
-                            right: '20%',
-                            width: '100px',
-                            height: '35px',
-                            backgroundColor: 'rgba(200, 180, 140, 0.7)',
-                            transform: 'rotate(-2deg)',
-                            boxShadow: '0 3px 6px rgba(0, 0, 0, 0.4)',
-                          }} />
-                        </>
-                      ) : (
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            top: -10,
-                            left: '20%',
-                            width: '60px',
-                            height: '25px',
-                            backgroundColor: 'rgba(200, 180, 140, 0.6)',
-                            transform: 'rotate(-2deg)',
-                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
-                          }}
-                        />
-                      )}
-                    </>
-                  )}
-                </Box>
-              );
-            })}
-          </Box>
-        </Box>
-      </Dialog>
+      />
 
       {/* Background Task Queue */}
       {backgroundTasks.length > 0 && (
