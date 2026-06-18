@@ -57,10 +57,10 @@ const M_DEFAULT_AR = 0.7; // fallback aspect before dims arrive
 // Content/genre ring — its OWN ring on the SAME cylinder, as a clean band below the
 // performer rows. Radius equals R_RING so it sits at the same depth as the main app's
 // "same grid, different section" layout. Rotation logic unchanged.
-const GENRE_Y = 0.15;     // low, clearly below the performer band
+const GENRE_Y = 0.1;      // low, clearly below the performer band
 const GENRE_R = R_RING;   // same depth as performers
-const GENRE_W = 1.5;      // wider so the stat chips + labels read
-const GENRE_H = 1.05;     // tall enough for avatar + name + chip grid + size
+const GENRE_W = 1.8;      // wider so the stat chips + labels breathe
+const GENRE_H = 1.5;      // taller: generous avatar + name + chip grid + size
 const GENRE_ROT = 0.16;   // radians the genre ring spins per scroll unit
 // Floating control bar.
 const BAR_W = 4.1;
@@ -918,14 +918,15 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       return;
     }
     const N = genres.length;
-    // vertical layout inside the card (top -> bottom): avatar, name, chip grid, size
-    const topY = GENRE_H / 2 - 0.18;
-    const avatarR = 0.14;
-    const nameY = topY - avatarR - 0.2;
-    const gridTopY = nameY - 0.14;
-    const rowH = 0.2, rowGap = 0.05;
-    const chipW = (GENRE_W - 0.24) / 2, chipH = rowH;
-    const sizeY = -GENRE_H / 2 + 0.14;
+    // vertical layout inside the card (top -> bottom): avatar, name, chip grid, size.
+    // Generous spacing now the cards are wider/taller — nothing should feel squeezed.
+    const topY = GENRE_H / 2 - 0.2;        // 0.45
+    const avatarR = 0.16;
+    const nameY = topY - avatarR - 0.22;   // ~0.07
+    const rowH = 0.22, rowGap = 0.06;
+    const gridTopY = nameY - 0.16 - rowH / 2;   // top row centre
+    const sizeY = -GENRE_H / 2 + 0.16;     // ~-0.49
+    const chipW = (GENRE_W - 0.34) / 2, chipH = rowH;
     genres.forEach((g, i) => {
       const ang = (i / N) * Math.PI * 2;
       const x = GENRE_R * Math.sin(ang), z = -GENRE_R * Math.cos(ang);
@@ -933,14 +934,14 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       faceUser(card, x, GENRE_Y, z); // faces the user; spins around them as the ring rotates
       const pics = g.pics || 0, vids = g.vids || 0, fun = g.funscripts || 0, total = pics + vids + fun;
       // body + subtle accent border (matches cinematic content-card spec)
-      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.06; color: ${CARD_BG}` }, card);
-      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.06; color: ${ACCENT}; opacity: 0.06` }, card);
+      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.07; color: ${CARD_BG}` }, card);
+      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.07; color: ${ACCENT}; opacity: 0.06` }, card);
       // folder avatar (warm gold circle, like ContentCard's genre-avatar)
       const av = makeEl('a-entity', { position: `0 ${topY - avatarR} 0.01` }, card);
       makeEl('a-entity', { rounded: `width: ${avatarR * 2}; height: ${avatarR * 2}; radius: ${avatarR}; color: ${ACCENT_WARM}` }, av);
       canvasPlane(av, { w: avatarR * 1.1, h: avatarR * 1.1, y: 0.012, draw: (ctx, cw, ch) => drawIcon(ctx, 'folder', cw, ch, '#1a1a1a') });
       // genre name (bold-ish, centered)
-      makeEl('a-text', { value: g.name, align: 'center', color: TEXT, position: `0 ${nameY} 0.01`, width: `${GENRE_W * 0.92}`, 'wrap-count': '22', font: 'roboto' }, card);
+      makeEl('a-text', { value: g.name, align: 'center', color: TEXT, position: `0 ${nameY} 0.01`, width: `${GENRE_W * 0.92}`, 'wrap-count': '24', font: 'roboto' }, card);
       // 2x2 stat chip grid: Pics / Vids / Funscripts / Total — color-coded like ContentCard.styles.js
       const chips = [
         { label: 'Pics', val: pics, color: C_PICS, icon: 'photo', r: 0, c: 0 },
@@ -949,17 +950,17 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         { label: 'All', val: total, color: C_TOTAL, icon: 'storage', r: 1, c: 1 },
       ];
       chips.forEach((ch) => {
-        const cxp = (ch.c === 0 ? -1 : 1) * (chipW / 2 + 0.04);
-        const cyp = gridTopY - ch.r * (rowH + rowGap) - chipH / 2;
+        const cxp = (ch.c === 0 ? -1 : 1) * (chipW / 2 + 0.06);
+        const cyp = gridTopY - ch.r * (rowH + rowGap); // gridTopY is the top-row centre
         const chip = makeEl('a-entity', { position: `${cxp} ${cyp} 0.01` }, card);
-        makeEl('a-entity', { rounded: `width: ${chipW}; height: ${chipH}; radius: 0.035; color: #22242b; opacity: 0.92` }, chip);
-        canvasPlane(chip, { w: 0.08, h: 0.08, x: -chipW / 2 + 0.1, draw: (ctx, cw, chh) => drawIcon(ctx, ch.icon, cw, chh, ch.color) });
-        makeEl('a-text', { value: `${ch.label} ${ch.val}`, align: 'left', color: ch.color, position: `${-chipW / 2 + 0.18} 0 0.01`, width: `${chipW}`, 'wrap-count': '12', font: 'roboto' }, chip);
+        makeEl('a-entity', { rounded: `width: ${chipW}; height: ${chipH}; radius: 0.04; color: #22242b; opacity: 0.92` }, chip);
+        canvasPlane(chip, { w: 0.1, h: 0.1, x: -chipW / 2 + 0.12, draw: (ctx, cw, chh) => drawIcon(ctx, ch.icon, cw, chh, ch.color) });
+        makeEl('a-text', { value: `${ch.label} ${ch.val}`, align: 'left', color: ch.color, position: `${-chipW / 2 + 0.22} 0 0.01`, width: `${chipW}`, 'wrap-count': '12', font: 'roboto' }, chip);
       });
       // size row
       const sizeRow = makeEl('a-entity', { position: `0 ${sizeY} 0.01` }, card);
-      canvasPlane(sizeRow, { w: 0.07, h: 0.07, x: -0.14, draw: (ctx, cw, chh) => drawIcon(ctx, 'storage', cw, chh, TEXT_DIM) });
-      makeEl('a-text', { value: `${g.size || 0} GB`, align: 'center', color: TEXT_DIM, position: '0.06 0 0.01', width: '0.9', 'wrap-count': '14', font: 'roboto' }, sizeRow);
+      canvasPlane(sizeRow, { w: 0.09, h: 0.09, x: -0.18, draw: (ctx, cw, chh) => drawIcon(ctx, 'storage', cw, chh, TEXT_DIM) });
+      makeEl('a-text', { value: `${g.size || 0} GB`, align: 'center', color: TEXT_DIM, position: '0.08 0 0.01', width: '1.0', 'wrap-count': '14', font: 'roboto' }, sizeRow);
       card.addEventListener('click', () => { popScale(card); showGenre(g); });
     });
     applyGenreRotation();
