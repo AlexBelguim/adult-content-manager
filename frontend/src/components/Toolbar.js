@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, ButtonGroup } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science } from '@mui/icons-material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 
 import './Toolbar.css';
@@ -101,8 +101,23 @@ function Toolbar({
   const location = useLocation();
   const [localHandyCode, setLocalHandyCode] = useState(() => localStorage.getItem('handyConnectionCode') || handyCode || '');
   const [showSettings, setShowSettings] = useState(false);
+  // VR is only enterable on a WebXR headset; gate the toolbar entry on support.
+  const [vrSupported, setVrSupported] = useState(null); // null = unknown yet
 
   const [showVideoPathModal, setShowVideoPathModal] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (navigator.xr && navigator.xr.isSessionSupported) {
+      navigator.xr
+        .isSessionSupported('immersive-vr')
+        .then((ok) => active && setVrSupported(ok))
+        .catch(() => active && setVrSupported(false));
+    } else {
+      setVrSupported(false);
+    }
+    return () => { active = false; };
+  }, []);
 
   const handleModeChange = (newMode) => {
     onModeChange(newMode);
@@ -199,6 +214,19 @@ function Toolbar({
             <IconButton color="inherit" onClick={() => navigate('/taste-dashboard')} size="small">
               <Science />
             </IconButton>
+          </Tooltip>
+
+          <Tooltip title={vrSupported === false ? 'Enter VR — open this page on a headset (e.g. Quest 3)' : 'Enter VR mode'}>
+            <span>
+              <IconButton
+                color={vrSupported ? 'primary' : 'inherit'}
+                onClick={() => navigate('/vr')}
+                disabled={vrSupported === false}
+                size="small"
+              >
+                <ViewInAr />
+              </IconButton>
+            </span>
           </Tooltip>
 
           <Tooltip title="Keyboard Shortcuts Settings">

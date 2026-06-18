@@ -27,11 +27,13 @@ FROM node:20-slim AS production
 #   ffmpeg        - video processing / thumbnail generation
 #   python3       - needed by some native module builds (node-gyp)
 #   build-essential - compile native addons (better-sqlite3, sharp)
+#   openssl       - self-signed TLS cert generation for WebXR/VR (ENABLE_HTTPS=1)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
     build-essential \
     chromium \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

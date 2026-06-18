@@ -9,6 +9,11 @@
 #   - ./data     → persistent database & config  (or a TrueNAS dataset)
 #   - /mnt/media → your media library on TrueNAS (adjust the host path)
 #
+# VR (WebXR) REQUIRES HTTPS — the Quest browser won't enter immersive VR over plain HTTP.
+# To enable it, set ENABLE_HTTPS=1 below. The server self-signs a TLS cert on first run
+# (covering localhost + all LAN IPs); open https://<NAS-IP>:4069 on the headset and accept
+# the cert warning once. You can supply your own cert/key via TLS_CERT / TLS_KEY.
+#
 # =============================================================================
 
 services:
@@ -26,6 +31,8 @@ services:
       - MEDIA_BASE_PATH=/media
       - CONTENT_BASE_PATH=/app/content
       - DATA_PATH=/app/data
+      # Set to 1 to serve over HTTPS (REQUIRED for VR/WebXR on a headset). See header note.
+      - ENABLE_HTTPS=1
     volumes:
       # Persistent data (database, settings)
       - ../data:/app/data

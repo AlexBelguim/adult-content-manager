@@ -64,6 +64,49 @@ router.post('/video-durations', async (req, res) => {
   }
 });
 
+// Pixel dimensions for media (images via sharp, videos via ffprobe), batched + cached in-memory.
+// Used by the VR masonry layout, which needs each tile's aspect ratio up front.
+const _dimsCache = new Map(); // path -> { w, h, mtime }
+function _probeVideoDims(filePath) {
+  return new Promise((resolve) => {
+    let ffprobePath;
+    try { ffprobePath = require('ffprobe-static').path; } catch (e) { return resolve(null); }
+    const args = ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', filePath];
+    const p = spawn(ffprobePath, args);
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('close', () => {
+      try { const j = JSON.parse(out); const s = j.streams && j.streams[0]; resolve(s && s.width ? { w: s.width, h: s.height } : null); }
+      catch (e) { resolve(null); }
+    });
+    p.on('error', () => resolve(null));
+  });
+}
+router.post('/dimensions', async (req, res) => {
+  const paths = (req.body && req.body.paths) || [];
+  if (!Array.isArray(paths)) return res.status(400).send({ error: 'paths array required' });
+  const IMG_RE = /\.(jpg|jpeg|png|gif|webp|bmp|avif)$/i;
+  const dims = {};
+  let i = 0;
+  async function worker() {
+    while (i < paths.length) {
+      const p = paths[i++];
+      try {
+        const st = await fs.stat(p).catch(() => null);
+        if (!st) continue;
+        const c = _dimsCache.get(p);
+        if (c && c.mtime === st.mtimeMs) { dims[p] = [c.w, c.h]; continue; }
+        let wh = null;
+        if (IMG_RE.test(p)) { const m = await sharp(p).metadata(); if (m && m.width) wh = { w: m.width, h: m.height }; }
+        else { wh = await _probeVideoDims(p); }
+        if (wh && wh.w && wh.h) { _dimsCache.set(p, { w: wh.w, h: wh.h, mtime: st.mtimeMs }); dims[p] = [wh.w, wh.h]; }
+      } catch (e) { /* skip one bad file */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(8, paths.length || 1) }, worker));
+  res.send({ dims });
+});
+
 // Serve funscript thumbnails (placeholder, but cached in .thumbnails)
 router.get('/funscript-thumbnail', async (req, res) => {
   const { path: filePath } = req.query;

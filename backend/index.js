@@ -111,9 +111,47 @@ app.use((err, req, res, next) => {
 });
 
 const http = require('http');
+const https = require('https');
+const { execSync } = require('child_process');
+const os = require('os');
 const { Server } = require("socket.io");
 
-const server = http.createServer(app);
+// WebXR (VR mode) requires a SECURE CONTEXT — it won't run over plain HTTP except on
+// localhost. On a remote host like TrueNAS the Quest browser hits the server over HTTP, so
+// VR silently refuses to enter immersive mode. ENABLE_HTTPS=1 serves the app + API over HTTPS
+// with a self-signed cert (auto-generated on first run, or use TLS_CERT/TLS_KEY to supply your
+// own). HTTP-to-HTTPS redirect can be added via a reverse proxy if needed.
+function buildHttpsOptions() {
+  const certPath = process.env.TLS_CERT || path.join(__dirname, '..', 'data', 'tls-cert.pem');
+  const keyPath = process.env.TLS_KEY || path.join(__dirname, '..', 'data', 'tls-key.pem');
+  // Reuse an existing cert if present (user-supplied or previously generated)
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+  }
+  // Otherwise self-sign one covering localhost + all LAN IPs so any of them works on the headset
+  try {
+    const openssl = process.env.OPENSSL_BIN || 'openssl';
+    const ips = Object.values(os.networkInterfaces()).flat()
+      .filter((n) => n && n.family === 'IPv4' && !n.internal)
+      .map((n) => `IP:${n.address}`);
+    const san = ['IP:127.0.0.1', ...ips].join(',');
+    const dataDir = path.dirname(certPath);
+    fs.ensureDirSync(dataDir);
+    execSync(`"${openssl}" req -x509 -newkey rsa:2048 -keyout "${keyPath}" -out "${certPath}" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=${san}"`, { stdio: 'ignore' });
+    console.log(`[TLS] Generated self-signed cert (${certPath})`);
+    return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+  } catch (e) {
+    console.error('[TLS] Could not generate a self-signed cert (openssl missing?). Set TLS_CERT/TLS_KEY or disable ENABLE_HTTPS.', e.message);
+    return null;
+  }
+}
+
+const useHttps = process.env.ENABLE_HTTPS === '1' || process.env.ENABLE_HTTPS === 'true';
+const tlsOpts = useHttps ? buildHttpsOptions() : null;
+const server = (useHttps && tlsOpts) ? https.createServer(tlsOpts, app) : http.createServer(app);
+if (useHttps && !tlsOpts) {
+  console.warn('[TLS] ENABLE_HTTPS set but cert generation failed — falling back to HTTP. VR will NOT work on a remote host.');
+}
 const io = new Server(server, {
   cors: {
     origin: "*", // Adjust in production
@@ -141,7 +179,13 @@ io.on('connection', (socket) => {
 
 
 server.listen(port, '0.0.0.0', async () => {
-  console.log(`Server running on http://0.0.0.0:${port}`);
+  const scheme = (useHttps && tlsOpts) ? 'https' : 'http';
+  console.log(`Server running on ${scheme}://0.0.0.0:${port}`);
+  if (useHttps && tlsOpts) {
+    console.log('  TLS enabled (WebXR/VR will work from a headset). Self-signed — accept the cert warning once in the browser.');
+  } else {
+    console.log('  Tip: set ENABLE_HTTPS=1 to serve over HTTPS (required for WebXR/VR on a remote host).');
+  }
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 
   // Cleanup: Remove any performers with names starting with '.' (like .cache, .thumbnails)

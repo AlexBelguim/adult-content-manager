@@ -39,6 +39,7 @@ import SmartFilterPage from './pages/SmartFilterPage';
 import TasteDashboardPage from './pages/TasteDashboardPage';
 import PairwiseRankPage from './pages/PairwiseRankPage';
 import TrainingHubPage from './pages/TrainingHubPage';
+import VRPage from './pages/VRPage';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
@@ -610,6 +611,9 @@ function AppContent({ onThemeChange, currentThemeId }) {
             } />
             <Route path="/training-hub" element={
               <TrainingHubPage />
+            } />
+            <Route path="/vr" element={
+              <VRPage />
             } />
 
             <Route path="/thumbnail-selector/:performerId" element={
