@@ -317,7 +317,9 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   makeEl('a-light', { type: 'directional', color: '#88aaff', intensity: '0.4', position: '0 4 -4' }, scene);
   const rig = makeEl('a-entity', { id: 'rig', position: '0 0 0', recenter: `anchorY: ${CENTER_Y}` }, scene);
   makeEl('a-entity', { id: 'head', camera: '', 'look-controls': '', 'wasd-controls': '', position: '0 1.6 0' }, rig);
-  const RAY = 'objects: .clickable; far: 40; showLine: true; lineColor: #007acc; lineOpacity: 0.9';
+  // No showLine here — force-laser turns the line ON only once the controller actually connects,
+  // so an unused hand (e.g. only one controller held) doesn't project a stray laser.
+  const RAY = 'objects: .clickable; far: 40; lineColor: #007acc; lineOpacity: 0.9';
   // NOTE: no `cursor` component on the hands. A-Frame's cursor fires its OWN click on
   // triggerdown/triggerup, which double-fired alongside our manual `select` handler and made
   // every toggle flip on then straight back off ("does nothing"). Clicks come solely from the
@@ -1350,11 +1352,12 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     raycaster.far = 40;
   }
   function rootClickable(obj) { while (obj) { if (obj.el && obj.el.classList && obj.el.classList.contains('clickable')) return obj.el; obj = obj.parent; } return null; }
-  // Debounce: a single trigger pull can register as two WebXR 'select' events within ~50-100ms
-  // (selectstart + selectend on some runtimes, or both hands). Ignore a second hit on the SAME
-  // target within 150ms so toggles don't flip on then straight back off — but deliberate repeated
-  // clicks (triage keep/delete, paging) are >200ms apart and still register.
-  let lastClickTarget = null, lastClickTime = 0;
+  // Debounce: a single trigger pull can register as two WebXR 'select' events within ~50-100ms.
+  // Key on the stable `data-name` string (NOT the entity reference) — toggle*() calls buildBar(),
+  // which recreates the clicked button between the two events, so an identity check misses the
+  // duplicate and the toggle flips on then straight back off. 150ms swallows one trigger pull but
+  // leaves deliberate repeated clicks (triage keep/delete, paging — >200ms apart) intact.
+  let lastClickName = null, lastClickTime = 0;
   function clickFromHand(hand, label) {
     rayFromHand(hand);
     const objs = Array.from(document.querySelectorAll('.clickable')).map((e) => e.object3D);
@@ -1362,12 +1365,13 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     if (!hits.length) { setDebug(`select(${label}) -> no target`); return; }
     const target = rootClickable(hits[0].object);
     if (!target) { setDebug(`select(${label}) -> no target`); return; }
+    const tName = target.getAttribute('data-name') || '';
     const now = performance.now();
-    if (target === lastClickTarget && now - lastClickTime < 150) {
-      setDebug(`select(${label}) -> ${target.getAttribute('data-name') || 'hit'} (debounced)`);
+    if (tName && tName === lastClickName && now - lastClickTime < 150) {
+      setDebug(`select(${label}) -> ${tName} (debounced)`);
       return; // swallow the duplicate from one trigger pull
     }
-    lastClickTarget = target; lastClickTime = now;
+    lastClickName = tName; lastClickTime = now;
     // click-to-seek: a scrub track maps the hit's local x to a fraction
     if (target.__seek && hits[0].point) {
       const local = target.object3D.worldToLocal(hits[0].point.clone());

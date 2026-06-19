@@ -61,10 +61,14 @@ export function registerVRComponents(AFRAME) {
     },
   });
 
-  /* ---- force-laser: guarantee the raycaster line stays visible ----
-     laser-controls can drop our line styling on connect; re-assert it. */
+  /* ---- force-laser: only show the raycaster line once the controller connects ----
+     laser-controls + raycaster(showLine:true) draw a line for BOTH hands immediately, so an
+     unused controller (e.g. only one held) still projects a stray laser. Start with the line
+     OFF; turn it on (and re-assert our styling) only when this hand actually connects. */
   reg('force-laser', {
     init() {
+      // line off until a real controller is connected for this hand
+      this.el.setAttribute('raycaster', 'showLine', false);
       const enable = () => {
         this.el.setAttribute('raycaster', 'showLine', true);
         this.el.setAttribute('raycaster', 'lineColor', '#007acc');
@@ -72,7 +76,6 @@ export function registerVRComponents(AFRAME) {
       };
       this.el.addEventListener('controllerconnected', enable);
       this.el.addEventListener('controllermodelready', enable);
-      [200, 800, 2000].forEach((t) => setTimeout(enable, t));
     },
   });
 
