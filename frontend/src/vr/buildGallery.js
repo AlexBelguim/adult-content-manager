@@ -1380,9 +1380,16 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     const tName = target.getAttribute('data-name') || '';
     const now = performance.now();
     const delta = lastClickTime ? (now - lastClickTime) : 0;
-    if (tName && tName === lastClickName && delta < 150) {
-      setDebug(`${tName} x2 @${Math.round(delta)}ms (swallowed)`);
-      return; // swallow the duplicate from one trigger pull
+    // Suppress repeat hits on the SAME control within 280ms — a single Quest trigger pull can
+    // throw 2-4 'select' events spread across ~200ms (selectstart/selectend + runtime echoes).
+    // Toggles (filter/search/device/vrMode/playpause/back) must collapse to ONE or they flip
+    // true→false→true and net to "nothing happened". Action buttons meant for deliberate rapid
+    // repeats (triage keep/delete/undo, prev/next media) are exempt.
+    const isRepeatable = /keepFile|deleteFile|undoFile|nextMedia|prevMedia|scrub/.test(tName);
+    if (tName && tName === lastClickName && !isRepeatable && delta < 280) {
+      lastClickTime = now; // extend the window so a 3rd/4th echo is also swallowed
+      setDebug(`${tName} echo @${Math.round(delta)}ms (swallowed)`);
+      return;
     }
     lastClickName = tName; lastClickTime = now;
     // click-to-seek: a scrub track maps the hit's local x to a fraction
