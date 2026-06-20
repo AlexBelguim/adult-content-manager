@@ -1194,7 +1194,19 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     if (ni < 0 || ni >= N) return;
     playerIndex = ni; buildBar(); renderPlayer();
   }
-  function togglePlay() { if (!videoEl) return; if (videoEl.paused) videoEl.play().catch(() => {}); else videoEl.pause(); buildBar(); }
+  function togglePlay() {
+    if (!videoEl) return;
+    // play()/pause() are ASYNC — rebuild the bar only after the state actually settles,
+    // otherwise buildBar() reads a stale videoEl.paused and the icon flips right back
+    // ("flashes but doesn't work").
+    if (videoEl.paused) {
+      videoEl.play().then(() => buildBar()).catch(() => buildBar());
+    } else {
+      videoEl.pause();
+      // pause() is synchronous for the paused flag, but give it a frame to settle
+      setTimeout(buildBar, 30);
+    }
+  }
   function applyPlayerScale() { if (playerRoot.object3D) playerRoot.object3D.scale.setScalar(playerScale); }
   function zoomPlayer(f) { playerScale = Math.max(0.5, Math.min(3, playerScale * f)); applyPlayerScale(); }
   // Toggle VR (side-by-side 180°) viewing for the current video. In VR mode the flat plane is
@@ -1367,8 +1379,9 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     if (!target) { setDebug(`select(${label}) -> no target`); return; }
     const tName = target.getAttribute('data-name') || '';
     const now = performance.now();
-    if (tName && tName === lastClickName && now - lastClickTime < 150) {
-      setDebug(`select(${label}) -> ${tName} (debounced)`);
+    const delta = lastClickTime ? (now - lastClickTime) : 0;
+    if (tName && tName === lastClickName && delta < 150) {
+      setDebug(`${tName} x2 @${Math.round(delta)}ms (swallowed)`);
       return; // swallow the duplicate from one trigger pull
     }
     lastClickName = tName; lastClickTime = now;
@@ -1394,7 +1407,9 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   let scrubbing = false, wasPlaying = false, scrubTarget = 0;
   const abLatch = { a: false, b: false }; // A/X=keep, B/Y=delete during filtering
 
+  let xrInputAttached = false; // guard against double-binding if enter-vr fires more than once
   function attachXRInput() {
+    if (xrInputAttached) detachXRInput(); // clean any previous binding first
     const xr = scene.renderer && scene.renderer.xr;
     xrSession = xr && xr.getSession && xr.getSession();
     if (!xrSession) return;
@@ -1406,10 +1421,11 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     xrSession.addEventListener('select', onSel);
     xrSession.addEventListener('squeezestart', onSqStart);
     xrSession.addEventListener('squeezeend', onSqEnd);
+    xrInputAttached = true;
   }
   function detachXRInput() {
     if (xrSession) { if (onSel) xrSession.removeEventListener('select', onSel); if (onSqStart) xrSession.removeEventListener('squeezestart', onSqStart); if (onSqEnd) xrSession.removeEventListener('squeezeend', onSqEnd); }
-    xrSession = null; onSel = onSqStart = onSqEnd = null;
+    xrSession = null; onSel = onSqStart = onSqEnd = null; xrInputAttached = false;
   }
 
   // Read a controller's thumbstick (xr-standard: axes[2]=X, axes[3]=Y; fallback [0],[1]).
