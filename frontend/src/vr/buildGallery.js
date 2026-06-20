@@ -517,9 +517,20 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     });
     return el;
   }
-  function toggleFilters() { showFilters = !showFilters; setDebug(`toggleFilters -> ${showFilters} (view=${view})`); renderFilterPanel(); buildBar(); }
-  function toggleSearch() { showSearch = !showSearch; setDebug(`toggleSearch -> ${showSearch}`); renderSearchPanel(); buildBar(); }
-  function toggleDevice() { showDevice = !showDevice; setDebug(`toggleDevice -> ${showDevice}`); renderDevicePanel(); buildBar(); }
+  // Toggle guard: a single Quest trigger pull throws 2-4 'select' events that each queue a
+  // deferred toggle call. Debouncing at the click level kept leaking through (echoes spread
+  // past the window). So each toggle takes a per-toggle lock for 400ms — the FIRST call flips
+  // the state and renders; every echo within 400ms returns immediately. Net = exactly one flip.
+  const _toggleLock = {};
+  function _guarded(key, fn) {
+    const now = performance.now();
+    if (_toggleLock[key] && now - _toggleLock[key] < 400) return; // echo of this pull — ignore
+    _toggleLock[key] = now;
+    fn();
+  }
+  function toggleFilters() { _guarded('filters', () => { showFilters = !showFilters; setDebug(`toggleFilters -> ${showFilters} (view=${view})`); renderFilterPanel(); buildBar(); }); }
+  function toggleSearch() { _guarded('search', () => { showSearch = !showSearch; setDebug(`toggleSearch -> ${showSearch}`); renderSearchPanel(); buildBar(); }); }
+  function toggleDevice() { _guarded('device', () => { showDevice = !showDevice; setDebug(`toggleDevice -> ${showDevice}`); renderDevicePanel(); buildBar(); }); }
   function panelBg(W, H, title, sub) {
     makeEl('a-entity', { rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${SURFACE}; opacity: 0.96` }, filterPanel);
     makeEl('a-text', { value: title, align: 'center', color: '#ffffff', position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, filterPanel);
@@ -1196,16 +1207,16 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
   function togglePlay() {
     if (!videoEl) return;
-    // play()/pause() are ASYNC — rebuild the bar only after the state actually settles,
-    // otherwise buildBar() reads a stale videoEl.paused and the icon flips right back
-    // ("flashes but doesn't work").
-    if (videoEl.paused) {
-      videoEl.play().then(() => buildBar()).catch(() => buildBar());
-    } else {
-      videoEl.pause();
-      // pause() is synchronous for the paused flag, but give it a frame to settle
-      setTimeout(buildBar, 30);
-    }
+    _guarded('playpause', () => {
+      // play()/pause() are ASYNC — rebuild the bar only after the state actually settles,
+      // otherwise buildBar() reads a stale videoEl.paused and the icon flips right back.
+      if (videoEl.paused) {
+        videoEl.play().then(() => buildBar()).catch(() => buildBar());
+      } else {
+        videoEl.pause();
+        setTimeout(buildBar, 30);
+      }
+    });
   }
   function applyPlayerScale() { if (playerRoot.object3D) playerRoot.object3D.scale.setScalar(playerScale); }
   function zoomPlayer(f) { playerScale = Math.max(0.5, Math.min(3, playerScale * f)); applyPlayerScale(); }
@@ -1214,28 +1225,30 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   // the field of view; the video texture is mapped to fill it (each eye naturally sees its half
   // because the headset renders the sphere from two viewpoints).
   function toggleVRVideo() {
-    vrVideoMode = !vrVideoMode;
-    setDebug('VR video mode: ' + (vrVideoMode ? 'ON' : 'off'));
-    // Swap the mesh IN PLACE if the video is already loaded (avoid a full reload that restarts it).
-    const screen = playerRoot.querySelector('[data-name="screen"]');
-    if (screen && videoEl && vrTexCache) {
-      if (vrVideoMode) {
-        screen.setObject3D('mesh', buildVRSphereMesh(vrTexCache, THREE));
-        playerRoot.setAttribute('position', '0 0 0'); playerRoot.setAttribute('rotation', '0 0 0');
-        playerScale = 1; applyPlayerScale();
+    _guarded('vrvideo', () => {
+      vrVideoMode = !vrVideoMode;
+      setDebug('VR video mode: ' + (vrVideoMode ? 'ON' : 'off'));
+      // Swap the mesh IN PLACE if the video is already loaded (avoid a full reload that restarts it).
+      const screen = playerRoot.querySelector('[data-name="screen"]');
+      if (screen && videoEl && vrTexCache) {
+        if (vrVideoMode) {
+          screen.setObject3D('mesh', buildVRSphereMesh(vrTexCache, THREE));
+          playerRoot.setAttribute('position', '0 0 0'); playerRoot.setAttribute('rotation', '0 0 0');
+          playerScale = 1; applyPlayerScale();
+        } else {
+          const { w, h } = fitVideo(videoEl.videoWidth, videoEl.videoHeight);
+          screen.setObject3D('mesh', new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: vrTexCache })));
+          faceUser(playerRoot, 0, PLAYER_Y, -PLAYER_Z);
+          applyPlayerScale();
+        }
+        buildBar();
       } else {
-        const { w, h } = fitVideo(videoEl.videoWidth, videoEl.videoHeight);
-        screen.setObject3D('mesh', new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: vrTexCache })));
-        faceUser(playerRoot, 0, PLAYER_Y, -PLAYER_Z);
-        applyPlayerScale();
+        // no loaded video yet — re-render so it builds with the right mode once metadata arrives
+        if (view === 'player') renderPlayer();
+        else if (view === 'filtering') renderFiltering();
+        else buildBar();
       }
-      buildBar();
-    } else {
-      // no loaded video yet — re-render so it builds with the right mode once metadata arrives
-      if (view === 'player') renderPlayer();
-      else if (view === 'filtering') renderFiltering();
-      else buildBar();
-    }
+    });
   }
   function closePlayerMedia() {
     if (videoEl) {
