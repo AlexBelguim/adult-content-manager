@@ -514,15 +514,21 @@ function TinderSortingPage({ basePath }) {
     // SWIPE VIEW
     return (
         <Box sx={{
-            height: '100dvh',
-            width: '100vw',
+            // Stretch via insets so the height never depends on vh-unit support.
+            // height 100vh is the fallback; 100dvh (mobile browser chrome) wins where supported.
+            // Without this, an unsupported 100dvh drops to height:auto and the image
+            // renders at intrinsic size, clipped by overflow:hidden.
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: '100vh',
+            '@supports (height: 100dvh)': { height: '100dvh' },
             display: 'flex',
             flexDirection: 'column',
             bgcolor: '#121212',
             overflow: 'hidden',
-            position: 'fixed',
-            top: 0,
-            left: 0,
             // Safe area padding for notched devices
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}>

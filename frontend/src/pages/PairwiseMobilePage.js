@@ -350,7 +350,14 @@ function PairwiseMobilePage() {
     }
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100dvh', bgcolor: '#000', overflow: 'hidden' }}>
+        <Box sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100vh', // fallback for browsers without dvh support
+            '@supports (height: 100dvh)': { height: '100dvh' },
+            bgcolor: '#000',
+            overflow: 'hidden'
+        }}>
             {/* Top Bar - Settings & Stats */}
             <Box sx={{
                 height: 50,
