@@ -134,7 +134,7 @@ function buildHttpsOptions() {
     const ips = Object.values(os.networkInterfaces()).flat()
       .filter((n) => n && n.family === 'IPv4' && !n.internal)
       .map((n) => `IP:${n.address}`);
-    const san = ['IP:127.0.0.1', ...ips].join(',');
+    const san = ['DNS:localhost', 'IP:127.0.0.1', ...ips].join(',');
     const dataDir = path.dirname(certPath);
     fs.ensureDirSync(dataDir);
     execSync(`"${openssl}" req -x509 -newkey rsa:2048 -keyout "${keyPath}" -out "${certPath}" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=${san}"`, { stdio: 'ignore' });

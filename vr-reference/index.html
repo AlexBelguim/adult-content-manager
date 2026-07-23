@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>ACM — VR Demo</title>
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script>
+    /* ---- recenter: re-anchor the whole UI on the user's current gaze ----
+       Works anywhere in space. The point the user is looking at (center of FOV)
+       becomes the new center of the layout, including pitch (looking up in bed = UI up). */
+    AFRAME.registerComponent('recenter', {
+      init: function () {
+        this.world = document.querySelector('#world');
+        this.head  = document.querySelector('#head');
+        this._q = new THREE.Quaternion();
+        this._e = new THREE.Euler();
+        this._p = new THREE.Vector3();
+        this._rot = new THREE.Quaternion();
+        this._off = new THREE.Vector3();
+        // The user's eye sits at (0, 1.6, 0) within the #world layout — its pivot point.
+        this._anchor = new THREE.Vector3(0, 1.6, 0);
+        window.__recenter = this.recenter.bind(this);   // global hook for controller buttons
+      },
+      recenter: function () {
+        if (!this.world || !this.head) return;
+        const head  = this.head.object3D;
+        const world = this.world.object3D;
+        head.updateMatrixWorld();
+        head.getWorldQuaternion(this._q);
+        this._e.setFromQuaternion(this._q, 'YXZ');      // yaw=y, pitch=x, roll=z
+        // Keep yaw + pitch (so it follows the FOV up/down), drop roll to stay level.
+        this._rot.setFromEuler(new THREE.Euler(this._e.x, this._e.y, 0, 'YXZ'));
+        head.getWorldPosition(this._p);
+        // Orient the layout to the gaze, then place it so the eye-anchor lands on the head:
+        //   world.pos = headPos - R * anchor
+        world.quaternion.copy(this._rot);
+        this._off.copy(this._anchor).applyQuaternion(this._rot);
+        world.position.copy(this._p).sub(this._off);
+      }
+    });
+
+    /* ---- force-laser: guarantee the raycaster line is visible ----
+       laser-controls resets showLine to false until a controller connects and only
+       then flips it on via a merge that can drop our styling. We re-assert it on every
+       connect/model event so the cyan beam reliably shows on the headset. */
+    AFRAME.registerComponent('force-laser', {
+      init: function () {
+        const enable = () => {
+          this.el.setAttribute('raycaster', 'showLine', true);
+          this.el.setAttribute('raycaster', 'lineColor', '#6cf0c2');
+          this.el.setAttribute('raycaster', 'lineOpacity', 0.9);
+        };
+        this.el.addEventListener('controllerconnected', enable);
+        this.el.addEventListener('controllermodelready', enable);
+        // also retry shortly after load in case events fired before we attached
+        [200, 800, 2000].forEach(t => setTimeout(enable, t));
+      }
+    });
+
+    /* ---- system-recenter: hook the headset's own recenter gesture ----
+       Long-pressing the Quest's Meta/Oculus button resets the WebXR reference space,
+       which fires a 'reset' event. We listen for it and re-anchor the UI to the new
+       forward. Deferred a couple of frames so the head pose reflects the reset origin
+       (window.requestAnimationFrame is paused during an immersive session, so we use
+       the scene tick instead). */
+    AFRAME.registerComponent('system-recenter', {
+      init: function () {
+        this.delay = 0;
+        this.el.addEventListener('enter-vr', this.attach.bind(this));
+      },
+      attach: function () {
+        const xr = this.el.renderer && this.el.renderer.xr;
+        const session = xr && xr.getSession && xr.getSession();
+        if (!session) return;
+        const onReset = () => { this.delay = 2; };   // apply ~2 frames later
+        const add = rs => { if (rs && rs.addEventListener) rs.addEventListener('reset', onReset); };
+        // A separately-requested reference space of the same type still receives the
+        // system 'reset', so we don't have to depend on three.js internals.
+        session.requestReferenceSpace('local-floor').then(add).catch(() =>
+          session.requestReferenceSpace('local').then(add).catch(() => {}));
+      },
+      tick: function () {
+        if (this.delay > 0 && --this.delay === 0 && window.__recenter) window.__recenter();
+      }
+    });
+  </script>
+  <style>
+    #overlay {
+      position: fixed; inset: 0; z-index: 10; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 1.2rem; text-align: center; padding: 2rem;
+      background: #07090dcc; color: #e8e6df;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    #overlay h1 { font-size: clamp(1.4rem,5vw,2.2rem); font-weight: 700; letter-spacing:-0.02em; margin:0; }
+    #overlay p  { max-width: 28rem; opacity:.75; font-size:.9rem; line-height:1.5; margin:0; }
+    #enterBtn {
+      appearance:none; border:1px solid #6cf0c2; border-radius:999px;
+      background:#6cf0c2; color:#04130d; font:inherit; font-weight:600;
+      padding:.75rem 2rem; cursor:pointer;
+    }
+    .hint { font-size:.75rem; opacity:.45; }
+  </style>
+</head>
+<body>
+<a-scene
+  background="color: #07090d"
+  renderer="antialias:true; colorManagement:true"
+  vr-mode-ui="enabled:true"
+  system-recenter>
+
+  <!-- Deep space background -->
+  <a-sky color="#07090d"></a-sky>
+
+  <!-- Lights so non-flat materials don't go black -->
+  <a-light type="ambient" color="#1a2a45" intensity="1.5"></a-light>
+  <a-light type="directional" color="#6cf0c2" intensity="0.4" position="0 4 -4"></a-light>
+
+  <!-- Camera rig. The headset drives the camera pose in WebXR; the rig is what we
+       move/rotate when recentering so content lands in front of the user. -->
+  <a-entity id="rig" position="0 0 0" recenter>
+    <a-entity id="head" camera look-controls wasd-controls position="0 1.6 0">
+      <!-- Mouse cursor so stations are clickable in flat/desktop mode too -->
+      <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 30"></a-entity>
+    </a-entity>
+
+    <!-- Quest Touch controllers with laser pointers. laser-controls auto-detects the
+         controller model. Trigger = click. Recenter is the headset's own gesture
+         (long-press the Meta button), handled by the system-recenter component. -->
+    <a-entity id="leftHand"  laser-controls="hand: left" force-laser
+              raycaster="objects: .clickable; far: 30; showLine: true; lineColor: #6cf0c2; lineOpacity: 0.9"></a-entity>
+    <a-entity id="rightHand" laser-controls="hand: right" force-laser
+              raycaster="objects: .clickable; far: 30; showLine: true; lineColor: #6cf0c2; lineOpacity: 0.9"></a-entity>
+  </a-entity>
+
+  <!-- Everything the user looks at lives in #world. Recentering moves this whole
+       container so the front station snaps in front of the user's current facing. -->
+  <a-entity id="world">
+
+  <!-- ══════════════════════════════════════════
+       STATION 1 — Performer Library  (front)
+  ══════════════════════════════════════════ -->
+  <a-entity position="0 1.6 -4" rotation="0 0 0" class="station clickable">
+    <!-- Panel backing -->
+    <a-plane width="2.6" height="1.8" color="#0d1526" opacity="0.92"
+             material="shader:flat"
+             animation__hover="property:position; to:0 0.05 0; dir:alternate; dur:3000; easing:easeInOutSine; loop:true">
+    </a-plane>
+    <!-- Header bar -->
+    <a-plane width="2.6" height="0.25" position="0 0.775 0.001" color="#6cf0c2" opacity="1" material="shader:flat"></a-plane>
+    <a-text value="PERFORMER LIBRARY" align="center" position="0 0.775 0.003"
+            color="#04130d" width="2.4" font="roboto" wrap-count="28"></a-text>
+
+    <!-- Performer cards row 1 -->
+    <a-entity position="-0.9 0.32 0.002">
+      <a-plane width="0.55" height="0.6" color="#131d30" material="shader:flat"></a-plane>
+      <a-plane width="0.55" height="0.35" position="0 0.04 0.001" color="#1a2a45" material="shader:flat"></a-plane>
+      <a-text value="Performer A" align="center" position="0 -0.22 0.002" color="#9bb8d4" width="0.9" wrap-count="12" font="roboto"></a-text>
+      <a-text value="142 files" align="center" position="0 -0.33 0.002" color="#6cf0c2" width="0.8" wrap-count="12" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="-0.3 0.32 0.002">
+      <a-plane width="0.55" height="0.6" color="#131d30" material="shader:flat"></a-plane>
+      <a-plane width="0.55" height="0.35" position="0 0.04 0.001" color="#1a2a45" material="shader:flat"></a-plane>
+      <a-text value="Performer B" align="center" position="0 -0.22 0.002" color="#9bb8d4" width="0.9" wrap-count="12" font="roboto"></a-text>
+      <a-text value="89 files" align="center" position="0 -0.33 0.002" color="#6cf0c2" width="0.8" wrap-count="12" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0.3 0.32 0.002">
+      <a-plane width="0.55" height="0.6" color="#131d30" material="shader:flat"></a-plane>
+      <a-plane width="0.55" height="0.35" position="0 0.04 0.001" color="#1a2a45" material="shader:flat"></a-plane>
+      <a-text value="Performer C" align="center" position="0 -0.22 0.002" color="#9bb8d4" width="0.9" wrap-count="12" font="roboto"></a-text>
+      <a-text value="217 files" align="center" position="0 -0.33 0.002" color="#6cf0c2" width="0.8" wrap-count="12" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0.9 0.32 0.002">
+      <a-plane width="0.55" height="0.6" color="#131d30" material="shader:flat"></a-plane>
+      <a-plane width="0.55" height="0.35" position="0 0.04 0.001" color="#1a2a45" material="shader:flat"></a-plane>
+      <a-text value="Performer D" align="center" position="0 -0.22 0.002" color="#9bb8d4" width="0.9" wrap-count="12" font="roboto"></a-text>
+      <a-text value="64 files" align="center" position="0 -0.33 0.002" color="#6cf0c2" width="0.8" wrap-count="12" font="roboto"></a-text>
+    </a-entity>
+
+    <!-- Stats bar -->
+    <a-text value="24 performers  •  2,841 files  •  847 GB" align="center"
+            position="0 -0.58 0.002" color="#5a7a96" width="2.2" wrap-count="40" font="roboto"></a-text>
+
+    <!-- Border glow -->
+    <a-plane width="2.64" height="1.84" color="#6cf0c2" opacity="0.12" material="shader:flat" position="0 0 -0.001"></a-plane>
+  </a-entity>
+
+
+  <!-- ══════════════════════════════════════════
+       STATION 2 — Content Gallery  (front-left)
+  ══════════════════════════════════════════ -->
+  <a-entity position="-3.2 1.6 -2.4" rotation="0 38 0" class="station clickable">
+    <a-plane width="2.6" height="1.8" color="#0d1526" opacity="0.92" material="shader:flat"
+             animation__hover="property:position; to:0 0.05 0; dir:alternate; dur:3800; easing:easeInOutSine; loop:true">
+    </a-plane>
+    <a-plane width="2.6" height="0.25" position="0 0.775 0.001" color="#b06cf0" opacity="1" material="shader:flat"></a-plane>
+    <a-text value="CONTENT GALLERY" align="center" position="0 0.775 0.003"
+            color="#ffffff" width="2.4" font="roboto" wrap-count="28"></a-text>
+
+    <!-- Thumbnail grid 3×2 -->
+    <a-entity position="-0.85 0.18 0.002">
+      <a-plane width="0.75" height="0.48" color="#1c1030" material="shader:flat"></a-plane>
+      <a-text value="12:34" align="center" position="0 -0.12 0.001" color="#b06cf0" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0 0.18 0.002">
+      <a-plane width="0.75" height="0.48" color="#1c1030" material="shader:flat"></a-plane>
+      <a-text value="08:22" align="center" position="0 -0.12 0.001" color="#b06cf0" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0.85 0.18 0.002">
+      <a-plane width="0.75" height="0.48" color="#1c1030" material="shader:flat"></a-plane>
+      <a-text value="24:01" align="center" position="0 -0.12 0.001" color="#b06cf0" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="-0.85 -0.42 0.002">
+      <a-plane width="0.75" height="0.48" color="#1c1030" material="shader:flat"></a-plane>
+      <a-text value="PHOTO" align="center" position="0 -0.12 0.001" color="#b06cf0" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0 -0.42 0.002">
+      <a-plane width="0.75" height="0.48" color="#1c1030" material="shader:flat"></a-plane>
+      <a-text value="06:44" align="center" position="0 -0.12 0.001" color="#b06cf0" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0.85 -0.42 0.002">
+      <a-plane width="0.75" height="0.48" color="#1c1030" material="shader:flat"></a-plane>
+      <a-text value="PHOTO" align="center" position="0 -0.12 0.001" color="#b06cf0" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+
+    <a-plane width="2.64" height="1.84" color="#b06cf0" opacity="0.1" material="shader:flat" position="0 0 -0.001"></a-plane>
+  </a-entity>
+
+
+  <!-- ══════════════════════════════════════════
+       STATION 3 — ML Tagging  (front-right)
+  ══════════════════════════════════════════ -->
+  <a-entity position="3.2 1.6 -2.4" rotation="0 -38 0" class="station clickable">
+    <a-plane width="2.6" height="1.8" color="#0d1526" opacity="0.92" material="shader:flat"
+             animation__hover="property:position; to:0 0.05 0; dir:alternate; dur:4200; easing:easeInOutSine; loop:true">
+    </a-plane>
+    <a-plane width="2.6" height="0.25" position="0 0.775 0.001" color="#f0a86c" opacity="1" material="shader:flat"></a-plane>
+    <a-text value="ML TAGGING" align="center" position="0 0.775 0.003"
+            color="#04130d" width="2.4" font="roboto" wrap-count="28"></a-text>
+
+    <!-- Tag chips -->
+    <a-entity position="-0.9 0.38 0.002">
+      <a-plane width="0.5" height="0.15" color="#1f2b10" material="shader:flat" opacity="0.9"></a-plane>
+      <a-text value="brunette" align="center" position="0 0 0.001" color="#a8e063" width="0.8" wrap-count="12" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="-0.3 0.38 0.002">
+      <a-plane width="0.4" height="0.15" color="#1f2b10" material="shader:flat" opacity="0.9"></a-plane>
+      <a-text value="outdoor" align="center" position="0 0 0.001" color="#a8e063" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0.3 0.38 0.002">
+      <a-plane width="0.5" height="0.15" color="#1f2b10" material="shader:flat" opacity="0.9"></a-plane>
+      <a-text value="solo" align="center" position="0 0 0.001" color="#a8e063" width="0.6" wrap-count="8" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0.85 0.38 0.002">
+      <a-plane width="0.5" height="0.15" color="#1f2b10" material="shader:flat" opacity="0.9"></a-plane>
+      <a-text value="studio" align="center" position="0 0 0.001" color="#a8e063" width="0.7" wrap-count="10" font="roboto"></a-text>
+    </a-entity>
+
+    <!-- Confidence bars -->
+    <a-text value="Tag confidence" align="left" position="-1.1 0.16 0.002" color="#9bb8d4" width="1.5" wrap-count="20" font="roboto"></a-text>
+    <a-entity position="0 0.02 0.002">
+      <a-plane width="2.2" height="0.08" color="#0d1a2e" material="shader:flat"></a-plane>
+      <a-plane width="1.87" height="0.08" position="-0.165 0 0.001" color="#a8e063" material="shader:flat" opacity="0.8"></a-plane>
+      <a-text value="brunette  85%" align="right" position="1.08 0 0.002" color="#9bb8d4" width="1.2" wrap-count="14" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0 -0.12 0.002">
+      <a-plane width="2.2" height="0.08" color="#0d1a2e" material="shader:flat"></a-plane>
+      <a-plane width="1.54" height="0.08" position="-0.33 0 0.001" color="#a8e063" material="shader:flat" opacity="0.8"></a-plane>
+      <a-text value="outdoor  70%" align="right" position="1.08 0 0.002" color="#9bb8d4" width="1.2" wrap-count="14" font="roboto"></a-text>
+    </a-entity>
+    <a-entity position="0 -0.26 0.002">
+      <a-plane width="2.2" height="0.08" color="#0d1a2e" material="shader:flat"></a-plane>
+      <a-plane width="1.1" height="0.08" position="-0.55 0 0.001" color="#f0a86c" material="shader:flat" opacity="0.8"></a-plane>
+      <a-text value="couple  50%" align="right" position="1.08 0 0.002" color="#9bb8d4" width="1.2" wrap-count="14" font="roboto"></a-text>
+    </a-entity>
+
+    <a-text value="Model: CLIP v2  •  Trained on 4,201 samples" align="center"
+            position="0 -0.58 0.002" color="#5a7a96" width="2.2" wrap-count="40" font="roboto"></a-text>
+
+    <a-plane width="2.64" height="1.84" color="#f0a86c" opacity="0.1" material="shader:flat" position="0 0 -0.001"></a-plane>
+  </a-entity>
+
+
+  <!-- ══════════════════════════════════════════
+       STATION 4 — Device / Funscript  (back-left)
+  ══════════════════════════════════════════ -->
+  <a-entity position="-2.4 1.6 2.8" rotation="0 140 0" class="station clickable">
+    <a-plane width="2.6" height="1.8" color="#0d1526" opacity="0.92" material="shader:flat"
+             animation__hover="property:position; to:0 0.05 0; dir:alternate; dur:3500; easing:easeInOutSine; loop:true">
+    </a-plane>
+    <a-plane width="2.6" height="0.25" position="0 0.775 0.001" color="#f06c8a" opacity="1" material="shader:flat"></a-plane>
+    <a-text value="DEVICE / FUNSCRIPT" align="center" position="0 0.775 0.003"
+            color="#ffffff" width="2.4" font="roboto" wrap-count="28"></a-text>
+
+    <!-- Waveform bars -->
+    <a-text value="Funscript Timeline" align="left" position="-1.1 0.42 0.002" color="#9bb8d4" width="1.5" wrap-count="20" font="roboto"></a-text>
+    <a-entity position="0 0.16 0.002" id="waveform">
+      <!-- 20 bars simulating a funscript waveform -->
+      <a-plane width="0.08" height="0.42" position="-1.04 0 0" color="#f06c8a" material="shader:flat" opacity="0.9"></a-plane>
+      <a-plane width="0.08" height="0.18" position="-0.93 0 0" color="#f06c8a" material="shader:flat" opacity="0.8"></a-plane>
+      <a-plane width="0.08" height="0.68" position="-0.82 0 0" color="#f06c8a" material="shader:flat" opacity="0.9"></a-plane>
+      <a-plane width="0.08" height="0.30" position="-0.71 0 0" color="#f06c8a" material="shader:flat" opacity="0.7"></a-plane>
+      <a-plane width="0.08" height="0.55" position="-0.60 0 0" color="#f06c8a" material="shader:flat" opacity="0.9"></a-plane>
+      <a-plane width="0.08" height="0.75" position="-0.49 0 0" color="#f06c8a" material="shader:flat" opacity="1"></a-plane>
+      <a-plane width="0.08" height="0.22" position="-0.38 0 0" color="#f06c8a" material="shader:flat" opacity="0.7"></a-plane>
+      <a-plane width="0.08" height="0.48" position="-0.27 0 0" color="#f06c8a" material="shader:flat" opacity="0.8"></a-plane>
+      <a-plane width="0.08" height="0.62" position="-0.16 0 0" color="#f06c8a" material="shader:flat" opacity="0.9"></a-plane>
+      <a-plane width="0.08" height="0.35" position="-0.05 0 0" color="#f06c8a" material="shader:flat" opacity="0.75"></a-plane>
+      <a-plane width="0.08" height="0.52" position="0.06 0 0"  color="#f06c8a" material="shader:flat" opacity="0.85"></a-plane>
+      <a-plane width="0.08" height="0.70" position="0.17 0 0"  color="#f06c8a" material="shader:flat" opacity="1"></a-plane>
+      <a-plane width="0.08" height="0.28" position="0.28 0 0"  color="#f06c8a" material="shader:flat" opacity="0.7"></a-plane>
+      <a-plane width="0.08" height="0.45" position="0.39 0 0"  color="#f06c8a" material="shader:flat" opacity="0.8"></a-plane>
+      <a-plane width="0.08" height="0.60" position="0.50 0 0"  color="#f06c8a" material="shader:flat" opacity="0.9"></a-plane>
+      <a-plane width="0.08" height="0.38" position="0.61 0 0"  color="#f06c8a" material="shader:flat" opacity="0.75"></a-plane>
+      <a-plane width="0.08" height="0.65" position="0.72 0 0"  color="#f06c8a" material="shader:flat" opacity="0.9"></a-plane>
+      <a-plane width="0.08" height="0.20" position="0.83 0 0"  color="#f06c8a" material="shader:flat" opacity="0.65"></a-plane>
+      <a-plane width="0.08" height="0.50" position="0.94 0 0"  color="#f06c8a" material="shader:flat" opacity="0.85"></a-plane>
+      <a-plane width="0.08" height="0.40" position="1.05 0 0"  color="#f06c8a" material="shader:flat" opacity="0.78"></a-plane>
+    </a-entity>
+
+    <!-- Device status -->
+    <a-text value="The Handy" align="left" position="-1.1 -0.36 0.002" color="#e8e6df" width="1.4" wrap-count="18" font="roboto"></a-text>
+    <a-plane width="0.65" height="0.18" position="0.6 -0.36 0.002" color="#0d2b12" material="shader:flat"></a-plane>
+    <a-text value="CONNECTED" align="center" position="0.6 -0.36 0.003" color="#6cf0c2" width="1.0" wrap-count="14" font="roboto"></a-text>
+
+    <a-text value="42 scripts synced  •  3 queued" align="center"
+            position="0 -0.58 0.002" color="#5a7a96" width="2.2" wrap-count="40" font="roboto"></a-text>
+
+    <a-plane width="2.64" height="1.84" color="#f06c8a" opacity="0.1" material="shader:flat" position="0 0 -0.001"></a-plane>
+  </a-entity>
+
+
+  <!-- ══════════════════════════════════════════
+       STATION 5 — Dedup / Hash  (back-right)
+  ══════════════════════════════════════════ -->
+  <a-entity position="2.4 1.6 2.8" rotation="0 -140 0" class="station clickable">
+    <a-plane width="2.6" height="1.8" color="#0d1526" opacity="0.92" material="shader:flat"
+             animation__hover="property:position; to:0 0.05 0; dir:alternate; dur:4600; easing:easeInOutSine; loop:true">
+    </a-plane>
+    <a-plane width="2.6" height="0.25" position="0 0.775 0.001" color="#6caaf0" opacity="1" material="shader:flat"></a-plane>
+    <a-text value="DEDUPLICATION" align="center" position="0 0.775 0.003"
+            color="#04130d" width="2.4" font="roboto" wrap-count="28"></a-text>
+
+    <!-- Donut-style stat -->
+    <a-ring radius-inner="0.28" radius-outer="0.38" color="#6caaf0" theta-length="260"
+            position="-0.55 0.1 0.002" rotation="0 0 90" material="shader:flat" opacity="0.9"></a-ring>
+    <a-ring radius-inner="0.28" radius-outer="0.38" color="#1a2a45" theta-length="100"
+            position="-0.55 0.1 0.002" rotation="0 0 -170" material="shader:flat" opacity="0.5"></a-ring>
+    <a-text value="72%" align="center" position="-0.55 0.08 0.003" color="#e8e6df" width="0.7" wrap-count="6" font="roboto"></a-text>
+    <a-text value="unique" align="center" position="-0.55 -0.08 0.003" color="#5a7a96" width="0.6" wrap-count="8" font="roboto"></a-text>
+
+    <!-- Stats list -->
+    <a-text value="Total files scanned" align="left" position="0.1 0.38 0.002" color="#9bb8d4" width="1.5" wrap-count="20" font="roboto"></a-text>
+    <a-text value="2,841" align="right" position="1.1 0.38 0.002" color="#e8e6df" width="0.8" wrap-count="10" font="roboto"></a-text>
+    <a-text value="Exact duplicates" align="left" position="0.1 0.22 0.002" color="#9bb8d4" width="1.5" wrap-count="20" font="roboto"></a-text>
+    <a-text value="384" align="right" position="1.1 0.22 0.002" color="#f06c8a" width="0.8" wrap-count="8" font="roboto"></a-text>
+    <a-text value="Near-duplicates" align="left" position="0.1 0.06 0.002" color="#9bb8d4" width="1.5" wrap-count="20" font="roboto"></a-text>
+    <a-text value="211" align="right" position="1.1 0.06 0.002" color="#f0a86c" width="0.8" wrap-count="8" font="roboto"></a-text>
+    <a-text value="Space recoverable" align="left" position="0.1 -0.1 0.002" color="#9bb8d4" width="1.5" wrap-count="20" font="roboto"></a-text>
+    <a-text value="47 GB" align="right" position="1.1 -0.1 0.002" color="#6cf0c2" width="0.8" wrap-count="8" font="roboto"></a-text>
+
+    <a-text value="CLIP embeddings  •  pHash  •  face match" align="center"
+            position="0 -0.58 0.002" color="#5a7a96" width="2.2" wrap-count="40" font="roboto"></a-text>
+
+    <a-plane width="2.64" height="1.84" color="#6caaf0" opacity="0.1" material="shader:flat" position="0 0 -0.001"></a-plane>
+  </a-entity>
+
+
+  <!-- ══════════════════════════════════════════
+       CENTER — Overhead title / stats
+  ══════════════════════════════════════════ -->
+  <a-entity position="0 3.8 0" rotation="-25 0 0">
+    <a-plane width="3.2" height="0.7" color="#07090d" opacity="0.8" material="shader:flat"></a-plane>
+    <a-text value="Adult Content Manager" align="center" position="0 0.1 0.001"
+            color="#6cf0c2" width="3.0" font="roboto" wrap-count="30"></a-text>
+    <a-text value="VR Interface Prototype" align="center" position="0 -0.15 0.001"
+            color="#5a7a96" width="2.6" font="roboto" wrap-count="32"></a-text>
+  </a-entity>
+
+  </a-entity><!-- /#world -->
+
+</a-scene>
+
+<div id="overlay">
+  <h1>ACM — VR Demo</h1>
+  <p>A proof-of-concept VR interface for Adult Content Manager. Look around to explore the five feature stations.</p>
+  <button id="enterBtn">Enter VR</button>
+  <button id="flatBtn" style="appearance:none;border:1px solid #5a7a96;border-radius:999px;background:transparent;color:#9bb8d4;font:inherit;padding:.55rem 1.6rem;cursor:pointer;">Explore flat (desktop)</button>
+  <span class="hint" id="hint">Quest 3 browser · any WebXR headset · or explore flat on desktop</span>
+</div>
+
+<script>
+  const scene   = document.querySelector('a-scene');
+  const overlay = document.getElementById('overlay');
+  const enterBtn = document.getElementById('enterBtn');
+  const flatBtn  = document.getElementById('flatBtn');
+  const hint     = document.getElementById('hint');
+
+  // Detect immersive-vr support up front so we never blank the screen on an
+  // unsupported browser (calling enterVR() there leaves a white canvas).
+  let vrSupported = false;
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    navigator.xr.isSessionSupported('immersive-vr')
+      .then(ok => {
+        vrSupported = ok;
+        if (!ok) {
+          enterBtn.textContent = 'No VR headset detected';
+          enterBtn.style.opacity = '0.5';
+          hint.textContent = 'Open this page in a WebXR headset browser (e.g. Quest 3) to enter VR.';
+        }
+      })
+      .catch(() => {});
+  } else {
+    enterBtn.textContent = 'WebXR unavailable';
+    enterBtn.style.opacity = '0.5';
+    hint.textContent = 'This browser has no WebXR. Use a headset browser, or explore flat below.';
+  }
+
+  enterBtn.addEventListener('click', async () => {
+    if (!vrSupported) { startFlat(); return; }   // fall back instead of going white
+    try {
+      await scene.enterVR();
+    } catch (e) {
+      hint.textContent = 'Could not start VR: ' + (e && e.message ? e.message : e);
+      startFlat();
+    }
+  });
+
+  // Flat mode: just hide the overlay; the scene is already rendering behind it.
+  function startFlat() { overlay.style.display = 'none'; }
+  flatBtn.addEventListener('click', startFlat);
+
+  scene.addEventListener('enter-vr', () => { overlay.style.display = 'none'; });
+  scene.addEventListener('exit-vr',  () => { overlay.style.display = 'flex'; });
+
+  // ---- Interactions: wire up once the scene's entities exist ----
+  scene.addEventListener('loaded', () => {
+    // Each station gives a quick scale "pop" when clicked, so buttons feel responsive.
+    document.querySelectorAll('.station').forEach(st => {
+      st.addEventListener('click', () => {
+        const o = st.object3D;
+        o.scale.set(1.04, 1.04, 1.04);
+        setTimeout(() => o.scale.set(1, 1, 1), 140);
+      });
+    });
+
+    // Keyboard shortcut for desktop testing: press R to recenter.
+    window.addEventListener('keydown', e => {
+      if (e.key === 'r' || e.key === 'R') { if (window.__recenter) window.__recenter(); }
+    });
+  });
+</script>
+</body>
+</html>

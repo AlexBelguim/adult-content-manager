@@ -84,3 +84,8 @@ AI-Inference-App/training_data/
 AI-Inference-App/localscene/test/
 AI-Inference-App/localscene/debug/
 *.mp4
+
+# TLS certs/keys — self-signed per machine, regenerated on first run
+# (a committed cert's SAN would only match one machine's IP anyway)
+vr-reference/*.pem
+data/

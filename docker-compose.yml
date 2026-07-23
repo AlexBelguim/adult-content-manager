@@ -10,9 +10,10 @@
 #   - /mnt/media → your media library on TrueNAS (adjust the host path)
 #
 # VR (WebXR) REQUIRES HTTPS — the Quest browser won't enter immersive VR over plain HTTP.
-# To enable it, set ENABLE_HTTPS=1 below. The server self-signs a TLS cert on first run
-# (covering localhost + all LAN IPs); open https://<NAS-IP>:4069 on the headset and accept
-# the cert warning once. You can supply your own cert/key via TLS_CERT / TLS_KEY.
+# To enable it, set ENABLE_HTTPS=1 below. The container serves the repo's self-signed cert
+# (./data/tls-cert.pem, mounted read-only at /app/tls) which covers localhost + the host LAN IP.
+# Open https://<host-IP>:4069 on the headset and accept the cert warning once. If the container
+# runs on a different machine (e.g. a NAS), regenerate the cert with that machine's IP in the SAN.
 #
 # =============================================================================
 
@@ -33,6 +34,11 @@ services:
       - DATA_PATH=/app/data
       # Set to 1 to serve over HTTPS (REQUIRED for VR/WebXR on a headset). See header note.
       - ENABLE_HTTPS=1
+      # Use the repo's self-signed cert (data/tls-*.pem) instead of generating one in-container.
+      # A container-generated cert would only see container-internal IPs, so it wouldn't match
+      # the host/NAS IP the headset actually connects to.
+      - TLS_CERT=/app/tls/tls-cert.pem
+      - TLS_KEY=/app/tls/tls-key.pem
     volumes:
       # Persistent data (database, settings)
       - ../data:/app/data
@@ -40,8 +46,12 @@ services:
       # Media library (one level up from the cloned repo)
       - ../media:/media
 
+      # TLS cert (read-only). SAN covers localhost + this host's LAN IP; regenerate with
+      # the NAS IP included if the container runs on a different machine.
+      - ./data:/app/tls:ro
+
     healthcheck:
-      test: ["CMD", "node", "-e", "const http=require('http');const r=http.get('http://localhost:4069/health',res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "const https=require('https');const r=https.get('https://localhost:4069/health',{rejectUnauthorized:false},res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       start_period: 15s
