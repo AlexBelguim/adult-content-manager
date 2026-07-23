@@ -67,8 +67,8 @@ ENV NODE_ENV=production \
 
 EXPOSE 4069
 
-# Health check — hit the /health endpoint every 30s
+# Health check — hit /health every 30s, matching the ENABLE_HTTPS scheme
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD node -e "const http=require('http');const r=http.get('http://localhost:4069/health',res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"
+    CMD node -e "const tls=['1','true'].includes(process.env.ENABLE_HTTPS);const m=tls?require('https'):require('http');const r=m.get((tls?'https':'http')+'://localhost:4069/health',tls?{rejectUnauthorized:false}:{},res=>process.exit(res.statusCode===200?0:1));r.on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["/app/backend/start.sh"]
