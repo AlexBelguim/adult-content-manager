@@ -30,25 +30,6 @@ class FunscriptPlayer extends HTMLElement {
       baseSeekStep: 5, // Start with 5 seconds
       maxSeekStep: 120 // Max 2 minutes
     };
-
-    // Autoplay generation counter - incremented on each src change to cancel stale autoplay attempts
-    this._autoplayGeneration = 0;
-  }
-
-  /**
-   * Stop and release any existing video element before DOM replacement.
-   * This prevents ghost audio from lingering after innerHTML replaces the video element.
-   */
-  stopExistingVideo() {
-    const video = this.shadowRoot?.querySelector('video');
-    if (video) {
-      video.pause();
-      video.removeAttribute('src');
-      // Remove all <source> children so the browser fully releases the stream
-      video.querySelectorAll('source').forEach(s => s.remove());
-      video.srcObject = null;
-      video.load(); // Force release of media resources
-    }
   }
 
   static get observedAttributes() {
@@ -72,7 +53,42 @@ class FunscriptPlayer extends HTMLElement {
     }
 
     // Handle autoplay and autofullscreen for video elements
-    this._attemptAutoplay();
+    if (this.getAttribute('type') !== 'image') {
+      const shouldAutoplay = this.getAttribute('autoplay') === 'true';
+      const shouldAutofullscreen = this.getAttribute('autofullscreen') === 'true';
+
+      if (shouldAutoplay || shouldAutofullscreen) {
+        // Wait for video element to exist, then wait for it to be ready
+        const waitForVideo = () => {
+          const video = this.shadowRoot.querySelector('video');
+          if (!video) {
+            setTimeout(waitForVideo, 50);
+            return;
+          }
+          
+          const doAutoplay = () => {
+            if (shouldAutoplay) {
+              console.log('🎬 Auto-playing video');
+              video.muted = true; // Mute initially to allow autoplay
+              video.play().then(() => {
+                video.muted = false; // Unmute after play starts
+              }).catch(err => console.log('Autoplay blocked:', err));
+            }
+            if (shouldAutofullscreen) {
+              console.log('🎬 Auto-entering fullscreen');
+              this.enterFullscreen();
+            }
+          };
+          
+          if (video.readyState >= 1) {
+            doAutoplay();
+          } else {
+            video.addEventListener('loadedmetadata', doAutoplay, { once: true });
+          }
+        };
+        waitForVideo();
+      }
+    }
 
     // Listen for scene updates
     this.sceneUpdateHandler = () => {
@@ -84,69 +100,7 @@ class FunscriptPlayer extends HTMLElement {
     window.addEventListener('scenesUpdated', this.sceneUpdateHandler);
   }
 
-  /**
-   * Attempt autoplay/autofullscreen for the current video.
-   * Uses a generation counter so that if src changes before the video is ready,
-   * the stale autoplay attempt is silently cancelled.
-   */
-  _attemptAutoplay() {
-    if (this.getAttribute('type') === 'image') return;
-
-    const shouldAutoplay = this.getAttribute('autoplay') === 'true';
-    const shouldAutofullscreen = this.getAttribute('autofullscreen') === 'true';
-    if (!shouldAutoplay && !shouldAutofullscreen) return;
-
-    // Capture the current generation so stale attempts are cancelled
-    const myGeneration = this._autoplayGeneration;
-
-    const waitForVideo = () => {
-      // If generation changed, this autoplay attempt is stale - abort
-      if (this._autoplayGeneration !== myGeneration) return;
-
-      const video = this.shadowRoot.querySelector('video');
-      if (!video) {
-        setTimeout(waitForVideo, 50);
-        return;
-      }
-
-      const doAutoplay = () => {
-        // Check generation again in case src changed while waiting for metadata
-        if (this._autoplayGeneration !== myGeneration) return;
-
-        if (shouldAutoplay) {
-          console.log('🎬 Auto-playing video (generation', myGeneration, ')');
-          video.muted = true; // Mute initially to allow autoplay
-          video.play().then(() => {
-            // Only unmute if this is still the current generation
-            if (this._autoplayGeneration === myGeneration) {
-              video.muted = false;
-            }
-          }).catch(err => console.log('Autoplay blocked:', err));
-        }
-        if (shouldAutofullscreen) {
-          console.log('🎬 Auto-entering fullscreen');
-          this.enterFullscreen();
-        }
-      };
-
-      if (video.readyState >= 1) {
-        doAutoplay();
-      } else {
-        video.addEventListener('loadedmetadata', doAutoplay, { once: true });
-      }
-    };
-    waitForVideo();
-  }
-
   disconnectedCallback() {
-    // Mark disconnected immediately to prevent stale renders
-    this._isConnected = false;
-
-    // Stop any playing video to prevent ghost audio
-    this.stopExistingVideo();
-    // Cancel any pending autoplay
-    this._autoplayGeneration++;
-
     if (this.sceneUpdateHandler) {
       window.removeEventListener('scenesUpdated', this.sceneUpdateHandler);
     }
@@ -167,9 +121,6 @@ class FunscriptPlayer extends HTMLElement {
     }
 
     if (name === 'src') {
-      // Cancel any pending autoplay from previous source
-      this._autoplayGeneration++;
-
       // Clear cached funscripts and thumbnail so we don't use stale data after reordering
       this.state.availableFunscripts = [];
       this.state.videoRating = null;
@@ -203,11 +154,6 @@ class FunscriptPlayer extends HTMLElement {
     // Only re-render after connected, to avoid multiple renders during initial attribute setup
     if (this._isConnected && this.shadowRoot) {
       this.render();
-
-      // Re-trigger autoplay when src changes (new video loaded)
-      if (name === 'src') {
-        this._attemptAutoplay();
-      }
     }
   }
 
@@ -334,7 +280,7 @@ class FunscriptPlayer extends HTMLElement {
   renderTagAssignButton() {
     if (this.getAttribute('tagassign') !== 'true') return '';
     return `
-      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: var(--primary-main, #7e57c2); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: #1976d2; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
         🏷️
       </button>
     `;
@@ -1023,15 +969,11 @@ class FunscriptPlayer extends HTMLElement {
 
   enterFullscreen() {
     console.log('🎥 enterFullscreen() called');
-    if (this.classList.contains('fullscreen')) {
-      console.log('🎥 Already in fullscreen mode, skipping');
-      return;
-    }
 
     // Try native browser fullscreen first (gives true fullscreen experience)
-    // ALWAYS use 'this' (the host element) so that when we replace inner HTML on file change, we don't exit fullscreen
-    const elementToFullscreen = this;
     const video = this.shadowRoot.querySelector('video');
+    const mediaContainer = this.shadowRoot.querySelector('.media-container');
+    const elementToFullscreen = video || mediaContainer || this;
 
     if (elementToFullscreen.requestFullscreen) {
       elementToFullscreen.requestFullscreen()
@@ -1476,7 +1418,7 @@ class FunscriptPlayer extends HTMLElement {
         height: 100vh;
         max-width: 100vw;
         max-height: 100vh;
-        object-fit: contain;
+        object-fit: fill;
         margin: 0;
         padding: 0;
         border: none;
@@ -3364,7 +3306,7 @@ class FunscriptPlayer extends HTMLElement {
 
     return `
       <div class="media-container ${view}">
-        <video data-last-src="${src}" poster="${videoThumbnailUrl}" preload="metadata" ${this.getAttribute('mode') !== 'modal' ? 'controls' : ''} style="object-fit: contain; width: 100%; height: 100%;">
+        <video poster="${videoThumbnailUrl}" preload="metadata" ${this.getAttribute('mode') !== 'modal' ? 'controls' : ''} style="object-fit: contain; width: 100%; height: 100%;">
           <source src="${src}" type="video/mp4">
           Your browser does not support the video tag.
         </video>
@@ -3607,71 +3549,6 @@ class FunscriptPlayer extends HTMLElement {
   }
 
   render() {
-    const src = this.getAttribute('src');
-    const type = this.getAttribute('type') || 'video';
-    const mode = this.getAttribute('mode') || 'standalone';
-
-    // Fast-path DOM update to prevent destroying the video element
-    // Destroying the video element forces the browser to exit native fullscreen and breaks autoplay gesture trust.
-    if (this._isConnected && this.shadowRoot && this.shadowRoot.querySelector('.media-container')) {
-      const video = this.shadowRoot.querySelector('video');
-      if (video && type === 'video' && mode === 'standalone') {
-        const needsSrcUpdate = video.getAttribute('data-last-src') !== src;
-
-        if (needsSrcUpdate) {
-          video.pause(); // Stop old playback
-
-          let filePath = src;
-          if (src && src.includes('/api/files/raw?path=')) {
-            const urlParams = new URLSearchParams(src.split('?')[1]);
-            filePath = urlParams.get('path');
-          }
-
-          if (!this._cachedThumbnailUrl || this._lastSrc !== src) {
-            this._cachedThumbnailUrl = `/api/files/video-thumbnail?path=${encodeURIComponent(filePath)}`;
-            this._lastSrc = src;
-          }
-
-          video.poster = this._cachedThumbnailUrl;
-          
-          const sourceElement = video.querySelector('source');
-          if (sourceElement) {
-            sourceElement.src = src;
-          } else {
-            video.src = src;
-          }
-          
-          video.setAttribute('data-last-src', src);
-          video.load();
-        }
-
-        // Update auxiliary buttons without destroying the rest of the UI
-        const updateButton = (selector, renderFunc) => {
-          const oldBtn = this.shadowRoot.querySelector(selector);
-          const temp = document.createElement('div');
-          temp.innerHTML = renderFunc.call(this);
-          const newBtn = temp.firstElementChild;
-          
-          if (oldBtn && newBtn) {
-            oldBtn.replaceWith(newBtn);
-          } else if (oldBtn && !newBtn) {
-            oldBtn.remove();
-          } else if (!oldBtn && newBtn) {
-            this.shadowRoot.querySelector('.media-container').appendChild(newBtn);
-          }
-        };
-
-        updateButton('.funscript-btn', this.renderFunscriptButton);
-        updateButton('.tagassign-btn', this.renderTagAssignButton);
-        updateButton('.scenemanager-btn', this.renderSceneManagerButton);
-
-        return; // Skip full render!
-      }
-    }
-
-    // Stop any existing video before replacing the DOM to prevent ghost audio
-    this.stopExistingVideo();
-
     this.shadowRoot.innerHTML = `
       <style>
         :host {
@@ -3914,19 +3791,15 @@ class FunscriptPlayer extends HTMLElement {
           background: rgba(255,255,255,0.9);
           border: none;
           border-radius: 50%;
-          width: 48px;
-          height: 48px;
-          min-width: 48px;
-          min-height: 48px;
+          width: 40px;
+          height: 40px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 20px;
+          font-size: 16px;
           transition: all 0.2s ease;
           flex-shrink: 0;
-          -webkit-tap-highlight-color: transparent;
-          touch-action: manipulation;
         }
 
         .play-pause-btn:hover,
@@ -3939,12 +3812,10 @@ class FunscriptPlayer extends HTMLElement {
         .progress-container {
           flex: 1;
           position: relative;
-          height: 32px;
+          height: 20px;
           display: flex;
           align-items: center;
           margin: 0 10px;
-          cursor: pointer;
-          touch-action: manipulation;
         }
 
         .progress-bar {
@@ -4046,7 +3917,7 @@ class FunscriptPlayer extends HTMLElement {
           max-height: none !important;
           min-width: 100vw !important;
           min-height: 100vh !important;
-          object-fit: contain !important;
+          object-fit: fill !important;
           position: fixed !important;
           top: 0 !important;
           left: 0 !important;
@@ -4056,7 +3927,6 @@ class FunscriptPlayer extends HTMLElement {
           transform: none !important;
           z-index: 999998 !important;
           box-sizing: border-box !important;
-          background: #000 !important;
         }
 
         :host(.fullscreen) .media-container img {
@@ -4066,7 +3936,7 @@ class FunscriptPlayer extends HTMLElement {
           max-height: none !important;
           min-width: 100vw !important;
           min-height: 100vh !important;
-          object-fit: contain !important;
+          object-fit: fill !important;
           position: fixed !important;
           top: 0 !important;
           left: 0 !important;
@@ -4076,7 +3946,6 @@ class FunscriptPlayer extends HTMLElement {
           transform: none !important;
           z-index: 999998 !important;
           box-sizing: border-box !important;
-          background: #000 !important;
         }
 
         :host(.fullscreen) .custom-video-controls {
@@ -4579,7 +4448,7 @@ class FunscriptImage extends HTMLElement {
   renderTagAssignButton() {
     if (this.getAttribute('tagassign') !== 'true') return '';
     return `
-      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: var(--primary-main, #7e57c2); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: #1976d2; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
         🏷️
       </button>
     `;

@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { loadShortcuts } from '../utils/settings';
 import BackgroundTaskQueue from './BackgroundTaskQueue';
-import MobilePicSwiper from './MobilePicSwiper';
 import '../utils/FunscriptPlayer.js'; // Register custom element
 import './FunscriptPlayerEmbed.css';
 import {
@@ -18,7 +16,9 @@ import {
   MenuItem,
   InputLabel,
   Switch,
-  FormControlLabel
+  FormControlLabel,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -27,13 +27,10 @@ import {
   SportsEsports as GameIcon,
   KeyboardArrowLeft as PrevIcon,
   KeyboardArrowRight as NextIcon,
-  Upload as UploadIcon,
-  AutoAwesome as SmartIcon,
-  SwipeRight as SwipeIcon
+  Upload as UploadIcon
 } from '@mui/icons-material';
 
 function PerformerFilterView({ performer, onBack, onNext, onComplete, handyIntegration, handyConnected, initialTab }) {
-  const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState(initialTab || 'pics'); // 'pics', 'vids', 'funscript_vids'
   const [files, setFiles] = useState([]);
   const [totalFiles, setTotalFiles] = useState(0);
@@ -50,22 +47,14 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [filesLoaded, setFilesLoaded] = useState(0);
   const [backgroundTasks, setBackgroundTasks] = useState([]);
+  const [funpipeToast, setFunpipeToast] = useState(null); // { severity, msg } after move_to_funscript
   const pollingIntervalRef = useRef(null);
 
   // Missing ML variables definition (added to fix runtime errors)
   const [mlEnabled, setMlEnabled] = useState(false);
-  const [showSmartFilter, setShowSmartFilter] = useState(false);
   const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [predictions, setPredictions] = useState({});
   const [activeModel, setActiveModel] = useState(null);
-  const [showMobileSwiper, setShowMobileSwiper] = useState(false);
-
-  // Detect mobile / touch device
-  const isMobile = typeof window !== 'undefined' && (
-    ('ontouchstart' in window) ||
-    (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
-    (window.matchMedia && window.matchMedia('(hover: none)').matches)
-  );
 
 
 
@@ -77,76 +66,6 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   }, [initialTab]);
 
   // Load files for current tab with progressive loading
-  const fetchFiles = useCallback(async (controller) => {
-    setLoadingFiles(true);
-    setFiles([]);
-    setTotalFiles(0);
-    setHasMoreFiles(false);
-    setFilesLoaded(0);
-
-    try {
-      // Load FIRST file only (limit=1) to start filtering immediately
-      const response = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}&limit=1&offset=0`, {
-        signal: controller.signal
-      });
-      if (response.ok) {
-        const data = await response.json();
-
-        // Check if we were aborted
-        if (controller.signal.aborted) return;
-
-        // Check if response is paginated or legacy format
-        if (data.files && data.total !== undefined) {
-          // New paginated format
-          let filesList = data.files;
-
-          // If sorting by funscript count, sort client-side if not supported by backend
-          if (sortBy === 'funscript_count') {
-            filesList = [...filesList].sort((a, b) => {
-              return sortOrder === 'asc'
-                ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                : (b.funscript_count || 0) - (a.funscript_count || 0);
-            });
-          }
-
-          setFiles(filesList);
-          setTotalFiles(data.total);
-          setHasMoreFiles(data.hasMore);
-          setCurrentIndex(0);
-          setFilesLoaded(1);
-
-          // Continue loading more files in background ONE AT A TIME
-          if (data.hasMore && !controller.signal.aborted) {
-            loadMoreFilesInBackground(1, controller);
-          }
-        } else {
-          // Legacy format - all files returned at once
-          let filesList = data;
-          if (sortBy === 'funscript_count') {
-            filesList = [...filesList].sort((a, b) => {
-              return sortOrder === 'asc'
-                ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                : (b.funscript_count || 0) - (a.funscript_count || 0);
-            });
-          }
-          setFiles(filesList);
-          setTotalFiles(filesList.length);
-          setHasMoreFiles(false);
-          setCurrentIndex(0);
-          setFilesLoaded(filesList.length);
-        }
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error('Error loading files:', err);
-      }
-    } finally {
-      if (!controller.signal.aborted) {
-        setLoadingFiles(false);
-      }
-    }
-  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]);
-
   useEffect(() => {
     // Cancel any previous loading
     if (abortController) {
@@ -156,62 +75,85 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
     const controller = new AbortController();
     setAbortController(controller);
 
+    const loadFiles = async () => {
+      setLoadingFiles(true);
+      setFiles([]);
+      setTotalFiles(0);
+      setHasMoreFiles(false);
+      setFilesLoaded(0);
+
+      try {
+        // Load FIRST file only (limit=1) to start filtering immediately
+        const response = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}&limit=1&offset=0`, {
+          signal: controller.signal
+        });
+        if (response.ok) {
+          const data = await response.json();
+
+          // Check if we were aborted
+          if (controller.signal.aborted) return;
+
+          // Check if response is paginated or legacy format
+          if (data.files && data.total !== undefined) {
+            // New paginated format
+            let filesList = data.files;
+
+            // If sorting by funscript count, sort client-side if not supported by backend
+            if (sortBy === 'funscript_count') {
+              filesList = [...filesList].sort((a, b) => {
+                return sortOrder === 'asc'
+                  ? (a.funscript_count || 0) - (b.funscript_count || 0)
+                  : (b.funscript_count || 0) - (a.funscript_count || 0);
+              });
+            }
+
+            setFiles(filesList);
+            setTotalFiles(data.total);
+            setHasMoreFiles(data.hasMore);
+            setCurrentIndex(0);
+            setFilesLoaded(1);
+
+            // Continue loading more files in background ONE AT A TIME
+            if (data.hasMore && !controller.signal.aborted) {
+              loadMoreFilesInBackground(1, controller);
+            }
+          } else {
+            // Legacy format - all files returned at once
+            let filesList = data;
+            if (sortBy === 'funscript_count') {
+              filesList = [...filesList].sort((a, b) => {
+                return sortOrder === 'asc'
+                  ? (a.funscript_count || 0) - (b.funscript_count || 0)
+                  : (b.funscript_count || 0) - (a.funscript_count || 0);
+              });
+            }
+            setFiles(filesList);
+            setTotalFiles(filesList.length);
+            setHasMoreFiles(false);
+            setCurrentIndex(0);
+            setFilesLoaded(filesList.length);
+          }
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Error loading files:', err);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoadingFiles(false);
+        }
+      }
+    };
+
     if (performer?.id) {
-      fetchFiles(controller);
+      loadFiles();
     }
 
     // Cleanup: abort on unmount or when dependencies change
     return () => {
       controller.abort();
     };
-  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles, fetchFiles]);
-
-  // Lazy-load AI predictions only if enabled
-  useEffect(() => {
-    if (!mlEnabled || !files[currentIndex]) return;
-    
-    const currentFile = files[currentIndex];
-    if (predictions[currentFile.hash_id]) return;
-
-    const fetchAiPrediction = async () => {
-      try {
-        setLoadingPredictions(true);
-
-        // Check if model is loaded
-        const modelsRes = await fetch('/api/filter/models');
-        const modelsData = await modelsRes.json();
-        if (modelsData.success && (!modelsData.current || !modelsData.current.includes('binary_filtering'))) {
-          await fetch('/api/filter/load-model', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modelId: 'binary_filtering.pt' })
-          });
-        }
-
-        const response = await fetch('/api/filter/predict-quality', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imagePath: currentFile.path })
-        });
-        const data = await response.json();
-        if (data.success) {
-          setPredictions(prev => ({
-            ...prev,
-            [currentFile.hash_id]: {
-              prediction: data.decision === 'delete' ? 1 : 0,
-              confidence: data.confidence / 100
-            }
-          }));
-        }
-      } catch (err) {
-        console.error('AI Prediction error:', err);
-      } finally {
-        setLoadingPredictions(false);
-      }
-    };
-
-    fetchAiPrediction();
-  }, [mlEnabled, currentIndex, files, predictions]);
+  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]);
 
 
 
@@ -411,6 +353,19 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
       if (response.ok) {
         const result = await response.json();
         console.log('Filter action result:', result);
+
+        // Moving to a funscript folder hands the video to funpipe for script
+        // generation — report whether that actually took.
+        if (action === 'move_to_funscript' && result.funpipe) {
+          const fp = result.funpipe;
+          if (fp.queued) {
+            setFunpipeToast({ severity: 'success', msg: 'Queued with funpipe for funscript generation' });
+          } else if (fp.skipped) {
+            setFunpipeToast({ severity: 'info', msg: `Not queued — ${fp.skipped}` });
+          } else if (fp.error) {
+            setFunpipeToast({ severity: 'warning', msg: `Moved, but funpipe didn't take it: ${fp.error}` });
+          }
+        }
 
         // Store the fullscreen and modal states before updating
         const wasFullscreen = isCurrentlyFullscreen;
@@ -659,16 +614,70 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   const [shouldRestoreModal, setShouldRestoreModal] = useState(false);
   const mediaContainerRef = React.useRef(null);
 
-  // Fullscreen restoration - the FunscriptPlayer component handles this natively
-  // via the autofullscreen attribute, so we just clear the flag after it's been consumed
+  // Simple fullscreen restoration - use native video fullscreen directly
   useEffect(() => {
-    if (shouldRestoreFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids')) {
-      // The flag is consumed by passing autofullscreen="true" to the funscript-player.
-      // Clear it after a short delay so the attribute is applied first.
-      const timeout = setTimeout(() => {
+    if (shouldRestoreFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids') && mediaContainerRef.current) {
+      console.log('Starting fullscreen restoration...');
+
+      // Already in fullscreen? Done.
+      if (document.fullscreenElement) {
+        console.log('Already in fullscreen');
         setShouldRestoreFullscreen(false);
-      }, 500);
-      return () => clearTimeout(timeout);
+        return;
+      }
+
+      let retryCount = 0;
+      const maxRetries = 10;
+      let timeoutId = null;
+
+      const attemptFullscreen = () => {
+        const container = mediaContainerRef.current;
+        if (!container) {
+          setShouldRestoreFullscreen(false);
+          return;
+        }
+
+        // Find video element (may be in shadow DOM)
+        const funscriptPlayer = container.querySelector('funscript-player');
+        const video = container.querySelector('video') ||
+          (funscriptPlayer?.shadowRoot?.querySelector('video'));
+
+        console.log(`Fullscreen attempt ${retryCount + 1}/${maxRetries}:`, { video: !!video });
+
+        if (video) {
+          // Use native video fullscreen directly
+          video.requestFullscreen()
+            .then(() => {
+              console.log('Video fullscreen successful');
+              // Also try to autoplay
+              video.play().catch(() => {});
+              setShouldRestoreFullscreen(false);
+            })
+            .catch(err => {
+              console.log('Video fullscreen failed:', err.message);
+              retryCount++;
+              if (retryCount < maxRetries) {
+                timeoutId = setTimeout(attemptFullscreen, 300);
+              } else {
+                setShouldRestoreFullscreen(false);
+              }
+            });
+        } else {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            timeoutId = setTimeout(attemptFullscreen, 200);
+          } else {
+            setShouldRestoreFullscreen(false);
+          }
+        }
+      };
+
+      const initialTimeout = setTimeout(attemptFullscreen, 200);
+
+      return () => {
+        clearTimeout(initialTimeout);
+        if (timeoutId) clearTimeout(timeoutId);
+      };
     }
   }, [shouldRestoreFullscreen, currentTab, currentFile]);
 
@@ -804,34 +813,18 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e) => {
-      // Ignore if typing in an input field
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-      let actionTaken = false;
-      if (e.key === shortcuts.keep) { handleFilterAction('keep'); actionTaken = true; }
-      else if (e.key === shortcuts.delete) { handleFilterAction('delete'); actionTaken = true; }
-      else if (e.key === shortcuts.move_to_funscript && currentTab === 'vids') { handleFilterAction('move_to_funscript'); actionTaken = true; }
-      else if (e.key === shortcuts.undo) { handleUndo(); actionTaken = true; }
-      else if (e.key === shortcuts.prev && currentIndex > 0) { navigateWithFullscreen(currentIndex - 1); actionTaken = true; }
-      else if (e.key === shortcuts.next && currentIndex < files.length - 1) { navigateWithFullscreen(currentIndex + 1); actionTaken = true; }
-
-      if (actionTaken) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        // If a button (like the fullscreen button) happens to be focused, blurring it
-        // ensures that subsequent spaces/enters don't re-trigger that button unintentionally.
-        if (document.activeElement instanceof HTMLElement) {
-          document.activeElement.blur();
-        }
-      }
+      if (e.key === shortcuts.keep) handleFilterAction('keep');
+      if (e.key === shortcuts.delete) handleFilterAction('delete');
+      if (e.key === shortcuts.move_to_funscript && currentTab === 'vids') handleFilterAction('move_to_funscript');
+      if (e.key === shortcuts.undo) handleUndo();
+      if (e.key === shortcuts.prev && currentIndex > 0) navigateWithFullscreen(currentIndex - 1);
+      if (e.key === shortcuts.next && currentIndex < files.length - 1) navigateWithFullscreen(currentIndex + 1);
     };
 
     // Only add listener if shortcuts are loaded
     if (Object.keys(shortcuts).length > 0) {
-      // Use capture phase (true) to intercept shortcuts before native video elements consume them
-      window.addEventListener('keydown', handleKeyPress, true);
-      return () => window.removeEventListener('keydown', handleKeyPress, true);
+      window.addEventListener('keydown', handleKeyPress);
+      return () => window.removeEventListener('keydown', handleKeyPress);
     }
   }, [currentIndex, files.length, currentTab, handleFilterAction, handleUndo, shortcuts, navigateWithFullscreen]);
 
@@ -1054,59 +1047,26 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           sx={{ ml: 2 }}
         />
 
-        <Button
-          variant="contained"
-          startIcon={<SmartIcon />}
-          onClick={() => navigate(`/smart-filter/${performer.id}`)}
-          sx={{
-            ml: 2,
-            bgcolor: 'rgba(0, 217, 255, 0.1)',
-            color: '#00d9ff',
-            border: '1px solid #00d9ff',
-            '&:hover': { bgcolor: 'rgba(0, 217, 255, 0.2)' },
-            textTransform: 'none',
-            fontWeight: 'bold'
-          }}
-        >
-          Smart Filtering
-        </Button>
-
         <FormControlLabel
           control={
             <Switch
               checked={mlEnabled}
               onChange={(e) => setMlEnabled(e.target.checked)}
               size="small"
-              sx={{
-                '& .MuiSwitch-switchBase.Mui-checked': { color: '#00d9ff' },
-                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: '#00d9ff' }
-              }}
+              disabled={loadingFiles || loadingPredictions}
             />
           }
-          label={<Typography variant="caption" sx={{ color: mlEnabled ? '#00d9ff' : '#888', fontWeight: 'bold' }}>AI ASSISTANT</Typography>}
+          label={
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              🤖 ML Predictions
+              {loadingPredictions && <Typography variant="caption" color="text.secondary">(loading...)</Typography>}
+              {mlEnabled && !activeModel && !loadingPredictions && (
+                <Typography variant="caption" color="error">(no model)</Typography>
+              )}
+            </Box>
+          }
           sx={{ ml: 2 }}
         />
-
-        {/* Mobile Swipe Mode button - only on mobile and pics tab */}
-        {isMobile && currentTab === 'pics' && files.length > 0 && (
-          <Button
-            variant="contained"
-            startIcon={<SwipeIcon />}
-            onClick={() => setShowMobileSwiper(true)}
-            sx={{
-              ml: 2,
-              bgcolor: '#e91e63',
-              '&:hover': { bgcolor: '#c2185b' },
-              textTransform: 'none',
-              fontWeight: 'bold',
-              whiteSpace: 'nowrap',
-              py: isMobile ? 1.5 : undefined, // Larger on mobile
-              px: isMobile ? 3 : undefined,
-            }}
-          >
-            Swipe Mode
-          </Button>
-        )}
 
         <Typography variant="body2" sx={{ ml: 'auto' }}>
           {currentIndex + 1} of {files.length}
@@ -1115,8 +1075,9 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
         </Typography>
       </Box>
 
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {currentFile && (
+      {/* Main Content: wrap in fragment to avoid adjacent JSX error */}
+      <>
+        {currentFile && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {/* Loading indicator for initial load */}
             {loadingFiles && files.length === 0 && (
@@ -1215,61 +1176,17 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               }}
             >
               {currentTab === 'pics' && (
-                isMobile ? (
-                  /* On mobile: show the image directly and open swipe mode on tap */
-                  <Box
-                    onClick={() => setShowMobileSwiper(true)}
-                    sx={{
-                      width: '100%',
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      position: 'relative',
-                    }}
-                  >
-                    <img
-                      src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                      alt={currentFile.name}
-                      style={{
-                        maxWidth: '100%',
-                        maxHeight: '100%',
-                        objectFit: 'contain',
-                      }}
-                    />
-                    <Box sx={{
-                      position: 'absolute',
-                      bottom: 12,
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      bgcolor: 'rgba(0,0,0,0.6)',
-                      borderRadius: 2,
-                      px: 2,
-                      py: 0.5,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 0.5,
-                    }}>
-                      <SwipeIcon sx={{ fontSize: 16, color: '#e91e63' }} />
-                      <Typography variant="caption" sx={{ color: '#fff', fontSize: '0.7rem' }}>
-                        Tap to enter Swipe Mode
-                      </Typography>
-                    </Box>
-                  </Box>
-                ) : (
-                  <funscript-player
-                    key="pic-player"
-                    src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                    type="image"
-                    performer-id={performer.id}
-                    performer-name={performer.name}
-                    handy-connected={handyConnected ? 'true' : 'false'}
-                    mode="modal"
-                    tagassign="true"
-                    className="funscript-player-embed"
-                  ></funscript-player>
-                )
+                <funscript-player
+                  key="pic-player"
+                  src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
+                  type="image"
+                  performer-id={performer.id}
+                  performer-name={performer.name}
+                  handy-connected={handyConnected ? 'true' : 'false'}
+                  mode="modal"
+                  tagassign="true"
+                  className="funscript-player-embed"
+                ></funscript-player>
               )}
               {currentTab === 'vids' && (
                 <funscript-player
@@ -1283,7 +1200,6 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                   tagassign="true"
                   scenemanager="true"
                   autoplay="true"
-                  autofullscreen={shouldRestoreFullscreen ? 'true' : undefined}
                   className="funscript-player-embed"
                 ></funscript-player>
               )}
@@ -1300,7 +1216,6 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                   mode="standalone"
                   scenemanager="true"
                   autoplay="true"
-                  autofullscreen={shouldRestoreFullscreen ? 'true' : undefined}
                   funscripts={JSON.stringify(Array.isArray(currentFile.funscripts) ? currentFile.funscripts : [])}
                   data-debug-funscripts={JSON.stringify(Array.isArray(currentFile.funscripts) ? currentFile.funscripts : [])}
                   data-debug-performer={performer.name}
@@ -1322,7 +1237,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       p: 2,
-                      border: '1px solid rgba(255,255,255,0.15)',
+                      border: '1px solid #ddd',
                       borderRadius: 1,
                       bgcolor: 'background.paper',
                       minHeight: 48
@@ -1406,71 +1321,69 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               </Box>
 
               {/* Action Buttons */}
-              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
-                {currentTab === 'funscript' ? (
-                  <>
+              {currentTab === 'funscript' ? (
+                <>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={() => handleFilterAction('keep')}
+                    sx={{ px: 4, py: 2, minWidth: 120 }}
+                  >
+                    Keep Video ({shortcuts.keep?.toUpperCase() || 'K'})
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    onClick={() => handleFilterAction('delete')}
+                    sx={{ px: 4, py: 2, minWidth: 120 }}
+                  >
+                    Delete Video ({shortcuts.delete?.toUpperCase() || 'D'})
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={handleUndo}
+                    sx={{ px: 4, py: 2, minWidth: 120 }}
+                  >
+                    Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={() => handleFilterAction('keep')}
+                    sx={{ px: 4, py: 2, minWidth: 120 }}
+                  >
+                    Keep ({shortcuts.keep?.toUpperCase() || 'K'})
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    onClick={() => handleFilterAction('delete')}
+                    sx={{ px: 4, py: 2, minWidth: 120 }}
+                  >
+                    Delete ({shortcuts.delete?.toUpperCase() || 'D'})
+                  </Button>
+                  {currentTab === 'vids' && (
                     <Button
                       variant="contained"
-                      color="success"
-                      onClick={() => handleFilterAction('keep')}
-                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
+                      color="secondary"
+                      onClick={() => handleFilterAction('move_to_funscript')}
+                      sx={{ px: 4, py: 2, minWidth: 160 }}
                     >
-                      Keep Video ({shortcuts.keep?.toUpperCase() || 'K'})
+                      Move to Funscript ({shortcuts.move_to_funscript?.toUpperCase() || 'F'})
                     </Button>
-                    <Button
-                      variant="contained"
-                      color="error"
-                      onClick={() => handleFilterAction('delete')}
-                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
-                    >
-                      Delete Video ({shortcuts.delete?.toUpperCase() || 'D'})
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={handleUndo}
-                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
-                    >
-                      Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      variant="contained"
-                      color="success"
-                      onClick={() => handleFilterAction('keep')}
-                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
-                    >
-                      Keep ({shortcuts.keep?.toUpperCase() || 'K'})
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="error"
-                      onClick={() => handleFilterAction('delete')}
-                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
-                    >
-                      Delete ({shortcuts.delete?.toUpperCase() || 'D'})
-                    </Button>
-                    {currentTab === 'vids' && (
-                      <Button
-                        variant="contained"
-                        color="secondary"
-                        onClick={() => handleFilterAction('move_to_funscript')}
-                        sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 160, fontSize: isMobile ? '1.1rem' : undefined }}
-                      >
-                        Move to Funscript ({shortcuts.move_to_funscript?.toUpperCase() || 'F'})
-                      </Button>
-                    )}
-                    <Button
-                      variant="outlined"
-                      onClick={handleUndo}
-                      sx={{ px: 4, py: isMobile ? 3 : 2, minWidth: 120, fontSize: isMobile ? '1.1rem' : undefined }}
-                    >
-                      Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
-                    </Button>
-                  </>
-                )}
-              </Box>
+                  )}
+                  <Button
+                    variant="outlined"
+                    onClick={handleUndo}
+                    sx={{ px: 4, py: 2, minWidth: 120 }}
+                  >
+                    Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
+                  </Button>
+                </>
+              )}
             </Box>
           </Box>
         )}
@@ -1481,23 +1394,19 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
             </Typography>
           </Box>
         )}
-      </Box>
-
-      {/* Mobile Pic Swiper — fullscreen Tinder-like mode for pics on mobile */}
-      {showMobileSwiper && currentTab === 'pics' && currentFile && (
-        <MobilePicSwiper
-          files={files}
-          currentIndex={currentIndex}
-          onAction={(action) => handleFilterAction(action)}
-          onUndo={handleUndo}
-          onNavigate={(newIndex) => navigateWithFullscreen(newIndex)}
-          onClose={() => setShowMobileSwiper(false)}
-          currentFile={currentFile}
-          progress={progress}
-          shortcuts={shortcuts}
-          totalFiles={totalFiles}
-        />
-      )}
+        <Snackbar
+          open={!!funpipeToast}
+          autoHideDuration={4000}
+          onClose={() => setFunpipeToast(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        >
+          {funpipeToast ? (
+            <Alert severity={funpipeToast.severity} variant="filled" onClose={() => setFunpipeToast(null)}>
+              {funpipeToast.msg}
+            </Alert>
+          ) : undefined}
+        </Snackbar>
+      </>
     </Container>
   );
 }

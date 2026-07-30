@@ -39,6 +39,7 @@ import SmartFilterPage from './pages/SmartFilterPage';
 import TasteDashboardPage from './pages/TasteDashboardPage';
 import PairwiseRankPage from './pages/PairwiseRankPage';
 import TrainingHubPage from './pages/TrainingHubPage';
+import FunpipePage from './pages/FunpipePage';
 import VRPage from './pages/VRPage';
 
 
@@ -611,6 +612,9 @@ function AppContent({ onThemeChange, currentThemeId }) {
             } />
             <Route path="/training-hub" element={
               <TrainingHubPage />
+            } />
+            <Route path="/funpipe" element={
+              <FunpipePage />
             } />
             <Route path="/vr" element={
               <VRPage />

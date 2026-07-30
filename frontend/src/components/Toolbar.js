@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, ButtonGroup } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr } from '@mui/icons-material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 
 import './Toolbar.css';
@@ -213,6 +213,12 @@ function Toolbar({
           <Tooltip title="Taste Dashboard - System Health & AI">
             <IconButton color="inherit" onClick={() => navigate('/taste-dashboard')} size="small">
               <Science />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Funpipe - Funscript generation queue & library">
+            <IconButton color="inherit" onClick={() => navigate('/funpipe')} size="small">
+              <Waves />
             </IconButton>
           </Tooltip>
 

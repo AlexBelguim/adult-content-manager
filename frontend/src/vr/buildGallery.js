@@ -341,7 +341,8 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   let sortIndex = 0;
   let videoEl = null;
   let vrTexCache = null;   // cached THREE.VideoTexture of the currently-loaded video (for in-place mesh swaps)
-  let vrVideoMode = false;  // when true, the current video renders as SBS 180° (one eye = half the frame)
+  let vrVideoMode = false;  // when true, the current video renders as a wraparound VR sphere
+  let vrVideoType = 'sbs180'; // sbs180 (side-by-side 180°) | sbs360 (side-by-side 360°) | tb180 (top-bottom 180°)
   let scrubFillEl = null, scrubTimeEl = null; // player scrub-bar refs (updated each frame)
   let playerScale = 1; // player content resize
   let mediaDims = {};      // path -> [w,h] for masonry
@@ -383,9 +384,12 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   const playerRoot = makeEl('a-entity', { visible: 'false' }, world);
   const statusText = makeEl('a-text', { value: 'Loading performers…', align: 'center', color: TEXT_MUTED, width: '3', 'wrap-count': '40', font: 'roboto' }, world);
   faceUser(statusText, 0, CENTER_Y, -DIST_FRONT());
-  const debug = makeEl('a-text', { value: 'debug', align: 'center', color: '#9fd0ff', width: '1.8', 'wrap-count': '40', font: 'roboto' }, world);
+  // Debug overlay — hidden in normal use. setDebug stays as a no-op-ish hook so the many call
+  // sites don't need removing; flip DEBUG_VR=true to re-enable diagnostics.
+  const DEBUG_VR = false;
+  const debug = makeEl('a-text', { value: '', align: 'center', color: '#9fd0ff', width: '1.8', 'wrap-count': '40', font: 'roboto', visible: 'false' }, world);
   faceUser(debug, 0, BAR_Y + 0.42, -BAR_Z);
-  const setDebug = (s) => debug.setAttribute('value', s);
+  const setDebug = (s) => { if (DEBUG_VR) debug.setAttribute('value', s); };
 
   function DIST_FRONT() { return R_RING; }
   function passesFilter(p) {
@@ -619,7 +623,12 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     canvasPlane(bar, { w: isz, h: isz, x: 0.45, y: y1, clickable: true, name: 'zoomout', onClick: function () { popScale(this); zoomPlayer(0.8); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'minus', cw, ch, '#cfe3f5') });
     canvasPlane(bar, { w: isz, h: isz, x: 0.83, y: y1, clickable: true, name: 'zoomin', onClick: function () { popScale(this); zoomPlayer(1.25); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'plus', cw, ch, '#cfe3f5') });
     // VR toggle: render the video as side-by-side 180° (each eye = one half of the frame)
-    if (isVid) canvasPlane(bar, { w: isz, h: isz, x: half - 0.3, y: y1, clickable: true, name: 'vrMode', onClick: function () { popScale(this); toggleVRVideo(); }, draw: (ctx, cw, ch) => { if (vrVideoMode) drawPill(ctx, cw, ch, ACCENT, 0.95); drawIcon(ctx, 'vr', cw, ch, vrVideoMode ? '#fff' : '#cfe3f5'); } });
+    if (isVid) {
+      // VR toggle (goggles) — switches the flat plane to a wraparound VR sphere
+      canvasPlane(bar, { w: isz, h: isz, x: half - 0.62, y: y1, clickable: true, name: 'vrMode', onClick: function () { popScale(this); toggleVRVideo(); }, draw: (ctx, cw, ch) => { if (vrVideoMode) drawPill(ctx, cw, ch, ACCENT, 0.95); drawIcon(ctx, 'vr', cw, ch, vrVideoMode ? '#fff' : '#cfe3f5'); } });
+      // Type label — only while VR mode is on. Click cycles SBS180 -> SBS360 -> TB180 -> TB360.
+      if (vrVideoMode) canvasPlane(bar, { w: 0.6, h: isz, x: half - 0.28, y: y1, clickable: true, name: 'vrType', onClick: function () { popScale(this); cycleVRVideoType(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, CARD_BG_ALT, 0.92); ctx.fillStyle = TEXT; ctx.font = `${Math.round(ch * 0.32)}px roboto, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(VR_VIDEO_LABELS[vrVideoType] || 'SBS', cw / 2, ch / 2); } });
+    }
     // row 2: scrub bar (video only) — clickable track + accent fill + time text
     if (isVid) {
       const track = makeEl('a-entity', { class: 'clickable', 'data-name': 'scrub', position: `0 ${y2} 0.011` }, bar);
@@ -1250,6 +1259,15 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       }
     });
   }
+  // Cycle the VR video layout type and rebuild the sphere in place (keeps playback running).
+  function cycleVRVideoType() {
+    if (!vrVideoMode) return;
+    const i = VR_VIDEO_TYPES.indexOf(vrVideoType);
+    vrVideoType = VR_VIDEO_TYPES[(i + 1) % VR_VIDEO_TYPES.length];
+    const screen = playerRoot.querySelector('[data-name="screen"]');
+    if (screen && vrTexCache) screen.setObject3D('mesh', buildVRSphereMesh(vrTexCache, THREE));
+    buildBar();
+  }
   function closePlayerMedia() {
     if (videoEl) {
       try { videoEl.pause(); } catch (_) { /* ignore */ }
@@ -1262,11 +1280,23 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   // Shared flat screen renderer (used by the player AND the keep/delete filter viewer).
   // fit + VR-sphere are module-level so toggleVRVideo can swap meshes without a full reload.
   function fitVideo(iw, ih) { const ar = iw / ih || 16 / 9; let w = SCREEN_W, h = SCREEN_W / ar; if (h > SCREEN_H) { h = SCREEN_H; w = SCREEN_H * ar; } return { w, h }; }
-  function buildVRSphereMesh(tex, THREE) {
-    const geo = new THREE.SphereGeometry(20, 64, 64, 0, Math.PI, 0, Math.PI);
+  // VR video sphere types. The headset's stereo rendering splits a side-by-side (or top-bottom)
+  // source so each eye gets its half; we just map the full frame onto an inward-facing sphere.
+  //   sbs180 / tb180 — 180° dome (the source fills the forward half-sphere)
+  //   sbs360 / tb360 — full 360° sphere
+  const VR_VIDEO_TYPES = ['sbs180', 'sbs360', 'tb180', 'tb360'];
+  const VR_VIDEO_LABELS = { sbs180: 'SBS 180°', sbs360: 'SBS 360°', tb180: 'TB 180°', tb360: 'TB 360°' };
+  function buildVRSphereMesh(tex, THREE, type) {
+    const t = type || vrVideoType || 'sbs180';
+    const full = /360/.test(t); // 360° = full sphere, 180° = forward dome
+    const radius = 20;
+    // phi sweeps around the viewer; theta covers top-to-bottom. 180° = half-sphere facing forward.
+    const geo = full
+      ? new THREE.SphereGeometry(radius, 72, 72)
+      : new THREE.SphereGeometry(radius, 72, 72, -Math.PI / 2, Math.PI, 0, Math.PI); // forward dome
     const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.scale.x = -1; // un-mirror so text reads correctly
+    mesh.scale.x = -1; // un-mirror so the image isn't horizontally flipped
     return mesh;
   }
   function renderScreen(item, { isActive, onTap }) {
