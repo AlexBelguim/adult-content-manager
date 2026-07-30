@@ -12,3 +12,17 @@ tqdm
 bitsandbytes
 accelerate
 peft
+
+# Funscript generation pipeline (funpipe/, served at /funpipe).
+# These resolve against the existing torch build — do NOT let them pull a
+# different torch, it would break DINOv2 inference.
+scenedetect
+opencv-python
+ultralytics
+imageio[ffmpeg]
+matplotlib
+scipy
+# The review editor (funpipe/funpipe_ui.py) is FastAPI, launched on demand as a
+# child process on this same venv.
+fastapi
+uvicorn[standard]

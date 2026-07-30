@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>funpipe queue</title>
+<style>
+  :root { --bg:#111418; --panel:#1a1f26; --line:#2a323d; --tx:#d7dde5;
+          --dim:#8a94a1; --acc:#4da3ff; --warn:#ff5d5d; --ok:#59d18c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx);
+         font:14px/1.5 system-ui, sans-serif; }
+  header { display:flex; gap:10px; align-items:center; padding:10px 16px;
+           background:var(--panel); border-bottom:1px solid var(--line); }
+  h1 { font-size:15px; margin:0; }
+  a { color:var(--acc); text-decoration:none; }
+  button { background:#232a33; color:var(--tx); border:1px solid var(--line);
+           border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); color:#08243d; font-weight:600; }
+  main { max-width:860px; margin:0 auto; padding:16px; }
+  #drop { border:2px dashed var(--line); border-radius:12px; padding:38px;
+          text-align:center; color:var(--dim); margin-bottom:16px;
+          transition:border-color .15s, background .15s; }
+  #drop.hot { border-color:var(--acc); background:#16212e; color:var(--tx); }
+  #drop b { color:var(--tx); }
+  .row { display:flex; gap:10px; align-items:center; margin:12px 0;
+         flex-wrap:wrap; }
+  h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+       color:var(--dim); margin:18px 0 8px; }
+  .job, .cand, .up { background:var(--panel); border:1px solid var(--line);
+        border-radius:8px; padding:8px 12px; margin-bottom:8px; }
+  .job.running { border-color:var(--ok); }
+  .job.failed { border-color:var(--warn); }
+  .jname { display:flex; justify-content:space-between; gap:8px; }
+  .bar { height:6px; background:#232a33; border-radius:3px; margin-top:6px;
+         overflow:hidden; }
+  .bar div { height:100%; background:var(--ok); width:0;
+             transition:width .4s; }
+  .up .bar div { background:var(--acc); }
+  .log { color:var(--dim); font:11px/1.45 monospace; white-space:pre-wrap;
+         margin-top:5px; max-height:70px; overflow:hidden; }
+  .dim { color:var(--dim); }
+  .cand { display:flex; align-items:center; gap:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>funpipe batch queue</h1>
+  <span class="dim" id="hdrState"></span>
+  <span style="margin-left:auto"><a href="/">&larr; review UI</a></span>
+</header>
+<main>
+  <div id="drop">
+    <b>drop videos here</b><br>
+    already in the library &rarr; queued in place &middot;
+    new files &rarr; uploaded to <code>incoming/</code> and queued
+  </div>
+  <div class="row">
+    <button class="primary" id="bStart">start queue</button>
+    <button id="bStop">stop after current</button>
+    <button id="bClear">clear done</button>
+    <label class="dim"><input type="checkbox" id="bPose" checked>
+      pose labeling</label>
+  </div>
+  <div id="uploads"></div>
+  <h3>queue</h3>
+  <div id="jobs" class="dim">loading...</div>
+  <h3>unprocessed in library
+    <button id="bScan" style="margin-left:8px">scan</button>
+    <button id="bAddAll">add all</button></h3>
+  <div id="cands" class="dim">press scan</div>
+</main>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+async function j(url, opts) { const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text()); return r.json(); }
+let cands = [];
+
+async function poll() {
+  try {
+    const q = await j("/api/queue");
+    $("#hdrState").textContent = q.running
+      ? `running · ${q.jobs.filter(x => x.status === "done").length}/${q.jobs.length} done`
+      : "idle";
+    const el = $("#jobs");
+    el.classList.remove("dim");
+    el.innerHTML = q.jobs.length ? "" : '<span class="dim">empty</span>';
+    for (const job of q.jobs) {
+      const d = document.createElement("div");
+      d.className = "job " + job.status;
+      const pct = job.progress != null ? Math.round(job.progress * 100) : null;
+      const state = job.status === "running"
+        ? `${job.stage || ""}${pct != null ? " " + pct + "%" : ""}`
+        : job.status + (job.elapsed ? ` · ${(job.elapsed/60).toFixed(1)} min` : "");
+      d.innerHTML = `<div class="jname"><span>${job.name}
+          <span class="dim">(${(job.stages||[]).join("+")})</span></span>
+          <span class="dim">${state}
+          ${job.status === "queued" ? "<button>remove</button>" : ""}</span></div>
+        <div class="bar"><div style="width:${pct ?? (job.status==="done"?100:0)}%"></div></div>
+        ${job.status === "running" || job.status === "failed"
+          ? `<div class="log">${(job.log_tail||[]).slice(-4).join("\n")}</div>` : ""}`;
+      const xb = d.querySelector("button");
+      if (xb) xb.onclick = () => j("/api/queue/remove", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ id: job.id })}).then(poll);
+      el.appendChild(d);
+    }
+  } catch (e) { $("#hdrState").textContent = "server unreachable"; }
+}
+
+$("#bScan").onclick = async () => {
+  cands = await j("/api/queue/candidates");
+  const el = $("#cands");
+  el.classList.remove("dim");
+  el.innerHTML = cands.length ? "" : '<span class="dim">nothing to process</span>';
+  cands.forEach((c, i) => {
+    const d = document.createElement("div");
+    d.className = "cand";
+    d.innerHTML = `<input type="checkbox" checked data-i="${i}">
+      <span>${c.name}</span>
+      <span class="dim">${c.stages.join("+")}</span>`;
+    el.appendChild(d);
+  });
+};
+$("#bAddAll").onclick = async () => {
+  const vids = [...$("#cands").querySelectorAll("input:checked")]
+    .map(cb => cands[+cb.dataset.i].video);
+  if (!vids.length) return;
+  await j("/api/queue/add", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ videos: vids, pose: $("#bPose").checked })});
+  $("#cands").innerHTML = "press scan";
+  poll();
+};
+$("#bStart").onclick = () => j("/api/queue/start", {method:"POST"}).then(poll);
+$("#bStop").onclick = () => j("/api/queue/stop", {method:"POST"}).then(poll);
+$("#bClear").onclick = () => j("/api/queue/clear_done", {method:"POST"}).then(poll);
+
+// ------------------------------------------------------------ drag & drop
+const drop = $("#drop");
+for (const ev of ["dragenter", "dragover"])
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hot"); });
+for (const ev of ["dragleave", "drop"])
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("hot"); });
+
+drop.addEventListener("drop", async e => {
+  const files = [...e.dataTransfer.files];
+  if (!files.length) return;
+  // refresh candidates so name-matching is current
+  try { cands = await j("/api/queue/candidates"); } catch (err) {}
+  for (const f of files) {
+    const match = cands.find(c => c.name === f.name);
+    if (match) {
+      await j("/api/queue/add", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ videos: [match.video],
+                               pose: $("#bPose").checked })});
+      note(`${f.name}: found in library — queued in place`);
+    } else {
+      uploadFile(f);
+    }
+  }
+  poll();
+});
+
+function note(txt) {
+  const d = document.createElement("div");
+  d.className = "up dim";
+  d.textContent = txt;
+  $("#uploads").prepend(d);
+  setTimeout(() => d.remove(), 8000);
+}
+
+function uploadFile(f) {
+  const d = document.createElement("div");
+  d.className = "up";
+  d.innerHTML = `<div class="jname"><span>${f.name}</span>
+    <span class="dim">uploading 0%</span></div>
+    <div class="bar"><div></div></div>`;
+  $("#uploads").prepend(d);
+  const lbl = d.querySelector(".dim"), bar = d.querySelector(".bar div");
+  const xhr = new XMLHttpRequest();
+  const url = `/api/upload?name=${encodeURIComponent(f.name)}` +
+              `&pose=${$("#bPose").checked}`;
+  xhr.open("POST", url);
+  xhr.upload.onprogress = ev => {
+    if (ev.lengthComputable) {
+      const p = Math.round(ev.loaded / ev.total * 100);
+      lbl.textContent = `uploading ${p}%`;
+      bar.style.width = p + "%";
+    }
+  };
+  xhr.onload = () => {
+    if (xhr.status === 200) {
+      lbl.textContent = "uploaded — queued";
+      setTimeout(() => d.remove(), 6000);
+      poll();
+    } else {
+      lbl.textContent = "failed: " + xhr.responseText.slice(0, 120);
+      d.classList.add("failed");
+    }
+  };
+  xhr.onerror = () => { lbl.textContent = "upload error"; };
+  xhr.send(f);
+}
+
+poll();
+setInterval(poll, 2500);
+</script>
+</body>
+</html>

@@ -89,3 +89,18 @@ AI-Inference-App/localscene/debug/
 # (a committed cert's SAN would only match one machine's IP anyway)
 vr-reference/*.pem
 data/
+
+# Demo video: captured app screenshots contain real library content, and the
+# render artifacts are large. The composition source (script.json, the build
+# script, GUIDE.md) is tracked; the pixels are not.
+demo/acm-demo/assets/shots/
+demo/acm-demo/snapshots/
+demo/acm-demo/out/
+demo/acm-demo/renders/
+demo/narration/
+demo/narration.wav
+demo/page-text.txt
+
+# funpipe runtime state (queue + review editor log), regenerated at run time
+AI-Inference-App/funpipe_queue.json
+AI-Inference-App/funpipe_ui.log

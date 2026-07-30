@@ -75,6 +75,21 @@ MODEL_LOCK = Lock()
 MODELS_DIR = Path(__file__).parent / 'models'
 MODEL_METADATA_CACHE = {}  # Cache for model file metadata to prevent heavy I/O
 
+# Register funscript generation pipeline. Deliberately does NOT serialise against
+# MODEL_LOCK: a tracking run can take half an hour and blocking image inference
+# behind it is worse than sharing the card. It warns about contention instead, so
+# it needs a way to ask whether we currently hold a model.
+try:
+    log("🌊 Initializing Funpipe funscript pipeline...")
+    from funpipe_worker import funpipe_bp, init_funpipe
+    app.register_blueprint(funpipe_bp, url_prefix='/funpipe')
+    init_funpipe(model_loaded_probe=lambda: MODEL is not None or RANKER_MODEL is not None)
+    log("✅ Funpipe registered at /funpipe")
+except Exception as e:
+    log(f"⚠️ Funpipe module failed to load: {e}")
+    import traceback
+    traceback.print_exc()
+
 def map_path(path):
     """Maps remote paths (TrueNAS) to local paths (Windows)."""
     if not path:

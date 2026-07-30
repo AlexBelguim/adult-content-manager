@@ -1,0 +1,1509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>funpipe review</title>
+<style>
+  :root { --bg:#111418; --panel:#1a1f26; --line:#2a323d; --tx:#d7dde5;
+          --dim:#8a94a1; --acc:#4da3ff; --warn:#ff5d5d; --ok:#59d18c;
+          --idle:#5a6472; --lasso:#ffd166; --anchor:#ff9f43; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx);
+         font:14px/1.45 system-ui, sans-serif; }
+  header { display:flex; gap:8px; align-items:center; padding:8px 12px;
+           background:var(--panel); border-bottom:1px solid var(--line);
+           flex-wrap:wrap; }
+  select, button { background:#232a33; color:var(--tx);
+      border:1px solid var(--line); border-radius:6px; padding:6px 10px;
+      font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); color:#08243d; font-weight:600; }
+  button.on { border-color:var(--lasso); color:var(--lasso); }
+  #speed button { padding:6px 8px; }
+  #speed button.on { border-color:var(--ok); color:var(--ok); }
+  #status { color:var(--dim); margin-left:auto; font-size:13px; }
+  main { display:grid; grid-template-columns: 1fr 300px; gap:10px;
+         padding:10px; height:calc(100vh - 50px); }
+  #left { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  #vidwrap { position:relative; resize:vertical; overflow:hidden;
+             height:48vh; min-height:160px; max-height:82vh;
+             border-radius:8px; }
+  video { width:100%; height:100%; object-fit:contain; background:#000;
+          border-radius:8px; display:block; }
+  #ov { position:absolute; inset:0; pointer-events:none; }
+  canvas.strip { width:100%; background:var(--panel);
+                 border:1px solid var(--line); border-radius:8px;
+                 touch-action:none; display:block; }
+  #plot { height:150px; }
+  #lanes { height:92px; }
+  #chapedit { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+              background:var(--panel); border:1px solid var(--line);
+              border-radius:8px; padding:6px 10px; min-height:40px;
+              font-size:13px; }
+  #chapedit b { color:var(--acc); }
+  #chapedit .swatch { width:12px; height:12px; border-radius:3px; }
+  input[type=number] { width:58px; background:#232a33; color:var(--tx);
+      border:1px solid var(--line); border-radius:6px; padding:4px 6px; }
+  #side { background:var(--panel); border:1px solid var(--line);
+          border-radius:8px; padding:12px; overflow-y:auto; }
+  h3 { margin:8px 0 8px; font-size:13px; text-transform:uppercase;
+       letter-spacing:.06em; color:var(--dim); }
+  .cluster { border:1px solid var(--line); border-radius:8px; padding:8px;
+             margin-bottom:8px; cursor:pointer; }
+  .cluster:hover { border-color:var(--acc); }
+  .cluster.sel { border-color:var(--ok); background:#1c2b22; }
+  .cluster canvas { width:100%; height:40px; display:block; }
+  .meta { color:var(--dim); font-size:12px; display:flex; gap:9px;
+          align-items:center; flex-wrap:wrap; }
+  .dot { width:10px; height:10px; border-radius:5px; display:inline-block; }
+  .mark { border:1px solid var(--line); border-radius:6px; padding:6px 8px;
+          margin-bottom:6px; font-size:12px; }
+  kbd { background:#232a33; border:1px solid var(--line); border-radius:4px;
+        padding:0 5px; font-size:11px; }
+  #help { color:var(--dim); font-size:12px; margin-top:10px; line-height:1.6; }
+  #anchprog { position:fixed; top:56px; right:12px; z-index:40;
+    background:var(--panel); border:1px solid var(--anchor); border-radius:8px;
+    padding:10px; width:260px; display:none; box-shadow:0 4px 18px #000a; }
+  #anchprog h4 { margin:0 0 6px; font-size:12px; color:var(--anchor);
+    text-transform:uppercase; letter-spacing:.05em; }
+  #anchprog canvas { width:100%; height:56px; display:block;
+    background:#0e1116; border-radius:4px; }
+  #anchprog .row { display:flex; justify-content:space-between;
+    align-items:center; margin-top:6px; font-size:12px; color:var(--dim); }
+  #qpanel { position:fixed; top:56px; left:12px; z-index:40; width:340px;
+    max-height:80vh; overflow-y:auto; background:var(--panel);
+    border:1px solid var(--acc); border-radius:8px; padding:10px;
+    display:none; box-shadow:0 4px 18px #000a; font-size:12px; }
+  #qpanel h4 { margin:0 0 6px; font-size:12px; color:var(--acc);
+    text-transform:uppercase; letter-spacing:.05em; }
+  .qjob { border:1px solid var(--line); border-radius:6px; padding:6px 8px;
+    margin-bottom:6px; }
+  .qjob .bar { height:5px; background:#232a33; border-radius:3px;
+    margin-top:5px; overflow:hidden; }
+  .qjob .bar div { height:100%; background:var(--ok); width:0; }
+  .qjob.failed { border-color:var(--warn); }
+  .qjob.running { border-color:var(--ok); }
+  .qname { display:flex; justify-content:space-between; gap:6px; }
+  .qcand { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  #qlog { color:var(--dim); font:10px/1.4 monospace; white-space:pre-wrap;
+    margin-top:4px; max-height:64px; overflow:hidden; }
+  #livemodal { position:fixed; inset:0; z-index:60; display:none;
+    background:rgba(10,13,17,.82); }
+  #livebox { position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%); width:min(880px,92vw);
+    background:var(--panel); border:1px solid var(--acc); border-radius:10px;
+    padding:12px; box-shadow:0 10px 40px #000c; }
+  #livebox h4 { margin:0 0 8px; font-size:13px; color:var(--acc);
+    text-transform:uppercase; letter-spacing:.05em; display:flex;
+    justify-content:space-between; align-items:center; }
+  #livevidwrap { position:relative; background:#000; border-radius:8px; }
+  #livevid { width:100%; max-height:52vh; display:block; border-radius:8px; }
+  #livecv { position:absolute; inset:0; pointer-events:none; }
+  #livespark { width:100%; height:54px; display:block; background:#0e1116;
+    border-radius:6px; margin-top:8px; }
+  #livefoot { display:flex; justify-content:space-between; align-items:center;
+    margin-top:8px; font-size:12px; color:var(--dim); }
+  #offsetrow { display:flex; justify-content:space-between; align-items:center;
+    font-size:12px; margin-bottom:6px; }
+  #offsetMs { width:56px; }
+  #shiftrow { display:flex; justify-content:space-between; align-items:center;
+    gap:6px; margin-top:6px; padding-top:6px;
+    border-top:1px solid #ffffff14; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <select id="vidsel"></select>
+  <span id="speed"></span>
+  <button id="btnQueue">queue</button>
+  <button id="btnLasso">lasso <kbd>L</kbd></button>
+  <button id="btnAnchor">anchor <kbd>N</kbd></button>
+  <button id="btnOv">overlay <kbd>O</kbd></button>
+  <button id="btnCompare">compare to human <kbd>C</kbd></button>
+  <span id="anchbar" style="display:none">
+    <label>mode
+      <select id="anchMode">
+        <option value="oscillation">oscillation</option>
+        <option value="distance">distance (2 pts)</option>
+        <option value="auto">auto-select</option>
+      </select></label>
+    <label>pts/anchor <input id="anchPts" type="number" min="3" max="9" value="5" style="width:42px"></label>
+    <button id="btnAnchStop">stop track</button>
+  </span>
+  <button class="primary" id="btnExport">export <kbd>E</kbd></button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="left">
+    <div id="vidwrap">
+      <video id="vid" controls preload="metadata"></video>
+      <canvas id="ov"></canvas>
+    </div>
+    <canvas id="plot" class="strip"></canvas>
+    <canvas id="lanes" class="strip"></canvas>
+    <div id="livemodal">
+    <div id="livebox">
+      <h4><span id="liveTitle">live</span>
+        <span style="color:var(--dim);font-weight:400">Esc = stop</span></h4>
+      <div id="livevidwrap">
+        <video id="livevid" muted></video>
+        <canvas id="livecv"></canvas>
+      </div>
+      <canvas id="livespark"></canvas>
+      <div id="livefoot">
+        <span id="liveInfo">waiting for first window...</span>
+        <span><button id="liveStop">stop</button>
+              <button id="liveClose">close</button></span>
+      </div>
+    </div>
+  </div>
+  <div id="qpanel">
+    <h4>batch queue <a href="/queue" target="_blank" style="float:right;font-weight:400">full page &nearr;</a></h4>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <button id="qStart">start</button><button id="qStop">stop</button>
+      <button id="qClear">clear done</button>
+      <label style="color:var(--dim)"><input type="checkbox" id="qPose" checked> pose</label>
+    </div>
+    <div id="qJobs"></div>
+    <h4 style="margin-top:10px">unprocessed videos
+      <button id="qScan" style="margin-left:6px">scan</button>
+      <button id="qAddAll" style="margin-left:2px">add all</button></h4>
+    <div id="qCands" style="color:var(--dim)">press scan</div>
+  </div>
+  <div id="anchprog">
+    <h4>anchor run</h4>
+    <canvas id="anchProgCv"></canvas>
+    <div class="row"><span id="anchProgTxt">starting...</span>
+      <button id="anchProgStop">stop</button></div>
+  </div>
+  <div id="chapedit"><span style="color:var(--dim)">no chapter selected —
+      click a block in the chapter lane</span></div>
+  </div>
+  <div id="side">
+    <h3>groups @ <span id="wlabel">-</span></h3>
+    <div id="clusters"></div>
+    <h3>compare</h3>
+    <div id="offsetrow" title="global timing shift applied to every exported
+action. CV timing is per-window accurate but the whole script can sit at a
+constant lead/lag vs where a human places points. C measures the optimum.">
+      <span style="color:var(--dim)">global offset</span>
+      <span><input id="offsetMs" type="number" step="5" value="0"> ms</span>
+    </div>
+    <div id="compare" style="color:var(--dim);font-size:12px">press C</div>
+    <div id="help">
+      <b>workflow</b>: speed up playback, watch. action starts &rarr; pause,
+      scrub back, click the group (card or directly on the video). it follows
+      until your next pick. <kbd>I</kbd> idle from here &middot;
+      <kbd>A</kbd> auto from here &middot; <kbd>L</kbd> lasso a custom group
+      &middot; <kbd>N</kbd> anchor: place points on a body part and CoTracker
+      tracks them until they leave the ROI (rescue for regions with no grid
+      points). modes: oscillation (1 pt), distance (2 pts), auto-select (lasso).
+      chapters + range live in the lanes below the plot: click a block to
+      edit its range/invert/delete.<br>
+      <kbd>space</kbd> play &middot; <kbd>[</kbd><kbd>]</kbd> speed &middot;
+      <kbd>&larr;&rarr;</kbd> &plusmn;2s &middot; <kbd>shift+&larr;&rarr;</kbd>
+      fine &middot; <kbd>,</kbd><kbd>.</kbd> window hop &middot;
+      <kbd>V</kbd> invert chapter &middot; <kbd>del</kbd> delete chapter
+    </div>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const vid = $("#vid");
+const plot = $("#plot"), pctx = plot.getContext("2d");
+const lanes = $("#lanes"), lctx = lanes.getContext("2d");
+const ov = $("#ov"), octx = ov.getContext("2d");
+
+let videos = [], cur = null, sig = null;
+let edits = { picks: [], windows: {}, regions: [] };
+let windows = [], selW = -1, selChap = -1, duration = 1;
+let selChaps = new Set();
+let dirty = null, showOv = true, lassoOn = false, lassoPoly = [];
+let anchorOn = false, anchorPts = [], anchoring = false;
+let lassoAbort = false;  // anchor placement + in-flight state
+let lostAt = [], lastPuck = 50, reviewedTo = 0;   // reviewedTo = furthest playhead reached
+const ptsCache = new Map();
+const regPtsCache = new Map();   // "wkey|src" -> promise of window_points
+const SPEEDS = [0.5, 1, 1.5, 2, 3, 4, 6, 8];
+
+async function j(url, opts) { const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text()); return r.json(); }
+const fmt = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
+
+function clusterColor(centroid) {
+  if (!centroid) return "#8a94a1";
+  const W = sig?.w || 1024, H = sig?.h || 576;
+  const hue = ((centroid[0] / W) * 300 + (centroid[1] / H) * 60) % 360;
+  return `hsl(${hue | 0}, 68%, 62%)`;
+}
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j2 = poly.length - 1; i < poly.length; j2 = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j2].x, yj = poly[j2].y;
+    if ((yi > y) !== (yj > y) &&
+        x < (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+// ------------------------------------------------------------ load
+async function loadList() {
+  videos = await j("/api/videos");
+  $("#vidsel").innerHTML = videos.map(v =>
+    `<option value="${v.id}">${v.name}${v.has_edits ? " *" : ""}</option>`).join("");
+  if (videos.length) loadVideo(videos[0].id);
+  else $("#status").textContent =
+    "no processed videos (need <video> + <video>.signal.json)";
+}
+
+async function loadVideo(id) {
+  cur = id; ptsCache.clear(); lastPuck = 50; selChap = -1; reviewedTo = 0;
+  if (anchorOn) $("#btnAnchor").click();
+  if (lassoOn) $("#btnLasso").click();
+  sig = await j(`/api/signal/${encodeURIComponent(id)}`);
+  edits = await j(`/api/edits/${encodeURIComponent(id)}`);
+  windows = [];
+  for (const w of sig.scenes) {
+    const T = w.clusters?.length ? w.clusters[0].values.length
+              : (w.final_values?.length || 0);
+    const t0 = w.t0_ms / 1000, t1 = t0 + T / sig.fps;
+    windows.push({ key: `${w.scene}_${w.window}`, t0, t1, w });
+  }
+  duration = windows.length ? windows[windows.length-1].t1 : 1;
+  migrate();
+  $("#offsetMs").value = edits.offset_ms || 0;
+  vid.src = `/api/video/${encodeURIComponent(id)}`;
+  selW = 0;
+  compilePicks(); renderAll();
+}
+
+// one-time migration from the older lanes model (cluster_marks/range_marks/
+// segments) into picks. Regions carry over unchanged.
+function migrate() {
+  if (!edits.picks) edits.picks = [];
+  if (!edits.windows) edits.windows = {};
+  if (!edits.regions) edits.regions = [];
+  if (edits.picks.length || (!edits.cluster_marks && !edits.segments)) {
+    delete edits.cluster_marks; delete edits.range_marks; delete edits.segments;
+    return;
+  }
+  const picks = [];
+  for (const m of (edits.cluster_marks || [])) {
+    const win = windows.find(w => m.t >= w.t0 && m.t < w.t1);
+    const c = win?.w.clusters?.[m.cluster];
+    picks.push({ t: m.t, type: "group", cluster: m.cluster,
+                 label: c?.label || `#${m.cluster}` });
+  }
+  for (const s of (edits.segments || [])) {
+    if (!s.idle) continue;
+    picks.push({ t: s.start_s, type: "idle" });
+    // restore whatever pick governed before the span, after it ends
+    const prev = [...picks].filter(p => p.t < s.start_s && p.type !== "idle")
+                           .sort((a, b) => b.t - a.t)[0];
+    if (prev) picks.push({ ...prev, t: s.end_s });
+  }
+  const rms = [...(edits.range_marks || [])].sort((a, b) => a.t - b.t);
+  for (const p of picks) {
+    let m = null;
+    for (const r of rms) if (p.t >= r.t) m = r; else break;
+    if (m) { p.min = m.min ?? 0; p.max = m.max ?? 100; }
+  }
+  edits.picks = picks.sort((a, b) => a.t - b.t);
+  delete edits.cluster_marks; delete edits.range_marks; delete edits.segments;
+}
+
+// ------------------------------------------------------------ chapters
+function chapters() {
+  const ps = [...edits.picks].sort((a, b) => a.t - b.t);
+  if (!ps.length || ps[0].t > 0.01)
+    ps.unshift({ t: 0, type: "idle", implicit: true });
+  // cap the trailing chapter at reviewedTo (furthest playhead reached) so a
+  // pick doesn't fill the timeline all the way to the end of the video — only
+  // up to where you've actually reviewed. Picks beyond reviewedTo still exist
+  // in edits.picks but their visual block stops at the review frontier.
+  const end = Math.min(duration, Math.max(reviewedTo, ps[ps.length - 1].t + 0.1));
+  return ps.map((p, i) => ({
+    ...p, idx: i, ta: p.t,
+    tb: i + 1 < ps.length ? ps[i+1].t : end,
+  }));
+}
+function chapterAt(t) {
+  const cs = chapters();
+  for (let i = cs.length - 1; i >= 0; i--)
+    if (t >= cs[i].ta) return cs[i];
+  return cs[0];
+}
+function realPickOf(chap) {          // the entry inside edits.picks (not implicit)
+  if (chap.implicit) return null;
+  return edits.picks.find(p => Math.abs(p.t - chap.ta) < 1e-6 && p.type === chap.type);
+}
+
+// group picks compile into per-window cluster assignments by centroid follow
+function compilePicks() {
+  for (const k of Object.keys(edits.windows)) {
+    delete edits.windows[k].cluster;
+    if (!Object.keys(edits.windows[k]).length) delete edits.windows[k];
+  }
+  lostAt = [];
+  const diag = Math.hypot(sig?.w || 768, sig?.h || 432);
+  for (const chap of chapters()) {
+    if (chap.type !== "group") continue;
+    let wi = windows.findIndex(w => chap.ta >= w.t0 && chap.ta < w.t1);
+    if (wi < 0)   // pick sits in a coverage gap: anchor on the next window
+      wi = windows.findIndex(w => w.t0 >= chap.ta && w.t0 < chap.tb);
+    if (wi < 0) continue;
+    let ref = windows[wi].w.clusters?.[chap.cluster];
+    if (!ref) continue;
+    const scene = windows[wi].w.scene;
+    setCluster(windows[wi], chap.cluster);
+    let misses = 0;
+    for (let k = wi + 1; k < windows.length; k++) {
+      const w2 = windows[k];
+      if (w2.t0 >= chap.tb) break;
+      if (w2.w.scene !== scene) { lostAt.push({ t: w2.t0 }); break; }
+      let best = null, bd = 0.16 * diag;
+      for (const c of (w2.w.clusters || [])) {
+        const d = Math.hypot(c.centroid[0] - ref.centroid[0],
+                             c.centroid[1] - ref.centroid[1]);
+        const lblOk = !c.label || !ref.label || c.label === ref.label;
+        if (d < bd && lblOk) { bd = d; best = c; }
+      }
+      if (!best && ref.label) {
+        // fallback: a single same-label cluster within a wider radius
+        const same = (w2.w.clusters || []).filter(c => c.label === ref.label);
+        if (same.length === 1) {
+          const d = Math.hypot(same[0].centroid[0] - ref.centroid[0],
+                               same[0].centroid[1] - ref.centroid[1]);
+          if (d < 0.30 * diag) best = same[0];
+        }
+      }
+      if (!best) {
+        // grace: skip up to 2 bad clustering windows before declaring lost
+        misses++;
+        if (misses >= 3) { lostAt.push({ t: w2.t0 }); break; }
+        continue;
+      }
+      misses = 0;
+      setCluster(w2, best.id);
+      ref = best;
+    }
+  }
+}
+function setCluster(win, ci) {
+  const ed = edits.windows[win.key] || (edits.windows[win.key] = {});
+  ed.cluster = ci;
+}
+
+// values a chapter produces inside one window (0..1), or null for silent
+function resolveVals(win, chap) {
+  if (!chap || chap.type === "idle") return null;
+  const w = win.w;
+  let vals = null;
+  if (chap.type === "lasso" || chap.type === "anchor") {
+    const r = edits.regions.find(
+      r => r.scene === w.scene && r.window === w.window);
+    vals = r?.values || null;
+  } else if (chap.type === "auto") {
+    const ci = w.chosen_cluster;
+    if (ci != null)
+      vals = w.final_values || w.clusters?.[ci]?.values || null;
+  } else {                                   // group
+    const we = edits.windows[win.key] || {};
+    const ci = we.cluster;
+    if (ci != null && w.clusters?.[ci])
+      vals = (ci === w.chosen_cluster && w.final_values)
+             ? w.final_values : w.clusters[ci].values;
+  }
+  if (!vals) return null;
+  let out = chap.invert ? vals.map(x => 1 - x) : vals;
+  if (chap.stretch) out = stretchVals(out, (chap.stretch_min ?? 0) / 100);
+  return out;
+}
+
+// JS mirror of the server's _stretch_actions (per window - close enough
+// for preview; export does it over the whole chapter)
+function stretchVals(vals, minAmp = 0) {
+  const n = vals.length;
+  if (n < 3) return vals;
+  const ex = [0];
+  for (let i = 1; i < n - 1; i++)
+    if ((vals[i] - vals[i-1]) * (vals[i+1] - vals[i]) < 0) ex.push(i);
+  ex.push(n - 1);
+  const loG = Math.min(...vals), hiG = Math.max(...vals);
+  const tgt = {};
+  for (let j = 1; j < ex.length - 1; j++) {
+    const i = ex[j];
+    const amp = Math.min(Math.abs(vals[i] - vals[ex[j-1]]),
+                         Math.abs(vals[i] - vals[ex[j+1]]));
+    if (amp < minAmp) { tgt[i] = vals[i]; continue; }   // tiny wiggle: keep
+    tgt[i] = vals[i] > vals[ex[j-1]] ? 1 : 0;
+  }
+  for (const i of [ex[0], ex[ex.length-1]])
+    tgt[i] = hiG === loG ? 0 : (vals[i] - loG) / (hiG - loG);
+  const out = vals.slice();
+  for (let j = 0; j < ex.length - 1; j++) {
+    const a = ex[j], b = ex[j+1];
+    const va = vals[a], vb = vals[b], ta = tgt[a], tb = tgt[b];
+    for (let i = a; i <= b; i++)
+      out[i] = vb === va ? tb : ta + (vals[i] - va) * (tb - ta) / (vb - va);
+  }
+  return out;
+}
+function playingWindow() {
+  const t = vid.currentTime;
+  return windows.find(w => t >= w.t0 && t < w.t1);
+}
+function chapColor(chap) {
+  if (chap.type === "idle") return "#5a6472";
+  if (chap.type === "lasso") return "#ffd166";
+  if (chap.type === "anchor") return "#ff9f43";
+  if (chap.type === "auto") return "#4da3ff";
+  const win = windows.find(w => chap.ta >= w.t0 && chap.ta < w.t1)
+           || windows.find(w => w.t0 >= chap.ta);
+  return clusterColor(win?.w.clusters?.[chap.cluster]?.centroid);
+}
+function chapLabel(chap) {
+  if (chap.type === "idle") return "idle";
+  if (chap.type === "lasso") return "lasso";
+  if (chap.type === "anchor") return "anchor";
+  if (chap.type === "auto") return "auto";
+  return chap.label || `#${chap.cluster}`;
+}
+
+// ------------------------------------------------------------ plot strip
+function sizeCanvas(cv, cx) {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * devicePixelRatio) {
+    cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+    cx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  }
+  return [W, H];
+}
+const x2t = (px, W) => px / W * duration;
+const t2x = (t, W) => t / duration * W;
+
+function drawPlot() {
+  const [W, H] = sizeCanvas(plot, pctx);
+  pctx.clearRect(0, 0, W, H);
+  const pt = 6, ph = H - 12;
+  const ymap = v => pt + ph * (1 - v / 100);
+  for (const chap of chapters()) {
+    const lo = chap.min ?? 0, hi = chap.max ?? 100;
+    if (chap.type === "idle") {
+      pctx.strokeStyle = "#5a6472"; pctx.lineWidth = 1;
+      pctx.beginPath();
+      pctx.moveTo(t2x(chap.ta, W), ymap(50));
+      pctx.lineTo(t2x(chap.tb, W), ymap(50));
+      pctx.stroke();
+      continue;
+    }
+    pctx.strokeStyle = chapColor(chap); pctx.lineWidth = 1.2;
+    for (const win of windows) {
+      if (win.t1 <= chap.ta || win.t0 >= chap.tb) continue;
+      const vals = resolveVals(win, chap);
+      const a = Math.max(win.t0, chap.ta), b = Math.min(win.t1, chap.tb);
+      if (!vals) {          // lost/uncovered: silent gap marker
+        pctx.save(); pctx.strokeStyle = "#3a424d"; pctx.setLineDash([2, 4]);
+        pctx.beginPath();
+        pctx.moveTo(t2x(a, W), ymap(50)); pctx.lineTo(t2x(b, W), ymap(50));
+        pctx.stroke(); pctx.restore();
+        continue;
+      }
+      pctx.beginPath();
+      const k0 = Math.max(0, Math.floor((a - win.t0) * sig.fps));
+      const k1 = Math.min(vals.length - 1, Math.ceil((b - win.t0) * sig.fps));
+      const px0 = t2x(a, W), px1 = t2x(b, W);
+      const step = Math.max(1, Math.floor((k1 - k0) / Math.max(2, px1 - px0)));
+      let first = true;
+      for (let k = k0; k <= k1; k += step) {
+        const px = t2x(win.t0 + k / sig.fps, W);
+        const py = ymap(lo + vals[k] * (hi - lo));
+        first ? pctx.moveTo(px, py) : pctx.lineTo(px, py);
+        first = false;
+      }
+      pctx.stroke();
+    }
+  }
+  // playhead
+  pctx.strokeStyle = "#ff5d5d"; pctx.lineWidth = 1.2;
+  const px = t2x(vid.currentTime || 0, W);
+  pctx.beginPath(); pctx.moveTo(px, 0); pctx.lineTo(px, H); pctx.stroke();
+}
+
+// ------------------------------------------------------------ lanes strip
+const LANE = { chap: [4, 34], range: [42, 26], ruler: [74, 16] };
+function drawLanes() {
+  const [W, H] = sizeCanvas(lanes, lctx);
+  lctx.clearRect(0, 0, W, H);
+  const cs = chapters();
+  // chapter lane
+  const [cy, chh] = LANE.chap;
+  for (const chap of cs) {
+    const a = t2x(chap.ta, W), b = t2x(chap.tb, W);
+    lctx.fillStyle = chapColor(chap);
+    lctx.globalAlpha = chap.type === "idle" ? 0.35 : 0.8;
+    lctx.fillRect(a, cy, Math.max(1, b - a - 1), chh);
+    lctx.globalAlpha = 1;
+    if (selChaps.has(chap.idx) || chap.idx === selChap) {
+      lctx.strokeStyle = "#fff"; lctx.lineWidth = 1.5;
+      lctx.strokeRect(a + 0.5, cy + 0.5, Math.max(1, b - a - 2), chh - 1);
+    }
+    if (b - a > 34) {
+      lctx.fillStyle = "#0e1116"; lctx.font = "600 11px system-ui";
+      lctx.fillText(chapLabel(chap).slice(0, Math.floor((b - a) / 7)),
+                    a + 4, cy + chh / 2 + 4);
+    }
+  }
+  // lost ticks
+  lctx.fillStyle = "#ff5d5d";
+  for (const L of lostAt)
+    lctx.fillRect(t2x(L.t, W) - 1, cy - 3, 2, chh + 6);
+  // range lane
+  const [ry, rh] = LANE.range;
+  lctx.strokeStyle = "rgba(77,163,255,.7)";
+  for (const chap of cs) {
+    const a = t2x(chap.ta, W), b = t2x(chap.tb, W);
+    const lo = chap.min ?? 0, hi = chap.max ?? 100;
+    const yLo = ry + rh * (1 - lo / 100), yHi = ry + rh * (1 - hi / 100);
+    lctx.fillStyle = "rgba(77,163,255,.12)";
+    lctx.fillRect(a, yHi, Math.max(1, b - a - 1), yLo - yHi);
+    lctx.beginPath();
+    lctx.moveTo(a, yLo); lctx.lineTo(b, yLo);
+    lctx.moveTo(a, yHi); lctx.lineTo(b, yHi);
+    lctx.stroke();
+  }
+  // ruler
+  const [uy] = LANE.ruler;
+  lctx.fillStyle = "#8a94a1"; lctx.font = "10px system-ui";
+  const stepS = duration > 900 ? 120 : duration > 300 ? 60 : 30;
+  for (let t = 0; t <= duration; t += stepS)
+    lctx.fillText(fmt(t), t2x(t, W) + 2, uy + 11);
+  // playhead
+  lctx.strokeStyle = "#ff5d5d"; lctx.lineWidth = 1.2;
+  const px = t2x(vid.currentTime || 0, W);
+  lctx.beginPath(); lctx.moveTo(px, 0); lctx.lineTo(px, H); lctx.stroke();
+}
+
+plot.addEventListener("pointerdown", e => {
+  vid.currentTime = x2t(e.offsetX, plot.clientWidth);
+});
+lanes.addEventListener("pointerdown", e => {
+  const t = x2t(e.offsetX, lanes.clientWidth);
+  if (e.offsetY >= LANE.chap[0] && e.offsetY <= LANE.chap[0] + LANE.chap[1] + 4) {
+    const chap = chapterAt(t);
+    if (e.ctrlKey || e.metaKey) {
+      if (selChaps.has(chap.idx)) selChaps.delete(chap.idx);
+      else selChaps.add(chap.idx);
+      selChap = chap.idx;
+    } else {
+      selChaps = new Set([chap.idx]);
+      selChap = chap.idx;
+    }
+    renderChapEdit(); drawLanes();
+  } else {
+    vid.currentTime = t;
+  }
+});
+lanes.addEventListener("dblclick", e => {
+  vid.currentTime = x2t(e.offsetX, lanes.clientWidth);
+});
+
+// ------------------------------------------------------------ chapter editor
+// find the time+value of the chapter's highest peak and lowest trough
+// (raw 0..1 motion, before range mapping - that's what you're calibrating)
+function chapExtremes(chap) {
+  let hi = { v: -1, t: null }, lo = { v: 2, t: null };
+  if (chap.type === "idle") return null;
+  for (const win of windows) {
+    if (win.t1 <= chap.ta || win.t0 >= chap.tb) continue;
+    const vals = resolveVals(win, chap);
+    if (!vals) continue;
+    const k0 = Math.max(0, Math.floor((Math.max(win.t0, chap.ta) - win.t0) * sig.fps));
+    const k1 = Math.min(vals.length - 1,
+      Math.ceil((Math.min(win.t1, chap.tb) - win.t0) * sig.fps));
+    for (let k = k0; k <= k1; k++) {
+      const t = win.t0 + k / sig.fps;
+      if (vals[k] > hi.v) hi = { v: vals[k], t };
+      if (vals[k] < lo.v) lo = { v: vals[k], t };
+    }
+  }
+  return hi.t === null ? null : { hi, lo };
+}
+
+function renderChapEdit() {
+  const el = $("#chapedit");
+  const chap = chapters().find(c => c.idx === selChap);
+  if (!chap) {
+    el.innerHTML = `<span style="color:var(--dim)">no chapter selected —
+      click a block in the chapter lane</span>`;
+    return;
+  }
+  el.innerHTML = `
+    <span class="swatch" style="background:${chapColor(chap)}"></span>
+    <b>${chapLabel(chap)}</b>
+    <span style="color:var(--dim)">${fmt(chap.ta)}–${fmt(chap.tb)}</span>
+    min <input type="number" min="0" max="100" value="${chap.min ?? 0}" id="chMin">
+    max <input type="number" min="0" max="100" value="${chap.max ?? 100}" id="chMax">
+    <label><input type="checkbox" id="chInv" ${chap.invert ? "checked" : ""}> invert</label>
+    <label title="amplify every stroke to full range: peaks to max, valleys to min">
+      <input type="checkbox" id="chStr" ${chap.stretch ? "checked" : ""}> stretch</label>
+    <label title="strokes smaller than this (0-100) are left unstretched">min
+      <input type="number" id="chStrMin" min="0" max="60" style="width:44px"
+        value="${chap.stretch_min ?? 0}"></label>
+    <button id="chCopy" title="copy min/max/invert/stretch from previous chapter">copy prev</button>
+    <button id="chGo">go</button>
+    <span id="chExt"></span>
+    ${chap.implicit ? "" : '<button id="chDel">delete</button>'}`;
+  const ext = chapExtremes(chap);
+  if (ext) {
+    $("#chExt").innerHTML =
+      `<button id="chPeak" title="seek to the chapter's highest point">peak @ ${fmt(ext.hi.t)}</button>
+       <button id="chLow" title="seek to the chapter's lowest point">low @ ${fmt(ext.lo.t)}</button>`;
+    $("#chPeak").onclick = () => { vid.pause(); vid.currentTime = ext.hi.t; };
+    $("#chLow").onclick = () => { vid.pause(); vid.currentTime = ext.lo.t; };
+  }
+  const pick = realPickOf(chap);
+  const selPicks = chapters().filter(c => selChaps.has(c.idx))
+    .map(realPickOf).filter(Boolean);
+  const targets = selPicks.length > 1 ? selPicks : (pick ? [pick] : []);
+  if (selPicks.length > 1) {
+    el.insertAdjacentHTML("afterbegin",
+      `<b style="color:var(--lasso)">${selPicks.length} chapters</b>`);
+  }
+  $("#chMin").onchange = e => {
+    if (targets.length) targets.forEach(p => p.min = +e.target.value);
+    else edits.picks.unshift({ t: 0, type: "idle", min: +e.target.value });
+    saveSoon(); renderAll();
+  };
+  $("#chMax").onchange = e => { targets.forEach(p => p.max = +e.target.value); saveSoon(); renderAll(); };
+  $("#chInv").onchange = e => { targets.forEach(p => p.invert = e.target.checked || undefined); saveSoon(); renderAll(); };
+  $("#chStr").onchange = e => { targets.forEach(p => p.stretch = e.target.checked || undefined); saveSoon(); renderAll(); };
+  $("#chStrMin").onchange = e => { targets.forEach(p => p.stretch_min = +e.target.value || undefined); saveSoon(); renderAll(); };
+  $("#chCopy").onclick = () => {
+    if (!targets.length) return;
+    const cs = chapters();
+    const earliest = Math.min(...targets.map(p => p.t));
+    const prev = cs.filter(c => c.ta < earliest).pop();
+    if (!prev) { $("#status").textContent = "no previous chapter"; return; }
+    for (const p of targets) {
+      p.min = prev.min ?? 0; p.max = prev.max ?? 100;
+      p.invert = prev.invert || undefined;
+      p.stretch = prev.stretch || undefined;
+      p.stretch_min = prev.stretch_min || undefined;
+    }
+    saveSoon(); renderAll();
+    $("#status").textContent =
+      `copied range from ${chapLabel(prev)} to ${targets.length} chapter(s)`;
+  };
+  $("#chGo").onclick = () => { vid.currentTime = chap.ta + 0.01; };
+  const del = $("#chDel");
+  if (del) del.onclick = () => {
+    const i = edits.picks.indexOf(pick);
+    if (i >= 0) edits.picks.splice(i, 1);
+    selChap = -1;
+    compilePicks(); saveSoon(); renderAll();
+  };
+}
+
+// ------------------------------------------------------------ picks
+function addPick(p) {
+  p.t = +p.t.toFixed(2);
+  const prev = chapterAt(p.t);
+  if (p.min == null) p.min = prev.min ?? 0;
+  if (p.max == null) p.max = prev.max ?? 100;
+  edits.picks = edits.picks.filter(q => Math.abs(q.t - p.t) > 0.3);
+  edits.picks.push(p);
+  edits.picks.sort((a, b) => a.t - b.t);
+  compilePicks(); saveSoon();
+  selChap = chapters().find(c => Math.abs(c.ta - p.t) < 1e-6)?.idx ?? -1;
+  renderAll();
+  const covered = Object.keys(edits.windows).filter(
+    k => "cluster" in edits.windows[k]).length;
+  $("#status").textContent =
+    `${p.type} pick @ ${fmt(p.t)}` +
+    (p.type === "group" ? ` — following (${covered} windows covered)` : "");
+}
+
+function pickGroup(ci) {
+  const win = playingWindow() || windows[selW];
+  if (!win) { $("#status").textContent = "no tracking window at playhead"; return; }
+  const c = win.w.clusters?.[ci];
+  if (!c) return;
+  addPick({ t: Math.max(win.t0, Math.min(vid.currentTime, win.t1 - 0.05)),
+            type: "group", cluster: ci, label: c.label || `#${ci}` });
+}
+
+// ------------------------------------------------------------ overlay
+function getPoints(win) {
+  const k = win.key;
+  if (!ptsCache.has(k)) {
+    ptsCache.set(k, j(`/api/points/${encodeURIComponent(cur)}/${win.w.scene}/${win.w.window}`)
+      .catch(() => null));
+    if (ptsCache.size > 24) ptsCache.delete(ptsCache.keys().next().value);
+  }
+  return ptsCache.get(k);
+}
+
+async function drawOverlay() {
+  const cw = vid.clientWidth, ch = vid.clientHeight;
+  if (!cw || !sig) return;
+  if (ov.width !== cw || ov.height !== ch) { ov.width = cw; ov.height = ch; }
+  octx.clearRect(0, 0, cw, ch);
+  const t = vid.currentTime;
+  const win = playingWindow();
+  const chap = chapterAt(t);
+
+  if (!win) {
+    octx.fillStyle = "#ff5d5d"; octx.font = "13px system-ui";
+    octx.fillText(`no tracking window at ${fmt(t)} (coverage gap)`, 12, 22);
+    return;
+  }
+  // motion puck: final device motion (chapter signal + range, idle holds)
+  let pos = null;
+  const vals = resolveVals(win, chap);
+  if (vals) {
+    const fi = Math.min(vals.length - 1,
+      Math.max(0, Math.round((t - win.t0) * sig.fps)));
+    const lo = chap.min ?? 0, hi = chap.max ?? 100;
+    pos = lo + vals[fi] * (hi - lo);
+  }
+  if (pos === null) pos = lastPuck; else lastPuck = pos;
+  const bx = cw - 26, trackTop = 12, trackH = ch - 60;
+  octx.fillStyle = "rgba(0,0,0,.35)";
+  octx.fillRect(bx - 6, trackTop, 12, trackH);
+  octx.fillStyle = "#ff5d5d";
+  octx.beginPath();
+  octx.arc(bx, trackTop + (1 - pos / 100) * trackH, 9, 0, 7); octx.fill();
+  // chapter badge
+  octx.fillStyle = chapColor(chap); octx.font = "600 12px system-ui";
+  octx.fillText(chapLabel(chap), 12, ch - 14);
+  // placed anchor markers — drawn BEFORE the showOv guard so placement
+  // feedback persists even when the point overlay is toggled off.
+  if (anchorOn && anchorPts.length && vid.videoWidth && sig) {
+    const sc = Math.min(cw / vid.videoWidth, ch / vid.videoHeight);
+    const bw = vid.videoWidth * sc, bh = vid.videoHeight * sc;
+    const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+    octx.fillStyle = "#ff9f43"; octx.font = "600 13px system-ui";
+    anchorPts.forEach((p, i) => {
+      const px = ox + p[0] / sig.w * bw, py = oy + p[1] / sig.h * bh;
+      octx.beginPath(); octx.arc(px, py, 7, 0, 7); octx.fill();
+      octx.fillStyle = "#0e1116";
+      octx.fillText(String(i + 1), px - 3, py + 4);
+      octx.fillStyle = "#ff9f43";
+    });
+  }
+
+  if (!showOv) return;
+  const data = await getPoints(win);
+  if (!data || data.error || !vid.videoWidth) return;
+  const scale = Math.min(cw / vid.videoWidth, ch / vid.videoHeight);
+  const bw = vid.videoWidth * scale, bh = vid.videoHeight * scale;
+  const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+  const nf = data.clusters[0]?.pts.length || 0;
+  const fi = Math.min(nf - 1, Math.max(0, Math.round((t - win.t0) * data.fps_s)));
+  const we = edits.windows[win.key] || {};
+  const chosen = chap.type === "group" ? we.cluster
+               : chap.type === "auto" ? win.w.chosen_cluster : -1;
+  // for a lasso chapter, build a set of global point indices that are part of
+  // the drawn region so the overlay can highlight exactly those points (the
+  // "what points are being used" feedback that was missing).
+  const lassoSet = chap.type === "lasso"
+    ? new Set(edits.regions.find(
+        r => r.scene === win.w.scene && r.window === win.w.window)?.indices || [])
+    : null;
+  let gi = 0;
+  for (const c of data.clusters) {
+    const frame = c.pts[fi];
+    if (!frame) continue;
+    octx.fillStyle = clusterColor(win.w.clusters?.[c.id]?.centroid);
+    for (let pi = 0; pi < frame.length; pi++) {
+      const [xx, yy] = frame[pi];
+      const isChosen = c.id === chosen || (lassoSet && lassoSet.has(gi));
+      octx.globalAlpha = isChosen ? 1 : 0.4;
+      octx.beginPath();
+      octx.arc(ox + xx / data.w * bw, oy + yy / data.h * bh,
+               isChosen ? 4 : 2.2, 0, 7);
+      octx.fill();
+      gi++;
+    }
+  }
+  octx.globalAlpha = 1;
+  if ((lassoOn || (anchorOn && $("#anchMode").value === "auto")) && lassoPoly.length >= 2) {
+    octx.strokeStyle = "#ffd166"; octx.lineWidth = 2;
+    octx.beginPath();
+    octx.moveTo(lassoPoly[0].x, lassoPoly[0].y);
+    for (let i = 1; i < lassoPoly.length; i++)
+      octx.lineTo(lassoPoly[i].x, lassoPoly[i].y);
+    octx.stroke();
+  }
+}
+
+// click a point group directly on the video = group pick
+vid.addEventListener("click", async e => {
+  if (lassoOn) return;
+  const rect = vid.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  if (my > vid.clientHeight - 44) return;      // native control bar
+  const win = playingWindow();
+  if (!win) return;
+  const data = await getPoints(win);
+  if (!data || data.error || !vid.videoWidth) return;
+  const cw = vid.clientWidth, ch = vid.clientHeight;
+  const scale = Math.min(cw / vid.videoWidth, ch / vid.videoHeight);
+  const bw = vid.videoWidth * scale, bh = vid.videoHeight * scale;
+  const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+  const nf = data.clusters[0]?.pts.length || 0;
+  const fi = Math.min(nf - 1, Math.max(0,
+    Math.round((vid.currentTime - win.t0) * data.fps_s)));
+  let bestC = null, bd = 28;
+  for (const c of data.clusters) {
+    const frame = c.pts[fi];
+    if (!frame) continue;
+    for (const [xx, yy] of frame) {
+      const d = Math.hypot(ox + xx / data.w * bw - mx,
+                           oy + yy / data.h * bh - my);
+      if (d < bd) { bd = d; bestC = c; }
+    }
+  }
+  if (bestC !== null) pickGroup(bestC.id);
+});
+
+// ------------------------------------------------------------ lasso
+$("#btnLasso").onclick = () => {
+  lassoOn = !lassoOn;
+  if (lassoOn && anchorOn) $("#btnAnchor").click();   // mutually exclusive
+  $("#btnLasso").classList.toggle("on", lassoOn);
+  ov.style.pointerEvents = (lassoOn || anchorOn) ? "auto" : "none";
+  $("#status").textContent = lassoOn ?
+    "lasso: draw around the points to follow" : "";
+};
+// ------------------------------------------------------------ anchor
+$("#btnAnchor").onclick = () => {
+  anchorOn = !anchorOn;
+  if (anchorOn && lassoOn) $("#btnLasso").click();
+  $("#btnAnchor").classList.toggle("on", anchorOn);
+  $("#anchbar").style.display = anchorOn ? "inline-flex" : "none";
+  ov.style.pointerEvents = (anchorOn || lassoOn) ? "auto" : "none";
+  anchorPts = [];                 // reset any half-placed anchors on toggle
+  if (anchorOn) {
+    const m = $("#anchMode").value;
+    $("#status").textContent = m === "distance"
+      ? "anchor: click 2 points (base + entry) to track their distance"
+      : m === "auto"
+      ? "anchor: draw around a region; clusterer picks the best points"
+      : "anchor: click a moving body part to track its oscillation";
+  } else $("#status").textContent = "";
+};
+// click-to-place anchor points on the overlay (oscillation + distance modes).
+// auto-select mode reuses the lasso freehand draw (handled in the lasso
+// pointerup when anchorOn + mode==auto).
+ov.addEventListener("click", e => {
+  if (!anchorOn || anchoring) return;
+  const m = $("#anchMode").value;
+  if (m === "auto") return;        // auto uses lasso draw, not click
+  // map canvas px -> scaled-frame px (data.w x data.h) so the backend gets
+  // coordinates in track space, matching make_support_grid.
+  const win = playingWindow();
+  if (!win) return;
+  const cw = vid.clientWidth, ch = vid.clientHeight;
+  const scale = Math.min(cw / vid.videoWidth, ch / vid.videoHeight);
+  const bw = vid.videoWidth * scale, bh = vid.videoHeight * scale;
+  const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+  const W = sig.w, H = sig.h;
+  const sx = (e.offsetX - ox) / bw * W;
+  const sy = (e.offsetY - oy) / bh * H;
+  anchorPts.push([sx, sy]);
+  drawOverlay();
+  const need = m === "distance" ? 2 : 1;
+  if (anchorPts.length >= need) startAnchorTrack();
+});
+$("#anchMode").onchange = () => {
+  anchorPts = [];
+  const m = $("#anchMode").value;
+  if (anchorOn) $("#status").textContent = m === "distance"
+    ? "anchor: click 2 points (base + entry) to track their distance"
+    : m === "auto"
+    ? "anchor: draw around a region; clusterer picks the best points"
+    : "anchor: click a moving body part to track its oscillation";
+};
+$("#btnAnchStop").onclick = () => {
+  if (!cur) return;
+  fetch(`/api/anchor_stop/${encodeURIComponent(cur)}`, { method: "POST" });
+  $("#status").textContent = "stopping at next window...";
+};
+// auto-select: a lasso polygon -> single anchor at its centroid, then the
+// normal anchor track flow (clusterer picks the best-correlated subset inside
+// the patch server-side via _derive_region_signal).
+async function anchorAutoFromLasso(poly) {
+  const win = playingWindow();
+  if (!win) return;
+  const cw = vid.clientWidth, ch = vid.clientHeight;
+  const scale = Math.min(cw / vid.videoWidth, ch / vid.videoHeight);
+  const bw = vid.videoWidth * scale, bh = vid.videoHeight * scale;
+  const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+  const W = sig.w, H = sig.h;
+  // polygon centroid in scaled-frame px
+  let cx = 0, cy = 0;
+  for (const p of poly) { cx += p.x; cy += p.y; }
+  cx = cx / poly.length; cy = cy / poly.length;
+  anchorPts = [[(cx - ox) / bw * W, (cy - oy) / bh * H]];
+  await startAnchorTrack();
+}
+async function startAnchorTrack() {
+  if (anchoring) return;
+  anchoring = true;
+  const win = playingWindow();
+  if (!win) { anchoring = false; return; }
+  const m = $("#anchMode").value;
+  const ptsN = +$("#anchPts").value || 5;
+  // ROI = bounding box of placed anchors, expanded ~30% margin, clamped.
+  const xs = anchorPts.map(p => p[0]), ys = anchorPts.map(p => p[1]);
+  const W = sig.w, H = sig.h;
+  const mx = Math.min(...xs), Mx = Math.max(...xs);
+  const my = Math.min(...ys), My = Math.max(...ys);
+  const dx = (Mx - mx) * 0.3 + 40, dy = (My - my) * 0.3 + 40;
+  const roi = [Math.max(0, mx - dx), Math.max(0, my - dy),
+               Math.min(W, Mx - mx + 2 * dx), Math.min(H, My - my + 2 * dy)];
+  const chapNow = chapterAt(vid.currentTime);
+  const invert = !!chapNow.invert;
+  $("#status").textContent = "anchor: loading CoTracker + tracking... (first window slow)";
+  openLive("anchor run", "anchor", () =>
+    fetch(`/api/anchor_stop/${encodeURIComponent(cur)}`, { method: "POST" }));
+  // clear old anchor regions + picks from the playhead forward in this scene
+  const scene = win.w.scene;
+  edits.regions = edits.regions.filter(
+    r => !(r.scene === scene && r.window >= win.w.window));
+  try {
+    const resp = await fetch(`/api/anchor_track/${encodeURIComponent(cur)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_s: vid.currentTime, scene,
+        queries: anchorPts, roi, mode: m, pts_per_anchor: ptsN, invert,
+      })});
+    if (!resp.ok) throw new Error(await resp.text());
+    // stream newline-delimited JSON: one window result per line
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", covered = 0, lostAt_t = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const r = JSON.parse(line);
+        if (r.done) break;
+        if (r.values) {
+          edits.regions.push({
+            scene, window: r.window, indices: null, src: "anchor",
+            values: r.values, n: r.n, dominant_hz: r.dominant_hz });
+          covered++;
+          if (r.pts) feedLive(
+            { t0: r.pts_t0_ms / 1000, fps_s: r.fps_s, pts: r.pts,
+              w: sig.w, h: sig.h, values: r.values },
+            r.dominant_hz ? `${r.dominant_hz}Hz` : "");
+        } else if (r.lost) {
+          lostAt_t = r.t0_ms / 1000;
+        }
+      }
+      reviewedTo = Math.max(reviewedTo, vid.currentTime);
+      renderAll();
+      $("#status").textContent = `anchor: tracking... ${covered} window(s) covered`;
+    }
+    addPick({ t: +Math.max(win.t0, Math.min(vid.currentTime, win.t1 - 0.05)).toFixed(2),
+              type: "anchor", mode: m, invert: invert || undefined });
+    if (lostAt_t) { lostAt.push({ t: lostAt_t }); }
+    $("#status").textContent = `anchor: tracked ${covered} window(s)` +
+      (lostAt_t ? ` (lost @ ${fmt(lostAt_t)})` : "");
+  } catch (err) {
+    $("#status").textContent = "anchor failed: " + err.message;
+  } finally {
+    anchoring = false;
+    anchorPts = [];
+    $("#liveInfo").textContent += "  — done";
+    setTimeout(() => closeLive(false), 2000);
+    drawOverlay();
+  }
+}
+
+// auto-select anchor mode reuses the lasso freehand draw. `drawing()` is true
+// when EITHER lasso mode OR anchor mode (auto) is capturing a polygon.
+const drawing = () => lassoOn || (anchorOn && $("#anchMode").value === "auto");
+ov.addEventListener("pointerdown", e => {
+  if (!drawing()) return;
+  lassoPoly = [{ x: e.offsetX, y: e.offsetY }];
+});
+ov.addEventListener("pointermove", e => {
+  if (!drawing() || !lassoPoly.length) return;
+  lassoPoly.push({ x: e.offsetX, y: e.offsetY });
+});
+ov.addEventListener("pointerup", async () => {
+  if (!drawing() || lassoPoly.length < 4) { lassoPoly = []; return; }
+  const poly = lassoPoly.slice();          // capture BEFORE clearing
+  lassoPoly = [];
+  // route to anchor auto-select if anchor mode owns the draw
+  if (anchorOn && $("#anchMode").value === "auto") {
+    await anchorAutoFromLasso(poly);
+    return;
+  }
+  const win = playingWindow();
+  const data = win ? await getPoints(win) : null;
+  if (!win || !data || data.error || !vid.videoWidth) return;
+  const t0pick = vid.currentTime;
+  const cw = vid.clientWidth, ch = vid.clientHeight;
+  const scale = Math.min(cw / vid.videoWidth, ch / vid.videoHeight);
+  const bw = vid.videoWidth * scale, bh = vid.videoHeight * scale;
+  const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+  const nf = data.clusters[0]?.pts.length || 0;
+  const fi = Math.min(nf - 1, Math.max(0,
+    Math.round((t0pick - win.t0) * data.fps_s)));
+  // global point index walk; remember which are inside + their positions
+  const selected = [];
+  let gi = 0, cx = 0, cy = 0;
+  for (const c of data.clusters) {
+    const frame = c.pts[fi];
+    if (!frame) continue;
+    for (const [xx, yy] of frame) {
+      const px = ox + xx / data.w * bw, py = oy + yy / data.h * bh;
+      if (pointInPoly(px, py, poly)) {
+        selected.push(gi); cx += xx; cy += yy;
+      }
+      gi++;
+    }
+  }
+  if (selected.length < 3) {
+    $("#status").textContent = `lasso caught ${selected.length} pts (need 3+)`;
+    return;
+  }
+  cx /= selected.length; cy /= selected.length;
+  $("#status").textContent = `lasso: ${selected.length} pts, deriving + following...`;
+  lassoAbort = false;
+  openLive("lasso follow", "lasso", () => { lassoAbort = true; });
+  const liveFeed = async (scene, window, t0, values) => {
+    try {
+      const rp = await j(`/api/window_points/${encodeURIComponent(cur)}`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ scene, window,
+          indices: edits.regions.find(r => r.scene === scene && r.window === window)?.indices,
+          source: "tracks" })});
+      feedLive({ t0, fps_s: rp.fps_s, pts: rp.pts, w: rp.w, h: rp.h, values });
+    } catch (e) { /* live view only */ }
+  };
+  try {
+    const chapNow = chapterAt(t0pick);
+    const invert = !!chapNow.invert;
+    const r0 = await j(`/api/region_signal/${encodeURIComponent(cur)}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ scene: win.w.scene, window: win.w.window,
+                             indices: selected, invert })});
+    edits.regions = edits.regions.filter(
+      r => !(r.scene === win.w.scene && r.window === win.w.window));
+    edits.regions.push({ scene: win.w.scene, window: win.w.window,
+                         indices: r0.indices || selected, src: "lasso",
+                         values: r0.values, n: r0.n,
+                         dominant_hz: r0.dominant_hz });
+    liveFeed(win.w.scene, win.w.window, win.t0, r0.values);
+    // walk forward until lost, scene end, or the next pick after t0pick
+    const nextPick = edits.picks.map(p => p.t).filter(t => t > t0pick + 0.3)
+                       .sort((a, b) => a - b)[0] ?? duration;
+    const radius = 0.16 * Math.hypot(data.w, data.h);
+    let ref = [cx, cy], followed = 0;
+    const wi0 = windows.indexOf(win);
+    for (let k = wi0 + 1; k < windows.length; k++) {
+      if (lassoAbort) break;
+      const w2 = windows[k];
+      if (w2.t0 >= nextPick || w2.w.scene !== win.w.scene) break;
+      const rf = await j(`/api/region_follow/${encodeURIComponent(cur)}`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ scene: w2.w.scene, window: w2.w.window,
+                               ref, radius, invert })});
+      if (rf.lost) { lostAt.push({ t: w2.t0 }); break; }
+      edits.regions = edits.regions.filter(
+        r => !(r.scene === w2.w.scene && r.window === w2.w.window));
+      edits.regions.push({ scene: w2.w.scene, window: w2.w.window,
+                           indices: rf.indices || null, src: "lasso",
+                           values: rf.values, n: rf.n,
+                           dominant_hz: rf.dominant_hz });
+      followed++;
+      liveFeed(w2.w.scene, w2.w.window, w2.t0, rf.values);
+    }
+    addPick({ t: Math.max(win.t0, Math.min(t0pick, win.t1 - 0.05)),
+              type: "lasso", invert: invert || undefined });
+    $("#status").textContent =
+      `lasso pick: ${selected.length} pts, followed ${followed} window(s)` +
+      (lassoAbort ? " (stopped)" : "");
+    setTimeout(() => closeLive(false), 2000);
+  } catch (err) {
+    $("#status").textContent = "lasso failed: " + err.message;
+  }
+});
+
+// ------------------------------------------------------------ side panel
+function spark(cv, vals, color) {
+  const c = cv.getContext("2d"), W = cv.width = cv.clientWidth * 2,
+        H = cv.height = 80;
+  c.strokeStyle = color; c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < vals.length; i++) {
+    const px = i / (vals.length - 1) * W, py = H - vals[i] * H;
+    i === 0 ? c.moveTo(px, py) : c.lineTo(px, py);
+  }
+  c.stroke();
+}
+
+function renderSide() {
+  const win = windows[selW];
+  const el = $("#clusters");
+  if (!win) { el.innerHTML = ""; return; }
+  const gap = !playingWindow();
+  $("#wlabel").textContent = `${fmt(win.t0)}-${fmt(win.t1)}` +
+    (gap ? " (gap - nearest window)" : "");
+  const chap = chapterAt(vid.currentTime);
+  const we = edits.windows[win.key] || {};
+  const chosen = chap.type === "group" ? we.cluster
+               : chap.type === "auto" ? win.w.chosen_cluster : -1;
+  el.innerHTML = "";
+  (win.w.clusters || []).forEach((c, ci) => {
+    const d = document.createElement("div");
+    d.className = "cluster" + (ci === chosen ? " sel" : "");
+    d.innerHTML = `<div class="meta">
+        <span class="dot" style="background:${clusterColor(c.centroid)}"></span>
+        <span>#${ci}</span>${c.label ? `<span style="color:var(--ok)">${c.label}</span>` : ""}
+        <span>score ${c.score}</span><span>${c.n_points} pts</span></div>
+      <canvas></canvas>`;
+    d.onclick = () => pickGroup(ci);
+    el.appendChild(d);
+    spark(d.querySelector("canvas"), c.values, clusterColor(c.centroid));
+  });
+}
+
+function renderCompare(m) {
+  const to = m.timing_offset_ms;
+  const cell = (k, v, c) =>
+    `<div style="display:flex;justify-content:space-between;padding:2px 0">
+       <span style="color:var(--dim)">${k}</span>
+       <span${c ? ` style="color:${c}"` : ""}>${v}</span></div>`;
+  const col = v => v >= .8 ? "var(--ok)" : v >= .6 ? "var(--acc)" : "var(--warn)";
+  $("#compare").innerHTML =
+    `<div class="mark" style="font-size:12px;line-height:1.5">
+      ${cell("precision", (m.precision*100).toFixed(1) + "%", col(m.precision))}
+      ${cell("recall", (m.recall*100).toFixed(1) + "%", col(m.recall))}
+      ${cell("tempo corr", m.tempo.correlation.toFixed(3))}
+      ${cell("offset", `${to.median > 0 ? "+" : ""}${to.median|0}ms`)}
+      ${cell("dir changes", `${m.direction_changes.pipe} vs ${m.direction_changes.human}`)}
+      ${cell("vs", m.human || "")}
+      ${shiftBlock(m.best_shift)}
+    </div>`;
+  const b = $("#btnApplyShift");
+  if (b) b.onclick = () => setOffset(+b.dataset.ms);
+}
+
+// suggested global timing shift, measured against the human script. The
+// exported funscript already has edits.offset_ms baked in, so the server
+// reports suggested_offset_ms as the absolute value to store.
+function shiftBlock(bs) {
+  if (!bs) return "";
+  const dp = (bs.precision - bs.base_precision) * 100;
+  const dr = (bs.recall - bs.base_recall) * 100;
+  if (Math.abs(bs.shift_ms) < 5 || (dp < 0.5 && dr < 0.5))
+    return `<div id="shiftrow"><span style="color:var(--dim)">offset</span>
+              <span style="color:var(--ok)">already optimal</span></div>`;
+  const s = bs.suggested_offset_ms;
+  return `<div id="shiftrow">
+      <span style="color:var(--dim)">best offset
+        <b style="color:var(--fg)">${s > 0 ? "+" : ""}${s}ms</b></span>
+      <button id="btnApplyShift" data-ms="${s}">apply
+        ${dp > 0 ? `+${dp.toFixed(1)}/${dr > 0 ? "+" : ""}${dr.toFixed(1)}pts` : ""}
+      </button></div>`;
+}
+
+function setOffset(ms) {
+  edits.offset_ms = Math.round(ms) || 0;
+  $("#offsetMs").value = edits.offset_ms;
+  saveSoon();
+  $("#status").textContent =
+    `global offset ${edits.offset_ms > 0 ? "+" : ""}${edits.offset_ms}ms `
+    + "— press E to re-export, C to re-score";
+}
+
+function renderAll() { renderSide(); renderChapEdit(); drawPlot(); drawLanes(); }
+
+// ------------------------------------------------------------ header actions
+function renderSpeed() {
+  $("#speed").innerHTML = SPEEDS.map(s =>
+    `<button data-s="${s}" class="${vid.playbackRate === s ? "on" : ""}">${s}x</button>`).join("");
+  for (const b of $("#speed").querySelectorAll("button"))
+    b.onclick = () => { vid.playbackRate = +b.dataset.s; renderSpeed(); };
+}
+function bumpSpeed(dir) {
+  const i = SPEEDS.indexOf(vid.playbackRate);
+  const ni = Math.min(SPEEDS.length - 1, Math.max(0, (i < 0 ? 1 : i) + dir));
+  vid.playbackRate = SPEEDS[ni];
+  renderSpeed();
+  $("#status").textContent = `speed ${vid.playbackRate}x`;
+}
+
+$("#btnOv").onclick = () => { showOv = !showOv; };
+$("#btnExport").onclick = async () => {
+  if (!cur || !sig) return;
+  $("#status").textContent = "exporting...";
+  try {
+    const r = await j(`/api/export/${encodeURIComponent(cur)}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(edits)});
+    $("#status").textContent = `exported ${r.actions} actions -> ${r.funscript}`;
+  } catch (e) { $("#status").textContent = "export failed: " + e.message; }
+};
+$("#btnCompare").onclick = async () => {
+  if (!cur || !sig) return;
+  $("#status").textContent = "comparing...";
+  $("#compare").innerHTML = '<div style="color:var(--dim)">running...</div>';
+  try {
+    const m = await j(`/api/compare/${encodeURIComponent(cur)}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ edits })});
+    renderCompare(m);
+    const lag = m.timing_offset_ms.median;
+    $("#status").textContent =
+      `prec ${(m.precision*100)|0}% rec ${(m.recall*100)|0}% ` +
+      `tempo ${m.tempo.correlation.toFixed(2)}` +
+      (lag ? ` (${lag > 0 ? "lags" : "leads"} ${Math.abs(lag)|0}ms)` : "");
+  } catch (e) {
+    $("#compare").innerHTML = `<div style="color:var(--warn)">${e.message}</div>`;
+    $("#status").textContent = "compare failed";
+  }
+};
+$("#offsetMs").onchange = e => setOffset(+e.target.value || 0);
+$("#vidsel").onchange = e => loadVideo(e.target.value);
+
+function saveSoon() {
+  if (!cur) return;
+  clearTimeout(dirty);
+  dirty = setTimeout(async () => {
+    await fetch(`/api/edits/${encodeURIComponent(cur)}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(edits)});
+    $("#status").textContent = "saved";
+  }, 600);
+}
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  if (e.code === "Space") { e.preventDefault(); vid.paused ? vid.play() : vid.pause(); }
+  else if (e.key === "ArrowLeft") vid.currentTime -= e.shiftKey ? 0.05 : 2;
+  else if (e.key === "ArrowRight") vid.currentTime += e.shiftKey ? 0.05 : 2;
+  else if (e.key === "[") bumpSpeed(-1);
+  else if (e.key === "]") bumpSpeed(+1);
+  else if (e.key === ",") { const i = Math.max(0, selW - 1);
+    selW = i; vid.currentTime = windows[i]?.t0 ?? 0; }
+  else if (e.key === ".") { const i = Math.min(windows.length - 1, selW + 1);
+    selW = i; vid.currentTime = windows[i]?.t0 ?? 0; }
+  else if (k === "i") addPick({ t: vid.currentTime, type: "idle" });
+  else if (k === "a") addPick({ t: vid.currentTime, type: "auto" });
+  else if (k === "v") {
+    const chap = chapterAt(vid.currentTime);
+    const pick = realPickOf(chap);
+  const selPicks = chapters().filter(c => selChaps.has(c.idx))
+    .map(realPickOf).filter(Boolean);
+  const targets = selPicks.length > 1 ? selPicks : (pick ? [pick] : []);
+  if (selPicks.length > 1) {
+    el.insertAdjacentHTML("afterbegin",
+      `<b style="color:var(--lasso)">${selPicks.length} chapters</b>`);
+  }
+    if (pick) { pick.invert = !pick.invert || undefined; saveSoon(); renderAll(); }
+  }
+  else if (k === "l") $("#btnLasso").click();
+  else if (k === "n") $("#btnAnchor").click();
+  else if (k === "o") $("#btnOv").click();
+  else if (k === "e") $("#btnExport").click();
+  else if (k === "c") $("#btnCompare").click();
+  else if (e.key === "Delete" || e.key === "Backspace") {
+    const chap = chapters().find(c => c.idx === selChap);
+    const pick = chap && realPickOf(chap);
+    if (pick) { edits.picks.splice(edits.picks.indexOf(pick), 1);
+      selChap = -1; compilePicks(); saveSoon(); renderAll(); }
+  }
+});
+
+// auto-pause when playback enters a lost point
+let lastT = 0;
+vid.addEventListener("timeupdate", () => {
+  const t = vid.currentTime;
+  // advance the review frontier (high-water mark) so chapter blocks fill only
+  // up to where you've actually played/seeked, not to the end of the video.
+  if (t > reviewedTo) { reviewedTo = t; drawLanes(); }
+  if (!vid.paused) {
+    for (const L of lostAt) {
+      if (lastT < L.t && t >= L.t && t - L.t < 2) {
+        vid.pause();
+        $("#status").textContent =
+          `group lost @ ${fmt(L.t)} - click a group (or I for idle) to continue`;
+        break;
+      }
+    }
+  }
+  lastT = t;
+  const win = playingWindow();
+  if (win) {
+    const i = windows.indexOf(win);
+    if (i !== selW) { selW = i; renderSide(); }
+  }
+  drawPlot(); drawLanes();
+});
+setInterval(drawOverlay, 66);
+setInterval(() => { drawPlot(); drawLanes(); }, 400);
+window.addEventListener("resize", renderAll);
+// ------------------------------------------------------------ live monitor
+const lv = $("#livevid"), lvc = $("#livecv"), lvctx = lvc.getContext("2d");
+let live = null;   // {mode, spark:[], win:{t0,fps_s,pts}, count, raf, onStop}
+function openLive(title, mode, onStop) {
+  live = { mode, spark: [], win: null, count: 0, onStop };
+  $("#liveTitle").textContent = title;
+  $("#liveInfo").textContent = "waiting for first window...";
+  $("#livemodal").style.display = "block";
+  if (lv.src !== vid.src) lv.src = vid.src;
+  lv.playbackRate = 2.5;
+  cancelAnimationFrame(live.raf);
+  const loop = () => { drawLiveFrame(); if (live) live.raf = requestAnimationFrame(loop); };
+  live.raf = requestAnimationFrame(loop);
+}
+function feedLive(w, info) {
+  if (!live) return;
+  live.count++;
+  live.win = w;
+  for (const v of w.values || []) live.spark.push(v);
+  if (live.spark.length > 4000) live.spark.splice(0, live.spark.length - 4000);
+  lv.currentTime = w.t0;
+  lv.play().catch(() => {});
+  $("#liveInfo").textContent =
+    `window ${live.count} @ ${fmt(w.t0)}` + (info ? ` · ${info}` : "");
+  drawLiveSpark();
+}
+function drawLiveFrame() {
+  const cw = lv.clientWidth, ch = lv.clientHeight;
+  if (!cw) return;
+  if (lvc.width !== cw || lvc.height !== ch) { lvc.width = cw; lvc.height = ch; }
+  lvctx.clearRect(0, 0, cw, ch);
+  const w = live?.win;
+  if (!w || !lv.videoWidth) return;
+  const scale = Math.min(cw / lv.videoWidth, ch / lv.videoHeight);
+  const bw = lv.videoWidth * scale, bh = lv.videoHeight * scale;
+  const ox = (cw - bw) / 2, oy = (ch - bh) / 2;
+  const fi = Math.min(w.pts.length - 1, Math.max(0,
+    Math.round((lv.currentTime - w.t0) * w.fps_s)));
+  const frame = w.pts[fi];
+  if (!frame) return;
+  lvctx.fillStyle = live.mode === "anchor" ? "#ff9f43" : "#ffd166";
+  for (const [xx, yy] of frame) {
+    lvctx.beginPath();
+    lvctx.arc(ox + xx / w.w * bw, oy + yy / w.h * bh, 4, 0, 7);
+    lvctx.fill();
+  }
+  // stop playback drift past the window
+  if (lv.currentTime - w.t0 > w.pts.length / w.fps_s + 0.5) lv.pause();
+}
+function drawLiveSpark() {
+  const cv = $("#livespark"), c = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth * 2, H = cv.height = 108;
+  c.clearRect(0, 0, W, H);
+  const s = live?.spark || [];
+  if (!s.length) return;
+  c.strokeStyle = live.mode === "anchor" ? "#ff9f43" : "#ffd166";
+  c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < s.length; i++) {
+    const px = i / Math.max(1, s.length - 1) * W, py = H - s[i] * H;
+    i === 0 ? c.moveTo(px, py) : c.lineTo(px, py);
+  }
+  c.stroke();
+}
+function closeLive(stop = false) {
+  if (!live) return;
+  if (stop && live.onStop) live.onStop();
+  cancelAnimationFrame(live.raf);
+  live = null;
+  lv.pause();
+  $("#livemodal").style.display = "none";
+}
+$("#liveStop").onclick = () => closeLive(true);
+$("#liveClose").onclick = () => closeLive(false);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && live) { e.preventDefault(); closeLive(true); }
+});
+
+// ------------------------------------------------------------ batch queue
+let qOpen = false, qTimer = null, qCands = [];
+$("#btnQueue").onclick = () => {
+  qOpen = !qOpen;
+  $("#qpanel").style.display = qOpen ? "block" : "none";
+  if (qOpen) { pollQueue(); qTimer = setInterval(pollQueue, 2500); }
+  else clearInterval(qTimer);
+};
+async function pollQueue() {
+  try {
+    const q = await j("/api/queue");
+    const el = $("#qJobs");
+    el.innerHTML = q.jobs.length ? "" :
+      '<div style="color:var(--dim)">queue empty</div>';
+    for (const job of q.jobs) {
+      const d = document.createElement("div");
+      d.className = "qjob " + job.status;
+      const pct = job.progress != null ? Math.round(job.progress * 100) : null;
+      const stage = job.status === "running"
+        ? (job.stage || "") + (pct != null ? ` ${pct}%` : "")
+        : job.status + (job.elapsed ? ` ${(job.elapsed/60).toFixed(1)}m` : "");
+      d.innerHTML = `<div class="qname"><span>${job.name}</span>
+          <span style="color:var(--dim)">${stage}</span>
+          ${job.status === "queued" ? "<button>x</button>" : ""}</div>
+        <div class="bar"><div style="width:${pct ?? (job.status==="done"?100:0)}%"></div></div>
+        ${job.status === "running" || job.status === "failed"
+          ? `<div id="qlog">${(job.log_tail||[]).slice(-3).join("\n")}</div>` : ""}`;
+      const xb = d.querySelector("button");
+      if (xb) xb.onclick = () => j("/api/queue/remove", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ id: job.id })}).then(pollQueue);
+      el.appendChild(d);
+    }
+    $("#btnQueue").textContent = q.running
+      ? `queue ▶ ${q.jobs.filter(x => x.status === "done").length}/${q.jobs.length}`
+      : "queue";
+  } catch (e) { /* server gone */ }
+}
+$("#qScan").onclick = async () => {
+  qCands = await j("/api/queue/candidates");
+  const el = $("#qCands");
+  el.innerHTML = qCands.length ? "" : "nothing to process";
+  qCands.forEach((c, i) => {
+    const d = document.createElement("div");
+    d.className = "qcand";
+    d.innerHTML = `<input type="checkbox" checked data-i="${i}">
+      <span>${c.name}</span>
+      <span style="color:var(--dim)">${c.stages.join("+")}</span>`;
+    el.appendChild(d);
+  });
+};
+$("#qAddAll").onclick = async () => {
+  const vids = [...$("#qCands").querySelectorAll("input:checked")]
+    .map(cb => qCands[+cb.dataset.i].video);
+  if (!vids.length) { $("#status").textContent = "scan first / none selected"; return; }
+  const r = await j("/api/queue/add", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ videos: vids, pose: $("#qPose").checked })});
+  $("#status").textContent = `queued ${r.added} video(s)`;
+  $("#qCands").innerHTML = "press scan";
+  pollQueue();
+};
+$("#qStart").onclick = () => j("/api/queue/start", { method: "POST" }).then(pollQueue);
+$("#qStop").onclick = () => j("/api/queue/stop", { method: "POST" }).then(pollQueue);
+$("#qClear").onclick = () => j("/api/queue/clear_done", { method: "POST" }).then(pollQueue);
+setInterval(() => { if (!qOpen) pollQueue(); }, 15000);
+
+renderSpeed();
+loadList();
+pollQueue();
+</script>
+</body>
+</html>

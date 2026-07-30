@@ -80,7 +80,7 @@ if not exist "venv" (
 
 :: ── Install dependencies (skip if already installed) ──────
 echo [AI System] Checking dependencies...
-.\venv\Scripts\python.exe -c "import flask; import bitsandbytes; import einops; import timm" >nul 2>&1
+.\venv\Scripts\python.exe -c "import flask; import bitsandbytes; import einops; import timm; import scenedetect; import cv2; import ultralytics" >nul 2>&1
 if %ERRORLEVEL% equ 0 goto DEPS_OK
 
 echo [AI System] Installing dependencies... (this may take a few minutes first time)
@@ -101,6 +101,7 @@ echo ============================================
 echo    Launching AI Server...
 echo    Image Inference: http://localhost:3344
 echo    Video Analysis:  http://localhost:3344/video
+echo    Funscript Gen:   http://localhost:3344/funpipe
 echo ============================================
 echo.
 echo.
