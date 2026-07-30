@@ -1,8 +1,8 @@
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
-const axios = require('axios');
 const { scanPerformerFolderEnhanced } = require('./importer');
+const funpipeService = require('./funpipeService');
 
 class FilterService {
   constructor() {
@@ -14,21 +14,6 @@ class FilterService {
     this.statsCache = new Map(); // Cache for getFilterStats - key = performerId, value = { stats, timestamp }
     this.statsCacheTimeout = 60 * 1000; // 1 minute cache for stats
   }
-
-  /**
-   * Get the base path from the database (first folder's path).
-   * Used as fallback when options.basePath isn't provided.
-   */
-  _getBasePath() {
-    try {
-      const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
-      return folder?.path || null;
-    } catch (err) {
-      console.error('Error getting base path:', err);
-      return null;
-    }
-  }
-
 
   async getFilterableFiles(performerId, type = 'all', sortBy = 'name', sortOrder = 'asc', hideKept = false, limit = undefined, offset = 0) {
     const cacheKey = `${performerId}_${type}_${sortBy}_${sortOrder}_${hideKept}`;
@@ -520,6 +505,7 @@ class FilterService {
               UPDATE performers 
               SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
                   funscript_files_count = ?, total_size_gb = ?,
+                  pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
                   last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
               WHERE id = ?
             `).run(
@@ -528,22 +514,15 @@ class FilterService {
             stats.funscript_vids_count,
             stats.funscript_files_count,
             stats.total_size_gb,
+            stats.pics_count,
+            stats.vids_count,
+            stats.funscript_vids_count,
             now,
             picsPath,
             vidsPath,
             funscriptPath,
             performerId
           );
-
-          // Only set original counts if they are currently 0 or NULL (first-time baseline)
-          const current = db.prepare('SELECT pics_original_count, vids_original_count, funscript_vids_original_count FROM performers WHERE id = ?').get(performerId);
-          if (current && (!current.pics_original_count && !current.vids_original_count && !current.funscript_vids_original_count)) {
-            db.prepare(`
-              UPDATE performers 
-              SET pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?
-              WHERE id = ?
-            `).run(stats.pics_count, stats.vids_count, stats.funscript_vids_count, performerId);
-          }
           console.log(`Stats refreshed for performer ${performer.name}`);
         }
       } catch (err) {
@@ -560,44 +539,7 @@ class FilterService {
   }
 
   async deleteFile(filePath, options = {}) {
-    // Check if we should save deleted files for training
-    const setting = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('save_deleted_for_training');
-    const saveForTraining = setting && setting.value === 'true';
-
-    if (saveForTraining && options.performerName) {
-      // Move to 'deleted keep for training' folder for AI model training data
-      const basePath = options.basePath || this._getBasePath();
-      if (basePath) {
-        const ext = path.extname(filePath).toLowerCase();
-        const isVideo = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'].includes(ext);
-        const subfolder = isVideo ? 'vids' : 'pics';
-        const destFolder = path.join(basePath, 'deleted keep for training', options.performerName, subfolder);
-        await fs.ensureDir(destFolder);
-
-        const fileName = path.basename(filePath);
-        let destPath = path.join(destFolder, fileName);
-
-        // If file already exists in destination, append timestamp
-        if (await fs.pathExists(destPath)) {
-          const nameWithoutExt = path.basename(fileName, ext);
-          destPath = path.join(destFolder, `${nameWithoutExt}_${Date.now()}${ext}`);
-        }
-
-        await fs.move(filePath, destPath, { overwrite: false });
-        console.log(`[FilterService] Saved to training: ${destPath}`);
-
-        // Mark file as deleted in hash database
-        db.prepare(`
-          UPDATE performer_file_hashes 
-          SET deleted_flag = 1 
-          WHERE file_path = ?
-        `).run(filePath);
-
-        return { success: true, message: 'File saved for training', destPath };
-      }
-    }
-
-    // Default: move to .trash
+    // Move to trash or delete permanently
     const backupPath = path.join(path.dirname(filePath), '.trash', path.basename(filePath));
     await fs.ensureDir(path.dirname(backupPath));
     await fs.move(filePath, backupPath);
@@ -617,9 +559,33 @@ class FilterService {
     const funscriptPath = path.join(performerPath, 'vids', 'funscript', fileName);
 
     await fs.ensureDir(funscriptPath);
-    await fs.move(filePath, path.join(funscriptPath, path.basename(filePath)));
+    const movedPath = path.join(funscriptPath, path.basename(filePath));
+    await fs.move(filePath, movedPath);
 
-    return { success: true, message: 'File moved to funscript folder', newPath: funscriptPath };
+    // Landing in a funscript folder is the signal that this video should get a
+    // script, so hand it straight to funpipe. Best-effort: funpipe lives on the
+    // GPU box and is often off — the move itself must never fail because of it.
+    const funpipe = await this.queueForFunpipe(movedPath, funscriptPath, options);
+
+    return { success: true, message: 'File moved to funscript folder', newPath: funscriptPath, funpipe };
+  }
+
+  /**
+   * Queue a video with funpipe unless it already has a script.
+   * Always resolves — never propagates a funpipe failure to the caller.
+   */
+  async queueForFunpipe(videoPath, folderPath, options = {}) {
+    if (options.skipFunpipe) return { queued: false, skipped: 'disabled for this action' };
+    try {
+      const existing = (await fs.readdir(folderPath)).filter(f => f.toLowerCase().endsWith('.funscript'));
+      if (existing.length > 0) {
+        return { queued: false, skipped: 'already has a funscript' };
+      }
+      return await funpipeService.enqueue([videoPath]);
+    } catch (err) {
+      console.warn('[funpipe] queue-on-move failed:', err.message);
+      return { queued: false, error: err.message };
+    }
   }
 
   async undoLastAction() {
@@ -809,37 +775,31 @@ class FilterService {
       };
     }
 
-    // Use ORIGINAL counts as the denominator (baseline from import time)
-    // Current counts change when duplicates are deleted, but original stays fixed
-    const picsOriginal = performer.pics_original_count || performer.pics_count || 0;
-    const vidsOriginal = performer.vids_original_count || performer.vids_count || 0;
-    const funscriptOriginal = performer.funscript_vids_original_count || performer.funscript_vids_count || 0;
-
-    // Current counts (may be lower than original after duplicate deletion)
-    const picsCurrent = performer.pics_count || 0;
-    const vidsCurrent = performer.vids_count || 0;
-    const funscriptCurrent = performer.funscript_vids_count || 0;
+    // Use cached counts from performers table
+    const picsTotal = performer.pics_count || 0;
+    const vidsTotal = performer.vids_count || 0;
+    const funscriptTotal = performer.funscript_vids_count || 0;
     
     const picsFiltered = performer.pics_filtered || 0;
     const vidsFiltered = performer.vids_filtered || 0;
     const funscriptFiltered = performer.funscript_vids_filtered || 0;
 
-    const totalOriginal = picsOriginal + vidsOriginal + funscriptOriginal;
+    const totalFiles = picsTotal + vidsTotal + funscriptTotal;
     const totalFiltered = picsFiltered + vidsFiltered + funscriptFiltered;
 
-    const picsCompletion = picsOriginal === 0 ? 100 : Math.round((picsFiltered / picsOriginal) * 100);
-    const vidsCompletion = vidsOriginal === 0 ? 100 : Math.round((vidsFiltered / vidsOriginal) * 100);
-    const funscriptCompletion = funscriptOriginal === 0 ? 100 : Math.round((funscriptFiltered / funscriptOriginal) * 100);
-    const overallCompletion = totalOriginal === 0 ? 100 : Math.round((totalFiltered / totalOriginal) * 100);
+    const picsCompletion = picsTotal === 0 ? 100 : Math.round((picsFiltered / picsTotal) * 100);
+    const vidsCompletion = vidsTotal === 0 ? 100 : Math.round((vidsFiltered / vidsTotal) * 100);
+    const funscriptCompletion = funscriptTotal === 0 ? 100 : Math.round((funscriptFiltered / funscriptTotal) * 100);
+    const overallCompletion = totalFiles === 0 ? 100 : Math.round((totalFiltered / totalFiles) * 100);
 
     return {
-      total: totalOriginal,
+      total: totalFiles,
       processed: totalFiltered,
-      remaining: totalOriginal - totalFiltered,
+      remaining: totalFiles - totalFiltered,
       completion: overallCompletion,
-      picsTotal: picsOriginal, picsProcessed: picsFiltered, picsCompletion,
-      vidsTotal: vidsOriginal, vidsProcessed: vidsFiltered, vidsCompletion,
-      funscriptTotal: funscriptOriginal, funscriptProcessed: funscriptFiltered, funscriptCompletion
+      picsTotal, picsProcessed: picsFiltered, picsCompletion,
+      vidsTotal, vidsProcessed: vidsFiltered, vidsCompletion,
+      funscriptTotal, funscriptProcessed: funscriptFiltered, funscriptCompletion
     };
   }
 
@@ -997,165 +957,6 @@ class FilterService {
     this.statsCache.set(performerId, { stats, timestamp: Date.now() });
     
     return stats;
-  }
-  async getSmartBatch(performerId, options = {}) {
-    const { threshold = 50.0, modelId } = options;
-
-    // 1. Get 50 unfiltered images for this performer
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performerId);
-    if (!performer) throw new Error('Performer not found');
-
-    const folder = db.prepare('SELECT path FROM folders WHERE id = ?').get(performer.folder_id);
-    let performerPath = performer.moved_to_after === 1 ?
-      path.join(folder.path, 'after filter performer', performer.name) :
-      path.join(folder.path, 'before filter performer', performer.name);
-
-    const picsDir = path.join(performerPath, 'pics');
-    if (!await fs.pathExists(picsDir)) return { results: [] };
-
-    const allPics = await this.getFilesFromDirectory(picsDir, 'image');
-
-    // Fetch all filter actions to filter out already processed files
-    const actions = db.prepare('SELECT file_path FROM filter_actions WHERE performer_id = ?').all(performerId);
-    const actionSet = new Set(actions.map(a => a.file_path));
-
-    const unfiltered = allPics.filter(p => !actionSet.has(p.path)).slice(0, options.limit || 100);
-
-    if (unfiltered.length === 0) return { results: [] };
-
-    // 2. Call Python AI Server
-    const AI_URL = options.ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
-    try {
-      const imagePaths = unfiltered.map(p => p.path);
-
-      // Auto-load model if not already loaded
-      try {
-        const healthRes = await axios.get(`${AI_URL}/health`, { timeout: 5000 });
-        if (!healthRes.data.model_loaded) {
-          let targetModel = modelId;
-          if (!targetModel) {
-            const type = options.modelType || 'binary';
-            if (type === 'binary') targetModel = 'binary_filtering.pt';
-            else if (type === 'pairwise') targetModel = 'pairwise_rating.pt';
-            else if (type === 'context_binary') targetModel = 'context_binary.pt';
-            else if (type === 'siamese') targetModel = 'siamese_binary.pt';
-            else if (type === 'rank_aware_siamese') targetModel = 'rank_siamese.pt';
-            else if (type === 'ranked_binary') targetModel = 'ranked_binary.pt';
-            else if (type === 'ranked_siamese_binary') targetModel = 'ranked_siamese.pt';
-            else targetModel = 'binary_filtering.pt';
-          }
-          console.log(`[SmartBatch] Model not loaded, auto-loading ${targetModel}...`);
-          await axios.post(`${AI_URL}/load_model`, { model_id: targetModel }, { timeout: 60000 });
-          console.log(`[SmartBatch] Model loaded successfully`);
-        }
-      } catch (healthErr) {
-        console.warn(`[SmartBatch] Health check failed, attempting classify anyway: ${healthErr.message}`);
-      }
-
-      console.log(`[SmartBatch] Calling AI at ${AI_URL}/classify_batch`);
-      console.log(`[SmartBatch]   Images: ${imagePaths.length}, Threshold: ${threshold}`);
-      console.log(`[SmartBatch]   app_base_url: ${options.app_base_url}`);
-      
-      const response = await axios.post(`${AI_URL}/classify_batch`, {
-        images: imagePaths,
-        threshold: parseFloat(threshold),
-        app_base_url: options.app_base_url,
-        performer_rank: options.performer_rank
-      }, { timeout: 120000 });
-
-      if (response.data.success) {
-        // Merge with local file info
-        let results = response.data.results.map(r => {
-          const local = unfiltered.find(u => u.path === r.path);
-          return { ...local, ...r };
-        });
-
-        // SORT BY SCORE DESCENDING (Keepers first)
-        results.sort((a, b) => (b.score || 0) - (a.score || 0));
-
-        // If threshold is -1, it means "Dynamic Initial Threshold" (50/50 split)
-        let finalThreshold = threshold;
-        if (threshold === -1 && results.length > 0) {
-          const scores = results.map(r => r.score).sort((a, b) => a - b);
-          // Pick the median score
-          finalThreshold = scores[Math.floor(scores.length / 2)];
-          
-          // Re-evaluate decisions based on this median
-          results = results.map(r => ({
-            ...r,
-            decision: r.score >= finalThreshold ? 'keep' : 'delete'
-          }));
-        }
-
-        return { results, threshold: finalThreshold };
-      } else {
-        console.error(`[SmartBatch] AI returned error: ${response.data.error}`);
-        throw new Error(response.data.error || 'AI Server Error');
-      }
-    } catch (err) {
-      console.error(`[SmartBatch] AI Server Error: ${err.message}`);
-      if (err.response) {
-        console.error(`[SmartBatch]   Status: ${err.response.status}`);
-        console.error(`[SmartBatch]   Data: ${JSON.stringify(err.response.data)}`);
-      }
-      // If AI server is down, return images with "keep" as default but mark as unpredicted
-      return {
-        results: unfiltered.map(u => ({ ...u, decision: 'keep', predicted: false, error: err.message })),
-        ai_error: err.message
-      };
-    }
-  }
-
-  async applySmartBatch(performerId, results, options = {}) {
-    console.log(`Applying smart batch for performer ${performerId} (${results.length} items)`);
-    const summary = { kept: 0, deleted: 0, errors: 0 };
-
-    for (const item of results) {
-      try {
-        await this.performFilterAction(performerId, item.path, item.decision, options);
-        if (item.decision === 'keep') summary.kept++;
-        else summary.deleted++;
-      } catch (err) {
-        console.error(`Error applying action to ${item.path}:`, err);
-        summary.errors++;
-      }
-    }
-    
-    // Save human corrections for hard example mining
-    if (options.corrections && options.corrections.length > 0) {
-      console.log(`[SmartBatch] Saving ${options.corrections.length} human corrections as hard examples`);
-      const stmt = db.prepare(`
-        INSERT INTO hard_examples (performer_id, file_path, original_label, corrected_label, model_type, model_name)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-      for (const corr of options.corrections) {
-        try {
-          stmt.run(performerId, corr.path, corr.original_label, corr.corrected_label, corr.model_type, corr.model_name);
-        } catch (e) {
-          // Ignore unique constraint or other minor errors
-        }
-      }
-    }
-
-    // Force stats refresh after batch
-    this.scheduleStatsRefresh(performerId);
-
-    return { success: true, summary };
-  }
-
-  async predictQuality(imagePath) {
-    const AI_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
-    try {
-      const axios = require('axios');
-      const response = await axios.post(`${AI_URL}/classify`, {
-        image: imagePath
-      }, { timeout: 10000 });
-
-      return response.data;
-    } catch (err) {
-      console.error('AI Single-image error:', err.message);
-      throw err;
-    }
   }
 }
 

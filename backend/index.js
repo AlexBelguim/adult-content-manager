@@ -70,6 +70,7 @@ app.use('/api/admin', require('./routes/admin'));
 
 app.use('/api/tags', require('./routes/tags'));
 app.use('/api/funscripts', require('./routes/funscripts'));
+app.use('/api/funpipe', require('./routes/funpipe')); // Funscript auto-generation pipeline
 app.use('/api/scenes', require('./routes/scenes'));
 app.use('/api/truenas', require('./routes/truenas'));
 app.use('/api/mobile', require('./routes/mobile')); // Mobile app API
