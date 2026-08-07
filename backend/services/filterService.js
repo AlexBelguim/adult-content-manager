@@ -134,6 +134,34 @@ class FilterService {
       console.log(`After filtering kept files: ${files.length} files remaining`);
     }
 
+    // The DB file-list cache stores only { name, path }, so size and modified
+    // are absent on cached entries and the comparators below were differencing
+    // undefined — every pair returned 0 and sorting by size or date silently
+    // did nothing. Hydrate from the filesystem, but only for the sorts that
+    // need it. The result lands in the fileCache above, which is keyed by
+    // sortBy/sortOrder, so this is paid once per performer/type/order rather
+    // than on every request.
+    if (sortBy === 'size' || sortBy === 'date') {
+      const missing = files.filter(f => f.size === undefined || f.modified === undefined);
+      if (missing.length > 0) {
+        console.log(`Hydrating ${missing.length} file stats for ${sortBy} sort`);
+        const CHUNK = 64; // bounded so we don't open thousands of handles at once
+        for (let i = 0; i < missing.length; i += CHUNK) {
+          await Promise.all(missing.slice(i, i + CHUNK).map(async (f) => {
+            try {
+              const stat = await fs.stat(f.path);
+              f.size = stat.size;
+              f.modified = stat.mtime.getTime();
+            } catch (e) {
+              // Missing or unreadable — sort it to one end rather than throw.
+              f.size = 0;
+              f.modified = 0;
+            }
+          }));
+        }
+      }
+    }
+
     // Sort files
     files.sort((a, b) => {
       let compareValue = 0;

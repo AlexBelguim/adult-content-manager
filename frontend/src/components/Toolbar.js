@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves, Swipe } from '@mui/icons-material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 import Logo from './Logo';
 
@@ -247,10 +247,6 @@ function Toolbar({
               ['Hash-based duplicate detection', <Difference key="d" />, () => window.open('/hash-management', '_blank')]
             ],
             [
-              // /tindersorting was routed in App.js but nothing in the UI ever
-              // linked to it, so the page was unreachable without typing the
-              // URL. It picks its own performer, so a bare link is enough.
-              ['Tinder Sort — swipe to keep or delete', <Swipe key="t" />, () => navigate('/tindersorting')],
               ['Taste Dashboard — system health & AI', <Science key="s" />, () => navigate('/taste-dashboard')],
               ['Funpipe — funscript queue & library', <Waves key="w" />, () => navigate('/funpipe')]
             ]

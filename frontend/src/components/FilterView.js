@@ -109,6 +109,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
   const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [settingsModal, setSettingsModal] = useState({ open: false, performer: null });
   const [containerWidth, setContainerWidth] = useState(0);
+  const cardRowRef = useRef(null);
   const [backgroundTasks, setBackgroundTasks] = useState([]);
   const pollingIntervalsRef = useRef(new Map());
   const prevSortRef = useRef(sort);
@@ -208,23 +209,24 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     localStorage.setItem('filterSortBy', sort);
   }, [sort]);
 
-  // Calculate container width for ghost cards
+  // Measure the row the cards actually live in, for the ghost-card count.
+  //
+  // This used to guess — window.innerWidth * 0.8, capped by breakpoint, with a
+  // "rough calculation" comment to match. At 1430px that returns 1144 against a
+  // real content width of 1366, so it concluded 3 cards per row where 4 fit and
+  // padded the last row with the wrong number of ghosts. Measuring the element
+  // removes both the guess and the hardcoded 48px padding that went with it:
+  // clientWidth is already the content box.
   useEffect(() => {
-    const updateContainerWidth = () => {
-      // Rough calculation based on typical container widths
-      const width = window.innerWidth;
-      if (width >= 1536) { // xl
-        setContainerWidth(Math.min(width * 0.8, 1536 * 1.3));
-      } else if (width >= 1200) { // lg
-        setContainerWidth(Math.min(width * 0.8, 1200 * 1.3));
-      } else {
-        setContainerWidth(width * 0.9);
-      }
-    };
+    const el = cardRowRef.current;
+    if (!el) return undefined;
 
-    updateContainerWidth();
-    window.addEventListener('resize', updateContainerWidth);
-    return () => window.removeEventListener('resize', updateContainerWidth);
+    const measure = () => setContainerWidth(el.clientWidth);
+    measure();
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   // Cleanup polling intervals on unmount
@@ -478,22 +480,15 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
         alignItems: 'center',
         mb: 3,
         flexWrap: 'wrap',
-        gap: 2,
-        // Calculate margins to align with card edges
-        mx: (() => {
-          if (containerWidth === 0) return 0;
-
-          const cardWidth = 280;
-          const gap = 24;
-          const padding = 48; // Container padding
-          const availableWidth = containerWidth - padding;
-          const cardsPerRow = Math.floor(availableWidth / (cardWidth + gap));
-          const totalCardsWidth = cardsPerRow * cardWidth + (cardsPerRow - 1) * gap;
-          const leftoverSpace = availableWidth - totalCardsWidth;
-          const sideMargin = leftoverSpace / 2;
-
-          return `${sideMargin}px`;
-        })()
+        gap: 2
+        // This used to carry a computed `mx` meant to inset the header to the
+        // edge of the centred 280px card block. It missed on both counts: the
+        // header landed at x=160 while the cards started at x=119, because the
+        // maths assumed a flat 48px of container padding when the Container
+        // uses a responsive px of {xs:2, sm:3, md:4} — 64px at desktop. It also
+        // put this header 108px right of the Gallery one, which shares the same
+        // Container and sits flush. Flush here too, so switching modes doesn't
+        // move the title.
       }}>
         <Box>
           {/* Matches the PageHeader primitive — see GalleryView. */}
@@ -548,6 +543,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
 
       {/* Performers Grid */}
       <Box
+        ref={cardRowRef}
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -634,9 +630,9 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
 
           const cardWidth = 280;
           const gap = 24;
-          const padding = 48; // Container padding
-          const availableWidth = containerWidth - padding;
-          const cardsPerRow = Math.floor(availableWidth / (cardWidth + gap));
+          // containerWidth is the measured content box, so no padding to
+          // subtract. The last card in a row has no trailing gap.
+          const cardsPerRow = Math.max(1, Math.floor((containerWidth + gap) / (cardWidth + gap)));
           const remainder = sorted.length % cardsPerRow;
           const ghostCards = remainder > 0 ? cardsPerRow - remainder : 0;
 

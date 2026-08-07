@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Link, Typography, CircularProgress, Box, Alert, Divider } from '@mui/material';
 import Toolbar from './components/Toolbar';
 import MainPage from './pages/MainPage';
+import MobileShell from './mobile/MobileShell';
+import useIsPhone from './mobile/useIsPhone';
 import UnifiedGalleryPage from './pages/UnifiedGalleryPage';
 
 import HashManagementPage from './pages/HashManagementPage';
@@ -490,6 +492,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
   // same thirteen props. That block was copy-pasted five times, so adding a
   // prop meant editing five call sites and missing one failed silently. One
   // object, one helper — and adding chrome to a route is now a one-line change.
+  const isPhone = useIsPhone();
   const toolbarProps = {
     mode, subMode,
     onModeChange: handleModeChange, onSubModeChange: handleSubModeChange,
@@ -583,7 +586,11 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/thumbnail-selector/:performerId" element={
               <ThumbnailSelectorWrapper />
             } />
-            <Route path="*" element={shell(
+            {/* Phones get their own shell, not the desktop one restyled — no
+                app bar, no MainPage, so none of the desktop chrome mounts. */}
+            <Route path="*" element={isPhone ? (
+              <MobileShell />
+            ) : shell(
               <MainPage
                 mode={mode}
                 subMode={subMode}

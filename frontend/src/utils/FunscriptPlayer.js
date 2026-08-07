@@ -58,19 +58,35 @@ class FunscriptPlayer extends HTMLElement {
       const shouldAutofullscreen = this.getAttribute('autofullscreen') === 'true';
 
       if (shouldAutoplay || shouldAutofullscreen) {
-        // Wait for video element to exist, then wait for it to be ready
+        // Wait for video element to exist, then wait for it to be ready.
+        //
+        // Every step here has to re-check isConnected. This element is torn
+        // down and rebuilt whenever the filter view changes file or tab, and
+        // metadata often finishes loading after that has happened. Without the
+        // guards the poll kept running, loadedmetadata still fired, and
+        // doAutoplay() played a video that was no longer in the document —
+        // which then unmuted itself. That is the "audio playing with no video
+        // and no way to stop it" bug: nothing is rendered, so there are no
+        // controls to reach.
         const waitForVideo = () => {
+          if (!this.isConnected) return;
           const video = this.shadowRoot.querySelector('video');
           if (!video) {
-            setTimeout(waitForVideo, 50);
+            this._autoplayTimer = setTimeout(waitForVideo, 50);
             return;
           }
-          
+
           const doAutoplay = () => {
+            if (!this.isConnected) return;
             if (shouldAutoplay) {
               console.log('🎬 Auto-playing video');
               video.muted = true; // Mute initially to allow autoplay
               video.play().then(() => {
+                // play() resolves a tick later; we may be gone by then.
+                if (!this.isConnected) {
+                  video.pause();
+                  return;
+                }
                 video.muted = false; // Unmute after play starts
               }).catch(err => console.log('Autoplay blocked:', err));
             }
@@ -79,10 +95,12 @@ class FunscriptPlayer extends HTMLElement {
               this.enterFullscreen();
             }
           };
-          
+
           if (video.readyState >= 1) {
             doAutoplay();
           } else {
+            this._autoplayVideo = video;
+            this._autoplayHandler = doAutoplay;
             video.addEventListener('loadedmetadata', doAutoplay, { once: true });
           }
         };
@@ -101,6 +119,8 @@ class FunscriptPlayer extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._isConnected = false;
+
     if (this.sceneUpdateHandler) {
       window.removeEventListener('scenesUpdated', this.sceneUpdateHandler);
     }
@@ -108,6 +128,22 @@ class FunscriptPlayer extends HTMLElement {
     // Clean up scroll seek handler
     if (this.scrollSeekHandler) {
       this.shadowRoot.removeEventListener('wheel', this.scrollSeekHandler);
+    }
+
+    // Cancel any autoplay still in flight, then silence whatever is playing.
+    // Removing a media element from the document pauses it, but a play() that
+    // lands after removal does not get that treatment — it just keeps going,
+    // audible and unreachable.
+    clearTimeout(this._autoplayTimer);
+    if (this._autoplayVideo && this._autoplayHandler) {
+      this._autoplayVideo.removeEventListener('loadedmetadata', this._autoplayHandler);
+      this._autoplayVideo = null;
+      this._autoplayHandler = null;
+    }
+    const video = this.shadowRoot && this.shadowRoot.querySelector('video');
+    if (video) {
+      video.pause();
+      video.muted = true;
     }
   }
 

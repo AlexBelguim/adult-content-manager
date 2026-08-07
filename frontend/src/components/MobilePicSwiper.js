@@ -17,7 +17,8 @@ import {
  *  - onAction: (action: 'keep' | 'delete') => void
  *  - onUndo: () => void
  *  - onNavigate: (newIndex: number) => void
- *  - onClose: () => void
+ *  - onClose: () => void — leave swipe mode, stay on this performer
+ *  - onBack: () => void — leave the performer and run the trash cleanup
  *  - currentFile: object
  *  - progress: number (0-100)
  *  - shortcuts: object
@@ -30,6 +31,7 @@ function MobilePicSwiper({
   onUndo,
   onNavigate,
   onClose,
+  onBack,
   currentFile,
   progress,
   shortcuts,
@@ -180,9 +182,19 @@ function MobilePicSwiper({
         backdropFilter: 'blur(10px)',
         zIndex: 10,
       }}>
-        <IconButton size="small" onClick={onClose} sx={{ color: 'var(--text)' }}>
-          <Close />
-        </IconButton>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {/* Back leaves the performer entirely and runs the trash cleanup;
+              Close just drops out of the swiper into the normal filter view.
+              Without Back there was no way to finish a session from in here. */}
+          {onBack && (
+            <IconButton size="small" onClick={onBack} aria-label="Back to performers" sx={{ color: 'var(--text)' }}>
+              <ArrowBack />
+            </IconButton>
+          )}
+          <IconButton size="small" onClick={onClose} aria-label="Close swipe mode" sx={{ color: 'var(--text)' }}>
+            <Close />
+          </IconButton>
+        </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="caption" sx={{ color: 'var(--dim)' }}>

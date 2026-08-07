@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { loadShortcuts } from '../utils/settings';
 import BackgroundTaskQueue from './BackgroundTaskQueue';
+import MobilePicSwiper from './MobilePicSwiper';
 import '../utils/FunscriptPlayer.js'; // Register custom element
 import './FunscriptPlayerEmbed.css';
 import {
@@ -27,7 +28,8 @@ import {
   SportsEsports as GameIcon,
   KeyboardArrowLeft as PrevIcon,
   KeyboardArrowRight as NextIcon,
-  Upload as UploadIcon
+  Upload as UploadIcon,
+  Swipe as SwipeIcon
 } from '@mui/icons-material';
 
 function PerformerFilterView({ performer, onBack, onNext, onComplete, handyIntegration, handyConnected, initialTab }) {
@@ -55,6 +57,18 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
   const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [predictions, setPredictions] = useState({});
   const [activeModel, setActiveModel] = useState(null);
+  // Detect mobile / touch device
+  const isMobile = typeof window !== 'undefined' && (
+    ('ontouchstart' in window) ||
+    (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
+    (window.matchMedia && window.matchMedia('(hover: none)').matches)
+  );
+
+  // On a phone, opening a performer drops you straight into the fullscreen
+  // sorting mode rather than the desktop filter chrome behind a button.
+  // Closing it leaves you on the normal view, and the Swipe Mode button is
+  // still there to go back in.
+  const [showMobileSwiper, setShowMobileSwiper] = useState(isMobile);
 
 
 
@@ -288,9 +302,15 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
       }
     }
 
-    // More robust modal detection for pics tab
+    // More robust modal detection for pics tab.
+    //
+    // Skipped entirely while the swiper is open. The heuristic below treats any
+    // element with z-index > 1000 as an open modal, and the swiper's own
+    // container is 9999 — so every swipe decided "a modal was open" and the
+    // restoration effect clicked the image behind it, dropping the fullscreen
+    // image modal on top of the swiper. That is why swiping looked dead.
     let isCurrentlyModal = false;
-    if (currentTab === 'pics') {
+    if (currentTab === 'pics' && !showMobileSwiper) {
       // Check for common modal indicators
       const modalElements = document.querySelectorAll('.modal, .modal-open, [data-modal="true"], .MuiDialog-root, .modal-backdrop, .overlay, .lightbox');
       isCurrentlyModal = modalElements.length > 0;
@@ -450,7 +470,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
     } catch (err) {
       console.error('Error performing filter action:', err);
     }
-  }, [files, currentIndex, performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]);
+  }, [files, currentIndex, performer.id, currentTab, sortBy, sortOrder, hideKeptFiles, showMobileSwiper]);
 
   const handleUndo = useCallback(async () => {
     try {
@@ -683,7 +703,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
 
   // Modal restoration for pictures
   useEffect(() => {
-    if (shouldRestoreModal && currentTab === 'pics' && mediaContainerRef.current) {
+    if (shouldRestoreModal && currentTab === 'pics' && !showMobileSwiper && mediaContainerRef.current) {
       console.log('Starting modal restoration for image...');
 
       // Wait a bit for the new funscript-player to render
@@ -727,7 +747,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
 
       return () => clearTimeout(timeout);
     }
-  }, [shouldRestoreModal, currentTab, currentFile]);
+  }, [shouldRestoreModal, currentTab, currentFile, showMobileSwiper]);
 
   // Helper function to navigate while preserving fullscreen/modal state
   const navigateWithFullscreen = useCallback((newIndex) => {
@@ -741,9 +761,15 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
       }
     }
 
-    // More robust modal detection for pics tab
+    // More robust modal detection for pics tab.
+    //
+    // Skipped entirely while the swiper is open. The heuristic below treats any
+    // element with z-index > 1000 as an open modal, and the swiper's own
+    // container is 9999 — so every swipe decided "a modal was open" and the
+    // restoration effect clicked the image behind it, dropping the fullscreen
+    // image modal on top of the swiper. That is why swiping looked dead.
     let isCurrentlyModal = false;
-    if (currentTab === 'pics') {
+    if (currentTab === 'pics' && !showMobileSwiper) {
       // Check for common modal indicators
       const modalElements = document.querySelectorAll('.modal, .modal-open, [data-modal="true"], .MuiDialog-root, .modal-backdrop, .overlay, .lightbox');
       isCurrentlyModal = modalElements.length > 0;
@@ -779,7 +805,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
       console.log('Navigation: Setting shouldRestoreModal to true');
       setShouldRestoreModal(true);
     }
-  }, [currentTab]);
+  }, [currentTab, showMobileSwiper]);
 
   // Load shortcuts on component mount and check for updates
   useEffect(() => {
@@ -1067,6 +1093,27 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           }
           sx={{ ml: 2 }}
         />
+
+        {/* Mobile Swipe Mode button - only on mobile and pics tab */}
+        {isMobile && currentTab === 'pics' && files.length > 0 && (
+          <Button
+            variant="contained"
+            startIcon={<SwipeIcon />}
+            onClick={() => setShowMobileSwiper(true)}
+            sx={{
+              ml: 2,
+              bgcolor: '#e91e63',
+              '&:hover': { bgcolor: '#c2185b' },
+              textTransform: 'none',
+              fontWeight: 'bold',
+              whiteSpace: 'nowrap',
+              py: 1.5,
+              px: 3
+            }}
+          >
+            Swipe Mode
+          </Button>
+        )}
 
         <Typography variant="body2" sx={{ ml: 'auto' }}>
           {currentIndex + 1} of {files.length}
@@ -1407,6 +1454,25 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           ) : undefined}
         </Snackbar>
       </>
+
+      {/* Mobile Pic Swiper — fullscreen Tinder-like mode for pics on mobile.
+          This and its Swipe Mode button were dropped by 090a408, the funpipe
+          commit, which swept in unrelated in-progress work on this file. */}
+      {showMobileSwiper && currentTab === 'pics' && currentFile && (
+        <MobilePicSwiper
+          files={files}
+          currentIndex={currentIndex}
+          onAction={(action) => handleFilterAction(action)}
+          onUndo={handleUndo}
+          onNavigate={(newIndex) => navigateWithFullscreen(newIndex)}
+          onClose={() => setShowMobileSwiper(false)}
+          onBack={handleBack}
+          currentFile={currentFile}
+          progress={progress}
+          shortcuts={shortcuts}
+          totalFiles={totalFiles}
+        />
+      )}
     </Container>
   );
 }
