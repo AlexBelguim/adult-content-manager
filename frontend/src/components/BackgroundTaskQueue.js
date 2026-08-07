@@ -49,7 +49,7 @@ const BackgroundTaskQueue = ({ tasks, onClose, onCancelTask }) => {
         sx={{
           p: 2,
           bgcolor: 'primary.main',
-          color: 'white',
+          color: 'var(--text)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -64,7 +64,7 @@ const BackgroundTaskQueue = ({ tasks, onClose, onCancelTask }) => {
             size="small"
             sx={{
               bgcolor: 'rgba(255,255,255,0.2)',
-              color: 'white',
+              color: 'var(--text)',
               height: 20,
               fontSize: '0.75rem',
             }}
@@ -74,14 +74,14 @@ const BackgroundTaskQueue = ({ tasks, onClose, onCancelTask }) => {
           <IconButton
             size="small"
             onClick={() => setExpanded(!expanded)}
-            sx={{ color: 'white', mr: 0.5 }}
+            sx={{ color: 'var(--text)', mr: 0.5 }}
           >
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
           <IconButton
             size="small"
             onClick={onClose}
-            sx={{ color: 'white' }}
+            sx={{ color: 'var(--text)' }}
             disabled={activeTasks.length > 0}
           >
             <CloseIcon />

@@ -59,7 +59,7 @@ export function openTagModal({
   // Modal content
   const content = document.createElement('div');
   content.style.cssText = `
-    background: #fff;
+    background: var(--text);
     border-radius: 14px;
     padding: 32px 28px;
     min-width: 340px;
@@ -81,7 +81,7 @@ export function openTagModal({
     top: 12px;
     right: 12px;
     background: rgba(0,0,0,0.8);
-    color: white;
+    color: var(--text);
     border: none;
     border-radius: 50%;
     width: 40px;
@@ -99,13 +99,13 @@ export function openTagModal({
   // Title
   const title = document.createElement('div');
   title.textContent = 'Assign Tags';
-  title.style.cssText = 'font-size: 1.25rem; font-weight: bold; margin-bottom: 18px; color: #7e57c2; letter-spacing: 0.5px;';
+  title.style.cssText = 'font-size: 1.25rem; font-weight: bold; margin-bottom: 18px; color: var(--accent); letter-spacing: 0.5px;';
   content.appendChild(title);
 
   // Add tag (all tags as buttons, filterable by input)
   const addBox = document.createElement('div');
   addBox.style.cssText = 'width: 100%; margin-bottom: 14px;';
-  addBox.innerHTML = `<div style="margin-bottom: 8px; font-weight: 500; color: #333;">Add Tag:</div>`;
+  addBox.innerHTML = `<div style="margin-bottom: 8px; font-weight: 500; color: var(--faint);">Add Tag:</div>`;
   const addRow = document.createElement('div');
   addRow.style.cssText = 'display: flex; align-items: center; gap: 8px; width: 100%;';
   const input = document.createElement('input');
@@ -145,8 +145,8 @@ export function openTagModal({
       btn.textContent = tag;
       btn.disabled = isGenreTag;
       btn.style.cssText = `
-        background: ${isAssigned ? '#7e57c2' : '#fff'};
-        color: ${isAssigned ? '#fff' : (isGenreTag ? '#888' : '#7e57c2')};
+        background: ${isAssigned ? 'var(--accent)' : 'var(--text)'};
+        color: ${isAssigned ? 'var(--text)' : (isGenreTag ? 'var(--dim)' : 'var(--accent)')};
         border: 2px solid var(--primary-main, #7e57c2);
         border-radius: 16px;
         padding: 6px 18px;
@@ -184,7 +184,7 @@ export function openTagModal({
   // Error
   if (tagError) {
     const err = document.createElement('div');
-    err.style.cssText = 'color:#d32f2f; margin-bottom:8px;';
+    err.style.cssText = 'color: var(--bad); margin-bottom:8px;';
     err.textContent = tagError;
     content.appendChild(err);
   }

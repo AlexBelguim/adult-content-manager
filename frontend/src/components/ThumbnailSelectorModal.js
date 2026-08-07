@@ -288,7 +288,7 @@ function ThumbnailSelectorModal({ open, onClose, performer, onSave }) {
                             top: 8,
                             left: 8,
                             bgcolor: 'primary.main',
-                            color: 'white',
+                            color: 'var(--text)',
                             borderRadius: '50%',
                             width: 32,
                             height: 32,

@@ -119,8 +119,8 @@ export default function VRPage() {
               disabled={status !== 'ready' || vrSupported === false}
               style={{
                 ...btnStyle,
-                background: vrSupported ? '#007acc' : '#2a2a2a',
-                color: vrSupported ? '#fff' : '#9bb8d4',
+                background: vrSupported ? 'var(--info)' : 'var(--raised)',
+                color: vrSupported ? 'var(--text)' : '#9bb8d4',
                 cursor: status === 'ready' && vrSupported ? 'pointer' : 'not-allowed',
                 opacity: status === 'ready' ? 1 : 0.5,
               }}
@@ -158,7 +158,7 @@ const overlayStyle = {
   gap: '1.2rem',
   textAlign: 'center',
   padding: '2rem',
-  background: '#07090dcc',
+  background: 'var(--scrim-strong)',
   color: '#e8e6df',
   fontFamily: 'ui-sans-serif, system-ui, sans-serif',
 };

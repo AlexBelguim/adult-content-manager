@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  AppBar,
-  Toolbar,
   Typography,
   IconButton,
+  Tooltip,
   Box,
   Button,
   Container,
@@ -21,7 +20,6 @@ import {
   useMediaQuery
 } from '@mui/material';
 import {
-  ArrowBack,
   CompareArrows,
   ArrowUpward,
   ArrowDownward,
@@ -34,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PageShell, PageHeader, iconBtnSx } from '../components/layout';
 
 function SmartComparePage() {
   const navigate = useNavigate();
@@ -459,73 +458,61 @@ function SmartComparePage() {
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', color: 'text.primary', pb: compareList.length === 2 ? 0 : (isLandscape ? 8 : 12) }}>
-      <AppBar position="sticky" color="default" elevation={0}>
-        <Toolbar sx={{ justifyContent: 'space-between', minHeight: isLandscape ? 48 : undefined, flexWrap: isSmall ? 'wrap' : 'nowrap', gap: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <IconButton onClick={() => navigate('/group-rate')} sx={{ color: 'text.primary' }}>
-              <ArrowBack />
-            </IconButton>
-            <Typography variant={isSmall ? 'h6' : 'h5'} sx={{ fontWeight: 800, color: 'primary.main' }}>
-              SMART COMPARE
-            </Typography>
-            {globalModel ? (
-              <Box sx={{ px: 1.5, py: 0.5, bgcolor: `${theme.palette.secondary.main}18`, border: `1px solid ${theme.palette.secondary.main}40`, borderRadius: '10px', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Star sx={{ fontSize: 14, color: 'secondary.main' }} />
-                <Typography variant="caption" sx={{ color: 'secondary.main', fontWeight: 'bold' }}>MODEL ACTIVE</Typography>
+      {/* Was a second sticky AppBar with an all-caps 800-weight title and a
+          gradient "Re-ask AI" button that pulsed. Same controls, shared header:
+          the back arrow stays because it returns to /group-rate specifically,
+          which the toolbar logo (always the gallery) cannot express. */}
+      <PageShell sx={{ pb: 0 }}>
+        <PageHeader
+          title="Smart Compare"
+          subtitle={globalModel ? 'Model active' : 'Default prior'}
+          back
+          onBack={() => navigate('/group-rate')}
+          actions={
+            <>
+              {isOrderDirty && (
+                <Button
+                  variant="contained"
+                  startIcon={<AutoFixNormal />}
+                  onClick={handleApplyOrder}
+                  size="small"
+                >
+                  Re-ask AI
+                </Button>
+              )}
+              <Box sx={{ width: 120 }}>
+                <Typography variant="caption" sx={{ color: 'var(--dim)', mb: 0.5, display: 'block' }}>
+                  Performers: {performerCount}
+                </Typography>
+                <Slider
+                  size="small"
+                  value={performerCount} min={2} max={10}
+                  onChange={(e, v) => setPerformerCount(v)}
+                  sx={{ color: 'var(--accent)', py: 1 }}
+                />
               </Box>
-            ) : (
-              <Box sx={{ px: 1.5, py: 0.5, bgcolor: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px' }}>
-                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 'bold' }}>DEFAULT PRIOR</Typography>
+              <Box sx={{ width: 150 }}>
+                <Typography variant="caption" sx={{ color: 'var(--dim)', mb: 0.5, display: 'block' }}>
+                  AI Photos: {picsPerPerformer === 51 ? 'All' : picsPerPerformer}
+                </Typography>
+                <Slider
+                  size="small"
+                  value={picsPerPerformer}
+                  min={1}
+                  max={51}
+                  onChange={(e, v) => setPicsPerPerformer(v)}
+                  sx={{ color: 'var(--accent)', py: 1 }}
+                />
               </Box>
-            )}
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {isOrderDirty && (
-              <Button 
-                variant="contained" 
-                color="secondary"
-                startIcon={<AutoFixNormal />}
-                onClick={handleApplyOrder}
-                sx={{ 
-                  borderRadius: '10px', 
-                  background: 'linear-gradient(45deg, #7c4dff, #ff4081)',
-                  boxShadow: '0 0 15px rgba(124, 77, 255, 0.4)',
-                  animation: 'pulse 1.5s infinite'
-                }}
-              >
-                Re-ask AI
-              </Button>
-            )}
-            <Box sx={{ width: 120 }}>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', mb: 0.5, display: 'block' }}>
-                Performers: {performerCount}
-              </Typography>
-              <Slider 
-                size="small"
-                value={performerCount} min={2} max={10} 
-                onChange={(e, v) => setPerformerCount(v)} 
-                sx={{ color: 'primary.main', py: 1 }}
-              />
-            </Box>
-            <Box sx={{ width: 150 }}>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', mb: 0.5, display: 'block' }}>
-                AI Photos: {picsPerPerformer === 51 ? "All" : picsPerPerformer}
-              </Typography>
-              <Slider 
-                size="small"
-                value={picsPerPerformer} 
-                min={1} 
-                max={51} 
-                onChange={(e, v) => setPicsPerPerformer(v)} 
-                sx={{ color: 'secondary.main', py: 1 }}
-              />
-            </Box>
-            <IconButton onClick={() => setShowSettings(true)} sx={{ color: 'text.secondary' }}>
-              <Settings />
-            </IconButton>
-          </Box>
-        </Toolbar>
-      </AppBar>
+              <Tooltip title="Settings">
+                <IconButton onClick={() => setShowSettings(true)} sx={iconBtnSx('var(--dim)')}>
+                  <Settings />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
+      </PageShell>
 
       {/* ═══ DUEL MODE (1v1) ═══ */}
       {compareList.length === 2 ? (
@@ -678,7 +665,7 @@ function SmartComparePage() {
                       '.MuiBox-root:hover > &': { opacity: 1 }
                     }}
                   >
-                    <Typography variant={isLandscape ? 'body1' : 'h6'} sx={{ color: '#fff', fontWeight: 700, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
+                    <Typography variant={isLandscape ? 'body1' : 'h6'} sx={{ color: 'var(--text)', fontWeight: 700, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
                       {index === 0 ? '← Pick' : 'Pick →'}
                     </Typography>
                   </Box>
@@ -750,7 +737,7 @@ function SmartComparePage() {
                             color: (performer.comparison_count || 0) < CALIBRATION_THRESHOLD ? 'warning.main' : 'text.secondary'
                           }}>
                             {(performer.comparison_count || 0) < CALIBRATION_THRESHOLD
-                              ? `⚡ Calibrating ${performer.comparison_count || 0}/${CALIBRATION_THRESHOLD}`
+                              ? `Calibrating ${performer.comparison_count || 0}/${CALIBRATION_THRESHOLD}`
                               : `${performer.comparison_count || 0} duels`}
                           </Typography>
                         </Box>
@@ -758,7 +745,7 @@ function SmartComparePage() {
                           size="small"
                           startIcon={<Refresh sx={{ fontSize: '14px' }} />}
                           onClick={() => fetchRandomPics(performer.id)}
-                          sx={{ color: 'rgba(255,255,255,0.4)', mt: 1, fontSize: '0.7rem' }}
+                          sx={{ color: 'var(--muted)', mt: 1, fontSize: '0.7rem' }}
                         >
                           Refresh Photos
                         </Button>
@@ -858,8 +845,8 @@ function SmartComparePage() {
             <Box>
               <Typography variant="body2" gutterBottom sx={{ color: 'text.secondary' }}>AI Server</Typography>
               <Typography variant="body2" sx={{ color: 'secondary.main', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
-                Change in <span style={{ color: '#00e5ff', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
+              <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
+                Change in <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

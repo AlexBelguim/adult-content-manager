@@ -39,7 +39,7 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
 
   if (!active || ordered.length === 0) {
     return (
-      <Box sx={{ position: 'absolute', inset: 0, bgcolor: '#000' }} />
+      <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'var(--bg)' }} />
     );
   }
 
@@ -53,7 +53,7 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
   };
 
   return (
-    <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#000' }}>
+    <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', background: 'var(--bg)' }}>
       {/* Ambient blurred background (same image, blown up + blurred) */}
       <AnimatePresence>
         <motion.div
@@ -133,7 +133,7 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
                 right: 0,
                 p: '24px 28px 22px',
                 background: 'linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 100%)',
-                color: 'white',
+                color: 'var(--text)',
               }}
             >
               <Typography sx={{ fontSize: 22, fontWeight: 600, letterSpacing: 0.4 }}>

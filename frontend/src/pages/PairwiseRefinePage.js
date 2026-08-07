@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, Button,
-    FormControl, InputLabel, Select, MenuItem, Chip,
-    Alert, Grid
+    Box, Typography, Button, FormControl, InputLabel, Select, MenuItem, Chip, Grid
 } from '@mui/material';
 import { AutoFixHigh, CheckCircle, Warning } from '@mui/icons-material';
+import { PageShell, PageHeader, Panel, EmptyState, LoadingState, SPACE } from '../components/layout';
 
 function PairwiseRefinePage({ serverUrl }) {
     const [performers, setPerformers] = useState([]);
@@ -19,7 +18,6 @@ function PairwiseRefinePage({ serverUrl }) {
     const [stats, setStats] = useState({ disagreement: 0, uncertainty: 0 });
 
     useEffect(() => {
-        // Fetch performers and models
         fetch(`${serverUrl}/api/performers`).then(r => r.json()).then(setPerformers);
         fetch(`${serverUrl}/api/inference/models`).then(r => r.json()).then(d => {
             setModels(d.models || []);
@@ -48,8 +46,7 @@ function PairwiseRefinePage({ serverUrl }) {
                 setStep('labeling');
                 setCurrentPairIndex(0);
             } else {
-                alert('No confusing pairs found! This performer is already well-understood by the model.');
-                setStep('setup');
+                setStep('none-found');
             }
         } catch (err) {
             console.error(err);
@@ -85,42 +82,55 @@ function PairwiseRefinePage({ serverUrl }) {
 
     const currentPair = pairs[currentPairIndex];
 
+    /** One side of the comparison. */
+    const Side = ({ side, path }) => (
+        <Grid item xs={6} onClick={() => handleVote(side)} sx={{ cursor: 'pointer' }}>
+            <Panel
+                padded={false}
+                sx={{
+                    height: '100%', overflow: 'hidden',
+                    borderWidth: 2, borderColor: 'transparent',
+                    '&:hover': { borderColor: 'var(--accent)' }
+                }}
+            >
+                <img
+                    src={`${serverUrl}/api/image?path=${encodeURIComponent(path)}`}
+                    // backgroundColor, not bgcolor — this is a plain DOM style
+                    // object, where MUI's sx aliases do not apply.
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'var(--bg)' }}
+                    alt={side === 'left' ? 'Left option' : 'Right option'}
+                />
+            </Panel>
+        </Grid>
+    );
+
     return (
-        <Box sx={{ p: 4, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 2 }}>
-                <AutoFixHigh sx={{ color: '#e94560', fontSize: 32 }} />
-                <Typography variant="h5" sx={{ color: '#fff' }}>
-                    Active Learning
-                </Typography>
-            </Box>
+        <PageShell sx={{ display: 'flex', flexDirection: 'column' }}>
+            <PageHeader
+                title="Active Learning"
+                subtitle="Finds the pairs the model is confused or wrong about — labeling these is far more effective than labeling at random."
+                back
+            />
 
             {step === 'setup' && (
-                <Paper sx={{ p: 4, maxWidth: 600, mx: 'auto', bgcolor: '#16213e' }}>
-                    <Typography variant="h6" sx={{ color: '#00d9ff', mb: 3 }}>
-                        Targeted Refinement
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: '#ccc', mb: 4 }}>
-                        The AI will analyze the selected performer and find "Hard Pairs" where it is confused or wrong.
-                        Labeling these specific pairs is 10x more effective than random labeling.
-                    </Typography>
-
-                    <FormControl fullWidth sx={{ mb: 3 }}>
-                        <InputLabel sx={{ color: '#888' }}>Model</InputLabel>
+                <Panel sx={{ maxWidth: 560, mx: 'auto', width: '100%', p: SPACE.lg }}>
+                    <FormControl fullWidth sx={{ mb: SPACE.md }}>
+                        <InputLabel>Model</InputLabel>
                         <Select
+                            label="Model"
                             value={selectedModel}
                             onChange={(e) => setSelectedModel(e.target.value)}
-                            sx={{ color: '#fff', '.MuiOutlinedInput-notchedOutline': { borderColor: '#444' } }}
                         >
                             {models.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
                         </Select>
                     </FormControl>
 
-                    <FormControl fullWidth sx={{ mb: 4 }}>
-                        <InputLabel sx={{ color: '#888' }}>Performer</InputLabel>
+                    <FormControl fullWidth sx={{ mb: SPACE.lg }}>
+                        <InputLabel>Performer</InputLabel>
                         <Select
+                            label="Performer"
                             value={selectedPerformer}
                             onChange={(e) => setSelectedPerformer(e.target.value)}
-                            sx={{ color: '#fff', '.MuiOutlinedInput-notchedOutline': { borderColor: '#444' } }}
                         >
                             {performers.map(p => (
                                 <MenuItem key={p.name} value={p.name}>
@@ -136,99 +146,66 @@ function PairwiseRefinePage({ serverUrl }) {
                         size="large"
                         onClick={startRefinement}
                         disabled={!selectedModel || !selectedPerformer}
-                        sx={{ bgcolor: '#e94560', py: 1.5 }}
                     >
-                        Start Analysis
+                        Start analysis
                     </Button>
-                </Paper>
+                </Panel>
             )}
 
             {step === 'analyzing' && (
-                <Box sx={{ textAlign: 'center', mt: 10 }}>
-                    <CircularProgress size={60} sx={{ color: '#e94560', mb: 4 }} />
-                    <Typography variant="h6" sx={{ color: '#fff' }}>
-                        Analyzing {selectedPerformer}...
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: '#888' }}>
-                        Running inference to find hard pairs
-                    </Typography>
-                </Box>
+                <LoadingState label={`Analyzing ${selectedPerformer} — running inference to find hard pairs…`} />
+            )}
+
+            {step === 'none-found' && (
+                <EmptyState
+                    icon={<CheckCircle />}
+                    title="No confusing pairs found"
+                    description={`The model already understands ${selectedPerformer} well. Try another performer, or train on more data first.`}
+                    action={<Button variant="contained" onClick={() => setStep('setup')}>Pick another</Button>}
+                />
             )}
 
             {step === 'labeling' && currentPair && (
-                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <Box sx={{
+                        display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center', mb: SPACE.md
+                    }}>
                         <Chip
                             icon={<Warning sx={{ fontSize: 16 }} />}
-                            label={`Reason: ${currentPair.reason}`}
-                            color={currentPair.reason === 'Disagreement' ? 'error' : 'warning'}
+                            label={currentPair.reason}
+                            size="small"
+                            sx={{
+                                bgcolor: 'transparent',
+                                border: `1px solid ${currentPair.reason === 'Disagreement' ? 'var(--bad)' : 'var(--warn)'}`,
+                                color: currentPair.reason === 'Disagreement' ? 'var(--bad)' : 'var(--warn)'
+                            }}
                         />
-                        <Typography sx={{ color: '#888' }}>
+                        <Typography variant="body2" sx={{ color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
                             {currentPairIndex + 1} / {pairs.length}
                         </Typography>
                     </Box>
 
-                    {/* Comparison Area */}
-                    <Grid container spacing={2} sx={{ flex: 1 }}>
-                        {/* LEFT */}
-                        <Grid item xs={6} onClick={() => handleVote('left')} sx={{ cursor: 'pointer', position: 'relative' }}>
-                            <Paper sx={{
-                                height: '100%', overflow: 'hidden',
-                                border: '2px solid transparent',
-                                '&:hover': { borderColor: '#00d9ff' },
-                                position: 'relative'
-                            }}>
-                                <img
-                                    src={`${serverUrl}/api/image?path=${encodeURIComponent(currentPair.left)}`}
-                                    style={{ width: '100%', height: '100%', objectFit: 'contain', bgcolor: '#000' }}
-                                    alt="Left"
-                                />
-                            </Paper>
-                        </Grid>
-
-                        {/* RIGHT */}
-                        <Grid item xs={6} onClick={() => handleVote('right')} sx={{ cursor: 'pointer' }}>
-                            <Paper sx={{
-                                height: '100%', overflow: 'hidden',
-                                border: '2px solid transparent',
-                                '&:hover': { borderColor: '#00d9ff' },
-                                position: 'relative'
-                            }}>
-                                <img
-                                    src={`${serverUrl}/api/image?path=${encodeURIComponent(currentPair.right)}`}
-                                    style={{ width: '100%', height: '100%', objectFit: 'contain', bgcolor: '#000' }}
-                                    alt="Right"
-                                />
-                            </Paper>
-                        </Grid>
+                    <Grid container spacing={2} sx={{ flex: 1, minHeight: 0 }}>
+                        <Side side="left" path={currentPair.left} />
+                        <Side side="right" path={currentPair.right} />
                     </Grid>
 
-                    <Typography variant="caption" sx={{ textAlign: 'center', mt: 2, color: '#666' }}>
+                    <Typography variant="caption" sx={{ textAlign: 'center', mt: SPACE.md, color: 'var(--muted)' }}>
                         Press Left/Right arrow keys or click to vote
                     </Typography>
                 </Box>
             )}
 
             {step === 'complete' && (
-                <Box sx={{ textAlign: 'center', mt: 10 }}>
-                    <CheckCircle sx={{ fontSize: 80, color: '#4caf50', mb: 3 }} />
-                    <Typography variant="h4" sx={{ color: '#fff', mb: 2 }}>
-                        Refinement Complete!
-                    </Typography>
-                    <Typography variant="body1" sx={{ color: '#ccc', mb: 4 }}>
-                        You resolved {pairs.length} hard cases ({stats.disagreement} disagreements, {stats.uncertainty} uncertain).
-                        The model will learn significantly from these on the next training run.
-                    </Typography>
-                    <Button
-                        variant="contained"
-                        onClick={() => setStep('setup')}
-                        sx={{ bgcolor: '#00d9ff' }}
-                    >
-                        Refine Another
-                    </Button>
-                </Box>
+                <EmptyState
+                    icon={<CheckCircle />}
+                    title="Refinement complete"
+                    description={`You resolved ${pairs.length} hard cases (${stats.disagreement} disagreements, ${stats.uncertainty} uncertain). The model will learn significantly from these on the next training run.`}
+                    action={<Button variant="contained" onClick={() => setStep('setup')}>Refine another</Button>}
+                />
             )}
-        </Box>
+        </PageShell>
     );
 }
 

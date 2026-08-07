@@ -418,15 +418,15 @@ function HashResultsPage() {
         <Button
           startIcon={<ArrowBackIcon />}
           onClick={() => navigate('/hash-management')}
-          sx={{ color: '#aaa', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}
+          sx={{ color: 'var(--dim)', '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' } }}
         >
           Back
         </Button>
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          <Typography variant="h5" component="h1"  sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>
             Hash Comparison Results
           </Typography>
-          <Typography variant="body2" sx={{ color: '#666' }}>
+          <Typography variant="body2" sx={{ color: 'var(--muted)' }}>
             Run ID: {runId}
           </Typography>
         </Box>
@@ -445,11 +445,11 @@ function HashResultsPage() {
                 }
                 label={
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <CheckCircleIcon sx={{ color: hashVerified ? '#4caf50' : '#666', fontSize: 18 }} />
+                    <CheckCircleIcon sx={{ color: hashVerified ? 'var(--ok)' : 'var(--muted)', fontSize: 18 }} />
                     <span>Verified</span>
                   </Box>
                 }
-                sx={{ color: hashVerified ? '#4caf50' : '#999' }}
+                sx={{ color: hashVerified ? 'var(--ok)' : '#999' }}
               />
             </Tooltip>
             <Tooltip title="Re-run internal duplicate check">
@@ -494,8 +494,8 @@ function HashResultsPage() {
           elevation={0}
           sx={{
             mb: 3,
-            bgcolor: 'rgba(244, 67, 54, 0.05)',
-            border: '1px solid rgba(244, 67, 54, 0.3)',
+            bgcolor: 'var(--bad-quiet)',
+            border: '1px solid var(--bad-quiet)',
             borderRadius: 2,
             overflow: 'hidden'
           }}
@@ -509,29 +509,29 @@ function HashResultsPage() {
               alignItems: 'center',
               justifyContent: 'space-between',
               cursor: 'pointer',
-              '&:hover': { bgcolor: 'rgba(244, 67, 54, 0.08)' }
+              '&:hover': { bgcolor: 'var(--bad-quiet)' }
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              <BrokenImageIcon sx={{ color: '#f44336', flexShrink: 0 }} />
-              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: '#f44336', whiteSpace: 'nowrap' }}>
+              <BrokenImageIcon sx={{ color: 'var(--bad)', flexShrink: 0 }} />
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: 'var(--bad)', whiteSpace: 'nowrap' }}>
                 Matches with Deleted Files ({deletedMatchItems.length})
               </Typography>
               <Chip
                 label={`${deletedSelectedCount} selected`}
                 size="small"
-                sx={{ bgcolor: 'rgba(244, 67, 54, 0.2)', color: '#f44336' }}
+                sx={{ bgcolor: 'var(--bad-quiet)', color: 'var(--bad)' }}
               />
             </Box>
-            <IconButton size="small" sx={{ color: '#f44336', flexShrink: 0 }}>
+            <IconButton size="small" sx={{ color: 'var(--bad)', flexShrink: 0 }}>
               {deletedSectionOpen ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
             </IconButton>
           </Box>
 
           <Collapse in={deletedSectionOpen}>
-            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid rgba(244, 67, 54, 0.2)' }}>
+            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid var(--bad-quiet)' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="body2" sx={{ color: '#888' }}>
+                <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                   Files that matched with now-deleted files. Select to delete, unselect to keep.
                 </Typography>
                 <FormControlLabel
@@ -540,10 +540,10 @@ function HashResultsPage() {
                       checked={deletedSelectedCount === deletedMatchItems.length && deletedMatchItems.length > 0}
                       indeterminate={deletedSelectedCount > 0 && deletedSelectedCount < deletedMatchItems.length}
                       onChange={(e) => handleSelectAllDeleted(e.target.checked)}
-                      sx={{ color: '#f44336', '&.Mui-checked': { color: '#f44336' } }}
+                      sx={{ color: 'var(--bad)', '&.Mui-checked': { color: 'var(--bad)' } }}
                     />
                   }
-                  label={<Typography variant="body2" sx={{ color: '#aaa' }}>Select All</Typography>}
+                  label={<Typography variant="body2" sx={{ color: 'var(--dim)' }}>Select All</Typography>}
                 />
               </Box>
 
@@ -565,12 +565,12 @@ function HashResultsPage() {
                       onClick={() => handleToggleItem(item.id)}
                       sx={{
                         p: 1,
-                        bgcolor: isSelected ? 'rgba(244, 67, 54, 0.15)' : '#1a1a1a',
-                        border: isSelected ? '2px solid #f44336' : '1px solid #333',
+                        bgcolor: isSelected ? 'var(--bad-quiet)' : 'var(--bg)',
+                        border: isSelected ? '2px solid var(--bad)' : '1px solid var(--line)',
                         borderRadius: 1.5,
                         cursor: 'pointer',
                         transition: 'all 0.15s',
-                        '&:hover': { borderColor: isSelected ? '#ff6659' : '#555' }
+                        '&:hover': { borderColor: isSelected ? '#ff6659' : 'var(--muted)' }
                       }}
                     >
                       <Box sx={{ position: 'relative' }}>
@@ -579,7 +579,7 @@ function HashResultsPage() {
                           height: 100,
                           borderRadius: 1,
                           overflow: 'hidden',
-                          bgcolor: '#000',
+                          bgcolor: 'var(--bg)',
                           mb: 1,
                           display: 'flex',
                           alignItems: 'center',
@@ -587,8 +587,8 @@ function HashResultsPage() {
                         }}>
                           {hasError ? (
                             <Box sx={{ textAlign: 'center' }}>
-                              <BrokenImageIcon sx={{ color: '#f44336', fontSize: 24 }} />
-                              <Typography variant="caption" sx={{ color: '#f44336', display: 'block', fontSize: '0.5rem' }}>
+                              <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: 24 }} />
+                              <Typography variant="caption" sx={{ color: 'var(--bad)', display: 'block', fontSize: '0.5rem' }}>
                                 Also Deleted
                               </Typography>
                             </Box>
@@ -621,8 +621,8 @@ function HashResultsPage() {
                             bgcolor: 'rgba(0,0,0,0.6)',
                             borderRadius: 1,
                             p: 0.25,
-                            color: '#888',
-                            '&.Mui-checked': { color: '#f44336' }
+                            color: 'var(--dim)',
+                            '&.Mui-checked': { color: 'var(--bad)' }
                           }}
                         />
 
@@ -636,15 +636,15 @@ function HashResultsPage() {
                             height: 18,
                             fontSize: '0.55rem',
                             fontWeight: 'bold',
-                            bgcolor: item.exact_match ? '#f44336' : '#ed6c02',
-                            color: '#fff'
+                            bgcolor: item.exact_match ? 'var(--bad)' : 'var(--warn)',
+                            color: 'var(--text)'
                           }}
                         />
                       </Box>
 
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                        {isVideo ? <MovieIcon sx={{ fontSize: 12, color: '#ce93d8' }} /> : <ImageIcon sx={{ fontSize: 12, color: '#90caf9' }} />}
-                        <Typography variant="caption" sx={{ color: '#666', fontSize: '0.55rem' }}>
+                        {isVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)' }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)' }} />}
+                        <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.55rem' }}>
                           {isVideo ? 'Video' : 'Image'}
                         </Typography>
                       </Box>
@@ -652,7 +652,7 @@ function HashResultsPage() {
                         <Typography
                           variant="caption"
                           sx={{
-                            color: '#aaa',
+                            color: 'var(--dim)',
                             fontSize: '0.65rem',
                             display: 'block',
                             overflow: 'hidden',
@@ -678,8 +678,8 @@ function HashResultsPage() {
           elevation={0}
           sx={{
             mb: 3,
-            bgcolor: 'rgba(76, 175, 80, 0.05)',
-            border: '1px solid rgba(76, 175, 80, 0.3)',
+            bgcolor: 'var(--ok-quiet)',
+            border: '1px solid var(--ok-quiet)',
             borderRadius: 2,
             overflow: 'hidden'
           }}
@@ -693,28 +693,28 @@ function HashResultsPage() {
               alignItems: 'center',
               justifyContent: 'space-between',
               cursor: 'pointer',
-              '&:hover': { bgcolor: 'rgba(76, 175, 80, 0.08)' }
+              '&:hover': { bgcolor: 'var(--ok-quiet)' }
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              <CheckCircleIcon sx={{ color: '#4caf50', flexShrink: 0 }} />
-              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: '#4caf50', whiteSpace: 'nowrap' }}>
+              <CheckCircleIcon sx={{ color: 'var(--ok)', flexShrink: 0 }} />
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: 'var(--ok)', whiteSpace: 'nowrap' }}>
                 Verified Kept Matches ({filteredActiveGroups.length} groups)
               </Typography>
               <Chip
                 label="Acknowledged as acceptable"
                 size="small"
-                sx={{ bgcolor: 'rgba(76, 175, 80, 0.2)', color: '#4caf50' }}
+                sx={{ bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }}
               />
             </Box>
-            <IconButton size="small" sx={{ color: '#4caf50', flexShrink: 0 }}>
+            <IconButton size="small" sx={{ color: 'var(--ok)', flexShrink: 0 }}>
               {keptSectionOpen ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
             </IconButton>
           </Box>
 
           <Collapse in={keptSectionOpen}>
-            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid rgba(76, 175, 80, 0.2)' }}>
-              <Typography variant="body2" sx={{ color: '#888', mb: 2 }}>
+            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid var(--ok-quiet)' }}>
+              <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 2 }}>
                 These matches were present when you marked this performer as verified. They are considered acceptable duplicates.
               </Typography>
 
@@ -734,8 +734,8 @@ function HashResultsPage() {
                         elevation={0}
                         sx={{
                           p: 1,
-                          bgcolor: '#1a1a1a',
-                          border: '1px solid rgba(76, 175, 80, 0.3)',
+                          bgcolor: 'var(--bg)',
+                          border: '1px solid var(--ok-quiet)',
                           borderRadius: 1.5,
                         }}
                       >
@@ -745,7 +745,7 @@ function HashResultsPage() {
                             height: 100,
                             borderRadius: 1,
                             overflow: 'hidden',
-                            bgcolor: '#000',
+                            bgcolor: 'var(--bg)',
                             mb: 1,
                             display: 'flex',
                             alignItems: 'center',
@@ -778,15 +778,15 @@ function HashResultsPage() {
                               height: 18,
                               fontSize: '0.55rem',
                               fontWeight: 'bold',
-                              bgcolor: 'rgba(76, 175, 80, 0.8)',
-                              color: '#fff'
+                              bgcolor: 'var(--ok-quiet)',
+                              color: 'var(--text)'
                             }}
                           />
                         </Box>
 
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                          {isVideo ? <MovieIcon sx={{ fontSize: 12, color: '#ce93d8' }} /> : <ImageIcon sx={{ fontSize: 12, color: '#90caf9' }} />}
-                          <Typography variant="caption" sx={{ color: '#666', fontSize: '0.55rem' }}>
+                          {isVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)' }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)' }} />}
+                          <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.55rem' }}>
                             {isVideo ? 'Video' : 'Image'}
                           </Typography>
                         </Box>
@@ -794,7 +794,7 @@ function HashResultsPage() {
                           <Typography
                             variant="caption"
                             sx={{
-                              color: '#aaa',
+                              color: 'var(--dim)',
                               fontSize: '0.65rem',
                               display: 'block',
                               overflow: 'hidden',
@@ -822,9 +822,9 @@ function HashResultsPage() {
             elevation={0}
             sx={{
               p: 3,
-              bgcolor: '#1E1E1E',
+              bgcolor: 'var(--surface)',
               borderRadius: 2,
-              border: '1px solid #333',
+              border: '1px solid var(--line)',
               position: 'sticky',
               top: 16,
               width: '100%',
@@ -834,30 +834,30 @@ function HashResultsPage() {
           >
             {/* Stats */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: '#888', mb: 1.5 }}>Statistics</Typography>
+              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1.5 }}>Statistics</Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
-                <Box sx={{ p: 1.5, bgcolor: '#252525', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: '#fff', fontWeight: 'bold' }}>{filteredActiveGroups.length}</Typography>
-                  <Typography variant="caption" sx={{ color: '#666' }}>Active</Typography>
+                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
+                  <Typography variant="h5" sx={{ color: 'var(--text)', fontWeight: 'bold' }}>{filteredActiveGroups.length}</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Active</Typography>
                 </Box>
-                <Box sx={{ p: 1.5, bgcolor: '#252525', borderRadius: 1, textAlign: 'center' }}>
+                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
                   <Typography variant="h5" sx={{ color: 'primary.light', fontWeight: 'bold' }}>{selectedItems.size}</Typography>
-                  <Typography variant="caption" sx={{ color: '#666' }}>Selected</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Selected</Typography>
                 </Box>
-                <Box sx={{ p: 1.5, bgcolor: '#252525', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: '#f44336', fontWeight: 'bold' }}>{filteredItems.filter(i => i.exact_match).length}</Typography>
-                  <Typography variant="caption" sx={{ color: '#666' }}>Exact</Typography>
+                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
+                  <Typography variant="h5" sx={{ color: 'var(--bad)', fontWeight: 'bold' }}>{filteredItems.filter(i => i.exact_match).length}</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Exact</Typography>
                 </Box>
-                <Box sx={{ p: 1.5, bgcolor: '#252525', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: '#ed6c02', fontWeight: 'bold' }}>{deletedMatchItems.length}</Typography>
-                  <Typography variant="caption" sx={{ color: '#666' }}>Deleted</Typography>
+                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
+                  <Typography variant="h5" sx={{ color: 'var(--warn)', fontWeight: 'bold' }}>{deletedMatchItems.length}</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Deleted</Typography>
                 </Box>
               </Box>
             </Box>
 
             {/* Similarity Slider */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: '#888', mb: 1 }}>Similarity Threshold</Typography>
+              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Similarity Threshold</Typography>
               <Slider
                 value={hammingThreshold}
                 onChange={(e, val) => setHammingThreshold(val)}
@@ -868,23 +868,23 @@ function HashResultsPage() {
                 valueLabelFormat={(val) => `${getSimilarityPercent(val)}%`}
                 sx={{
                   color: 'primary.light',
-                  '& .MuiSlider-thumb': { bgcolor: '#fff', border: '2px solid #b085f5' },
+                  '& .MuiSlider-thumb': { bgcolor: 'var(--text)', border: '2px solid #b085f5' },
                   '& .MuiSlider-track': { bgcolor: 'primary.light' },
-                  '& .MuiSlider-rail': { bgcolor: '#444' },
+                  '& .MuiSlider-rail': { bgcolor: 'var(--raised)' },
                 }}
               />
             </Box>
 
             {/* Match Type Filter */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: '#888', mb: 1 }}>Match Type</Typography>
+              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Match Type</Typography>
               <ToggleButtonGroup
                 value={sortBy}
                 exclusive
                 onChange={(e, v) => v && setSortBy(v)}
                 size="small"
                 fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
+                sx={{ '& .MuiToggleButton-root': { color: 'var(--dim)', borderColor: 'var(--line-strong)', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="exact">Exact</ToggleButton>
@@ -894,14 +894,14 @@ function HashResultsPage() {
 
             {/* Group Filter */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: '#888', mb: 1 }}>Group Type</Typography>
+              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Group Type</Typography>
               <ToggleButtonGroup
                 value={groupFilter}
                 exclusive
                 onChange={(e, v) => { if (v) { setGroupFilter(v); setDisplayPage(1); } }}
                 size="small"
                 fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
+                sx={{ '& .MuiToggleButton-root': { color: 'var(--dim)', borderColor: 'var(--line-strong)', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="pairs">Pairs</ToggleButton>
@@ -911,14 +911,14 @@ function HashResultsPage() {
 
             {/* Media Filter */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: '#888', mb: 1 }}>Media Type</Typography>
+              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Media Type</Typography>
               <ToggleButtonGroup
                 value={mediaFilter}
                 exclusive
                 onChange={(e, v) => { if (v) { setMediaFilter(v); setDisplayPage(1); } }}
                 size="small"
                 fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: '#888', borderColor: '#444', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
+                sx={{ '& .MuiToggleButton-root': { color: 'var(--dim)', borderColor: 'var(--line-strong)', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
               >
                 <ToggleButton value="all">All</ToggleButton>
                 <ToggleButton value="pics">Pics</ToggleButton>
@@ -927,15 +927,15 @@ function HashResultsPage() {
             </Box>
 
             {/* Select All Active */}
-            <Box sx={{ mb: 3, pt: 2, borderTop: '1px solid #333' }}>
+            <Box sx={{ mb: 3, pt: 2, borderTop: '1px solid var(--line)' }}>
               <FormControlLabel
-                control={<Checkbox checked={selectAll} onChange={(e) => handleSelectAll(e.target.checked, filteredItems)} sx={{ color: '#666', '&.Mui-checked': { color: 'primary.light' } }} />}
-                label={<Typography variant="body2" sx={{ color: '#aaa' }}>Select All Active ({filteredActiveGroups.length})</Typography>}
+                control={<Checkbox checked={selectAll} onChange={(e) => handleSelectAll(e.target.checked, filteredItems)} sx={{ color: 'var(--muted)', '&.Mui-checked': { color: 'primary.light' } }} />}
+                label={<Typography variant="body2" sx={{ color: 'var(--dim)' }}>Select All Active ({filteredActiveGroups.length})</Typography>}
               />
             </Box>
 
             {/* Actions */}
-            <Box sx={{ pt: 2, borderTop: '1px solid #333' }}>
+            <Box sx={{ pt: 2, borderTop: '1px solid var(--line)' }}>
               {!commitAction && (
                 <Button
                   fullWidth
@@ -944,10 +944,10 @@ function HashResultsPage() {
                   onClick={() => setCommitAction('delete')}
                   disabled={selectedItems.size === 0 || committing}
                   sx={{
-                    background: 'linear-gradient(45deg, #f44336 30%, #ff5722 90%)',
+                    background: 'linear-gradient(45deg, var(--bad) 30%, #ff5722 90%)',
                     fontWeight: 'bold',
                     py: 1.5,
-                    '&:disabled': { background: '#333', color: '#666' }
+                    '&:disabled': { background: 'var(--raised)', color: 'var(--muted)' }
                   }}
                 >
                   Delete Selected ({selectedItems.size})
@@ -956,11 +956,11 @@ function HashResultsPage() {
 
               {commitAction === 'delete' && (
                 <Box>
-                  <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 2, bgcolor: 'rgba(237, 108, 2, 0.1)', color: '#ed6c02' }}>
+                  <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 2, bgcolor: 'rgba(237, 108, 2, 0.1)', color: 'var(--warn)' }}>
                     Delete {selectedItems.size} file(s)?
                   </Alert>
                   <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button onClick={() => setCommitAction(null)} sx={{ flex: 1, color: '#aaa' }}>
+                    <Button onClick={() => setCommitAction(null)} sx={{ flex: 1, color: 'var(--dim)' }}>
                       Cancel
                     </Button>
                     <Button
@@ -982,14 +982,14 @@ function HashResultsPage() {
         {/* Right Panel: Results */}
         <Grid item xs={12} md={9}>
           {committing ? (
-            <Paper sx={{ p: 6, textAlign: 'center', bgcolor: '#1E1E1E', border: '1px solid #333', borderRadius: 2, minHeight: '50vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 2, minHeight: '50vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <CircularProgress size={60} sx={{ color: 'primary.light', mb: 3 }} />
-              <Typography variant="h5" sx={{ color: '#fff', mb: 1 }}>Processing Deletion...</Typography>
-              <Typography variant="body2" sx={{ color: '#888' }}>Unmounting media to release file locks...</Typography>
+              <Typography variant="h5" sx={{ color: 'var(--text)', mb: 1 }}>Processing Deletion...</Typography>
+              <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Unmounting media to release file locks...</Typography>
             </Paper>
           ) : filteredActiveGroups.length === 0 ? (
-            <Paper sx={{ p: 6, textAlign: 'center', bgcolor: '#1E1E1E', border: '1px solid #333', borderRadius: 2 }}>
-              <Typography variant="h6" sx={{ color: '#666' }}>No active matches found at this threshold</Typography>
+            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 2 }}>
+              <Typography variant="h6" sx={{ color: 'var(--muted)' }}>No active matches found at this threshold</Typography>
             </Paper>
           ) : (
             <HashResultsGrid
@@ -1018,10 +1018,10 @@ function HashResultsPage() {
           position: 'fixed',
           bottom: 24,
           right: 24,
-          bgcolor: '#252525',
-          color: '#aaa',
-          border: '1px solid #444',
-          '&:hover': { bgcolor: '#333' }
+          bgcolor: 'var(--surface)',
+          color: 'var(--dim)',
+          border: '1px solid var(--line-strong)',
+          '&:hover': { bgcolor: 'var(--raised)' }
         }}
       >
         <KeyboardArrowDownIcon />

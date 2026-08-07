@@ -246,6 +246,81 @@ router.get('/preview', async (req, res) => {
   }
 });
 
+/**
+ * Poster frame for a video.
+ *
+ * /preview above deliberately 400s on anything that isn't an image, so until
+ * now there was no way to show a video as anything but its filename — which is
+ * why the funpipe library rendered as a text table. This grabs one frame with
+ * the ffmpeg binary already vendored for remuxing and caches it next to the
+ * file, so the seek cost is paid once per video rather than once per render.
+ *
+ * Frames are taken at 12% rather than 0s: the first second of a lot of files is
+ * black or a title card, which makes every row look identical.
+ */
+const VIDEO_THUMB_EXT = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.webm', '.m4v', '.flv', '.ts', '.mpg', '.mpeg'];
+
+router.get('/video-thumbnail', async (req, res) => {
+  const { path: filePath } = req.query;
+  if (!filePath) return res.status(400).send({ error: 'File path is required' });
+
+  try {
+    if (!await fs.pathExists(filePath)) {
+      return res.status(404).send({ error: 'File not found' });
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    if (!VIDEO_THUMB_EXT.includes(ext)) {
+      return res.status(400).send({ error: 'File is not a video' });
+    }
+
+    // Cache beside the video in .thumbnails, matching the funscript-thumbnail
+    // convention. Hash the full path so two videos with the same basename in
+    // different folders cannot collide.
+    const thumbDir = path.join(path.dirname(filePath), '.thumbnails');
+    const key = crypto.createHash('md5').update(filePath).digest('hex').slice(0, 16);
+    const thumbPath = path.join(thumbDir, `${path.basename(filePath, ext)}.${key}.jpg`);
+
+    const serve = () => {
+      res.set('Content-Type', 'image/jpeg');
+      res.set('Cache-Control', 'public, max-age=86400');
+      return res.sendFile(thumbPath);
+    };
+
+    if (await fs.pathExists(thumbPath)) return serve();
+
+    await fs.ensureDir(thumbDir);
+
+    let seek = 3;
+    try {
+      const duration = await getVideoDuration(filePath);
+      if (duration && duration > 0) seek = Math.max(1, Math.min(duration * 0.12, 600));
+    } catch { /* unreadable duration — the 3s default still beats frame 0 */ }
+
+    const tmp = `${thumbPath}.${process.pid}.tmp`;
+    await new Promise((resolve, reject) => {
+      // -ss before -i seeks by keyframe, which is near-instant even on a NAS.
+      const proc = spawn(ffmpegPath, [
+        '-ss', String(seek), '-i', filePath,
+        '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5',
+        '-y', tmp
+      ], { windowsHide: true });
+      let stderr = '';
+      proc.stderr.on('data', d => { stderr += d.toString().slice(0, 400); });
+      proc.on('error', reject);
+      proc.on('close', code => code === 0
+        ? resolve()
+        : reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-200)}`)));
+    });
+
+    // Rename last so a concurrent request never sees a half-written file.
+    await fs.move(tmp, thumbPath, { overwrite: true });
+    return serve();
+  } catch (err) {
+    console.error('Error generating video thumbnail:', err.message);
+    res.status(500).send({ error: err.message });
+  }
+});
+
 // Stream video with range request support (crucial for large files over SMB/network)
 router.get('/stream-video', async (req, res) => {
   const { path: filePath, startTime } = req.query;

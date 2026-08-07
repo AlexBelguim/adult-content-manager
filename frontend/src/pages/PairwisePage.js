@@ -6,8 +6,10 @@ import {
 } from '@mui/material';
 import {
     CompareArrows, School, Psychology, TuneRounded, HealthAndSafety, AutoFixHigh, SmartToy,
-    Settings, Refresh, CheckCircle, Error as ErrorIcon, FilterAlt, Science
+    Settings, Refresh, CheckCircle, Error as ErrorIcon, FilterAlt, Science,
+    Insights, ArrowBack
 } from '@mui/icons-material';
+import { LoadingState } from '../components/layout';
 
 // Sub-pages (will create these next)
 import PairwiseLabelerPage from './PairwiseLabelerPage';
@@ -178,28 +180,28 @@ function PairwisePage() {
 
     if (loading) {
         return (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <CircularProgress />
+            <Box sx={{ height: '100vh', bgcolor: 'var(--bg)', display: 'grid', placeItems: 'center' }}>
+                <LoadingState label="Connecting to pairwise server…" />
             </Box>
         );
     }
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#1a1a2e' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: 'var(--bg)' }}>
             {/* Header */}
             <Paper
                 elevation={0}
                 sx={{
                     borderRadius: 0,
-                    bgcolor: '#16213e',
-                    borderBottom: '1px solid #0f3460',
+                    bgcolor: 'var(--surface)',
+                    borderBottom: '1px solid var(--line)',
                     px: 2, py: 1
                 }}
             >
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Typography variant="h6" sx={{ color: '#e94560', fontWeight: 'bold' }}>
-                            🎯 Pairwise Labeler
+                        <Typography variant="h6" sx={{ color: 'var(--text)', fontWeight: 640, letterSpacing: '-0.015em' }}>
+                            Pairwise Labeler
                         </Typography>
 
                         {serverHealthy ? (
@@ -221,15 +223,15 @@ function PairwisePage() {
                         )}
 
                         {status && (
-                            <Box sx={{ display: 'flex', gap: 2, color: '#888' }}>
+                            <Box sx={{ display: 'flex', gap: 2, color: 'var(--dim)' }}>
                                 <Typography variant="body2">
-                                    <strong style={{ color: '#00d9ff' }}>{status.performers}</strong> performers
+                                    <strong style={{ color: 'var(--accent)' }}>{status.performers}</strong> performers
                                 </Typography>
                                 <Typography variant="body2">
-                                    <strong style={{ color: '#00d9ff' }}>{status.totalImages}</strong> images
+                                    <strong style={{ color: 'var(--accent)' }}>{status.totalImages}</strong> images
                                 </Typography>
                                 <Typography variant="body2">
-                                    <strong style={{ color: '#00d9ff' }}>{status.labeledPairs}</strong> pairs
+                                    <strong style={{ color: 'var(--accent)' }}>{status.labeledPairs}</strong> pairs
                                 </Typography>
                             </Box>
                         )}
@@ -237,46 +239,47 @@ function PairwisePage() {
 
                     <Box sx={{ display: 'flex', gap: 1 }}>
                         <Tooltip title="Refresh Data">
-                            <IconButton onClick={handleRefresh} sx={{ color: '#888' }}>
+                            <IconButton onClick={handleRefresh} sx={{ color: 'var(--dim)' }}>
                                 <Refresh />
                             </IconButton>
                         </Tooltip>
                         <Tooltip title="Settings">
-                            <IconButton onClick={() => setShowSettings(!showSettings)} sx={{ color: showSettings ? '#e94560' : '#888' }}>
+                            <IconButton onClick={() => setShowSettings(!showSettings)} sx={{ color: showSettings ? 'var(--accent)' : 'var(--dim)' }}>
                                 <Settings />
                             </IconButton>
                         </Tooltip>
                         <Button
                             variant="outlined"
                             size="small"
+                            startIcon={<Insights />}
                             onClick={() => navigate('/ranking-insight')}
-                            sx={{ color: '#00d9ff', borderColor: '#00d9ff' }}
                         >
-                            📊 Insights
+                            Insights
                         </Button>
                         <Button
                             variant="outlined"
                             size="small"
+                            startIcon={<ArrowBack />}
                             onClick={() => navigate('/')}
-                            sx={{ color: '#888', borderColor: '#333' }}
+                            sx={{ color: 'var(--dim)' }}
                         >
-                            ← Back
+                            Back
                         </Button>
                     </Box>
                 </Box>
 
                 {/* Settings Panel */}
                 {showSettings && (
-                    <Box sx={{ mt: 2, p: 2, bgcolor: '#0f3460', borderRadius: 1 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, color: '#fff' }}>
+                    <Box sx={{ mt: 2, p: 2, bgcolor: 'var(--raised)', borderRadius: 1 }}>
+                        <Typography variant="subtitle2" sx={{ mb: 2, color: 'var(--text)' }}>
                             Server Configuration
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                <Typography variant="caption" sx={{ color: '#888' }}>
+                                <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
                                     Data Root (from Main DB)
                                 </Typography>
-                                <Typography variant="body2" sx={{ color: '#fff', bgcolor: '#1a1a2e', px: 1, py: 0.5, borderRadius: 1, border: '1px solid #333' }}>
+                                <Typography variant="body2" sx={{ color: 'var(--text)', bgcolor: 'var(--surface)', px: 1, py: 0.5, borderRadius: 'var(--radius-sm, 4px)', border: '1px solid var(--line)' }}>
                                     {basePath || 'Not configured'}
                                 </Typography>
                             </Box>
@@ -287,10 +290,10 @@ function PairwisePage() {
                                 size="small"
                                 sx={{
                                     width: 300,
-                                    '& .MuiInputBase-root': { bgcolor: '#1a1a2e', color: '#fff' },
-                                    '& .MuiInputLabel-root': { color: '#aaa' },
-                                    '& .MuiInputLabel-root.Mui-focused': { color: '#e94560' },
-                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#333' }
+                                    '& .MuiInputBase-root': { bgcolor: 'var(--surface)', color: 'var(--text)' },
+                                    '& .MuiInputLabel-root': { color: 'var(--dim)' },
+                                    '& .MuiInputLabel-root.Mui-focused': { color: 'var(--accent)' },
+                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' }
                                 }}
                             />
                             <TextField
@@ -300,13 +303,13 @@ function PairwisePage() {
                                 size="small"
                                 sx={{
                                     width: 300,
-                                    '& .MuiInputBase-root': { bgcolor: '#1a1a2e', color: '#fff' },
-                                    '& .MuiInputLabel-root': { color: '#aaa' },
-                                    '& .MuiInputLabel-root.Mui-focused': { color: '#e94560' },
-                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#333' }
+                                    '& .MuiInputBase-root': { bgcolor: 'var(--surface)', color: 'var(--text)' },
+                                    '& .MuiInputLabel-root': { color: 'var(--dim)' },
+                                    '& .MuiInputLabel-root.Mui-focused': { color: 'var(--accent)' },
+                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' }
                                 }}
                             />
-                            <Button variant="contained" onClick={handleSaveSettings} sx={{ bgcolor: '#e94560', height: 40 }}>
+                            <Button variant="contained" onClick={handleSaveSettings} sx={{ bgcolor: 'var(--accent)', height: 40 }}>
                                 Save & Rescan
                             </Button>
                         </Box>
@@ -326,26 +329,27 @@ function PairwisePage() {
                 elevation={0}
                 sx={{
                     borderRadius: 0,
-                    bgcolor: '#0f3460',
-                    borderBottom: '2px solid #e94560'
+                    bgcolor: 'var(--surface)',
+                    borderBottom: '1px solid var(--line)'
                 }}
             >
                 <Tabs
                     value={tabValue}
                     onChange={handleTabChange}
+                    variant="scrollable"
+                    scrollButtons="auto"
                     sx={{
                         '& .MuiTab-root': {
-                            color: '#888',
+                            color: 'var(--dim)',
                             textTransform: 'none',
-                            fontWeight: 500,
-                            fontSize: '1rem',
-                            minHeight: 48
+                            fontWeight: 550,
+                            fontSize: '0.9rem',
+                            minHeight: 46
                         },
                         '& .Mui-selected': {
-                            color: '#fff !important',
-                            bgcolor: 'rgba(233, 69, 96, 0.2)'
+                            color: 'var(--accent) !important'
                         },
-                        '& .MuiTabs-indicator': { bgcolor: '#e94560' }
+                        '& .MuiTabs-indicator': { bgcolor: 'var(--accent)', height: 2 }
                     }}
                 >
                     <Tab icon={<CompareArrows />} iconPosition="start" label="Labeler" />

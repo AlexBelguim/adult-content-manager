@@ -161,7 +161,7 @@ function MobilePicSwiper({
         left: 0,
         right: 0,
         bottom: 0,
-        bgcolor: '#0a0a15',
+        bgcolor: 'var(--bg)',
         zIndex: 9999,
         display: 'flex',
         flexDirection: 'column',
@@ -180,12 +180,12 @@ function MobilePicSwiper({
         backdropFilter: 'blur(10px)',
         zIndex: 10,
       }}>
-        <IconButton size="small" onClick={onClose} sx={{ color: '#fff' }}>
+        <IconButton size="small" onClick={onClose} sx={{ color: 'var(--text)' }}>
           <Close />
         </IconButton>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" sx={{ color: '#aaa' }}>
+          <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
             {currentIndex + 1} / {files.length}
             {totalFiles > files.length && ` (${totalFiles})`}
           </Typography>
@@ -193,15 +193,15 @@ function MobilePicSwiper({
             label={`${progress}%`}
             size="small"
             sx={{
-              bgcolor: 'rgba(76, 175, 80, 0.2)',
-              color: '#4caf50',
+              bgcolor: 'var(--ok-quiet)',
+              color: 'var(--ok)',
               fontSize: '0.7rem',
               height: 22
             }}
           />
         </Box>
 
-        <IconButton size="small" onClick={toggleFullscreen} sx={{ color: '#fff' }}>
+        <IconButton size="small" onClick={toggleFullscreen} sx={{ color: 'var(--text)' }}>
           {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
         </IconButton>
       </Box>
@@ -218,7 +218,7 @@ function MobilePicSwiper({
           top: 0,
           height: '100%',
           width: `${progress}%`,
-          bgcolor: '#4caf50',
+          bgcolor: 'var(--ok)',
           transition: 'width 0.3s ease',
         }} />
       </Box>
@@ -239,9 +239,9 @@ function MobilePicSwiper({
               alignItems: 'center',
               opacity: Math.min(1, Math.abs(swipeOffset.x) / (SWIPE_THRESHOLD * 2)),
             }}>
-              <CheckCircle sx={{ fontSize: 80, color: '#4caf50' }} />
+              <CheckCircle sx={{ fontSize: 80, color: 'var(--ok)' }} />
               <Typography variant="h5" sx={{
-                color: '#4caf50',
+                color: 'var(--ok)',
                 fontWeight: 'bold',
                 textShadow: '0 2px 8px rgba(0,0,0,0.8)',
                 mt: 1
@@ -264,9 +264,9 @@ function MobilePicSwiper({
               alignItems: 'center',
               opacity: Math.min(1, Math.abs(swipeOffset.x) / (SWIPE_THRESHOLD * 2)),
             }}>
-              <Delete sx={{ fontSize: 80, color: '#f44336' }} />
+              <Delete sx={{ fontSize: 80, color: 'var(--bad)' }} />
               <Typography variant="h5" sx={{
-                color: '#f44336',
+                color: 'var(--bad)',
                 fontWeight: 'bold',
                 textShadow: '0 2px 8px rgba(0,0,0,0.8)',
                 mt: 1
@@ -355,7 +355,7 @@ function MobilePicSwiper({
         alignItems: 'center',
       }}>
         <Typography variant="caption" sx={{
-          color: '#aaa',
+          color: 'var(--dim)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -369,15 +369,15 @@ function MobilePicSwiper({
             label={currentFile.filtered === 'keep' ? 'KEPT' : currentFile.filtered === 'delete' ? 'DELETED' : currentFile.filtered.toUpperCase()}
             size="small"
             sx={{
-              bgcolor: currentFile.filtered === 'keep' ? '#4caf50' :
-                currentFile.filtered === 'delete' ? '#f44336' : '#ff9800',
-              color: '#fff',
+              bgcolor: currentFile.filtered === 'keep' ? 'var(--ok)' :
+                currentFile.filtered === 'delete' ? 'var(--bad)' : 'var(--warn)',
+              color: 'var(--text)',
               fontSize: '0.65rem',
               height: 20,
             }}
           />
         )}
-        <Typography variant="caption" sx={{ color: '#666', ml: 1 }}>
+        <Typography variant="caption" sx={{ color: 'var(--muted)', ml: 1 }}>
           {Math.round(currentFile.size / 1024 / 1024 * 100) / 100} MB
         </Typography>
       </Box>
@@ -399,7 +399,7 @@ function MobilePicSwiper({
           disabled={currentIndex === 0}
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
-            color: '#aaa',
+            color: 'var(--dim)',
             width: 56, // Larger
             height: 56, // Larger
             '&:disabled': { opacity: 0.3 }
@@ -412,12 +412,12 @@ function MobilePicSwiper({
         <IconButton
           onClick={() => onAction('delete')}
           sx={{
-            bgcolor: 'rgba(244, 67, 54, 0.2)',
+            bgcolor: 'var(--bad-quiet)',
             border: '2px solid #f44336',
-            color: '#f44336',
+            color: 'var(--bad)',
             width: 72, // Larger
             height: 72, // Larger
-            '&:active': { bgcolor: 'rgba(244, 67, 54, 0.4)' }
+            '&:active': { bgcolor: 'var(--bad-quiet)' }
           }}
         >
           <Delete sx={{ fontSize: 36 }} />
@@ -428,7 +428,7 @@ function MobilePicSwiper({
           onClick={onUndo}
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
-            color: '#ff9800',
+            color: 'var(--warn)',
             width: 56, // Larger
             height: 56, // Larger
           }}
@@ -440,12 +440,12 @@ function MobilePicSwiper({
         <IconButton
           onClick={() => onAction('keep')}
           sx={{
-            bgcolor: 'rgba(76, 175, 80, 0.2)',
+            bgcolor: 'var(--ok-quiet)',
             border: '2px solid #4caf50',
-            color: '#4caf50',
+            color: 'var(--ok)',
             width: 72, // Larger
             height: 72, // Larger
-            '&:active': { bgcolor: 'rgba(76, 175, 80, 0.4)' }
+            '&:active': { bgcolor: 'var(--ok-quiet)' }
           }}
         >
           <CheckCircle sx={{ fontSize: 36 }} />
@@ -457,7 +457,7 @@ function MobilePicSwiper({
           disabled={currentIndex >= files.length - 1}
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
-            color: '#aaa',
+            color: 'var(--dim)',
             width: 56, // Larger
             height: 56, // Larger
             '&:disabled': { opacity: 0.3 }
@@ -507,10 +507,10 @@ function SwipeHint() {
         py: 2,
         backdropFilter: 'blur(10px)',
       }}>
-        <Typography variant="body2" sx={{ color: '#4caf50', mb: 0.5 }}>
+        <Typography variant="body2" sx={{ color: 'var(--ok)', mb: 0.5 }}>
           → Swipe Right = <strong>Keep</strong>
         </Typography>
-        <Typography variant="body2" sx={{ color: '#f44336' }}>
+        <Typography variant="body2" sx={{ color: 'var(--bad)' }}>
           ← Swipe Left = <strong>Delete</strong>
         </Typography>
       </Box>

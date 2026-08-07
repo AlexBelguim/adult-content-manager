@@ -8,7 +8,7 @@ import {
 } from '@mui/icons-material';
 import FlagEmoji from '../FlagEmoji';
 
-const ORANGE = '#f97316';
+const ORANGE = 'var(--accent)';
 const PINK = '#fb7185';
 const BLUE = '#38bdf8';
 
@@ -38,7 +38,7 @@ export default function GamerCard({ cardProps }) {
     return (
       <Box sx={{
         position: 'absolute', top: 10, right: 10,
-        bgcolor: '#000', color: '#fff', 
+        bgcolor: 'var(--bg)', color: 'var(--text)', 
         px: 1.2, py: 0.5, border: `1px solid ${ORANGE}`,
         display: 'flex', alignItems: 'center', gap: 1,
         zIndex: 2, fontWeight: 'bold'
@@ -67,7 +67,7 @@ export default function GamerCard({ cardProps }) {
   if (mode === 'filter') {
     return (
       <Box sx={{
-        width: 280, height: 520, bgcolor: '#111', position: 'relative',
+        width: 280, height: 520, bgcolor: 'var(--bg)', position: 'relative',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
         border: '1px solid #333', cursor: 'pointer', transition: 'all 0.2s',
         '&:hover': { borderColor: ORANGE, boxShadow: `0 0 20px ${ORANGE}22`, transform: 'translateY(-2px)' }
@@ -80,20 +80,20 @@ export default function GamerCard({ cardProps }) {
             fontSize: '1.05rem', textTransform: 'uppercase', letterSpacing: 0.5,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
           }}>{performer.name}</Typography>
-          <Box sx={{ display: 'flex', gap: 1, color: '#aaa', fontSize: '0.75rem', mt: 0.5 }}>
+          <Box sx={{ display: 'flex', gap: 1, color: 'var(--dim)', fontSize: '0.75rem', mt: 0.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><StorageIcon sx={{ fontSize: 13 }} />{stats.size}G</Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><ImageIcon sx={{ fontSize: 13 }} />{stats.pics}</Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><FolderIcon sx={{ fontSize: 13 }} />{stats.vids}</Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><GameIcon sx={{ fontSize: 13 }} />{stats.funscripts}</Box>
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-            <Typography sx={{ color: '#666', fontSize: '0.7rem' }}>⬇ {daysSinceImport !== null ? `${daysSinceImport}d ago` : '—'}</Typography>
+            <Typography sx={{ color: 'var(--muted)', fontSize: '0.7rem' }}>⬇ {daysSinceImport !== null ? `${daysSinceImport}d ago` : '—'}</Typography>
             <Box sx={{ display: 'flex', gap: 0.5 }}>
               {onSettings && <IconButton onClick={(e) => { e.stopPropagation(); onSettings(performer); }} sx={{ ...iconSx, color: ORANGE }}><SettingsIcon /></IconButton>}
               {onOpenHash && (
                 <IconButton onClick={(e) => { e.stopPropagation(); if (performer.latest_internal_run_id) window.open(`/hash-results/${performer.latest_internal_run_id}`, '_blank'); else onOpenHash(performer.id); }}
                   sx={{ ...iconSx, color: BLUE }}>
-                  {performer.hash_verified ? <CheckCircleIcon sx={{ color: '#4caf50' }} /> : performer.internal_duplicate_count > 0 ? <Badge badgeContent={performer.internal_duplicate_count} color="error" max={99} sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', height: '14px', minWidth: '14px', padding: '0 3px' } }}><FingerprintIcon /></Badge> : <FingerprintIcon />}
+                  {performer.hash_verified ? <CheckCircleIcon sx={{ color: 'var(--ok)' }} /> : performer.internal_duplicate_count > 0 ? <Badge badgeContent={performer.internal_duplicate_count} color="error" max={99} sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', height: '14px', minWidth: '14px', padding: '0 3px' } }}><FingerprintIcon /></Badge> : <FingerprintIcon />}
                 </IconButton>
               )}
               <IconButton onClick={handleSmartScan} disabled={smartScanLoading} sx={{ ...iconSx, color: '#c084fc' }}>
@@ -116,19 +116,19 @@ export default function GamerCard({ cardProps }) {
           <AgeFlagBadge />
         </Box>
         {/* Thick bottom border blocks — matching Style3 FilterCardA */}
-        <Box sx={{ zIndex: 1, bgcolor: '#0a0a0a', display: 'flex', gap: '1px' }}>
+        <Box sx={{ zIndex: 1, bgcolor: 'var(--bg)', display: 'flex', gap: '1px' }}>
           {[
-            { l: 'PIC', v: picsPercentage, c: '#22c55e', type: 'pics' },
+            { l: 'PIC', v: picsPercentage, c: 'var(--ok)', type: 'pics' },
             { l: 'VID', v: vidsPercentage, c: ORANGE, type: 'vids' },
-            { l: 'FUN', v: funscriptPercentage, c: '#ef4444', type: 'funscript_vids' }
+            { l: 'FUN', v: funscriptPercentage, c: 'var(--bad)', type: 'funscript_vids' }
           ].map(p => (
             <Box key={p.l} onClick={(e) => { e.stopPropagation(); if (onProgressClick) onProgressClick(performer, p.type); }}
               sx={{
                 flex: 1, py: 1, textAlign: 'center', cursor: 'pointer',
                 bgcolor: '#151515', borderTop: `3px solid ${p.c}`,
-                transition: 'all 0.2s', '&:hover': { bgcolor: '#1a1a1a', borderTopWidth: '4px' }
+                transition: 'all 0.2s', '&:hover': { bgcolor: 'var(--bg)', borderTopWidth: '4px' }
               }}>
-              <Typography sx={{ color: '#fff', fontSize: '0.75rem', fontWeight: 'bold' }}>
+              <Typography sx={{ color: 'var(--text)', fontSize: '0.75rem', fontWeight: 'bold' }}>
                 {p.l} <span style={{ color: p.c }}>{p.v}%</span>
               </Typography>
             </Box>
@@ -141,7 +141,7 @@ export default function GamerCard({ cardProps }) {
   // Gallery mode
   return (
     <Box sx={{
-      width: 280, height: 520, bgcolor: '#111', position: 'relative',
+      width: 280, height: 520, bgcolor: 'var(--bg)', position: 'relative',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
       border: '1px solid #333', cursor: 'pointer', transition: 'all 0.2s',
       '&:hover': { borderColor: ORANGE, boxShadow: `0 0 20px ${ORANGE}22`, transform: 'translateY(-2px)' }
@@ -155,11 +155,11 @@ export default function GamerCard({ cardProps }) {
         {/* Rating badge — orange, clip-path */}
         <Box onClick={handleRatingBadgeClick} sx={{
           position: 'absolute', top: 10, left: 10, zIndex: 2,
-          bgcolor: ORANGE, color: '#fff', px: 1.5, py: 0.5,
+          bgcolor: ORANGE, color: 'var(--text)', px: 1.5, py: 0.5,
           fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer',
           clipPath: 'polygon(0 0, 100% 0, 95% 100%, 0 100%)'
         }}>⭐ {ratingValue !== null ? formatRating(ratingValue) : 'Rate'}</Box>
-        <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #111 0%, transparent 35%)' }} />
+        <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, var(--bg) 0%, transparent 35%)' }} />
       </Box>
       {/* Bottom info */}
       <Box sx={{ p: 1.5, borderTop: `2px solid ${ORANGE}` }}>
@@ -180,7 +180,7 @@ export default function GamerCard({ cardProps }) {
             </IconButton>
           </Box>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1, color: '#aaa', fontSize: '0.75rem' }}>
+        <Box sx={{ display: 'flex', gap: 1, color: 'var(--dim)', fontSize: '0.75rem' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><StorageIcon sx={{ fontSize: 13 }} />{stats.size}G</Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><ImageIcon sx={{ fontSize: 13 }} />{stats.pics}</Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><FolderIcon sx={{ fontSize: 13 }} />{stats.vids}</Box>

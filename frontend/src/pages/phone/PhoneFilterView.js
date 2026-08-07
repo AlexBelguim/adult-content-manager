@@ -9,10 +9,8 @@ import {
   TextField,
   Alert,
   CircularProgress,
-  Container,
-  useMediaQuery
+  Container
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
 import PhonePerformerCard from '../../components/phone/PhonePerformerCard';
 import PhonePerformerSettingsModal from '../../components/phone/PhonePerformerSettingsModal';
 import PhonePerformerFilterView from './PhonePerformerFilterView';
@@ -35,9 +33,6 @@ function PhoneFilterView({ basePath, handyIntegration, handyConnected }) {
   const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [settingsModal, setSettingsModal] = useState({ open: false, performer: null });
   
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-
   useEffect(() => {
     loadFilterPerformers();
   }, [basePath]);
@@ -52,8 +47,14 @@ function PhoneFilterView({ basePath, handyIntegration, handyConnected }) {
     
     try {
       setLoading(true);
-      const performersData = await fetchPerformers();
-      setPerformers(performersData);
+      // /api/performers/filter answers { performers, totalCount, … }, never a
+      // bare array, and defaults to 12 rows. Passing the response straight to
+      // setPerformers put an object into sortPerformers, which crashed the
+      // whole view on its first render. Unwrap, and ask for the full set —
+      // this list sorts and searches client-side, so a 12-row page would
+      // silently hide everything else.
+      const response = await fetchPerformers(1, 1000);
+      setPerformers(Array.isArray(response?.performers) ? response.performers : []);
       setError('');
     } catch (err) {
       console.error('Error loading performers:', err);
@@ -156,7 +157,7 @@ function PhoneFilterView({ basePath, handyIntegration, handyConnected }) {
         py: 2,
         px: 2,
         minHeight: '100vh',
-        bgcolor: '#121212'
+        bgcolor: 'var(--bg)'
       }}
     >
       {/* Header */}

@@ -67,7 +67,7 @@ function TagManager({ basePath, onTagCreated, onTagDeleted }) {
         <Button variant="contained" onClick={handleCreateTag} sx={{ minWidth: 90 }}>Create</Button>
       </Box>
       {error && <Typography color="error" variant="body2" sx={{ mb: 1, textAlign: 'center' }}>{error}</Typography>}
-      <Paper variant="outlined" sx={{ maxHeight: 220, overflowY: 'auto', p: 0, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, borderColor: 'divider' }}>
+      <Paper variant="outlined" sx={{ maxHeight: 220, overflowY: 'auto', p: 0, bgcolor: 'var(--raised)', borderRadius: 2, borderColor: 'divider' }}>
         <List dense>
           {tags.length === 0 && (
             <ListItem>

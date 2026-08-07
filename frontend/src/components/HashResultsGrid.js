@@ -42,9 +42,9 @@ const MediaThumbnail = ({ src, type, alt, size = 100, onDeleted, onClick }) => {
 
   if (hasError) {
     return (
-      <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'rgba(244, 67, 54, 0.1)' }}>
-        <BrokenImageIcon sx={{ color: '#f44336', fontSize: size > 80 ? 28 : 20 }} />
-        <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.5rem', mt: 0.5 }}>Deleted</Typography>
+      <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'var(--bad-quiet)' }}>
+        <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: size > 80 ? 28 : 20 }} />
+        <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.5rem', mt: 0.5 }}>Deleted</Typography>
       </Box>
     );
   }
@@ -90,20 +90,20 @@ const CompactDeletedRow = ({ item, isSelected, onToggle, getSimilarityPercent, i
         gap: 1.5,
         py: 0.75,
         px: 1.5,
-        bgcolor: isSelected ? 'rgba(244, 67, 54, 0.1)' : 'rgba(255,255,255,0.02)',
+        bgcolor: isSelected ? 'var(--bad-quiet)' : 'rgba(255,255,255,0.02)',
         borderRadius: 1,
         border: isSelected ? '1px solid #f44336' : '1px solid #333',
         cursor: 'pointer',
         transition: 'all 0.15s',
-        '&:hover': { bgcolor: 'rgba(244, 67, 54, 0.08)' }
+        '&:hover': { bgcolor: 'var(--bad-quiet)' }
       }}
     >
       <Checkbox
         checked={isSelected}
         size="small"
-        sx={{ color: '#555', '&.Mui-checked': { color: '#f44336' }, p: 0 }}
+        sx={{ color: 'var(--muted)', '&.Mui-checked': { color: 'var(--bad)' }, p: 0 }}
       />
-      <BrokenImageIcon sx={{ color: '#f44336', fontSize: 16 }} />
+      <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: 16 }} />
       <Chip
         label={item.exact_match ? 'EXACT' : `${getSimilarityPercent(item.hamming_distance)}%`}
         size="small"
@@ -111,16 +111,16 @@ const CompactDeletedRow = ({ item, isSelected, onToggle, getSimilarityPercent, i
           height: 18,
           fontSize: '0.6rem',
           fontWeight: 'bold',
-          bgcolor: item.exact_match ? '#f44336' : '#ed6c02',
-          color: '#fff'
+          bgcolor: item.exact_match ? 'var(--bad)' : 'var(--warn)',
+          color: 'var(--text)'
         }}
       />
-      {isSourceVideo ? <MovieIcon sx={{ fontSize: 14, color: '#ce93d8' }} /> : <ImageIcon sx={{ fontSize: 14, color: '#90caf9' }} />}
+      {isSourceVideo ? <MovieIcon sx={{ fontSize: 14, color: 'var(--accent)' }} /> : <ImageIcon sx={{ fontSize: 14, color: 'var(--info)' }} />}
       <Tooltip title={item.source_path}>
         <Typography
           variant="body2"
           sx={{
-            color: '#888',
+            color: 'var(--dim)',
             fontSize: '0.75rem',
             flex: 1,
             overflow: 'hidden',
@@ -132,7 +132,7 @@ const CompactDeletedRow = ({ item, isSelected, onToggle, getSimilarityPercent, i
           {filename}
         </Typography>
       </Tooltip>
-      <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.6rem' }}>DELETED</Typography>
+      <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.6rem' }}>DELETED</Typography>
     </Box>
   );
 };
@@ -163,7 +163,7 @@ const LightboxModal = ({ open, onClose, src, type }) => {
               position: 'absolute',
               top: -40,
               right: 0,
-              color: '#fff',
+              color: 'var(--text)',
               bgcolor: 'rgba(255,255,255,0.1)',
               '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }
             }}
@@ -256,7 +256,7 @@ const HashResultsGrid = ({
             showFirstButton
             showLastButton
             sx={{
-              '& .MuiPaginationItem-root': { color: '#aaa' },
+              '& .MuiPaginationItem-root': { color: 'var(--dim)' },
               '& .Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.2) !important', color: 'primary.light' }
             }}
           />
@@ -266,7 +266,7 @@ const HashResultsGrid = ({
       {/* Pairs Section - 3 Column Grid */}
       {pairs.length > 0 && (
         <Box sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" sx={{ color: '#888', mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 2 }}>
             Pairs ({pairs.length})
           </Typography>
           <Box sx={{
@@ -290,24 +290,24 @@ const HashResultsGrid = ({
                   elevation={0}
                   sx={{
                     p: 1.5,
-                    bgcolor: '#252525',
+                    bgcolor: 'var(--surface)',
                     border: '1px solid #444',
                     borderRadius: 2,
                     transition: 'border-color 0.2s',
-                    '&:hover': { borderColor: '#666' }
+                    '&:hover': { borderColor: 'var(--line-strong)' }
                   }}
                 >
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'stretch' }}>
                     {/* KEEP Side */}
                     <Box sx={{ width: 'calc(50% - 16px)', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                        <CheckCircleIcon sx={{ color: '#4caf50', fontSize: 12 }} />
-                        <Typography variant="caption" sx={{ color: '#4caf50', fontSize: '0.6rem', fontWeight: 'bold' }}>KEEP</Typography>
+                        <CheckCircleIcon sx={{ color: 'var(--ok)', fontSize: 12 }} />
+                        <Typography variant="caption" sx={{ color: 'var(--ok)', fontSize: '0.6rem', fontWeight: 'bold' }}>KEEP</Typography>
                       </Box>
                       <Box
                         sx={{
                           p: 1,
-                          bgcolor: '#1a1a1a',
+                          bgcolor: 'var(--bg)',
                           borderRadius: 1,
                           border: '2px solid #4caf50',
                           display: 'flex',
@@ -315,12 +315,12 @@ const HashResultsGrid = ({
                           flex: 1
                         }}
                       >
-                        <Box sx={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: '#000', mb: 1 }}>
+                        <Box sx={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: 'var(--bg)', mb: 1 }}>
                           <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
                             {targetDeleted ? (
-                              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'rgba(244, 67, 54, 0.1)' }}>
-                                <BrokenImageIcon sx={{ color: '#f44336', fontSize: 24 }} />
-                                <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.5rem' }}>Deleted</Typography>
+                              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'var(--bad-quiet)' }}>
+                                <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: 24 }} />
+                                <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.5rem' }}>Deleted</Typography>
                               </Box>
                             ) : (
                               <MediaThumbnail
@@ -335,9 +335,9 @@ const HashResultsGrid = ({
                           </Box>
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                          {isTargetVideo ? <MovieIcon sx={{ fontSize: 12, color: '#ce93d8', flexShrink: 0 }} /> : <ImageIcon sx={{ fontSize: 12, color: '#90caf9', flexShrink: 0 }} />}
+                          {isTargetVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)', flexShrink: 0 }} />}
                           <Tooltip title={item.target_path}>
-                            <Typography variant="caption" sx={{ color: '#aaa', fontSize: '0.6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Typography variant="caption" sx={{ color: 'var(--dim)', fontSize: '0.6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {item.target_path.split(/[\\/]/).pop()}
                             </Typography>
                           </Tooltip>
@@ -364,14 +364,14 @@ const HashResultsGrid = ({
                     {/* REMOVE Side */}
                     <Box sx={{ width: 'calc(50% - 16px)', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                        <DeleteIcon sx={{ color: '#f44336', fontSize: 12 }} />
-                        <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.6rem', fontWeight: 'bold' }}>REMOVE</Typography>
+                        <DeleteIcon sx={{ color: 'var(--bad)', fontSize: 12 }} />
+                        <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.6rem', fontWeight: 'bold' }}>REMOVE</Typography>
                       </Box>
                       <Box
                         onClick={() => handleToggleItem(item.id)}
                         sx={{
                           p: 1,
-                          bgcolor: '#1a1a1a',
+                          bgcolor: 'var(--bg)',
                           borderRadius: 1,
                           border: isSelected ? '2px solid #b085f5' : '1px solid #333',
                           display: 'flex',
@@ -379,18 +379,18 @@ const HashResultsGrid = ({
                           cursor: 'pointer',
                           transition: 'border-color 0.15s',
                           flex: 1,
-                          '&:hover': { borderColor: isSelected ? 'var(--primary-main, #7e57c2)' : '#555' }
+                          '&:hover': { borderColor: isSelected ? 'var(--primary-main, #7e57c2)' : 'var(--muted)' }
                         }}
                       >
-                        <Box sx={{ position: 'relative', width: '100%', paddingTop: '100%', borderRadius: 1, overflow: 'hidden', bgcolor: '#000', mb: 1 }}>
+                        <Box sx={{ position: 'relative', width: '100%', paddingTop: '100%', borderRadius: 1, overflow: 'hidden', bgcolor: 'var(--bg)', mb: 1 }}>
                           <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
                             {sourceDeleted ? (
-                              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'rgba(244, 67, 54, 0.1)' }}>
-                                <BrokenImageIcon sx={{ color: '#f44336', fontSize: 24 }} />
-                                <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.5rem' }}>Deleted</Typography>
+                              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'var(--bad-quiet)' }}>
+                                <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: 24 }} />
+                                <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.5rem' }}>Deleted</Typography>
                               </Box>
                             ) : (committing && isSelected) ? (
-                              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: '#000' }}>
+                              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'var(--bg)' }}>
                                 <CircularProgress size={24} sx={{ color: 'primary.light', mb: 1 }} />
                                 <Typography variant="caption" sx={{ color: 'primary.light', fontSize: '0.6rem' }}>Processing...</Typography>
                               </Box>
@@ -414,7 +414,7 @@ const HashResultsGrid = ({
                                 p: 0.25,
                                 bgcolor: 'rgba(0,0,0,0.6)',
                                 borderRadius: 0.5,
-                                color: '#888',
+                                color: 'var(--dim)',
                                 '&.Mui-checked': { color: 'primary.light' }
                               }}
                               onClick={(e) => e.stopPropagation()}
@@ -429,16 +429,16 @@ const HashResultsGrid = ({
                                 height: 16,
                                 fontSize: '0.55rem',
                                 fontWeight: 'bold',
-                                bgcolor: item.exact_match ? '#f44336' : '#ed6c02',
-                                color: '#fff'
+                                bgcolor: item.exact_match ? 'var(--bad)' : 'var(--warn)',
+                                color: 'var(--text)'
                               }}
                             />
                           </Box>
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                          {isSourceVideo ? <MovieIcon sx={{ fontSize: 12, color: '#ce93d8', flexShrink: 0 }} /> : <ImageIcon sx={{ fontSize: 12, color: '#90caf9', flexShrink: 0 }} />}
+                          {isSourceVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)', flexShrink: 0 }} />}
                           <Tooltip title={item.source_path}>
-                            <Typography variant="caption" sx={{ color: '#aaa', fontSize: '0.6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Typography variant="caption" sx={{ color: 'var(--dim)', fontSize: '0.6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {item.source_path.split(/[\\/]/).pop()}
                             </Typography>
                           </Tooltip>
@@ -457,7 +457,7 @@ const HashResultsGrid = ({
       {groups.length > 0 && (
         <Box>
           {pairs.length > 0 && (
-            <Typography variant="subtitle2" sx={{ color: '#888', mb: 2, mt: 2 }}>
+            <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 2, mt: 2 }}>
               Groups ({groups.length})
             </Typography>
           )}
@@ -479,11 +479,11 @@ const HashResultsGrid = ({
                   elevation={0}
                   sx={{
                     p: 2,
-                    bgcolor: '#252525',
+                    bgcolor: 'var(--surface)',
                     border: '1px solid #444',
                     borderRadius: 2,
                     transition: 'border-color 0.2s',
-                    '&:hover': { borderColor: '#666' }
+                    '&:hover': { borderColor: 'var(--line-strong)' }
                   }}
                 >
                   {/* Group Header */}
@@ -491,9 +491,9 @@ const HashResultsGrid = ({
                     <Chip
                       label={`${group.length + 1} dupes`}
                       size="small"
-                      sx={{ bgcolor: 'rgba(25, 118, 210, 0.2)', color: '#90caf9', fontWeight: 'bold', fontSize: '0.7rem' }}
+                      sx={{ bgcolor: 'rgba(25, 118, 210, 0.2)', color: 'var(--info)', fontWeight: 'bold', fontSize: '0.7rem' }}
                     />
-                    <Typography variant="caption" sx={{ color: '#666' }}>
+                    <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                       Keep 1, Remove {group.length}
                     </Typography>
                   </Box>
@@ -503,15 +503,15 @@ const HashResultsGrid = ({
                     {/* KEEP Side */}
                     <Box sx={{ width: '100%', boxSizing: 'border-box' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                        <CheckCircleIcon sx={{ color: '#4caf50', fontSize: 12 }} />
-                        <Typography variant="caption" sx={{ color: '#4caf50', fontSize: '0.6rem', fontWeight: 'bold' }}>KEEP</Typography>
+                        <CheckCircleIcon sx={{ color: 'var(--ok)', fontSize: 12 }} />
+                        <Typography variant="caption" sx={{ color: 'var(--ok)', fontSize: '0.6rem', fontWeight: 'bold' }}>KEEP</Typography>
                       </Box>
-                      <Box sx={{ p: 1.5, bgcolor: '#1a1a1a', borderRadius: 1.5, border: '2px solid #4caf50' }}>
-                        <Box sx={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: '#000', mb: 1 }}>
+                      <Box sx={{ p: 1.5, bgcolor: 'var(--bg)', borderRadius: 1.5, border: '2px solid #4caf50' }}>
+                        <Box sx={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: 'var(--bg)', mb: 1 }}>
                           {isTargetDeleted ? (
-                            <Box sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'rgba(244, 67, 54, 0.1)' }}>
-                              <BrokenImageIcon sx={{ color: '#f44336', fontSize: 24 }} />
-                              <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.5rem' }}>Deleted</Typography>
+                            <Box sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'var(--bad-quiet)' }}>
+                              <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: 24 }} />
+                              <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.5rem' }}>Deleted</Typography>
                             </Box>
                           ) : (
                             <Box sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
@@ -527,9 +527,9 @@ const HashResultsGrid = ({
                           )}
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          {isTargetVideo ? <MovieIcon sx={{ fontSize: 12, color: '#ce93d8' }} /> : <ImageIcon sx={{ fontSize: 12, color: '#90caf9' }} />}
+                          {isTargetVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)' }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)' }} />}
                           <Tooltip title={firstItem.target_path}>
-                            <Typography variant="caption" sx={{ color: '#aaa', fontSize: '0.6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Typography variant="caption" sx={{ color: 'var(--dim)', fontSize: '0.6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {firstItem.target_path.split(/[\\/]/).pop()}
                             </Typography>
                           </Tooltip>
@@ -550,7 +550,7 @@ const HashResultsGrid = ({
                               color: 'primary.light',
                               transform: 'rotate(90deg)',
                               '&:hover': { bgcolor: 'rgba(255, 142, 83, 0.2)' },
-                              '&.Mui-disabled': { color: '#444', bgcolor: 'transparent' }
+                              '&.Mui-disabled': { color: 'var(--faint)', bgcolor: 'transparent' }
                             }}
                           >
                             <SwapHorizIcon />
@@ -562,8 +562,8 @@ const HashResultsGrid = ({
                     {/* REMOVE Side */}
                     <Box sx={{ width: '100%' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                        <DeleteIcon sx={{ color: '#f44336', fontSize: 12 }} />
-                        <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.6rem', fontWeight: 'bold' }}>REMOVE ({group.length})</Typography>
+                        <DeleteIcon sx={{ color: 'var(--bad)', fontSize: 12 }} />
+                        <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.6rem', fontWeight: 'bold' }}>REMOVE ({group.length})</Typography>
                       </Box>
 
                       <Box sx={{
@@ -571,7 +571,7 @@ const HashResultsGrid = ({
                         gridTemplateColumns: group.length > 1 ? 'repeat(2, 1fr)' : '1fr',
                         gap: 1,
                         p: 1.5,
-                        bgcolor: '#1a1a1a',
+                        bgcolor: 'var(--bg)',
                         borderRadius: 1.5,
                         border: '1px solid #333'
                       }}>
@@ -599,18 +599,18 @@ const HashResultsGrid = ({
                               onClick={() => handleToggleItem(item.id)}
                               sx={{
                                 p: 1,
-                                bgcolor: '#252525',
+                                bgcolor: 'var(--surface)',
                                 borderRadius: 1,
                                 border: isSelected ? '2px solid #b085f5' : '1px solid #444',
                                 cursor: 'pointer',
                                 transition: 'border-color 0.15s',
-                                '&:hover': { borderColor: isSelected ? 'var(--primary-main, #7e57c2)' : '#666' }
+                                '&:hover': { borderColor: isSelected ? 'var(--primary-main, #7e57c2)' : 'var(--muted)' }
                               }}
                             >
-                              <Box sx={{ position: 'relative', width: '100%', paddingTop: '100%', borderRadius: 1, overflow: 'hidden', bgcolor: '#000', mb: 0.5 }}>
+                              <Box sx={{ position: 'relative', width: '100%', paddingTop: '100%', borderRadius: 1, overflow: 'hidden', bgcolor: 'var(--bg)', mb: 0.5 }}>
                                 <Box sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
                                   {(committing && isSelected) ? (
-                                    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: '#000' }}>
+                                    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', bgcolor: 'var(--bg)' }}>
                                       <CircularProgress size={24} sx={{ color: 'primary.light', mb: 1 }} />
                                       <Typography variant="caption" sx={{ color: 'primary.light', fontSize: '0.6rem' }}>Processing...</Typography>
                                     </Box>
@@ -634,7 +634,7 @@ const HashResultsGrid = ({
                                     p: 0.25,
                                     bgcolor: 'rgba(0,0,0,0.6)',
                                     borderRadius: 0.5,
-                                    color: '#888',
+                                    color: 'var(--dim)',
                                     '&.Mui-checked': { color: 'primary.light' }
                                   }}
                                   onClick={(e) => e.stopPropagation()}
@@ -649,15 +649,15 @@ const HashResultsGrid = ({
                                     height: 16,
                                     fontSize: '0.55rem',
                                     fontWeight: 'bold',
-                                    bgcolor: item.exact_match ? '#f44336' : '#ed6c02',
-                                    color: '#fff'
+                                    bgcolor: item.exact_match ? 'var(--bad)' : 'var(--warn)',
+                                    color: 'var(--text)'
                                   }}
                                 />
                               </Box>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                                {isSourceVideo ? <MovieIcon sx={{ fontSize: 10, color: '#ce93d8', flexShrink: 0 }} /> : <ImageIcon sx={{ fontSize: 10, color: '#90caf9', flexShrink: 0 }} />}
+                                {isSourceVideo ? <MovieIcon sx={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }} /> : <ImageIcon sx={{ fontSize: 10, color: 'var(--info)', flexShrink: 0 }} />}
                                 <Tooltip title={item.source_path}>
-                                  <Typography variant="caption" sx={{ color: '#aaa', fontSize: '0.55rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <Typography variant="caption" sx={{ color: 'var(--dim)', fontSize: '0.55rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {item.source_path.split(/[\\/]/).pop()}
                                   </Typography>
                                 </Tooltip>
@@ -687,7 +687,7 @@ const HashResultsGrid = ({
             showFirstButton
             showLastButton
             sx={{
-              '& .MuiPaginationItem-root': { color: '#aaa' },
+              '& .MuiPaginationItem-root': { color: 'var(--dim)' },
               '& .Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.2) !important', color: 'primary.light' }
             }}
           />

@@ -2,16 +2,16 @@
 // All style objects for ContentCard component - theme-aware
 
 // Main label styles for origin counts
-export const chipLabelOriginPicsSx = { color: '#90caf9', fontWeight: 500 };
-export const chipLabelOriginVidsSx = { color: '#ef9a9a', fontWeight: 500 };
+export const chipLabelOriginPicsSx = { color: 'var(--info)', fontWeight: 500 };
+export const chipLabelOriginVidsSx = { color: 'var(--bad)', fontWeight: 500 };
 export const chipLabelOriginFunscriptsSx = { color: '#a5d6a7', fontWeight: 500 };
-export const chipLabelOriginTotalSx = { color: '#fff', fontWeight: 500 };
+export const chipLabelOriginTotalSx = { color: 'var(--text)', fontWeight: 500 };
 
 // Chip icon styles
-export const chipIconPicsSx = { color: '#90caf9', fontSize: 18 };
-export const chipIconVidsSx = { color: '#ef9a9a', fontSize: 18 };
+export const chipIconPicsSx = { color: 'var(--info)', fontSize: 18 };
+export const chipIconVidsSx = { color: 'var(--bad)', fontSize: 18 };
 export const chipIconFunscriptsSx = { color: '#a5d6a7', fontSize: 18 };
-export const chipIconTotalSx = { color: '#fff', fontSize: 18 };
+export const chipIconTotalSx = { color: 'var(--text)', fontSize: 18 };
 
 // Chip label span styles
 export const chipLabelRootSx = {
@@ -22,7 +22,7 @@ export const chipLabelRootSx = {
 };
 
 export const chipLabelVirtualSx = {
-  color: '#888',
+  color: 'var(--dim)',
   fontSize: 12,
   display: 'inline-block',
   textAlign: 'right'
@@ -77,7 +77,7 @@ export const statsBoxSx = {
 
 // Use theme-aware bg instead of hardcoded color
 const chipBaseSx = {
-  bgcolor: 'rgba(255,255,255,0.05)',
+  bgcolor: 'var(--raised)',
   fontWeight: 400,
   px: 1,
   height: 24,
@@ -88,8 +88,8 @@ const chipBaseSx = {
   minWidth: 0
 };
 
-export const chipPicsSx = { ...chipBaseSx, color: '#90caf9' };
-export const chipVidsSx = { ...chipBaseSx, color: '#ef9a9a' };
+export const chipPicsSx = { ...chipBaseSx, color: 'var(--info)' };
+export const chipVidsSx = { ...chipBaseSx, color: 'var(--bad)' };
 export const chipFunscriptsSx = { ...chipBaseSx, color: '#a5d6a7' };
 export const chipTotalSx = { ...chipBaseSx, color: 'text.primary' };
 

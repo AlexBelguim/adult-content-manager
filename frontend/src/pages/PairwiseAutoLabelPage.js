@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, Button,
+    Box, Typography, CircularProgress, Button,
     Dialog, DialogTitle, DialogContent, DialogActions,
     List, ListItem, ListItemButton, Checkbox, ListItemText,
-    Grid, IconButton, Alert, Chip, ToggleButton, ToggleButtonGroup
+    Grid, IconButton
 } from '@mui/material';
-import { ArrowBack, AutoFixHigh, CheckCircle, Delete, SwapHoriz, Refresh, FilterList, SmartToy, Save } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { Delete, SwapHoriz, FilterList, SmartToy, Save } from '@mui/icons-material';
+import { PageShell, PageHeader, Panel, EmptyState, SPACE } from '../components/layout';
 
 function PairwiseAutoLabelPage({ serverUrl }) {
-    const navigate = useNavigate();
-
     // State
     const [performers, setPerformers] = useState([]);
     const [selectedPerformers, setSelectedPerformers] = useState([]);
@@ -89,18 +87,12 @@ function PairwiseAutoLabelPage({ serverUrl }) {
         if (proposals.length === 0) return;
         setLoading(true);
         try {
-            // Filter valid proposals
             const validPairs = proposals.map(p => ({
                 id: 'auto-' + Date.now() + '-' + p.id,
                 winner: p.winner === 'left' ? p.left.path : p.right.path,
                 loser: p.winner === 'left' ? p.right.path : p.left.path,
                 type: 'auto_label'
             }));
-
-            // Submit sequentially or batch? Server expects single /submit usually?
-            // Existing /submit handles one pair. We should probably update server to handle batch or loop here.
-            // Looping 50 requests is okay for now, or add batch endpoint.
-            // Let's loop for simplicity first, user won't do 1000s at once.
 
             await Promise.all(validPairs.map(pair =>
                 fetch(`${serverUrl}/api/submit`, {
@@ -120,152 +112,126 @@ function PairwiseAutoLabelPage({ serverUrl }) {
         }
     };
 
+    /** One side of a proposal; the chosen side gets the accent rule. */
+    const Choice = ({ side, data, isWinner, onClick }) => (
+        <Box
+            onClick={onClick}
+            sx={{
+                position: 'relative', width: 120, height: 120, flexShrink: 0,
+                cursor: 'pointer', overflow: 'hidden',
+                borderRadius: 'var(--radius-sm, 4px)',
+                border: `2px solid ${isWinner ? 'var(--accent)' : 'var(--line)'}`
+            }}
+        >
+            <img
+                src={`${serverUrl}/api/image?path=${encodeURIComponent(data.path)}`}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                alt={`${side} option`}
+            />
+            <Typography
+                variant="caption"
+                sx={{
+                    position: 'absolute', bottom: 0, right: 0,
+                    bgcolor: 'rgba(0,0,0,0.65)', color: 'var(--text)',
+                    px: 0.75, fontVariantNumeric: 'tabular-nums'
+                }}
+            >
+                {Math.round(data.score)}
+            </Typography>
+        </Box>
+    );
+
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#0a0a15', color: '#fff' }}>
-            {/* Header */}
-            <Paper elevation={0} sx={{
-                p: 2, bgcolor: '#16213e', borderBottom: '1px solid #333',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-            }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Button
-                        startIcon={<ArrowBack />}
-                        onClick={() => navigate('/pairwise')}
-                        sx={{ color: '#ccc' }}
-                    >
-                        Back
-                    </Button>
-                    <Typography variant="h6" sx={{ color: '#00d9ff' }}>
-                        🦾 Auto-Labeling
-                    </Typography>
-                </Box>
+        <PageShell>
+            <PageHeader
+                title="Auto-Labeling"
+                subtitle="Let the model propose labels, then review them quickly to expand the dataset."
+                back
+                actions={
+                    <>
+                        <Button
+                            variant="outlined"
+                            startIcon={<FilterList />}
+                            onClick={() => setShowPerformerModal(true)}
+                        >
+                            Performers ({selectedPerformers.length})
+                        </Button>
+                        {proposals.length > 0 && (
+                            <Button
+                                variant="contained"
+                                startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <Save />}
+                                onClick={handleCommit}
+                                disabled={loading}
+                            >
+                                Commit all
+                            </Button>
+                        )}
+                    </>
+                }
+            />
 
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Button
-                        variant="outlined"
-                        startIcon={<FilterList />}
-                        onClick={() => setShowPerformerModal(true)}
-                        sx={{ color: '#fff', borderColor: '#00d9ff' }}
-                    >
-                        Select Performers ({selectedPerformers.length})
-                    </Button>
-                </Box>
-            </Paper>
-
-            {/* Main Content */}
-            <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
-
-                {/* Empty State / Generate Button */}
-                {proposals.length === 0 && (
-                    <Box sx={{ textAlign: 'center', mt: 10 }}>
-                        <SmartToy sx={{ fontSize: 80, color: '#333', mb: 2 }} />
-                        <Typography variant="h5" color="textSecondary" gutterBottom>
-                            AI Labeling Assistant
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary" sx={{ mb: 4 }}>
-                            Select performers and let the model propose labels for you.<br />
-                            Review them quickly and expand your dataset.
-                        </Typography>
-
+            {proposals.length === 0 ? (
+                <EmptyState
+                    icon={<SmartToy />}
+                    title="No proposals yet"
+                    description="Select performers, then generate proposals for review."
+                    action={
                         <Button
                             variant="contained"
                             size="large"
                             onClick={handleGenerate}
                             disabled={generating || selectedPerformers.length === 0}
-                            sx={{ bgcolor: '#00d9ff', px: 4, py: 1.5 }}
+                            startIcon={generating ? <CircularProgress size={16} color="inherit" /> : null}
                         >
-                            {generating ? 'Analyzing...' : 'Generate Proposals'}
+                            {generating ? 'Analyzing…' : 'Generate proposals'}
                         </Button>
-                    </Box>
-                )}
+                    }
+                />
+            ) : (
+                <Box sx={{ maxWidth: 900, mx: 'auto' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 620, mb: SPACE.md }}>
+                        Review {proposals.length} proposals
+                    </Typography>
 
-                {/* Review List */}
-                {proposals.length > 0 && (
-                    <Box sx={{ maxWidth: 900, mx: 'auto' }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                            <Typography variant="h6">
-                                Review {proposals.length} Proposals
-                            </Typography>
-                            <Button
-                                variant="contained"
-                                startIcon={loading ? <CircularProgress size={20} /> : <Save />}
-                                onClick={handleCommit}
-                                disabled={loading}
-                                sx={{ bgcolor: '#4caf50' }}
-                            >
-                                Commit All
-                            </Button>
-                        </Box>
+                    <Grid container spacing={2}>
+                        {proposals.map((p, idx) => (
+                            <Grid item xs={12} key={p.id}>
+                                <Panel sx={{
+                                    display: 'flex', alignItems: 'center', gap: SPACE.md,
+                                    borderLeft: `3px solid ${p.status === 'flipped' ? 'var(--warn)' : 'var(--ok)'}`
+                                }}>
+                                    <Choice side="left" data={p.left} isWinner={p.winner === 'left'} onClick={() => handleFlip(idx)} />
 
-                        <Grid container spacing={2}>
-                            {proposals.map((p, idx) => (
-                                <Grid item xs={12} key={p.id}>
-                                    <Paper sx={{
-                                        p: 2, bgcolor: '#1a1a2e',
-                                        display: 'flex', alignItems: 'center', gap: 2,
-                                        borderLeft: `4px solid ${p.status === 'flipped' ? '#ff9800' : '#4caf50'}`
-                                    }}>
-                                        {/* Left Image */}
-                                        <Box
+                                    <Box sx={{ flex: 1, textAlign: 'center' }}>
+                                        <Typography variant="caption" display="block" sx={{ color: 'var(--muted)', mb: SPACE.xs }}>
+                                            Confidence: {Math.round(p.confidence)}
+                                        </Typography>
+                                        <IconButton
                                             onClick={() => handleFlip(idx)}
-                                            sx={{
-                                                position: 'relative', width: 120, height: 120,
-                                                cursor: 'pointer',
-                                                border: p.winner === 'left' ? '3px solid #4caf50' : '1px solid #333',
-                                                borderRadius: 2, overflow: 'hidden'
-                                            }}
+                                            sx={{ color: p.status === 'flipped' ? 'var(--warn)' : 'var(--dim)' }}
                                         >
-                                            <img src={`${serverUrl}/api/image?path=${encodeURIComponent(p.left.path)}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
-                                            <Typography variant="caption" sx={{ position: 'absolute', bottom: 0, right: 0, bgcolor: 'rgba(0,0,0,0.6)', px: 0.5 }}>
-                                                {Math.round(p.left.score)}
-                                            </Typography>
-                                        </Box>
+                                            <SwapHoriz />
+                                        </IconButton>
+                                        <IconButton onClick={() => handleDelete(idx)} sx={{ color: 'var(--bad)' }}>
+                                            <Delete />
+                                        </IconButton>
+                                    </Box>
 
-                                        {/* Center Controls */}
-                                        <Box sx={{ flex: 1, textAlign: 'center' }}>
-                                            <Typography variant="caption" display="block" sx={{ color: '#666', mb: 1 }}>
-                                                Confidence: {Math.round(p.confidence)}
-                                            </Typography>
-                                            <IconButton onClick={() => handleFlip(idx)} color={p.status === 'flipped' ? "warning" : "default"}>
-                                                <SwapHoriz />
-                                            </IconButton>
-                                            <IconButton onClick={() => handleDelete(idx)} sx={{ color: '#f44336' }}>
-                                                <Delete />
-                                            </IconButton>
-                                        </Box>
+                                    <Choice side="right" data={p.right} isWinner={p.winner === 'right'} onClick={() => handleFlip(idx)} />
+                                </Panel>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </Box>
+            )}
 
-                                        {/* Right Image */}
-                                        <Box
-                                            onClick={() => handleFlip(idx)}
-                                            sx={{
-                                                position: 'relative', width: 120, height: 120,
-                                                cursor: 'pointer',
-                                                border: p.winner === 'right' ? '3px solid #4caf50' : '1px solid #333',
-                                                borderRadius: 2, overflow: 'hidden'
-                                            }}
-                                        >
-                                            <img src={`${serverUrl}/api/image?path=${encodeURIComponent(p.right.path)}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
-                                            <Typography variant="caption" sx={{ position: 'absolute', bottom: 0, right: 0, bgcolor: 'rgba(0,0,0,0.6)', px: 0.5 }}>
-                                                {Math.round(p.right.score)}
-                                            </Typography>
-                                        </Box>
-                                    </Paper>
-                                </Grid>
-                            ))}
-                        </Grid>
-                    </Box>
-                )}
-            </Box>
-
-            {/* Performer Selection Modal (Reusing identical code simplifies things for now) */}
             <Dialog
                 open={showPerformerModal}
                 onClose={() => setShowPerformerModal(false)}
                 maxWidth="sm"
                 fullWidth
-                PaperProps={{ sx: { bgcolor: '#16213e', color: '#fff' } }}
             >
-                <DialogTitle>Select Performers</DialogTitle>
+                <DialogTitle>Select performers</DialogTitle>
                 <DialogContent>
                     <List sx={{ maxHeight: 400, overflow: 'auto' }}>
                         {performers.map((p) => (
@@ -277,24 +243,23 @@ function PairwiseAutoLabelPage({ serverUrl }) {
                                             : [...prev, p.name]
                                     );
                                 }}>
-                                    <Checkbox
-                                        checked={selectedPerformers.includes(p.name)}
-                                        sx={{ color: '#888' }}
+                                    <Checkbox checked={selectedPerformers.includes(p.name)} />
+                                    <ListItemText
+                                        primary={p.name}
+                                        secondary={`${p.totalCount} images`}
+                                        secondaryTypographyProps={{ sx: { color: 'var(--dim)' } }}
                                     />
-                                    <ListItemText primary={p.name} secondary={`${p.totalCount} images`} secondaryTypographyProps={{ sx: { color: '#888' } }} />
                                 </ListItemButton>
                             </ListItem>
                         ))}
                     </List>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setSelectedPerformers([])} sx={{ color: '#bbb' }}>Clear</Button>
-                    <Button onClick={() => setShowPerformerModal(false)} variant="contained" sx={{ bgcolor: '#00d9ff' }}>
-                        Done
-                    </Button>
+                    <Button onClick={() => setSelectedPerformers([])}>Clear</Button>
+                    <Button onClick={() => setShowPerformerModal(false)} variant="contained">Done</Button>
                 </DialogActions>
             </Dialog>
-        </Box>
+        </PageShell>
     );
 }
 

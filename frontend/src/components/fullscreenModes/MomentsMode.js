@@ -4,149 +4,169 @@ import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import useGalleryImages, { imageUrlForPath } from './useGalleryImages';
 
 /**
- * "Moments" — motionin.design style guided tour.
+ * "Moments" — motionin.design-style cinematic exploration.
  *
- * A custom animated cursor with a soft glow drifts from photo to photo on a
- * cinematic spring. The photo currently under the cursor scales up, brightens
- * and lifts to the front; other photos dim. Auto-advances every few seconds.
+ * Photos are scattered across a canvas LARGER than the viewport (~1.8× in
+ * each direction). A "camera" smoothly pans around the canvas via spring
+ * physics, drifting from photo to photo as if we're touring a gallery wall.
+ * An animated cursor (white ring + dot, with a soft glow) lands on whatever
+ * photo the camera is currently visiting, and that photo scales up + brightens
+ * with a "Moment / <name>" caption.
  *
- * The user can also move their real mouse — if they move, the cursor follows
- * pointer and the auto-tour pauses briefly.
+ * Every ~4.5s a new photo is chosen — we prefer one that's distant from the
+ * current focus so each camera move has real travel. Move your real mouse and
+ * you take over for ~2.4s before the tour resumes.
  */
 export default function MomentsMode({ performers, onPhotoClick, active }) {
-  const { items } = useGalleryImages(performers, { perPerformerMax: 3, active });
+  const { items } = useGalleryImages(performers, { perPerformerMax: 6, active });
   const containerRef = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [focusIdx, setFocusIdx] = useState(0);
-  const autoTimerRef = useRef(null);
+  const [featuredIdx, setFeaturedIdx] = useState(0);
   const userControlRef = useRef({ until: 0 });
 
-  // Spring-driven cursor position
-  const cursorX = useMotionValue(0);
-  const cursorY = useMotionValue(0);
-  const springX = useSpring(cursorX, { stiffness: 60, damping: 18, mass: 1.4 });
-  const springY = useSpring(cursorY, { stiffness: 60, damping: 18, mass: 1.4 });
-  // Glow intensity grows with the distance the spring still needs to travel
-  const glow = useTransform([springX, springY, cursorX, cursorY], ([sx, sy, tx, ty]) => {
-    const dx = tx - sx, dy = ty - sy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    return Math.min(40, 18 + dist * 0.04);
-  });
-  const boxShadow = useTransform(
-    glow,
-    (v) => `0 0 ${v}px ${v / 2}px rgba(255,255,255,0.45)`
-  );
+  // --- Camera: stored in canvas pixels (top-left of viewport within canvas) ---
+  const cameraX = useMotionValue(0);
+  const cameraY = useMotionValue(0);
+  const cameraSpringX = useSpring(cameraX, { stiffness: 22, damping: 24, mass: 1.7 });
+  const cameraSpringY = useSpring(cameraY, { stiffness: 22, damping: 24, mass: 1.7 });
+  // Canvas div translates by -camera so contents at (camX,camY) appear at (0,0)
+  const canvasOffsetX = useTransform(cameraSpringX, (v) => -v);
+  const canvasOffsetY = useTransform(cameraSpringY, (v) => -v);
 
-  // Sample a stable sub-pool so the layout doesn't reshuffle on every render
-  const pool = useMemo(() => {
-    if (!items.length) return [];
-    const arr = [...items];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr.slice(0, 28);
-  }, [items]);
+  // --- Cursor: stored in SCREEN pixels (viewport-relative) ---
+  const cursorTargetX = useMotionValue(0);
+  const cursorTargetY = useMotionValue(0);
+  const cursorSpringX = useSpring(cursorTargetX, { stiffness: 55, damping: 18, mass: 1.2 });
+  const cursorSpringY = useSpring(cursorTargetY, { stiffness: 55, damping: 18, mass: 1.2 });
 
-  // Generate a non-overlapping scattered layout
-  const layout = useMemo(() => {
-    if (!size.w || !size.h || pool.length === 0) return [];
-    const placed = [];
-    const margin = 40;
-    const minSide = Math.min(size.w, size.h);
-    const baseSize = Math.max(140, Math.floor(minSide / 5));
-    for (const item of pool) {
-      // Random aspect: portrait/landscape/square
-      const aspectRoll = Math.random();
-      let w, h;
-      if (aspectRoll < 0.4) { w = baseSize; h = Math.round(baseSize * 1.35); }
-      else if (aspectRoll < 0.75) { w = Math.round(baseSize * 1.25); h = baseSize; }
-      else { w = baseSize; h = baseSize; }
-      const sizeJitter = 0.75 + Math.random() * 0.55;
-      w = Math.round(w * sizeJitter);
-      h = Math.round(h * sizeJitter);
-
-      // Try to find non-overlapping position
-      let pos = null;
-      for (let attempt = 0; attempt < 60; attempt++) {
-        const x = margin + Math.random() * (size.w - w - margin * 2);
-        const y = margin + Math.random() * (size.h - h - margin * 2);
-        const rect = { x, y, w, h };
-        let ok = true;
-        for (const other of placed) {
-          if (x + w + 12 < other.x) continue;
-          if (other.x + other.w + 12 < x) continue;
-          if (y + h + 12 < other.y) continue;
-          if (other.y + other.h + 12 < y) continue;
-          ok = false;
-          break;
-        }
-        if (ok) { pos = rect; break; }
-      }
-      if (!pos) continue;
-      placed.push({ ...pos, item });
-      if (placed.length >= 14) break;
-    }
-    return placed;
-  }, [pool, size]);
-
-  // Track container size
+  // Track viewport size. Crucially: re-run when active flips, otherwise the
+  // ResizeObserver never attaches because the ref is null on first mount when
+  // the mode was inactive (this is what caused "have to close & reopen").
   useEffect(() => {
+    if (!active) return;
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
-      const rect = el.getBoundingClientRect();
-      setSize({ w: rect.width, h: rect.height });
+      const r = el.getBoundingClientRect();
+      setSize({ w: r.width, h: r.height });
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [active]);
 
-  // Auto-tour: advance focus every ~3.5s
+  // Canvas dimensions — bigger than viewport so we have room to pan
+  const CANVAS_MULT = 1.8;
+  const canvasW = size.w * CANVAS_MULT;
+  const canvasH = size.h * CANVAS_MULT;
+
+  // Scatter photos across the canvas with non-overlapping placement
+  const layout = useMemo(() => {
+    if (!canvasW || !canvasH || items.length === 0) return [];
+    const baseSide = Math.max(190, Math.min(size.w, size.h) / 4.2);
+    const margin = 90;
+    const spacing = 50;
+    const placed = [];
+    const pool = [...items];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    for (const item of pool) {
+      // Random aspect ratio: portrait, landscape, or square
+      const aspectRoll = Math.random();
+      let w, h;
+      if (aspectRoll < 0.35) { w = baseSide; h = Math.round(baseSide * 1.35); }
+      else if (aspectRoll < 0.7) { w = Math.round(baseSide * 1.3); h = baseSide; }
+      else { w = baseSide; h = baseSide; }
+      const jit = 0.85 + Math.random() * 0.5;
+      w = Math.round(w * jit);
+      h = Math.round(h * jit);
+
+      let pos = null;
+      for (let attempt = 0; attempt < 90; attempt++) {
+        const x = margin + Math.random() * (canvasW - w - margin * 2);
+        const y = margin + Math.random() * (canvasH - h - margin * 2);
+        let ok = true;
+        for (const o of placed) {
+          if (x + w + spacing < o.x) continue;
+          if (o.x + o.w + spacing < x) continue;
+          if (y + h + spacing < o.y) continue;
+          if (o.y + o.h + spacing < y) continue;
+          ok = false; break;
+        }
+        if (ok) { pos = { x, y, w, h, item }; break; }
+      }
+      if (pos) placed.push(pos);
+      if (placed.length >= 38) break;
+    }
+    return placed;
+  }, [canvasW, canvasH, items, size.w, size.h]);
+
+  // Auto-tour: pick a new focus every 4.5s, preferring a distant photo so
+  // each camera move is dramatic.
   useEffect(() => {
     if (!active || layout.length === 0) return;
     const tick = () => {
-      if (Date.now() > userControlRef.current.until) {
-        setFocusIdx((i) => (i + 1) % layout.length);
-      }
-      autoTimerRef.current = setTimeout(tick, 3500);
+      if (Date.now() < userControlRef.current.until) return;
+      setFeaturedIdx((prev) => {
+        if (layout.length <= 1) return prev;
+        const cur = layout[prev];
+        const curCx = cur.x + cur.w / 2;
+        const curCy = cur.y + cur.h / 2;
+        // Prefer candidates at least ~30% of canvas diag away
+        const minDist = Math.min(canvasW, canvasH) * 0.3;
+        const far = [];
+        for (let i = 0; i < layout.length; i++) {
+          if (i === prev) continue;
+          const p = layout[i];
+          const dx = (p.x + p.w / 2) - curCx;
+          const dy = (p.y + p.h / 2) - curCy;
+          if (Math.hypot(dx, dy) > minDist) far.push(i);
+        }
+        if (far.length > 0) return far[Math.floor(Math.random() * far.length)];
+        // Fallback: any different photo
+        let next = prev;
+        while (next === prev) next = Math.floor(Math.random() * layout.length);
+        return next;
+      });
     };
-    autoTimerRef.current = setTimeout(tick, 2400);
-    return () => clearTimeout(autoTimerRef.current);
-  }, [active, layout.length]);
+    const t = setInterval(tick, 4500);
+    const init = setTimeout(tick, 1800); // first move ~1.8s after mount
+    return () => {
+      clearInterval(t);
+      clearTimeout(init);
+    };
+  }, [active, layout.length, canvasW, canvasH]);
 
-  // Move cursor to focused photo
+  // When the featured photo changes, retarget camera + cursor
   useEffect(() => {
-    if (!layout[focusIdx]) return;
-    const p = layout[focusIdx];
-    // Aim at a soft offset inside the photo (not dead center, looks more natural)
-    const cx = p.x + p.w * (0.4 + Math.random() * 0.2);
-    const cy = p.y + p.h * (0.4 + Math.random() * 0.2);
-    cursorX.set(cx);
-    cursorY.set(cy);
-  }, [focusIdx, layout, cursorX, cursorY]);
+    if (!layout[featuredIdx] || !size.w) return;
+    const p = layout[featuredIdx];
+    const photoCenterX = p.x + p.w / 2;
+    const photoCenterY = p.y + p.h / 2;
+    // Camera: center the photo in the viewport, clamped to canvas bounds
+    const camX = Math.max(0, Math.min(canvasW - size.w, photoCenterX - size.w / 2));
+    const camY = Math.max(0, Math.min(canvasH - size.h, photoCenterY - size.h / 2));
+    cameraX.set(camX);
+    cameraY.set(camY);
+    // Cursor: photo's eventual screen position + small jitter inside the photo
+    const csx = photoCenterX - camX;
+    const csy = photoCenterY - camY;
+    const jx = (Math.random() - 0.5) * Math.min(80, p.w * 0.3);
+    const jy = (Math.random() - 0.5) * Math.min(80, p.h * 0.3);
+    cursorTargetX.set(csx + jx);
+    cursorTargetY.set(csy + jy);
+  }, [featuredIdx, layout, canvasW, canvasH, size.w, size.h, cameraX, cameraY, cursorTargetX, cursorTargetY]);
 
-  // Allow user pointer to drive the cursor too
+  // Real-mouse override: cursor follows pointer, auto-tour pauses briefly
   const handlePointerMove = (e) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    cursorX.set(x);
-    cursorY.set(y);
-    userControlRef.current.until = Date.now() + 2200;
-
-    // Find nearest photo under cursor and focus it
-    let best = -1, bestD = Infinity;
-    for (let i = 0; i < layout.length; i++) {
-      const p = layout[i];
-      const px = p.x + p.w / 2, py = p.y + p.h / 2;
-      const d = (px - x) ** 2 + (py - y) ** 2;
-      if (d < bestD) { bestD = d; best = i; }
-    }
-    if (best !== -1) setFocusIdx(best);
+    cursorTargetX.set(e.clientX - rect.left);
+    cursorTargetY.set(e.clientY - rect.top);
+    userControlRef.current.until = Date.now() + 2400;
   };
 
   if (!active) return null;
@@ -159,85 +179,109 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
         position: 'absolute',
         inset: 0,
         overflow: 'hidden',
-        background: 'radial-gradient(ellipse at center, #14141a 0%, #06060a 80%)',
+        background: 'radial-gradient(ellipse at center, #0c0c12 0%, #050507 80%)',
         cursor: 'none',
       }}
     >
-      {layout.map((p, i) => {
-        const isFocus = i === focusIdx;
-        return (
-          <motion.div
-            key={`${p.item.performer.id}-${p.item.path}-${i}`}
-            onClick={() => onPhotoClick?.(p.item.performer)}
-            initial={{ opacity: 0, scale: 0.92 }}
-            animate={{
-              opacity: isFocus ? 1 : 0.32,
-              scale: isFocus ? 1.08 : 0.97,
-              filter: isFocus ? 'blur(0px) saturate(1.1)' : 'blur(1.5px) saturate(0.85)',
-            }}
-            transition={{ duration: 0.7, ease: [0.22, 0.9, 0.3, 1] }}
-            style={{
-              position: 'absolute',
-              left: p.x,
-              top: p.y,
-              width: p.w,
-              height: p.h,
-              borderRadius: 6,
-              overflow: 'hidden',
-              cursor: 'pointer',
-              boxShadow: isFocus
-                ? '0 30px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.15)'
-                : '0 8px 24px rgba(0,0,0,0.55)',
-              zIndex: isFocus ? 50 : 1,
-              background: '#111',
-            }}
-          >
-            <img
-              src={imageUrlForPath(p.item.path)}
-              alt={p.item.performer.name}
-              loading="lazy"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                display: 'block',
-                pointerEvents: 'none',
-              }}
-            />
-            {isFocus && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.25, duration: 0.5 }}
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  padding: '14px 16px 12px',
-                  background: 'linear-gradient(to top, rgba(0,0,0,0.85), transparent)',
-                  color: 'white',
-                  fontSize: 15,
-                  fontWeight: 500,
-                  letterSpacing: 0.3,
-                  textShadow: '0 2px 8px rgba(0,0,0,0.6)',
-                }}
-              >
-                {p.item.performer.name}
-              </motion.div>
-            )}
-          </motion.div>
-        );
-      })}
-
-      {/* Animated cursor: outer glow ring + inner dot */}
+      {/* The big pannable canvas */}
       <motion.div
         style={{
           position: 'absolute',
           left: 0,
           top: 0,
-          x: springX,
-          y: springY,
+          width: canvasW,
+          height: canvasH,
+          x: canvasOffsetX,
+          y: canvasOffsetY,
+          willChange: 'transform',
+        }}
+      >
+        {layout.map((p, i) => {
+          const isFeatured = i === featuredIdx;
+          return (
+            <motion.div
+              key={`${p.item.performer.id}-${p.item.path}-${i}`}
+              onClick={() => onPhotoClick?.(p.item.performer)}
+              animate={{
+                scale: isFeatured ? 1.4 : 1,
+                opacity: isFeatured ? 1 : 0.72,
+                filter: isFeatured ? 'blur(0px) saturate(1.05)' : 'blur(0.4px) saturate(0.9)',
+              }}
+              transition={{ duration: 1.0, ease: [0.22, 0.9, 0.3, 1] }}
+              style={{
+                position: 'absolute',
+                left: p.x,
+                top: p.y,
+                width: p.w,
+                height: p.h,
+                borderRadius: 6,
+                overflow: 'hidden',
+                cursor: 'pointer',
+                background: '#111',
+                boxShadow: isFeatured
+                  ? '0 30px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.15)'
+                  : '0 6px 22px rgba(0,0,0,0.5)',
+                zIndex: isFeatured ? 50 : 1,
+                transformOrigin: 'center center',
+              }}
+            >
+              <img
+                src={imageUrlForPath(p.item.path)}
+                alt={p.item.performer.name}
+                loading="lazy"
+                draggable={false}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  display: 'block',
+                  pointerEvents: 'none',
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+              {isFeatured && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.45, duration: 0.5 }}
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    padding: '22px 22px 18px',
+                    background: 'linear-gradient(to top, rgba(0,0,0,0.88) 0%, transparent 100%)',
+                    color: 'white',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <div style={{
+                    fontSize: 10,
+                    letterSpacing: 3,
+                    textTransform: 'uppercase',
+                    opacity: 0.65,
+                    marginBottom: 5,
+                  }}>
+                    Moment
+                  </div>
+                  <div style={{ fontSize: 19, fontWeight: 500, lineHeight: 1.2 }}>
+                    {p.item.performer.name}
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+          );
+        })}
+      </motion.div>
+
+      {/* Animated cursor (overlaid in viewport space) */}
+      <motion.div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          x: cursorSpringX,
+          y: cursorSpringY,
           pointerEvents: 'none',
           zIndex: 1000,
           translateX: '-50%',
@@ -247,11 +291,11 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
       >
         <motion.div
           style={{
-            width: 48,
-            height: 48,
+            width: 52,
+            height: 52,
             borderRadius: '50%',
-            border: '1.5px solid rgba(255, 255, 255, 0.85)',
-            boxShadow,
+            border: '1.5px solid rgba(255, 255, 255, 0.9)',
+            boxShadow: '0 0 30px 10px rgba(255,255,255,0.35)',
           }}
           animate={{
             scale: [1, 1.18, 1],

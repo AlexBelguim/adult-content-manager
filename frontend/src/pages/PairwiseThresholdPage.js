@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Box, Typography, Button, Paper, CircularProgress, Select, MenuItem,
-    FormControl, InputLabel, Slider, Grid
+    Box, Typography, Button, CircularProgress, Select, MenuItem,
+    FormControl, InputLabel, Slider
 } from '@mui/material';
-import { TuneRounded, Psychology } from '@mui/icons-material';
+import { TuneRounded } from '@mui/icons-material';
+import {
+    PageShell, PageHeader, Section, Panel, Toolbar, StatRow, EmptyState, SPACE
+} from '../components/layout';
 
 function PairwiseThresholdPage({ serverUrl }) {
     const [performers, setPerformers] = useState([]);
@@ -44,7 +47,7 @@ function PairwiseThresholdPage({ serverUrl }) {
         }
     };
 
-    // Calculate accuracy at current threshold
+    // Accuracy at the current threshold
     const getAccuracyStats = () => {
         if (!calibrationData?.images) return null;
 
@@ -60,63 +63,72 @@ function PairwiseThresholdPage({ serverUrl }) {
     };
 
     const stats = getAccuracyStats();
+    const accuracyTone = !stats ? 'default'
+        : stats.accuracy >= 80 ? 'ok'
+            : stats.accuracy >= 60 ? 'warn' : 'bad';
 
-    const getScoreColor = (score) => {
-        if (score >= threshold) return '#4caf50';
-        return '#f44336';
-    };
+    /** One cell of the confusion matrix. */
+    const Cell = ({ value, correct }) => (
+        <Box sx={{
+            bgcolor: correct ? 'var(--ok-quiet)' : 'var(--bad-quiet)',
+            color: correct ? 'var(--ok)' : 'var(--bad)',
+            p: SPACE.sm,
+            borderRadius: 'var(--radius-sm, 4px)',
+            fontWeight: 640,
+            fontVariantNumeric: 'tabular-nums'
+        }}>
+            {value}
+        </Box>
+    );
 
     return (
-        <Box sx={{ p: 3, color: '#fff' }}>
-            <Typography variant="h5" sx={{ mb: 3, color: '#e94560' }}>
-                Threshold Calibration
-            </Typography>
+        <PageShell>
+            <PageHeader
+                title="Threshold Calibration"
+                subtitle="Pick the score cut-off that best separates keep from delete for a performer."
+                back
+            />
 
-            {/* Performer Selection */}
-            <Paper sx={{ p: 3, mb: 3, bgcolor: '#16213e' }}>
-                <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>
-                    Select Performer
-                </Typography>
-
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <FormControl sx={{ minWidth: 300 }}>
-                        <InputLabel sx={{ color: '#888' }}>Performer</InputLabel>
-                        <Select
-                            value={selectedPerformer}
-                            onChange={(e) => setSelectedPerformer(e.target.value)}
-                            label="Performer"
-                            disabled={loadingPerformers}
-                            sx={{ bgcolor: '#0f3460' }}
-                        >
-                            {performers.map((p) => (
-                                <MenuItem key={p.name} value={p.name}>
-                                    {p.name} ({p.totalCount} images)
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-
-                    <Button
-                        variant="contained"
-                        startIcon={loading ? <CircularProgress size={20} /> : <TuneRounded />}
-                        onClick={handleLoadCalibration}
-                        disabled={!selectedPerformer || loading}
-                        sx={{ bgcolor: '#e94560', height: 56 }}
+            <Toolbar>
+                <FormControl sx={{ minWidth: 280 }} size="small">
+                    <InputLabel>Performer</InputLabel>
+                    <Select
+                        value={selectedPerformer}
+                        onChange={(e) => setSelectedPerformer(e.target.value)}
+                        label="Performer"
+                        disabled={loadingPerformers}
                     >
-                        Load Scores
-                    </Button>
-                </Box>
-            </Paper>
+                        {performers.map((p) => (
+                            <MenuItem key={p.name} value={p.name}>
+                                {p.name} ({p.totalCount} images)
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
 
-            {calibrationData && (
+                <Button
+                    variant="contained"
+                    startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <TuneRounded />}
+                    onClick={handleLoadCalibration}
+                    disabled={!selectedPerformer || loading}
+                >
+                    Load scores
+                </Button>
+            </Toolbar>
+
+            {!calibrationData ? (
+                <EmptyState
+                    icon={<TuneRounded />}
+                    title="No calibration loaded"
+                    description="Pick a performer and load their scores to tune the keep/delete threshold."
+                />
+            ) : (
                 <>
-                    {/* Threshold Slider */}
-                    <Paper sx={{ p: 3, mb: 3, bgcolor: '#16213e' }}>
-                        <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>
-                            Adjust Threshold
-                        </Typography>
-
-                        <Box sx={{ px: 2 }}>
+                    <Section
+                        title="Threshold"
+                        description={`Score ≥ ${threshold} is predicted KEEP, below is DELETE`}
+                    >
+                        <Panel sx={{ px: SPACE.lg, pt: SPACE.lg }}>
                             <Slider
                                 value={threshold}
                                 onChange={(e, val) => setThreshold(val)}
@@ -124,94 +136,54 @@ function PairwiseThresholdPage({ serverUrl }) {
                                 max={100}
                                 step={1}
                                 valueLabelDisplay="on"
-                                sx={{
-                                    color: '#e94560',
-                                    '& .MuiSlider-thumb': { bgcolor: '#e94560' },
-                                    '& .MuiSlider-track': { bgcolor: '#e94560' },
-                                    '& .MuiSlider-rail': { bgcolor: '#333' }
-                                }}
                             />
-                        </Box>
+                        </Panel>
+                    </Section>
 
-                        <Typography variant="body2" sx={{ textAlign: 'center', color: '#888', mt: 1 }}>
-                            Images with score ≥ {threshold} are predicted as KEEP, below as DELETE
-                        </Typography>
-                    </Paper>
-
-                    {/* Accuracy Stats */}
                     {stats && (
-                        <Paper sx={{ p: 3, mb: 3, bgcolor: '#16213e' }}>
-                            <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>
-                                Prediction Accuracy
-                            </Typography>
+                        <Section title="Prediction accuracy">
+                            <StatRow
+                                items={[
+                                    { label: 'Accuracy', value: `${stats.accuracy.toFixed(1)}%`, tone: accuracyTone },
+                                    { label: 'True keep', value: stats.trueKeep, tone: 'ok' },
+                                    { label: 'True delete', value: stats.trueDelete, tone: 'ok' },
+                                    { label: 'False keep', value: stats.falseKeep, tone: 'bad' },
+                                    { label: 'False delete', value: stats.falseDelete, tone: 'bad' }
+                                ]}
+                            />
 
-                            <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', mb: 2 }}>
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h3" sx={{ color: stats.accuracy >= 80 ? '#4caf50' : stats.accuracy >= 60 ? '#ff9800' : '#f44336', fontWeight: 'bold' }}>
-                                        {stats.accuracy.toFixed(1)}%
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ color: '#888' }}>Accuracy</Typography>
-                                </Box>
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h4" sx={{ color: '#4caf50', fontWeight: 'bold' }}>
-                                        {stats.trueKeep}
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ color: '#888' }}>True Keep</Typography>
-                                </Box>
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h4" sx={{ color: '#4caf50', fontWeight: 'bold' }}>
-                                        {stats.trueDelete}
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ color: '#888' }}>True Delete</Typography>
-                                </Box>
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h4" sx={{ color: '#f44336', fontWeight: 'bold' }}>
-                                        {stats.falseKeep}
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ color: '#888' }}>False Keep</Typography>
-                                </Box>
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography variant="h4" sx={{ color: '#f44336', fontWeight: 'bold' }}>
-                                        {stats.falseDelete}
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ color: '#888' }}>False Delete</Typography>
-                                </Box>
-                            </Box>
+                            <Panel sx={{ display: 'inline-block' }}>
+                                <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block', mb: SPACE.sm }}>
+                                    Confusion matrix
+                                </Typography>
+                                <Box sx={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '110px 76px 76px',
+                                    gap: 0.5,
+                                    textAlign: 'center',
+                                    alignItems: 'center'
+                                }}>
+                                    <Box />
+                                    <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Pred keep</Typography>
+                                    <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Pred delete</Typography>
 
-                            {/* Confusion Matrix */}
-                            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                                <Box sx={{ bgcolor: '#0f3460', p: 2, borderRadius: 1 }}>
-                                    <Typography variant="subtitle2" sx={{ mb: 1, color: '#888', textAlign: 'center' }}>
-                                        Confusion Matrix
-                                    </Typography>
-                                    <Box sx={{ display: 'grid', gridTemplateColumns: '100px 80px 80px', gap: 0.5, textAlign: 'center' }}>
-                                        <Box />
-                                        <Typography variant="caption" sx={{ color: '#4caf50' }}>Pred Keep</Typography>
-                                        <Typography variant="caption" sx={{ color: '#f44336' }}>Pred Delete</Typography>
-                                        <Typography variant="caption" sx={{ color: '#4caf50' }}>Actual Keep</Typography>
-                                        <Box sx={{ bgcolor: 'rgba(76, 175, 80, 0.3)', p: 1, borderRadius: 1 }}>{stats.trueKeep}</Box>
-                                        <Box sx={{ bgcolor: 'rgba(244, 67, 54, 0.3)', p: 1, borderRadius: 1 }}>{stats.falseDelete}</Box>
-                                        <Typography variant="caption" sx={{ color: '#f44336' }}>Actual Delete</Typography>
-                                        <Box sx={{ bgcolor: 'rgba(244, 67, 54, 0.3)', p: 1, borderRadius: 1 }}>{stats.falseKeep}</Box>
-                                        <Box sx={{ bgcolor: 'rgba(76, 175, 80, 0.3)', p: 1, borderRadius: 1 }}>{stats.trueDelete}</Box>
-                                    </Box>
+                                    <Typography variant="caption" sx={{ color: 'var(--dim)', textAlign: 'left' }}>Actual keep</Typography>
+                                    <Cell value={stats.trueKeep} correct />
+                                    <Cell value={stats.falseDelete} />
+
+                                    <Typography variant="caption" sx={{ color: 'var(--dim)', textAlign: 'left' }}>Actual delete</Typography>
+                                    <Cell value={stats.falseKeep} />
+                                    <Cell value={stats.trueDelete} correct />
                                 </Box>
-                            </Box>
-                        </Paper>
+                            </Panel>
+                        </Section>
                     )}
 
-                    {/* Image Grid */}
-                    <Paper sx={{ p: 3, bgcolor: '#16213e' }}>
-                        <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>
-                            Images Sorted by Score ({calibrationData.totalImages} total)
-                        </Typography>
-
-                        <div style={{
+                    <Section title={`Images by score (${calibrationData.totalImages} total)`}>
+                        <Box sx={{
                             display: 'grid',
                             gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                            gap: '8px',
-                            marginTop: '16px',
-                            width: '100%'
+                            gap: SPACE.sm
                         }}>
                             {calibrationData.images?.map((img, i) => (
                                 <Box
@@ -219,10 +191,10 @@ function PairwiseThresholdPage({ serverUrl }) {
                                     sx={{
                                         position: 'relative',
                                         aspectRatio: '1',
-                                        bgcolor: '#1a1a2e',
-                                        borderRadius: 1,
+                                        bgcolor: 'var(--surface)',
+                                        borderRadius: 'var(--radius-sm, 4px)',
                                         overflow: 'hidden',
-                                        border: '1px solid #333'
+                                        border: '1px solid var(--line)'
                                     }}
                                 >
                                     <img
@@ -231,47 +203,34 @@ function PairwiseThresholdPage({ serverUrl }) {
                                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                         loading="lazy"
                                     />
-                                    {/* Original label badge */}
-                                    <Box
-                                        sx={{
-                                            position: 'absolute',
-                                            top: 4,
-                                            left: 4,
-                                            bgcolor: img.originalLabel === 'keep' ? '#4caf50' : '#f44336',
-                                            px: 0.5,
-                                            borderRadius: 0.5
-                                        }}
-                                    >
-                                        <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: 10 }}>
-                                            {img.originalLabel === 'keep' ? 'K' : 'D'}
-                                        </Typography>
+                                    <Box sx={{
+                                        position: 'absolute', top: 4, left: 4,
+                                        bgcolor: img.originalLabel === 'keep' ? 'var(--ok)' : 'var(--bad)',
+                                        color: 'var(--bg)',
+                                        px: 0.75, borderRadius: 'var(--radius-sm, 4px)',
+                                        fontSize: 10, fontWeight: 700, lineHeight: 1.6
+                                    }}>
+                                        {img.originalLabel === 'keep' ? 'K' : 'D'}
                                     </Box>
-                                    {/* Score badge */}
-                                    <Box
-                                        sx={{
-                                            position: 'absolute',
-                                            bottom: 0,
-                                            left: 0,
-                                            right: 0,
-                                            bgcolor: 'rgba(0,0,0,0.7)',
-                                            py: 0.5,
-                                            textAlign: 'center'
-                                        }}
-                                    >
-                                        <Typography
-                                            variant="body2"
-                                            sx={{ fontWeight: 'bold', color: getScoreColor(img.score) }}
-                                        >
+                                    <Box sx={{
+                                        position: 'absolute', bottom: 0, left: 0, right: 0,
+                                        bgcolor: 'rgba(0,0,0,0.7)', py: 0.5, textAlign: 'center'
+                                    }}>
+                                        <Typography sx={{
+                                            fontWeight: 700, fontSize: '.8rem',
+                                            fontVariantNumeric: 'tabular-nums',
+                                            color: img.score >= threshold ? 'var(--ok)' : 'var(--bad)'
+                                        }}>
                                             {Math.round(img.score)}
                                         </Typography>
                                     </Box>
                                 </Box>
                             ))}
-                        </div>
-                    </Paper>
+                        </Box>
+                    </Section>
                 </>
             )}
-        </Box>
+        </PageShell>
     );
 }
 

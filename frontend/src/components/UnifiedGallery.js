@@ -940,7 +940,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
           height: 480,
           borderRadius: 2,
           overflow: 'hidden',
-          bgcolor: 'rgba(18, 18, 18, 0.7)',
+          bgcolor: 'var(--scrim)',
           boxShadow: 3,
           position: 'relative',
           transition: 'all 0.3s ease',
@@ -976,13 +976,13 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
               bottom: 0, left: 0, right: 0,
               p: 2,
               zIndex: 2,
-              color: 'white'
+              color: 'var(--text)'
             }}>
               <Typography sx={{
                 fontSize: '1.1rem',
                 fontWeight: 'bold',
                 mb: 1,
-                color: 'white',
+                color: 'var(--text)',
                 textShadow: '0 1px 1px rgba(0,0,0,0.3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -995,7 +995,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 gap: 1,
-                color: 'rgba(255,255,255,0.9)'
+                color: 'var(--text)'
               }}>
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>{item.sizeFormatted}</Typography>
               </Box>
@@ -1027,13 +1027,13 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
               bottom: 0, left: 0, right: 0,
               p: 2,
               zIndex: 2,
-              color: 'white'
+              color: 'var(--text)'
             }}>
               <Typography sx={{
                 fontSize: '1.1rem',
                 fontWeight: 'bold',
                 mb: 1,
-                color: 'white',
+                color: 'var(--text)',
                 textShadow: '0 1px 1px rgba(0,0,0,0.3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -1046,7 +1046,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 gap: 1,
-                color: 'rgba(255,255,255,0.9)'
+                color: 'var(--text)'
               }}>
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>{item.sizeFormatted}</Typography>
                 {item.funscriptCount !== undefined && (
@@ -1055,7 +1055,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                     label={`${item.funscriptCount} funscripts`}
                     sx={{
                       bgcolor: item.missingFunscripts || item.funscriptCount === 0 ? 'error.main' : 'success.main',
-                      color: 'white',
+                      color: 'var(--text)',
                       fontWeight: 'bold',
                       height: 20,
                       fontSize: '0.7rem'
@@ -1082,7 +1082,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                     size="small"
                     label={`🎵 ${formatRating(item.funscriptRating)}`}
                     sx={{
-                      bgcolor: 'rgba(156, 39, 176, 0.2)',
+                      bgcolor: 'var(--accent-quiet)',
                       color: '#f8bbd0',
                       border: '1px solid rgba(248, 187, 208, 0.4)',
                       height: 20,
@@ -1118,9 +1118,13 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
 
   return (
     <Box sx={{ p: { xs: 1, md: 3 }, bgcolor: 'background.default', minHeight: '100vh' }}>
-      <Paper elevation={3} sx={{ maxWidth: 1480, mx: 'auto', p: { xs: 2, md: 3 }, borderRadius: 2, bgcolor: 'background.paper' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, pb: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'text.primary', m: 0 }}>{galleryName}</Typography>
+      {/* elevation={3} was a floating drop-shadow card; this identity uses a
+          flat surface with a hairline, matching Panel. maxWidth aligned to
+          CONTENT_MAX (1600) so the gallery doesn't sit narrower than every
+          other page. */}
+      <Paper elevation={0} sx={{ maxWidth: 1600, mx: 'auto', p: { xs: 2, md: 3 }, borderRadius: 'var(--radius-lg, 10px)', bgcolor: 'var(--surface)', border: '1px solid var(--line)' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, pb: 2, borderBottom: '1px solid var(--line)' }}>
+          <Typography variant="h5" sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)', m: 0 }}>{galleryName}</Typography>
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Chip color="primary" variant="outlined" label={`${currentContent?.pics?.length || 0} pics`} />
             <Chip color="primary" variant="outlined" label={`${currentContent?.vids?.length || 0} videos`} />
@@ -1317,11 +1321,13 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
                 variant="contained"
                 sx={{
                   ml: { xs: 0, md: 1 },
-                  bgcolor: showTaggedMode === 0 ? 'primary.main' : showTaggedMode === 1 ? 'success.main' : 'warning.main',
-                  color: showTaggedMode === 2 ? 'warning.contrastText' : 'white',
-                  fontWeight: 'bold',
-                  border: 2,
-                  borderColor: 'primary.main',
+                  bgcolor: showTaggedMode === 0 ? 'var(--accent)' : showTaggedMode === 1 ? 'var(--ok)' : 'var(--warn)',
+                  // All three fills are mid-tone, so ink reads better on every
+                  // one of them than white did.
+                  color: 'var(--bg)',
+                  fontWeight: 700,
+                  border: '1px solid',
+                  borderColor: 'transparent',
                   '&:hover': {
                     bgcolor: showTaggedMode === 0 ? 'primary.dark' : showTaggedMode === 1 ? 'success.dark' : 'warning.dark',
                   }

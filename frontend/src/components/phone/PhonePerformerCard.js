@@ -80,7 +80,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
         height: '300px',
         borderRadius: '12px',
         overflow: 'hidden',
-        backgroundColor: 'rgba(18, 18, 18, 0.8)',
+        backgroundColor: 'var(--scrim-strong)',
         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
         backgroundImage: thumbnail !== 'placeholder-image.jpg' ? `url("${thumbnail}")` : 'none',
         backgroundSize: 'cover',
@@ -131,7 +131,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
             <Typography sx={{
               fontSize: '1.2rem',
               fontWeight: 'bold',
-              color: 'white',
+              color: 'var(--text)',
               textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -149,7 +149,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
                     onSettings(performer);
                   }}
                   sx={{
-                    color: '#ffeb3b',
+                    color: 'var(--warn)',
                     padding: '4px',
                     '& svg': { fontSize: '20px' }
                   }}
@@ -164,7 +164,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
                   if (onChangeThumbnail) onChangeThumbnail(performer.id);
                 }}
                 sx={{
-                  color: '#ff3a3a',
+                  color: 'var(--bad)',
                   padding: '4px',
                   '& svg': { fontSize: '20px' }
                 }}
@@ -185,7 +185,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
               display: 'flex',
               alignItems: 'center',
               fontSize: '0.9rem',
-              color: 'rgba(255, 255, 255, 0.9)'
+              color: 'var(--text)'
             }}>
               <StorageIcon sx={{ marginRight: '4px', fontSize: '16px' }} />
               {stats.size} GB
@@ -194,7 +194,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
               display: 'flex',
               alignItems: 'center',
               fontSize: '0.9rem',
-              color: 'rgba(255, 255, 255, 0.9)'
+              color: 'var(--text)'
             }}>
               <ImageIcon sx={{ marginRight: '4px', fontSize: '16px' }} />
               {stats.pics}
@@ -203,7 +203,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
               display: 'flex',
               alignItems: 'center',
               fontSize: '0.9rem',
-              color: 'rgba(255, 255, 255, 0.9)'
+              color: 'var(--text)'
             }}>
               <FolderIcon sx={{ marginRight: '4px', fontSize: '16px' }} />
               {stats.vids}
@@ -212,7 +212,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
               display: 'flex',
               alignItems: 'center',
               fontSize: '0.9rem',
-              color: 'rgba(255, 255, 255, 0.9)'
+              color: 'var(--text)'
             }}>
               <GameIcon sx={{ marginRight: '4px', fontSize: '16px' }} />
               {stats.funscripts}
@@ -223,7 +223,7 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
           <Box sx={{
             display: 'flex',
             justifyContent: 'center',
-            color: 'rgba(255, 255, 255, 0.7)',
+            color: 'var(--dim)',
             fontSize: '0.8rem',
             marginBottom: mode === 'filter' ? '12px' : '0'
           }}>
@@ -238,8 +238,8 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
               gap: 1
             }}>
               <Box sx={{
-                backgroundColor: '#2e7d32',
-                color: 'white',
+                backgroundColor: 'var(--ok)',
+                color: 'var(--text)',
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '0.8rem',
@@ -250,8 +250,8 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
                 Pics {picsPercentage}%
               </Box>
               <Box sx={{
-                backgroundColor: '#1565c0',
-                color: 'white',
+                backgroundColor: 'var(--info)',
+                color: 'var(--text)',
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '0.8rem',
@@ -262,8 +262,8 @@ function PhonePerformerCard({ performer, onClick, onChangeThumbnail, onSettings,
                 Vids {vidsPercentage}%
               </Box>
               <Box sx={{
-                backgroundColor: '#c62828',
-                color: 'white',
+                backgroundColor: 'var(--bad)',
+                color: 'var(--text)',
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '0.8rem',

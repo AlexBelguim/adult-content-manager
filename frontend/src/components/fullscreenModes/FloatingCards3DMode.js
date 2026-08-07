@@ -3,17 +3,19 @@ import { Box } from '@mui/material';
 import useGalleryImages, { imageUrlForPath } from './useGalleryImages';
 
 /**
- * "Floating Cards 3D" — photos arranged on a slowly rotating cylinder in
- * perspective space. Each card counter-rotates so it always faces the camera,
- * with a gentle vertical bob for extra parallax. Closer cards stay crisp,
- * far-side cards dim and blur slightly via opacity falloff with rotation.
+ * "Floating Cards 3D" — photos arranged on a slowly rotating cylinder seen in
+ * perspective. Three vertical rows; cards counter-bob on individual phases.
+ * Perspective is intentionally far (2200px) so the front cards don't balloon,
+ * giving every card around the cylinder a roughly comparable on-screen size.
  */
 export default function FloatingCards3DMode({ performers, onPhotoClick, active }) {
-  const { items } = useGalleryImages(performers, { perPerformerMax: 3, active });
+  const { items } = useGalleryImages(performers, { perPerformerMax: 4, active });
   const containerRef = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
+  // Re-run when active flips so the ResizeObserver attaches on activation
   useEffect(() => {
+    if (!active) return;
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
@@ -24,33 +26,32 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [active]);
 
-  // Build a stable arrangement on the cylinder
   const cards = useMemo(() => {
     if (!items.length || !size.w) return [];
-    // Limit cards on screen so it doesn't get cluttered
-    const N = Math.min(items.length, 32);
-    const radius = Math.max(420, size.w * 0.42);
-    const out = [];
-    // Shuffle items so the order around the cylinder is varied
+    // More cards, in 3 stacked rows, for density
+    const N = Math.min(items.length * 2, 60);
+    const radius = Math.min(720, Math.max(520, size.w * 0.36));
     const pool = [...items];
+    // Shuffle so adjacent cards aren't the same performer
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
+    const out = [];
+    const rowYs = [-220, 0, 220];
     for (let i = 0; i < N; i++) {
       const angle = (i / N) * 360;
-      // Two rows: half lower, half upper, offset for nice staggering
-      const row = i % 2;
-      const y = row === 0 ? -90 : 110;
-      const yJitter = (Math.random() - 0.5) * 40;
-      const w = 220 + (i % 3) * 25;
-      const h = Math.round(w * (1.2 + Math.random() * 0.3));
+      const row = i % 3;
+      const baseY = rowYs[row];
+      const yJitter = (Math.random() - 0.5) * 60;
+      const w = 175 + (i % 4) * 12;     // 175..211
+      const h = Math.round(w * (1.18 + Math.random() * 0.22));
       out.push({
         item: pool[i % pool.length],
         angle,
-        y: y + yJitter,
+        y: baseY + yJitter,
         w,
         h,
         radius,
@@ -70,27 +71,28 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
         inset: 0,
         overflow: 'hidden',
         background: 'radial-gradient(ellipse at center, #1a1830 0%, #05050d 80%)',
-        perspective: '1500px',
+        // Far perspective keeps front cards from blowing up
+        perspective: '2200px',
         perspectiveOrigin: '50% 50%',
       }}
     >
-      {/* Soft moving light glow */}
+      {/* Soft drifting glow */}
       <Box
         sx={{
           position: 'absolute',
-          width: '600px',
-          height: '600px',
+          width: '700px',
+          height: '700px',
           left: '50%',
           top: '50%',
-          marginLeft: '-300px',
-          marginTop: '-300px',
+          marginLeft: '-350px',
+          marginTop: '-350px',
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(124,77,255,0.18) 0%, transparent 70%)',
-          filter: 'blur(40px)',
-          animation: 'lightDrift 18s ease-in-out infinite',
+          background: 'radial-gradient(circle, rgba(124,77,255,0.22) 0%, transparent 70%)',
+          filter: 'blur(50px)',
+          animation: 'lightDrift 22s ease-in-out infinite',
           '@keyframes lightDrift': {
-            '0%, 100%': { transform: 'translate(-20%, -10%)' },
-            '50%': { transform: 'translate(20%, 10%)' },
+            '0%, 100%': { transform: 'translate(-22%, -12%)' },
+            '50%': { transform: 'translate(22%, 12%)' },
           },
           pointerEvents: 'none',
         }}
@@ -105,10 +107,11 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
           width: 0,
           height: 0,
           transformStyle: 'preserve-3d',
-          animation: 'cylSpin 50s linear infinite',
+          // Slow, slightly tilted spin
+          animation: 'cylSpin 72s linear infinite',
           '@keyframes cylSpin': {
-            '0%': { transform: 'rotateX(-8deg) rotateY(0deg)' },
-            '100%': { transform: 'rotateX(-8deg) rotateY(360deg)' },
+            '0%':   { transform: 'rotateX(-6deg) rotateY(0deg)' },
+            '100%': { transform: 'rotateX(-6deg) rotateY(360deg)' },
           },
         }}
       >
@@ -127,16 +130,15 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
               cursor: 'pointer',
             }}
           >
-            {/* Counter-rotate the inner so the card faces the camera-ish (billboard) */}
             <Box
               sx={{
                 position: 'absolute',
                 inset: 0,
-                animation: `cardBob 6s ease-in-out infinite`,
+                animation: 'cardBob 7s ease-in-out infinite',
                 animationDelay: `-${c.bobDelay}s`,
                 '@keyframes cardBob': {
                   '0%, 100%': { transform: 'translateY(0px)' },
-                  '50%': { transform: 'translateY(-12px)' },
+                  '50%':      { transform: 'translateY(-14px)' },
                 },
               }}
             >
@@ -149,6 +151,7 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
                   boxShadow:
                     '0 30px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)',
                   background: '#111',
+                  backfaceVisibility: 'hidden',
                   transition: 'transform 0.3s ease, box-shadow 0.3s ease',
                   '&:hover': {
                     transform: 'scale(1.06)',
@@ -171,14 +174,13 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
                   }}
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
-                {/* Reflective sheen along bottom edge */}
                 <Box
                   sx={{
                     position: 'absolute',
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    height: '40%',
+                    height: '38%',
                     background:
                       'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)',
                     pointerEvents: 'none',
@@ -190,14 +192,14 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
         ))}
       </Box>
 
-      {/* Floor reflection / fog */}
+      {/* Floor fog */}
       <Box
         sx={{
           position: 'absolute',
           left: 0,
           right: 0,
           bottom: 0,
-          height: '25%',
+          height: '22%',
           background:
             'linear-gradient(to top, rgba(5,5,13,1) 0%, rgba(5,5,13,0) 100%)',
           pointerEvents: 'none',

@@ -44,7 +44,7 @@ const darkModalStyles = {
     maxWidth: 700,
     maxHeight: '90vh',
     overflow: 'auto',
-    bgcolor: '#1E1E1E',
+    bgcolor: 'var(--surface)',
     borderRadius: 3,
     boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     border: '1px solid #333',
@@ -67,38 +67,38 @@ const darkModalStyles = {
   sectionTitle: {
     fontWeight: 'bold',
     mb: 2,
-    color: '#fff',
+    color: 'var(--text)',
     display: 'flex',
     alignItems: 'center',
     gap: 1
   },
   card: {
-    bgcolor: '#252525',
+    bgcolor: 'var(--surface)',
     borderRadius: 2,
     p: 2.5,
     border: '1px solid #444'
   },
   textSecondary: {
-    color: '#aaa'
+    color: 'var(--dim)'
   },
   gradientButton: {
-    background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
-    color: '#fff',
+    background: 'linear-gradient(135deg, var(--primary-main, var(--accent)) 0%, var(--primary-dark, #5e35b1) 100%)',
+    color: 'var(--text)',
     fontWeight: 'bold',
     px: 3,
     py: 1.5,
     textTransform: 'none',
     '&:hover': {
       background: 'linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%)',
-      boxShadow: '0 3px 10px rgba(126, 87, 194, .4)'
+      boxShadow: '0 3px 10px var(--accent-quiet)'
     },
     '&:disabled': {
-      background: '#444',
+      background: 'var(--raised)',
       color: '#777'
     }
   },
   outlinedButton: {
-    borderColor: '#555',
+    borderColor: 'var(--line-strong)',
     color: '#ddd',
     fontWeight: 'bold',
     px: 3,
@@ -110,10 +110,10 @@ const darkModalStyles = {
     }
   },
   textField: {
-    '& .MuiInputLabel-root': { color: '#aaa' },
+    '& .MuiInputLabel-root': { color: 'var(--dim)' },
     '& .MuiOutlinedInput-root': {
-      color: '#fff',
-      '& fieldset': { borderColor: '#444' },
+      color: 'var(--text)',
+      '& fieldset': { borderColor: 'var(--line-strong)' },
       '&:hover fieldset': { bordercolor: 'primary.light' },
       '&.Mui-focused fieldset': { bordercolor: 'primary.light' }
     }
@@ -435,7 +435,7 @@ function PerformerSettingsModal({
                 justify-content: center;
                 align-items: center;
                 min-height: 100vh;
-                background: #1E1E1E;
+                background: var(--surface);
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
               }
               .loading-container {
@@ -455,8 +455,8 @@ function PerformerSettingsModal({
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
               }
-              h2 { color: #fff; margin-bottom: 10px; }
-              p { color: #aaa; }
+              h2 { color: var(--text); margin-bottom: 10px; }
+              p { color: var(--dim); }
             </style>
           </head>
           <body>
@@ -723,9 +723,7 @@ function PerformerSettingsModal({
                 sx={{
                   fontWeight: 'bold',
                   mb: 1,
-                  background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
+                  color: 'var(--text)',
                 }}
               >
                 Performer Settings
@@ -749,10 +747,10 @@ function PerformerSettingsModal({
                           checked={renameFolderToo}
                           onChange={(e) => setRenameFolderToo(e.target.checked)}
                           size="small"
-                          sx={{ color: '#aaa', '&.Mui-checked': { color: 'primary.light' } }}
+                          sx={{ color: 'var(--dim)', '&.Mui-checked': { color: 'primary.light' } }}
                         />
                       }
-                      label={<Typography variant="body2" sx={{ color: '#aaa' }}>Also rename folder</Typography>}
+                      label={<Typography variant="body2" sx={{ color: 'var(--dim)' }}>Also rename folder</Typography>}
                     />
                     <Button
                       size="small"
@@ -785,14 +783,14 @@ function PerformerSettingsModal({
                   <IconButton
                     size="small"
                     onClick={() => setIsEditingName(true)}
-                    sx={{ color: '#aaa', '&:hover': { color: 'primary.light' } }}
+                    sx={{ color: 'var(--dim)', '&:hover': { color: 'primary.light' } }}
                   >
                     <EditIcon fontSize="small" />
                   </IconButton>
                 </Box>
               )}
             </Box>
-            <IconButton onClick={onClose} sx={{ color: '#aaa', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}>
+            <IconButton onClick={onClose} sx={{ color: 'var(--dim)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}>
               <CloseIcon />
             </IconButton>
           </Box>
@@ -867,7 +865,7 @@ function PerformerSettingsModal({
                     {savingAliases ? 'Saving...' : 'Save Aliases'}
                   </Button>
                   <FormControl size="small" sx={{ width: 220 }}>
-                    <InputLabel id="scraper-select-label" sx={{ color: '#aaa' }}>Scraper</InputLabel>
+                    <InputLabel id="scraper-select-label" sx={{ color: 'var(--dim)' }}>Scraper</InputLabel>
                     <Select
                       labelId="scraper-select-label"
                       value={selectedScraper}
@@ -895,23 +893,23 @@ function PerformerSettingsModal({
               </Box>
             </Box>
 
-            <Divider sx={{ my: 3, borderColor: '#333' }} />
+            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
 
             {/* Hash Management Section */}
             <Box sx={darkModalStyles.section}>
               <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                <HashIcon sx={{ color: '#ce93d8' }} />
+                <HashIcon sx={{ color: 'var(--accent)' }} />
                 Hash Management
                 {hasHashDB && (
                   <Chip
                     label={`${settings.performer.hash_count} hashes`}
                     size="small"
-                    sx={{ ml: 1, bgcolor: 'rgba(206, 147, 216, 0.2)', color: '#ce93d8' }}
+                    sx={{ ml: 1, bgcolor: 'rgba(206, 147, 216, 0.2)', color: 'var(--accent)' }}
                   />
                 )}
               </Typography>
               <Box sx={darkModalStyles.card}>
-                <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
+                <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
                   Create perceptual hashes to detect duplicate content across performers.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
@@ -943,16 +941,16 @@ function PerformerSettingsModal({
               </Box>
             </Box>
 
-            <Divider sx={{ my: 3, borderColor: '#333' }} />
+            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
 
             {/* AI Insights Section */}
             <Box sx={darkModalStyles.section}>
               <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                <RefreshIcon sx={{ color: '#8b5cf6' }} />
+                <RefreshIcon sx={{ color: 'var(--accent)' }} />
                 AI Insights
               </Typography>
               <Box sx={darkModalStyles.card}>
-                <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
+                <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
                   Use the active AI Ranker model to estimate this performer's star rating based on their content.
                 </Typography>
                 <Button
@@ -962,7 +960,7 @@ function PerformerSettingsModal({
                   startIcon={isPredictingRank ? <CircularProgress size={20} /> : <RefreshIcon />}
                   sx={{ 
                     ...darkModalStyles.gradientButton,
-                    background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+                    background: 'linear-gradient(135deg, var(--accent) 0%, #6d28d9 100%)',
                     '&:hover': { background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)' }
                    }}
                 >
@@ -971,16 +969,16 @@ function PerformerSettingsModal({
               </Box>
             </Box>
 
-            <Divider sx={{ my: 3, borderColor: '#333' }} />
+            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
 
             {/* Stats & Cache Sync Section */}
             <Box sx={darkModalStyles.section}>
               <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                <RefreshIcon sx={{ color: '#90caf9' }} />
+                <RefreshIcon sx={{ color: 'var(--info)' }} />
                 Sync & Refresh
               </Typography>
               <Box sx={darkModalStyles.card}>
-                <Typography variant="body2" sx={{ mb: 2, color: '#aaa' }}>
+                <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
                   Scan the performer folder to update file counts, sizes, thumbnails, and rebuild the file cache. This also purges stale references to deleted files.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
@@ -997,7 +995,7 @@ function PerformerSettingsModal({
               </Box>
             </Box>
 
-            <Divider sx={{ my: 3, borderColor: '#333' }} />
+            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
 
             {/* Action Buttons */}
             <Box sx={darkModalStyles.section}>
@@ -1044,13 +1042,13 @@ function PerformerSettingsModal({
       </Modal>
 
       {/* Confirmation Dialog */}
-      <Dialog open={confirmDialog.open} onClose={handleCancelAction} PaperProps={{ sx: { bgcolor: '#252525', color: '#fff' } }}>
+      <Dialog open={confirmDialog.open} onClose={handleCancelAction} PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}>
         <DialogTitle>{confirmDialog.title}</DialogTitle>
         <DialogContent>
           <Typography sx={{ color: '#ddd' }}>{confirmDialog.message}</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCancelAction} sx={{ color: '#aaa' }}>
+          <Button onClick={handleCancelAction} sx={{ color: 'var(--dim)' }}>
             Cancel
           </Button>
           <Button onClick={handleConfirmAction} color="error" variant="contained">
@@ -1060,27 +1058,27 @@ function PerformerSettingsModal({
       </Dialog>
 
       {/* Delete Options Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => !isDeleting && setDeleteDialogOpen(false)} maxWidth="md" fullWidth PaperProps={{ sx: { bgcolor: '#1E1E1E', color: '#fff' } }}>
+      <Dialog open={deleteDialogOpen} onClose={() => !isDeleting && setDeleteDialogOpen(false)} maxWidth="md" fullWidth PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}>
         <DialogTitle>Performer Actions: {performer?.name}</DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2 }}>
             {deleteOptions.includes('unblacklist') && (
-              <Box sx={{ border: '2px solid #2196f3', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'rgba(33, 150, 243, 0.1)' }}>
+              <Box sx={{ border: '2px solid #2196f3', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--info-quiet)' }}>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={deleteOption === 'unblacklist'}
                       onChange={() => setDeleteOption('unblacklist')}
                       disabled={isDeleting}
-                      sx={{ color: '#2196f3', '&.Mui-checked': { color: '#2196f3' } }}
+                      sx={{ color: 'var(--info)', '&.Mui-checked': { color: 'var(--info)' } }}
                     />
                   }
                   label={
                     <Box>
-                      <Typography variant="h6" sx={{ color: '#2196f3' }}>
+                      <Typography variant="h6" sx={{ color: 'var(--info)' }}>
                         🔓 Remove from Blacklist
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#aaa' }}>
+                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                         Remove this performer from the blacklist and allow it to be imported again.
                       </Typography>
                     </Box>
@@ -1090,22 +1088,22 @@ function PerformerSettingsModal({
             )}
 
             {deleteOptions.includes('blacklist') && (
-              <Box sx={{ border: '2px solid #ff9800', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'rgba(255, 152, 0, 0.1)' }}>
+              <Box sx={{ border: '2px solid #ff9800', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--warn-quiet)' }}>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={deleteOption === 'blacklist'}
                       onChange={() => setDeleteOption('blacklist')}
                       disabled={isDeleting}
-                      sx={{ color: '#ff9800', '&.Mui-checked': { color: '#ff9800' } }}
+                      sx={{ color: 'var(--warn)', '&.Mui-checked': { color: 'var(--warn)' } }}
                     />
                   }
                   label={
                     <Box>
-                      <Typography variant="h6" sx={{ color: '#ff9800' }}>
+                      <Typography variant="h6" sx={{ color: 'var(--warn)' }}>
                         ⛔ Add to Blacklist
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#aaa' }}>
+                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                         Delete the folder and prevent this performer from being imported in the future.
                       </Typography>
                     </Box>
@@ -1126,22 +1124,22 @@ function PerformerSettingsModal({
             )}
 
             {deleteOptions.includes('delete-folder-only') && (
-              <Box sx={{ border: '2px solid #9c27b0', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'rgba(156, 39, 176, 0.1)' }}>
+              <Box sx={{ border: '2px solid #9c27b0', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--accent-quiet)' }}>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={deleteOption === 'delete-folder-only'}
                       onChange={() => setDeleteOption('delete-folder-only')}
                       disabled={isDeleting}
-                      sx={{ color: '#9c27b0', '&.Mui-checked': { color: '#9c27b0' } }}
+                      sx={{ color: 'var(--accent)', '&.Mui-checked': { color: 'var(--accent)' } }}
                     />
                   }
                   label={
                     <Box>
-                      <Typography variant="h6" sx={{ color: '#9c27b0' }}>
+                      <Typography variant="h6" sx={{ color: 'var(--accent)' }}>
                         📁 Delete Folder Only
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#aaa' }}>
+                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                         Delete the performer folder from disk but keep all database records (filter history, tags, etc).
                       </Typography>
                     </Box>
@@ -1151,22 +1149,22 @@ function PerformerSettingsModal({
             )}
 
             {deleteOptions.includes('cleanup-before') && (
-              <Box sx={{ border: '2px solid #4caf50', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'rgba(76, 175, 80, 0.1)' }}>
+              <Box sx={{ border: '2px solid #4caf50', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--ok-quiet)' }}>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={deleteOption === 'cleanup-before'}
                       onChange={() => setDeleteOption('cleanup-before')}
                       disabled={isDeleting}
-                      sx={{ color: '#4caf50', '&.Mui-checked': { color: '#4caf50' } }}
+                      sx={{ color: 'var(--ok)', '&.Mui-checked': { color: 'var(--ok)' } }}
                     />
                   }
                   label={
                     <Box>
-                      <Typography variant="h6" sx={{ color: '#4caf50' }}>
+                      <Typography variant="h6" sx={{ color: 'var(--ok)' }}>
                         🧹 Clean Up "Before" Folder
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#aaa' }}>
+                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                         For performers in "after" - delete the old "before filter performer" folder and merge hash databases.
                       </Typography>
                     </Box>
@@ -1176,22 +1174,22 @@ function PerformerSettingsModal({
             )}
 
             {deleteOptions.includes('delete-complete') && (
-              <Box sx={{ border: '2px solid #f44336', borderRadius: 2, p: 2, backgroundColor: 'rgba(244, 67, 54, 0.1)' }}>
+              <Box sx={{ border: '2px solid #f44336', borderRadius: 2, p: 2, backgroundColor: 'var(--bad-quiet)' }}>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={deleteOption === 'delete-complete'}
                       onChange={() => setDeleteOption('delete-complete')}
                       disabled={isDeleting}
-                      sx={{ color: '#f44336', '&.Mui-checked': { color: '#f44336' } }}
+                      sx={{ color: 'var(--bad)', '&.Mui-checked': { color: 'var(--bad)' } }}
                     />
                   }
                   label={
                     <Box>
-                      <Typography variant="h6" sx={{ color: '#f44336' }}>
+                      <Typography variant="h6" sx={{ color: 'var(--bad)' }}>
                         🗑️ Completely Delete Performer
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#aaa' }}>
+                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                         PERMANENT deletion of ALL data and files! Deletes folders, database records, hash DB, everything. Cannot be undone!
                       </Typography>
                     </Box>
@@ -1202,7 +1200,7 @@ function PerformerSettingsModal({
           </Box>
         </DialogContent>
         <DialogActions sx={{ borderTop: '1px solid #333', p: 2 }}>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={isDeleting} sx={{ color: '#aaa' }}>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={isDeleting} sx={{ color: 'var(--dim)' }}>
             Cancel
           </Button>
           <Button

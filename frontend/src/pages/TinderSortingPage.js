@@ -16,8 +16,11 @@ import {
     Image as ImageIcon,
     Videocam as VideoIcon,
     CheckCircle as CheckCircleIcon,
-    Delete as DeleteIcon
+    Delete as DeleteIcon,
+    VolumeOff as VolumeOffIcon,
+    VolumeUp as VolumeUpIcon
 } from '@mui/icons-material';
+import { PageShell, PageHeader } from '../components/layout';
 
 function TinderSortingPage({ basePath }) {
     // State
@@ -36,6 +39,9 @@ function TinderSortingPage({ basePath }) {
     const [isDragging, setIsDragging] = useState(false);
     const [isHidden, setIsHidden] = useState(false);
     const cardRef = useRef(null);
+    const videoRef = useRef(null);
+    // Starts muted so autoplay is allowed; browsers block sound without a gesture.
+    const [muted, setMuted] = useState(true);
     const startPosRef = useRef({ x: 0, y: 0 });
     const isTransitioningRef = useRef(false);
     const isDraggingRef = useRef(false);
@@ -390,20 +396,21 @@ function TinderSortingPage({ basePath }) {
         return (
             <Box sx={{
                 minHeight: '100vh',
-                bgcolor: '#121212',
-                p: 2
+                bgcolor: 'var(--bg)'
             }}>
-                <AppBar position="static" sx={{ bgcolor: 'transparent', boxShadow: 'none', mb: 2 }}>
-                    <Toolbar sx={{ px: 0, minHeight: '48px !important' }}>
-                        <Typography variant="h5" sx={{ color: 'white', fontWeight: 'bold' }}>
-                            Tinder Sort
-                        </Typography>
-                    </Toolbar>
-                </AppBar>
+                {/* Was an AppBar rendering nothing but a title — an entire app-bar
+                    element used as a heading. The swipe view below keeps its own
+                    bar, because that one is position:fixed full-screen chrome for
+                    an immersive mode, not a second copy of the app's. */}
+                <PageShell>
+                <PageHeader
+                    title="Tinder Sort"
+                    subtitle={performers.length ? `${performers.length} performers` : undefined}
+                />
 
                 {loadingPerformers ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                        <CircularProgress sx={{ color: 'white' }} />
+                        <CircularProgress sx={{ color: 'var(--text)' }} />
                     </Box>
                 ) : performers.length === 0 ? (
                     <Typography sx={{ color: 'grey.500', textAlign: 'center', py: 4 }}>
@@ -427,7 +434,7 @@ function TinderSortingPage({ basePath }) {
                                     borderRadius: 1,
                                     overflow: 'hidden',
                                     cursor: 'pointer',
-                                    bgcolor: '#1e1e1e',
+                                    bgcolor: 'var(--surface)',
                                     flexShrink: 0,
                                     '&:hover': { opacity: 0.8 }
                                 }}
@@ -457,7 +464,7 @@ function TinderSortingPage({ basePath }) {
                                     <Typography
                                         variant="caption"
                                         sx={{
-                                            color: 'white',
+                                            color: 'var(--text)',
                                             fontWeight: 'bold',
                                             display: 'block',
                                             overflow: 'hidden',
@@ -479,9 +486,9 @@ function TinderSortingPage({ basePath }) {
                                                 sx={{
                                                     height: 14,
                                                     fontSize: '0.55rem',
-                                                    bgcolor: 'rgba(33, 150, 243, 0.8)',
-                                                    color: 'white',
-                                                    '& .MuiChip-icon': { color: 'white', ml: 0.3, mr: -0.5 },
+                                                    bgcolor: 'var(--info-quiet)',
+                                                    color: 'var(--text)',
+                                                    '& .MuiChip-icon': { color: 'var(--text)', ml: 0.3, mr: -0.5 },
                                                     '& .MuiChip-label': { px: 0.3 }
                                                 }}
                                             />
@@ -494,9 +501,9 @@ function TinderSortingPage({ basePath }) {
                                                 sx={{
                                                     height: 14,
                                                     fontSize: '0.55rem',
-                                                    bgcolor: 'rgba(156, 39, 176, 0.8)',
-                                                    color: 'white',
-                                                    '& .MuiChip-icon': { color: 'white', ml: 0.3, mr: -0.5 },
+                                                    bgcolor: 'var(--accent-quiet)',
+                                                    color: 'var(--text)',
+                                                    '& .MuiChip-icon': { color: 'var(--text)', ml: 0.3, mr: -0.5 },
                                                     '& .MuiChip-label': { px: 0.3 }
                                                 }}
                                             />
@@ -507,6 +514,7 @@ function TinderSortingPage({ basePath }) {
                         ))}
                     </Box>
                 )}
+                </PageShell>
             </Box>
         );
     }
@@ -527,24 +535,24 @@ function TinderSortingPage({ basePath }) {
             '@supports (height: 100dvh)': { height: '100dvh' },
             display: 'flex',
             flexDirection: 'column',
-            bgcolor: '#121212',
+            bgcolor: 'var(--bg)',
             overflow: 'hidden',
             // Safe area padding for notched devices
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}>
             {/* Header */}
-            <AppBar position="static" sx={{ bgcolor: 'rgba(0,0,0,0.9)', flexShrink: 0 }}>
+            <AppBar position="static" sx={{ bgcolor: 'var(--scrim-strong)', backdropFilter: 'blur(8px)', borderBottom: '1px solid var(--line)', boxShadow: 'none', flexShrink: 0 }}>
                 <Toolbar sx={{ gap: 1, minHeight: '56px !important' }}>
                     {/* Back button */}
                     <IconButton
                         onClick={handleExitSwipeView}
-                        sx={{ color: 'white' }}
+                        sx={{ color: 'var(--text)' }}
                     >
                         <ArrowBackIcon />
                     </IconButton>
 
                     {/* Performer name */}
-                    <Typography variant="subtitle1" sx={{ color: 'white', flex: 1, fontWeight: 'bold' }} noWrap>
+                    <Typography variant="subtitle1" sx={{ color: 'var(--text)', flex: 1, fontWeight: 'bold' }} noWrap>
                         {selectedPerformer.name}
                     </Typography>
 
@@ -555,10 +563,10 @@ function TinderSortingPage({ basePath }) {
                         onChange={(e, val) => val && setContentType(val)}
                         size="small"
                     >
-                        <ToggleButton value="pics" sx={{ color: 'white', px: 1, '&.Mui-selected': { bgcolor: 'primary.dark', color: 'white' } }}>
+                        <ToggleButton value="pics" sx={{ color: 'var(--text)', px: 1, '&.Mui-selected': { bgcolor: 'primary.dark', color: 'var(--text)' } }}>
                             <ImageIcon fontSize="small" />
                         </ToggleButton>
-                        <ToggleButton value="vids" sx={{ color: 'white', px: 1, '&.Mui-selected': { bgcolor: 'primary.dark', color: 'white' } }}>
+                        <ToggleButton value="vids" sx={{ color: 'var(--text)', px: 1, '&.Mui-selected': { bgcolor: 'primary.dark', color: 'var(--text)' } }}>
                             <VideoIcon fontSize="small" />
                         </ToggleButton>
                     </ToggleButtonGroup>
@@ -567,7 +575,7 @@ function TinderSortingPage({ basePath }) {
                     <IconButton
                         onClick={handleUndo}
                         disabled={undoStack.length === 0}
-                        sx={{ color: 'white' }}
+                        sx={{ color: 'var(--text)' }}
                     >
                         <UndoIcon />
                     </IconButton>
@@ -591,7 +599,7 @@ function TinderSortingPage({ basePath }) {
                     <Chip
                         label={formatSize(currentFile.size)}
                         size="small"
-                        sx={{ bgcolor: 'grey.800', color: 'white' }}
+                        sx={{ bgcolor: 'grey.800', color: 'var(--text)' }}
                     />
                     <Typography variant="body2" sx={{ color: 'grey.400' }}>
                         {remainingCount} left
@@ -612,7 +620,7 @@ function TinderSortingPage({ basePath }) {
             }}>
                 {/* Loading state */}
                 {loading && (
-                    <CircularProgress sx={{ color: 'white' }} />
+                    <CircularProgress sx={{ color: 'var(--text)' }} />
                 )}
 
                 {/* No files */}
@@ -645,7 +653,7 @@ function TinderSortingPage({ basePath }) {
                                 width: '100%',
                                 height: '100%',
                                 objectFit: 'contain',
-                                backgroundColor: '#000',
+                                backgroundColor: 'var(--bg)',
                                 pointerEvents: 'none'
                             }}
                         />
@@ -672,7 +680,10 @@ function TinderSortingPage({ basePath }) {
                             overflow: 'hidden',
                             cursor: 'grab',
                             userSelect: 'none',
-                            bgcolor: '#000',
+                            // Stops the browser claiming the horizontal drag as a
+                            // page scroll before our handler sees it.
+                            touchAction: 'none',
+                            bgcolor: 'var(--bg)',
                             boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
                             zIndex: 1,
                             ...getCardStyle()
@@ -689,23 +700,53 @@ function TinderSortingPage({ basePath }) {
                                     width: '100%',
                                     height: '100%',
                                     objectFit: 'contain',
-                                    backgroundColor: '#000',
+                                    backgroundColor: 'var(--bg)',
                                     pointerEvents: 'none'
                                 }}
                             />
                         ) : (
+                            /* No native controls, and pointer-events off — same as
+                               the image. With `controls` the video swallowed every
+                               touch for its own scrub bar, so on a phone a video
+                               card could not be swiped at all, only pictures could.
+                               It autoplays muted and loops instead, which is what
+                               you need to make a keep/delete call; sound is a tap
+                               on the button below. */
                             <video
                                 key={currentFile.path}
+                                ref={videoRef}
                                 src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                                controls
+                                autoPlay
+                                loop
+                                muted={muted}
                                 playsInline
                                 style={{
                                     width: '100%',
                                     height: '100%',
                                     objectFit: 'contain',
-                                    backgroundColor: '#000'
+                                    backgroundColor: 'var(--bg)',
+                                    pointerEvents: 'none'
                                 }}
                             />
+                        )}
+
+                        {contentType === 'vids' && (
+                            <IconButton
+                                onClick={(e) => { e.stopPropagation(); setMuted(m => !m); }}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                aria-label={muted ? 'Unmute' : 'Mute'}
+                                sx={{
+                                    position: 'absolute', top: 10, right: 10, zIndex: 4,
+                                    width: 40, height: 40,
+                                    bgcolor: 'var(--scrim-strong)',
+                                    border: '1px solid var(--line-strong)',
+                                    borderRadius: 'var(--radius, 6px)',
+                                    color: 'var(--text)',
+                                    '&:hover': { bgcolor: 'var(--raised)' }
+                                }}
+                            >
+                                {muted ? <VolumeOffIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
+                            </IconButton>
                         )}
 
                         {/* DELETE overlay */}
@@ -715,7 +756,7 @@ function TinderSortingPage({ basePath }) {
                             left: 0,
                             right: 0,
                             bottom: 0,
-                            bgcolor: 'rgba(244, 67, 54, 0.5)',
+                            bgcolor: 'var(--bad-quiet)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -723,7 +764,7 @@ function TinderSortingPage({ basePath }) {
                             ...getOverlayStyle('left')
                         }}>
                             <Typography variant="h2" sx={{
-                                color: 'white',
+                                color: 'var(--text)',
                                 fontWeight: 'bold',
                                 transform: 'rotate(-20deg)',
                                 border: '4px solid white',
@@ -742,7 +783,7 @@ function TinderSortingPage({ basePath }) {
                             left: 0,
                             right: 0,
                             bottom: 0,
-                            bgcolor: 'rgba(76, 175, 80, 0.5)',
+                            bgcolor: 'var(--ok-quiet)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -750,7 +791,7 @@ function TinderSortingPage({ basePath }) {
                             ...getOverlayStyle('right')
                         }}>
                             <Typography variant="h2" sx={{
-                                color: 'white',
+                                color: 'var(--text)',
                                 fontWeight: 'bold',
                                 transform: 'rotate(20deg)',
                                 border: '4px solid white',
@@ -793,12 +834,12 @@ function TinderSortingPage({ basePath }) {
                             });
                         }}
                         sx={{
-                            bgcolor: 'rgba(244, 67, 54, 0.15)',
-                            border: '2px solid #f44336',
-                            color: '#f44336',
+                            bgcolor: 'var(--bad-quiet)',
+                            border: '2px solid var(--bad)',
+                            color: 'var(--bad)',
                             width: { xs: 64, sm: 72 },
                             height: { xs: 64, sm: 72 },
-                            '&:active': { bgcolor: 'rgba(244, 67, 54, 0.4)', transform: 'scale(0.92)' },
+                            '&:active': { bgcolor: 'var(--bad-quiet)', transform: 'scale(0.92)' },
                             transition: 'transform 0.1s ease',
                         }}
                     >
@@ -811,7 +852,7 @@ function TinderSortingPage({ basePath }) {
                         disabled={undoStack.length === 0}
                         sx={{
                             bgcolor: 'rgba(255,255,255,0.08)',
-                            color: '#ff9800',
+                            color: 'var(--warn)',
                             width: { xs: 48, sm: 56 },
                             height: { xs: 48, sm: 56 },
                             '&:disabled': { opacity: 0.3 },
@@ -835,12 +876,12 @@ function TinderSortingPage({ basePath }) {
                             });
                         }}
                         sx={{
-                            bgcolor: 'rgba(76, 175, 80, 0.15)',
-                            border: '2px solid #4caf50',
-                            color: '#4caf50',
+                            bgcolor: 'var(--ok-quiet)',
+                            border: '2px solid var(--ok)',
+                            color: 'var(--ok)',
                             width: { xs: 64, sm: 72 },
                             height: { xs: 64, sm: 72 },
-                            '&:active': { bgcolor: 'rgba(76, 175, 80, 0.4)', transform: 'scale(0.92)' },
+                            '&:active': { bgcolor: 'var(--ok-quiet)', transform: 'scale(0.92)' },
                             transition: 'transform 0.1s ease',
                         }}
                     >

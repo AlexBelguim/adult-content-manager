@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-    Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem,
+    Box, Typography, FormControl, InputLabel, Select, MenuItem,
     Button, LinearProgress, Slider, Dialog, DialogTitle, DialogContent, DialogActions,
     Chip, CircularProgress, ToggleButton, ToggleButtonGroup
 } from '@mui/material';
 import {
-    PlayArrow, CheckCircle, Cancel, Tune, Memory, Science
+    PlayArrow, CheckCircle, Cancel, Tune, Memory, Science, FilterAlt
 } from '@mui/icons-material';
+import {
+    PageShell, PageHeader, Section, Panel, Toolbar, EmptyState, SPACE
+} from '../components/layout';
 
 function PairwiseFilterPage({ serverUrl }) {
     const [performers, setPerformers] = useState([]);
@@ -242,21 +245,23 @@ function PairwiseFilterPage({ serverUrl }) {
     };
 
     const selectSx = {
-        color: '#fff',
-        '.MuiOutlinedInput-notchedOutline': { borderColor: '#333' },
-        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#555' },
-        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#e94560' },
+        color: 'var(--text)',
+        '.MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' },
+        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line-strong)' },
+        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--accent)' },
     };
 
     return (
-        <Box sx={{ p: 3 }}>
-            <Typography variant="h4" sx={{ mb: 3, color: '#e94560', fontWeight: 'bold' }}>
-                🔎 Filter Incoming Performer
-            </Typography>
+        <PageShell>
+            <PageHeader
+                title="Filter Incoming Performer"
+                subtitle="Score a performer's incoming images, then set the cut-off for what to keep."
+                back
+            />
 
-            <Paper sx={{ p: 3, mb: 3, bgcolor: '#16213e' }}>
+            <Panel sx={{ mb: SPACE.lg }}>
                 {/* Row 1: Model type toggle + model selection */}
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
+                <Toolbar sx={{ mb: SPACE.md }}>
 
                     {/* Model type toggle */}
                     <ToggleButtonGroup
@@ -264,20 +269,19 @@ function PairwiseFilterPage({ serverUrl }) {
                         exclusive
                         onChange={(e, val) => val && setModelType(val)}
                         size="small"
-                        sx={{ bgcolor: '#0f3460' }}
                     >
-                        <ToggleButton value="pairwise" sx={{ color: '#888', gap: 0.5, '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
+                        <ToggleButton value="pairwise" sx={{ gap: 0.5 }}>
                             <Memory fontSize="small" /> Pairwise
                         </ToggleButton>
-                        <ToggleButton value="binary" sx={{ color: '#888', gap: 0.5, '&.Mui-selected': { color: '#fff', bgcolor: '#9c27b0' } }}>
+                        <ToggleButton value="binary" sx={{ gap: 0.5 }}>
                             <Science fontSize="small" /> Binary
                         </ToggleButton>
                     </ToggleButtonGroup>
 
                     {/* Pairwise model select */}
                     {modelType === 'pairwise' && (
-                    <FormControl sx={{ minWidth: 280 }}>
-                        <InputLabel sx={{ color: '#888' }}>Pairwise Model</InputLabel>
+                    <FormControl sx={{ minWidth: 280 }} size="small">
+                        <InputLabel>Pairwise Model</InputLabel>
                         <Select
                             value={selectedModel}
                             onChange={(e) => setSelectedModel(e.target.value)}
@@ -287,7 +291,7 @@ function PairwiseFilterPage({ serverUrl }) {
                         >
                             {models.map((m) => (
                                 <MenuItem key={m.name} value={m.name}>
-                                    {m.name} <span style={{ color: '#666', fontSize: 11, marginLeft: 6 }}>{m.location}</span>
+                                    {m.name} <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 6 }}>{m.location}</span>
                                 </MenuItem>
                             ))}
                         </Select>
@@ -296,8 +300,8 @@ function PairwiseFilterPage({ serverUrl }) {
 
                     {/* Binary model select */}
                     {modelType === 'binary' && (
-                    <FormControl sx={{ minWidth: 280 }}>
-                        <InputLabel sx={{ color: '#888' }}>Binary Model</InputLabel>
+                    <FormControl sx={{ minWidth: 280 }} size="small">
+                        <InputLabel>Binary Model</InputLabel>
                         <Select
                             value={selectedBinaryModel}
                             onChange={(e) => setSelectedBinaryModel(e.target.value)}
@@ -315,7 +319,7 @@ function PairwiseFilterPage({ serverUrl }) {
                     </FormControl>
                     )}
 
-                    {loadingModels && <CircularProgress size={20} sx={{ color: '#888' }} />}
+                    {loadingModels && <CircularProgress size={20} sx={{ color: 'var(--dim)' }} />}
 
                     {modelType === 'pairwise' && inferenceHealth && (
                         <Chip
@@ -334,15 +338,15 @@ function PairwiseFilterPage({ serverUrl }) {
                             size="small"
                             color={binaryHealth?.model_loaded ? 'success' : 'warning'}
                             variant="outlined"
-                            sx={{ borderColor: '#9c27b0', color: binaryHealth?.model_loaded ? undefined : '#ff9800' }}
+                            sx={{ borderColor: 'var(--accent)', color: binaryHealth?.model_loaded ? undefined: 'var(--warn)' }}
                         />
                     )}
-                </Box>
+                </Toolbar>
 
                 {/* Row 2: Performer + run button */}
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <FormControl sx={{ minWidth: 300 }}>
-                        <InputLabel sx={{ color: '#888' }}>Select Incoming Performer</InputLabel>
+                <Toolbar sx={{ mb: 0 }}>
+                    <FormControl sx={{ minWidth: 300 }} size="small">
+                        <InputLabel>Select Incoming Performer</InputLabel>
                         <Select
                             value={selectedPerformer}
                             onChange={(e) => {
@@ -371,30 +375,24 @@ function PairwiseFilterPage({ serverUrl }) {
                             startIcon={<PlayArrow />}
                             onClick={handleRunInference}
                             disabled={!selectedPerformer || !selectedModel}
-                            sx={{ bgcolor: '#e94560', '&:hover': { bgcolor: '#c3364f' }, height: 56 }}
                         >
-                            Run Inference
+                            Run inference
                         </Button>
                     ) : (
-                        <Button
-                            variant="outlined"
-                            color="error"
-                            onClick={handleStopInference}
-                            sx={{ height: 56 }}
-                        >
+                        <Button variant="outlined" color="error" onClick={handleStopInference}>
                             Stop
                         </Button>
                     )}
-                </Box>
+                </Toolbar>
 
                 {(isInferencing || status) && (
-                    <Box sx={{ mt: 2 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                            <Typography variant="body2" sx={{ color: '#888' }}>
+                    <Box sx={{ mt: SPACE.md }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: SPACE.xs }}>
+                            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                                 {status}
                             </Typography>
                             {total > 0 && (
-                                <Typography variant="body2" sx={{ color: '#00d9ff' }}>
+                                <Typography variant="body2" sx={{ color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>
                                     {progress} / {total} ({Math.round((progress / total) * 100) || 0}%)
                                 </Typography>
                             )}
@@ -404,23 +402,32 @@ function PairwiseFilterPage({ serverUrl }) {
                                 variant={total > 0 ? 'determinate' : 'indeterminate'}
                                 value={total > 0 ? (progress / total) * 100 : undefined}
                                 sx={{
-                                    height: 8,
-                                    borderRadius: 4,
-                                    bgcolor: '#0f3460',
-                                    '& .MuiLinearProgress-bar': { bgcolor: '#00d9ff' }
+                                    height: 4,
+                                    borderRadius: 2,
+                                    bgcolor: 'var(--raised)',
+                                    '& .MuiLinearProgress-bar': { bgcolor: 'var(--accent)' }
                                 }}
                             />
                         )}
                     </Box>
                 )}
-            </Paper>
+            </Panel>
+
+            {results.length === 0 && !isInferencing && (
+                <EmptyState
+                    icon={<FilterAlt />}
+                    title="No results yet"
+                    description="Pick a model and an incoming performer, then run inference to score their images."
+                />
+            )}
 
             {results.length > 0 && !isInferencing && (
-                <Paper sx={{ p: 3, mb: 3, bgcolor: '#16213e' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+                <Section title="Results">
+                    <Panel sx={{ mb: SPACE.md }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: SPACE.md, flexWrap: 'wrap', gap: SPACE.md }}>
                         <Box sx={{ flex: 1, minWidth: 300 }}>
-                            <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                                Threshold Cutoff: <strong style={{ color: '#00d9ff' }}>{threshold.toFixed(1)}</strong>
+                            <Typography variant="subtitle1" sx={{ color: 'var(--text)', mb: SPACE.xs, fontWeight: 620 }}>
+                                Threshold cutoff: <strong style={{ color: 'var(--accent)' }}>{threshold.toFixed(1)}</strong>
                             </Typography>
                             <Slider
                                 value={threshold}
@@ -429,47 +436,38 @@ function PairwiseFilterPage({ serverUrl }) {
                                 max={100}
                                 step={0.1}
                                 sx={{
-                                    color: '#00d9ff',
+                                    color: 'var(--accent)',
                                     '& .MuiSlider-thumb': {
                                         width: 24,
                                         height: 24,
                                         '&:hover, &.Mui-focusVisible': {
-                                            boxShadow: '0px 0px 0px 8px rgba(0, 217, 255, 0.16)'
+                                            boxShadow: '0px 0px 0px 8px var(--accent-quiet)'
                                         }
                                     }
                                 }}
                             />
                             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <Chip label={`✅ Keep: ${results.filter(r => r.score >= threshold).length}`} color="success" size="small" variant="outlined" />
-                                <Chip label={`🗑️ Delete: ${results.filter(r => r.score < threshold).length}`} color="error" size="small" variant="outlined" />
+                                <Chip label={`Keep: ${results.filter(r =>r.score >= threshold).length}`} color="success"size="small"variant="outlined"/>
+                                <Chip label={`Delete: ${results.filter(r =>r.score < threshold).length}`} color="error"size="small"variant="outlined"/>
                             </Box>
                         </Box>
 
-                        <Box sx={{ display: 'flex', gap: 2, flexDirection: 'column' }}>
-                            <Button
-                                variant="outlined"
-                                startIcon={<Tune />}
-                                onClick={startFineTune}
-                                sx={{ color: '#00d9ff', borderColor: '#00d9ff' }}
-                            >
-                                Fine Tune Wizard
+                        <Box sx={{ display: 'flex', gap: SPACE.sm, flexDirection: 'column' }}>
+                            <Button variant="outlined" startIcon={<Tune />} onClick={startFineTune}>
+                                Fine tune wizard
                             </Button>
-                            <Button
-                                variant="contained"
-                                color="error"
-                                onClick={executeFilter}
-                            >
-                                Execute Filter & Move
+                            <Button variant="contained" color="error" onClick={executeFilter}>
+                                Execute filter &amp; move
                             </Button>
                         </Box>
                     </Box>
+                    </Panel>
 
                     {/* Image Grid */}
-                    <div style={{
+                    <Box sx={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                        gap: '8px',
-                        width: '100%'
+                        gap: SPACE.sm
                     }}>
                         {results.map((img, i) => (
                             <Box
@@ -477,10 +475,10 @@ function PairwiseFilterPage({ serverUrl }) {
                                 sx={{
                                     position: 'relative',
                                     aspectRatio: '1',
-                                    bgcolor: '#1a1a2e',
-                                    borderRadius: 1,
+                                    bgcolor: 'var(--surface)',
+                                    borderRadius: 'var(--radius-sm, 4px)',
                                     overflow: 'hidden',
-                                    border: img.score >= threshold ? '2px solid #4caf50' : '2px solid #f44336'
+                                    border: `2px solid ${img.score >= threshold ? 'var(--ok)' : 'var(--bad)'}`
                                 }}
                             >
                                 <img
@@ -493,30 +491,33 @@ function PairwiseFilterPage({ serverUrl }) {
                                     position: 'absolute',
                                     bottom: 4,
                                     right: 4,
-                                    bgcolor: 'rgba(0,0,0,0.7)',
-                                    px: 1,
-                                    py: 0.5,
-                                    borderRadius: 1
+                                    bgcolor: 'var(--scrim-strong)',
+                                    px: 0.75,
+                                    py: 0.25,
+                                    borderRadius: 'var(--radius-sm, 4px)'
                                 }}>
-                                    <Typography variant="caption" sx={{ color: '#00d9ff', fontWeight: 'bold' }}>
+                                    <Typography variant="caption" sx={{
+                                        color: 'var(--accent)', fontWeight: 700,
+                                        fontVariantNumeric: 'tabular-nums'
+                                    }}>
                                         {img.score?.toFixed(1)}
                                     </Typography>
                                 </Box>
                             </Box>
                         ))}
-                    </div>
-                </Paper>
+                    </Box>
+                </Section>
             )}
 
             {/* Fine Tune Dialog */}
             <Dialog open={fineTuneOpen} onClose={() => setFineTuneOpen(false)} maxWidth="md">
-                <DialogTitle sx={{ bgcolor: '#16213e', color: '#fff' }}>
-                    Fine Tune Threshold
-                    <Typography variant="caption" sx={{ display: 'block', color: '#888' }}>
-                        Score: {fineTuneImage?.score?.toFixed(1)} — Is this image good enough to keep?
+                <DialogTitle>
+                    Fine tune threshold
+                    <Typography variant="caption" sx={{ display: 'block', color: 'var(--dim)' }}>
+                        Score: {fineTuneImage?.score?.toFixed(1)} — is this image good enough to keep?
                     </Typography>
                 </DialogTitle>
-                <DialogContent sx={{ bgcolor: '#1a1a2e', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 3 }}>
+                <DialogContent sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: SPACE.lg }}>
                     {fineTuneImage && (
                         <img
                             src={`${serverUrl}/api/image?path=${encodeURIComponent(fineTuneImage.path)}`}
@@ -525,7 +526,7 @@ function PairwiseFilterPage({ serverUrl }) {
                         />
                     )}
                 </DialogContent>
-                <DialogActions sx={{ bgcolor: '#16213e', justifyContent: 'center', p: 2, gap: 2 }}>
+                <DialogActions sx={{ justifyContent: 'center', p: SPACE.md, gap: SPACE.md }}>
                     <Button
                         variant="contained"
                         color="error"
@@ -548,7 +549,7 @@ function PairwiseFilterPage({ serverUrl }) {
                     </Button>
                 </DialogActions>
             </Dialog>
-        </Box>
+        </PageShell>
     );
 }
 

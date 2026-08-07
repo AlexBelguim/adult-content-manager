@@ -40,7 +40,7 @@ export default function TokyoNightCard({ cardProps }) {
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
           {performer.age && (
-            <Typography sx={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#7aa2f7' }}>
+            <Typography sx={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--accent)' }}>
               {displayAge}
             </Typography>
           )}
@@ -62,11 +62,11 @@ export default function TokyoNightCard({ cardProps }) {
   if (mode === 'filter') {
     return (
       <Box sx={{
-        width: 280, height: 520, bgcolor: '#1a1b26', borderRadius: 3,
+        width: 280, height: 520, bgcolor: 'var(--bg)', borderRadius: 3,
         overflow: 'hidden', display: 'flex', flexDirection: 'column',
         boxShadow: '0 8px 24px rgba(0,0,0,0.4)', border: '1px solid #292e42',
         cursor: 'pointer', transition: 'all 0.25s',
-        '&:hover': { borderColor: 'rgba(122,162,247,0.3)', boxShadow: '0 0 30px rgba(122,162,247,0.1), 0 12px 32px rgba(0,0,0,0.4)', transform: 'translateY(-3px)' }
+        '&:hover': { borderColor: 'var(--accent-quiet)', boxShadow: '0 0 30px var(--accent-quiet), 0 12px 32px rgba(0,0,0,0.4)', transform: 'translateY(-3px)' }
       }} onClick={onClick}
         onContextMenu={(e) => { e.preventDefault(); if (onSettings) onSettings(performer); }}
       >
@@ -75,7 +75,7 @@ export default function TokyoNightCard({ cardProps }) {
           <img src={thumbnail} alt={performer.name} onError={onError}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
           <AgeFlagBadge />
-          <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 60%, #1a1b26 100%)' }} />
+          <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 60%, var(--surface) 100%)' }} />
           <Box sx={{ position: 'absolute', bottom: 8, left: 12, right: 12 }}>
             <Typography fontWeight="bold" color="#c0caf5" fontSize="1.1rem" sx={{ textShadow: '0 2px 6px rgba(0,0,0,0.8)' }}>
               {performer.name}
@@ -97,8 +97,8 @@ export default function TokyoNightCard({ cardProps }) {
             <Box sx={{ display: 'flex', gap: 0.5 }}>
               {onSettings && <IconButton onClick={(e) => { e.stopPropagation(); onSettings(performer); }} sx={{ ...iconSx, color: '#e0af68' }}><SettingsIcon /></IconButton>}
               {onOpenHash && (
-                <IconButton onClick={(e) => { e.stopPropagation(); if (performer.latest_internal_run_id) window.open(`/hash-results/${performer.latest_internal_run_id}`, '_blank'); else onOpenHash(performer.id); }} sx={{ ...iconSx, color: '#7aa2f7' }}>
-                  {performer.hash_verified ? <CheckCircleIcon sx={{ color: '#4caf50' }} /> : performer.internal_duplicate_count > 0 ? <Badge badgeContent={performer.internal_duplicate_count} color="error" max={99} sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', height: '14px', minWidth: '14px', padding: '0 3px' } }}><FingerprintIcon /></Badge> : <FingerprintIcon />}
+                <IconButton onClick={(e) => { e.stopPropagation(); if (performer.latest_internal_run_id) window.open(`/hash-results/${performer.latest_internal_run_id}`, '_blank'); else onOpenHash(performer.id); }} sx={{ ...iconSx, color: 'var(--accent)' }}>
+                  {performer.hash_verified ? <CheckCircleIcon sx={{ color: 'var(--ok)' }} /> : performer.internal_duplicate_count > 0 ? <Badge badgeContent={performer.internal_duplicate_count} color="error" max={99} sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', height: '14px', minWidth: '14px', padding: '0 3px' } }}><FingerprintIcon /></Badge> : <FingerprintIcon />}
                 </IconButton>
               )}
               <IconButton onClick={handleSmartScan} disabled={smartScanLoading} sx={{ ...iconSx, color: '#bb9af7' }}>
@@ -108,7 +108,7 @@ export default function TokyoNightCard({ cardProps }) {
                 onMouseDown={handleThumbnailMouseDown} onMouseUp={handleThumbnailMouseUp}
                 onMouseLeave={handleThumbnailMouseLeave}
                 onTouchStart={handleThumbnailMouseDown} onTouchEnd={handleThumbnailMouseUp}
-                sx={{ ...iconSx, color: '#f7768e' }}>
+                sx={{ ...iconSx, color: 'var(--bad)' }}>
                 <RefreshIcon />
               </IconButton>
             </Box>
@@ -116,9 +116,9 @@ export default function TokyoNightCard({ cardProps }) {
           {/* Neon progress bars */}
           <Box sx={{ mt: 0.5, pb: 1.5 }}>
             {[
-              { l: 'Pics', v: picsPercentage, c: '#9ece6a', type: 'pics' },
-              { l: 'Vids', v: vidsPercentage, c: '#7aa2f7', type: 'vids' },
-              { l: 'Fun', v: funscriptPercentage, c: '#f7768e', type: 'funscript_vids' }
+              { l: 'Pics', v: picsPercentage, c: 'var(--ok)', type: 'pics' },
+              { l: 'Vids', v: vidsPercentage, c: 'var(--accent)', type: 'vids' },
+              { l: 'Fun', v: funscriptPercentage, c: 'var(--bad)', type: 'funscript_vids' }
             ].map(p => (
               <Box key={p.l} onClick={(e) => { e.stopPropagation(); if (onProgressClick) onProgressClick(performer, p.type); }}
                 sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, cursor: 'pointer', '&:hover .fill': { filter: 'brightness(1.3)' } }}>
@@ -138,11 +138,11 @@ export default function TokyoNightCard({ cardProps }) {
   // Gallery mode
   return (
     <Box sx={{
-      width: 280, height: 520, bgcolor: '#1a1b26', borderRadius: 3,
+      width: 280, height: 520, bgcolor: 'var(--bg)', borderRadius: 3,
       overflow: 'hidden', display: 'flex', flexDirection: 'column',
       boxShadow: '0 8px 24px rgba(0,0,0,0.4)', border: '1px solid #292e42',
       cursor: 'pointer', transition: 'all 0.25s',
-      '&:hover': { borderColor: 'rgba(122,162,247,0.3)', boxShadow: '0 0 30px rgba(122,162,247,0.1), 0 12px 32px rgba(0,0,0,0.4)', transform: 'translateY(-3px)' }
+      '&:hover': { borderColor: 'var(--accent-quiet)', boxShadow: '0 0 30px var(--accent-quiet), 0 12px 32px rgba(0,0,0,0.4)', transform: 'translateY(-3px)' }
     }} onClick={onClick}
       onContextMenu={(e) => { e.preventDefault(); if (onSettings) onSettings(performer); }}
     >
@@ -157,7 +157,7 @@ export default function TokyoNightCard({ cardProps }) {
           color: '#e0af68', fontWeight: 'bold', fontSize: '0.85rem',
           border: '1px solid #292e42', cursor: 'pointer', zIndex: 2
         }}>⭐ {ratingValue !== null ? formatRating(ratingValue) : 'Rate'}</Box>
-        <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #1a1b26 0%, transparent 30%)' }} />
+        <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, var(--surface) 0%, transparent 30%)' }} />
       </Box>
       <Box sx={{ p: 1.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
@@ -165,13 +165,13 @@ export default function TokyoNightCard({ cardProps }) {
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, mr: 1
           }}>{performer.name}</Typography>
           <Box sx={{ display: 'flex', gap: 0.5 }}>
-            {onSettings && <IconButton onClick={(e) => { e.stopPropagation(); onSettings(performer); }} sx={{ ...iconSx, color: '#7aa2f7' }}><SettingsIcon /></IconButton>}
-            {onDelete && <IconButton onClick={handleDeleteClick} sx={{ ...iconSx, color: '#f7768e' }}><DeleteIcon /></IconButton>}
+            {onSettings && <IconButton onClick={(e) => { e.stopPropagation(); onSettings(performer); }} sx={{ ...iconSx, color: 'var(--accent)' }}><SettingsIcon /></IconButton>}
+            {onDelete && <IconButton onClick={handleDeleteClick} sx={{ ...iconSx, color: 'var(--bad)' }}><DeleteIcon /></IconButton>}
             <IconButton onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
               onMouseDown={handleThumbnailMouseDown} onMouseUp={handleThumbnailMouseUp}
               onMouseLeave={handleThumbnailMouseLeave}
               onTouchStart={handleThumbnailMouseDown} onTouchEnd={handleThumbnailMouseUp}
-              sx={{ ...iconSx, color: '#f7768e' }}>
+              sx={{ ...iconSx, color: 'var(--bad)' }}>
               <RefreshIcon />
             </IconButton>
           </Box>

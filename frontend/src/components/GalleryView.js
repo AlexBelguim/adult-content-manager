@@ -579,7 +579,9 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
         gap: 2
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="h4" sx={{ fontWeight: 600, color: 'text.primary' }}>
+          {/* h5 + 640 weight matches the PageHeader primitive, so the main app
+              and the rebuilt pages share one page-title size. */}
+          <Typography variant="h5" sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>
             Gallery
           </Typography>
           <Chip
@@ -626,16 +628,23 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
               Performers
             </Typography>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Was flex/nowrap with a 200px search and a 150px select, so on a
+                360px cover screen this row alone measured 644px and dragged the
+                whole page into horizontal scroll. Wraps now, and the search
+                takes the first row to itself on narrow screens. */}
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 },
+              flexWrap: 'wrap', width: { xs: '100%', md: 'auto' }
+            }}>
               <TextField
                 size="small"
                 placeholder="Search performers..."
                 value={performerSearchTerm}
                 onChange={e => setPerformerSearchTerm(e.target.value)}
-                sx={{ minWidth: 200 }}
+                sx={{ minWidth: { xs: 0, sm: 200 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}
               />
 
-              <FormControl size="small" sx={{ minWidth: 150 }}>
+              <FormControl size="small" sx={{ minWidth: { xs: 130, sm: 150 }, flex: { xs: 1, sm: '0 0 auto' } }}>
                 <InputLabel>Sort By</InputLabel>
                 <Select
                   value={performerSortBy}
@@ -670,11 +679,11 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                 startIcon={<StarIcon />}
                 onClick={() => navigate('/group-rate')}
                 sx={{ 
-                  background: 'linear-gradient(45deg, #7c4dff, #00e5ff)',
-                  color: 'white',
+                  background: 'linear-gradient(45deg, var(--accent), var(--accent))',
+                  color: 'var(--text)',
                   fontWeight: 'bold',
                   borderRadius: '20px',
-                  boxShadow: '0 4px 15px rgba(124, 77, 255, 0.4)'
+                  boxShadow: '0 4px 15px var(--accent-quiet)'
                 }}
               >
                 Group Rate
@@ -711,7 +720,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                       justifyContent: 'center'
                     }}
                   >
-                    <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '14px' }}>
+                    <Typography sx={{ color: 'var(--dim)', fontSize: '14px' }}>
                       Loading...
                     </Typography>
                   </Box>
@@ -741,7 +750,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                         justifyContent: 'center'
                       }}
                     >
-                      <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '14px' }}>
+                      <Typography sx={{ color: 'var(--dim)', fontSize: '14px' }}>
                         Loading...
                       </Typography>
                     </Box>
@@ -798,54 +807,59 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
               Content by Genre
             </Typography>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Same nowrap + fixed-width problem as the performers row above. */}
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 },
+              flexWrap: 'wrap', width: { xs: '100%', md: 'auto' }
+            }}>
               <TextField
                 size="small"
                 placeholder="Search genres..."
                 value={contentSearchTerm}
                 onChange={e => setContentSearchTerm(e.target.value)}
                 sx={{
-                  minWidth: 200,
+                  minWidth: { xs: 0, sm: 200 },
+                  flex: { xs: '1 1 100%', sm: '0 0 auto' },
                   '& .MuiOutlinedInput-root': {
-                    color: 'white',
+                    color: 'var(--text)',
                     backgroundColor: 'rgba(255, 255, 255, 0.1)',
                     '& fieldset': {
-                      borderColor: 'rgba(255, 255, 255, 0.3)',
+                      borderColor: 'var(--line-strong)',
                     },
                     '&:hover fieldset': {
-                      borderColor: 'rgba(255, 255, 255, 0.5)',
+                      borderColor: 'var(--line-strong)',
                     },
                     '&.Mui-focused fieldset': {
-                      borderColor: 'rgba(255, 255, 255, 0.7)',
+                      borderColor: 'var(--line-strong)',
                     },
                   },
                   '& .MuiInputBase-input::placeholder': {
-                    color: 'rgba(255, 255, 255, 0.5)',
+                    color: 'var(--dim)',
                     opacity: 1,
                   },
                 }}
               />
 
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)', '&.Mui-focused': { color: 'white' } }}>Sort By</InputLabel>
+              <FormControl size="small" sx={{ minWidth: { xs: 130, sm: 150 }, flex: { xs: 1, sm: '0 0 auto' } }}>
+                <InputLabel sx={{ color: 'var(--dim)', '&.Mui-focused': { color: 'var(--text)' } }}>Sort By</InputLabel>
                 <Select
                   value={contentSortBy}
                   label="Sort By"
                   onChange={e => setContentSortBy(e.target.value)}
                   sx={{
-                    color: 'white',
+                    color: 'var(--text)',
                     backgroundColor: 'rgba(255, 255, 255, 0.1)',
                     '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'rgba(255, 255, 255, 0.3)',
+                      borderColor: 'var(--line-strong)',
                     },
                     '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'rgba(255, 255, 255, 0.5)',
+                      borderColor: 'var(--line-strong)',
                     },
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'rgba(255, 255, 255, 0.7)',
+                      borderColor: 'var(--line-strong)',
                     },
                     '& .MuiSvgIcon-root': {
-                      color: 'white',
+                      color: 'var(--text)',
                     },
                   }}
                 >
@@ -914,7 +928,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          color: 'white',
+                          color: 'var(--text)',
                           fontWeight: 'bold'
                         }}
                       >
@@ -1016,7 +1030,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
             <CloseIcon />
           </IconButton>
         </DialogTitle>
-        <DialogContent dividers sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }}>
+        <DialogContent dividers sx={{ borderColor: 'var(--line-strong)' }}>
           {/* Age Slider */}
           <Box sx={{ mb: 4 }}>
             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
@@ -1036,7 +1050,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
               sx={{
                 color: 'primary.main',
                 '& .MuiSlider-thumb': {
-                  backgroundColor: '#fff',
+                  backgroundColor: 'var(--text)',
                 },
                 '& .MuiSlider-valueLabel': {
                   backgroundcolor: 'primary.main',
@@ -1073,7 +1087,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1105,7 +1119,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1137,7 +1151,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1169,7 +1183,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1201,7 +1215,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1233,7 +1247,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1263,7 +1277,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
               </Box>
             ))}
           </Box>
-          <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+          <Divider sx={{ borderColor: 'var(--line-strong)' }} />
 
           {/* Weight */}
           {getUniqueValues('weight').length > 0 && (
@@ -1293,7 +1307,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 
@@ -1325,7 +1339,7 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
                   </Box>
                 ))}
               </Box>
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.12)' }} />
+              <Divider sx={{ borderColor: 'var(--line-strong)' }} />
             </>
           )}
 

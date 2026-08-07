@@ -352,7 +352,7 @@ function UploadImportModal({ open, onClose, basePath, onImportComplete }) {
 
                 {/* File Stats */}
                 {selectedFiles.length > 0 && (
-                    <Box sx={{ mb: 3, p: 2, backgroundColor: '#1e1e1e', borderRadius: 1 }}>
+                    <Box sx={{ mb: 3, p: 2, backgroundColor: 'var(--surface)', borderRadius: 1 }}>
                         <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
                             Selected Files: {selectedFiles.length}
                         </Typography>

@@ -8,6 +8,7 @@ import {
 import {
     PlayArrow, Stop, Science, Refresh
 } from '@mui/icons-material';
+import { PageShell, PageHeader, SPACE } from '../components/layout';
 
 function PairwiseBinaryPage({ serverUrl }) {
     // Performer list
@@ -199,34 +200,38 @@ function PairwiseBinaryPage({ serverUrl }) {
     }, 0);
 
     const chipSx = { fontWeight: 'bold', fontSize: 12 };
-    const darkBg = '#16213e';
-    const darkerBg = '#0f3460';
+    const darkBg = 'var(--surface)';
+    const darkerBg = 'var(--raised)';
 
     return (
-        <Box sx={{ p: 3, color: '#fff' }}>
-            <Typography variant="h4" sx={{ mb: 1, color: '#e94560', fontWeight: 'bold' }}>
-                🔬 Binary Classifier
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 3, color: '#888' }}>
-                Train a simple keep/delete classifier from folder structure. Compare accuracy against the pairwise model.
-            </Typography>
+        <PageShell>
+            <PageHeader
+                title="Binary Classifier"
+                subtitle="Train a keep/delete classifier from folder structure, and compare its accuracy against the pairwise model."
+                back
+            />
 
-            <Box sx={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 3, alignItems: 'start' }}>
+            <Box sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', md: '320px 1fr' },
+                gap: SPACE.lg,
+                alignItems: 'start'
+            }}>
                 {/* ── Left: Performer Selection ── */}
                 <Box>
                     <Paper sx={{ p: 2, bgcolor: darkBg }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                            <Typography variant="h6" sx={{ color: '#00d9ff' }}>Performers</Typography>
+                            <Typography variant="h6" sx={{ color: 'var(--accent)' }}>Performers</Typography>
                             <Box sx={{ display: 'flex', gap: 1 }}>
-                                <Button size="small" onClick={handleSelectAll} sx={{ color: '#888', fontSize: 11 }}>All</Button>
-                                <Button size="small" onClick={handleDeselectAll} sx={{ color: '#888', fontSize: 11 }}>None</Button>
+                                <Button size="small" onClick={handleSelectAll} sx={{ color: 'var(--dim)', fontSize: 11 }}>All</Button>
+                                <Button size="small" onClick={handleDeselectAll} sx={{ color: 'var(--dim)', fontSize: 11 }}>None</Button>
                             </Box>
                         </Box>
 
                         {selectedPerformers.length > 0 && (
                             <Box sx={{ mb: 1, display: 'flex', gap: 1 }}>
-                                <Chip label={`✅ ${totalKeep} keep`} color="success" size="small" variant="outlined" sx={chipSx} />
-                                <Chip label={`🗑️ ${totalDelete} delete`} color="error" size="small" variant="outlined" sx={chipSx} />
+                                <Chip label={`${totalKeep} keep`} color="success"size="small"variant="outlined"sx={chipSx} />
+                                <Chip label={`${totalDelete} delete`} color="error"size="small"variant="outlined"sx={chipSx} />
                             </Box>
                         )}
 
@@ -234,22 +239,22 @@ function PairwiseBinaryPage({ serverUrl }) {
                             {loadingPerformers ? (
                                 <CircularProgress size={24} sx={{ m: 2 }} />
                             ) : performers.length === 0 ? (
-                                <Typography variant="body2" sx={{ color: '#666', p: 1 }}>
+                                <Typography variant="body2" sx={{ color: 'var(--muted)', p: 1 }}>
                                     No performers with both keep and delete images found.
                                 </Typography>
                             ) : performers.map(p => (
                                 <Box key={p.name} sx={{
                                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                     px: 1, py: 0.5, borderRadius: 1, cursor: 'pointer',
-                                    bgcolor: selectedPerformers.includes(p.name) ? 'rgba(0,217,255,0.08)' : 'transparent',
-                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+                                    bgcolor: selectedPerformers.includes(p.name) ? 'var(--accent-quiet)' : 'transparent',
+                                    '&:hover': { bgcolor: 'var(--raised)' }
                                 }} onClick={() => handleTogglePerformer(p.name)}>
                                     <FormControlLabel
                                         control={
                                             <Checkbox
                                                 checked={selectedPerformers.includes(p.name)}
                                                 size="small"
-                                                sx={{ color: '#555', '&.Mui-checked': { color: '#00d9ff' }, p: 0.5 }}
+                                                sx={{ color: 'var(--muted)', '&.Mui-checked': { color: 'var(--accent)' }, p: 0.5 }}
                                             />
                                         }
                                         label={
@@ -276,7 +281,7 @@ function PairwiseBinaryPage({ serverUrl }) {
 
                     {/* Train Section */}
                     <Paper sx={{ p: 3, bgcolor: darkBg }}>
-                        <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>Train Binary Model</Typography>
+                        <Typography variant="h6" sx={{ mb: 2, color: 'var(--accent)' }}>Train Binary Model</Typography>
 
                         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2, alignItems: 'center' }}>
                             <ToggleButtonGroup
@@ -286,10 +291,10 @@ function PairwiseBinaryPage({ serverUrl }) {
                                 size="small"
                                 sx={{ bgcolor: darkerBg }}
                             >
-                                <ToggleButton value="simple" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#00d9ff' } }}>
+                                <ToggleButton value="simple" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)' } }}>
                                     Simple
                                 </ToggleButton>
-                                <ToggleButton value="context" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#9c27b0' } }}>
+                                <ToggleButton value="context" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)' } }}>
                                     Context-Aware
                                 </ToggleButton>
                             </ToggleButtonGroup>
@@ -301,10 +306,10 @@ function PairwiseBinaryPage({ serverUrl }) {
                                 size="small"
                                 sx={{ bgcolor: darkerBg }}
                             >
-                                <ToggleButton value="new" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
+                                <ToggleButton value="new" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)' } }}>
                                     New Model
                                 </ToggleButton>
-                                <ToggleButton value="resume" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                                <ToggleButton value="resume" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--ok)' } }}>
                                     Refine Existing
                                 </ToggleButton>
                             </ToggleButtonGroup>
@@ -314,34 +319,34 @@ function PairwiseBinaryPage({ serverUrl }) {
                                 value={outputName}
                                 onChange={e => setOutputName(e.target.value)}
                                 size="small"
-                                sx={{ width: 180, '& .MuiInputBase-input': { color: '#fff' }, '& .MuiInputLabel-root': { color: '#888' }, '& .MuiOutlinedInput-notchedOutline': { borderColor: '#333' } }}
-                                InputProps={{ endAdornment: <Typography variant="caption" sx={{ color: '#666' }}>.pt</Typography> }}
+                                sx={{ width: 180, '& .MuiInputBase-input': { color: 'var(--text)' }, '& .MuiInputLabel-root': { color: 'var(--dim)' }, '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' } }}
+                                InputProps={{ endAdornment: <Typography variant="caption" sx={{ color: 'var(--muted)' }}>.pt</Typography> }}
                             />
 
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Typography variant="body2" sx={{ color: '#888' }}>Total epochs:</Typography>
+                                <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Total epochs:</Typography>
                                 <Slider value={epochs} onChange={(e, v) => setEpochs(v)}
-                                    min={1} max={20} step={1} sx={{ width: 100, color: '#00d9ff' }} />
-                                <Typography variant="body2" sx={{ color: '#00d9ff', fontWeight: 'bold', minWidth: 20 }}>{epochs}</Typography>
+                                    min={1} max={20} step={1} sx={{ width: 100, color: 'var(--accent)' }} />
+                                <Typography variant="body2" sx={{ color: 'var(--accent)', fontWeight: 'bold', minWidth: 20 }}>{epochs}</Typography>
                             </Box>
 
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Typography variant="body2" sx={{ color: '#888' }}>Warmup:</Typography>
+                                <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Warmup:</Typography>
                                 <Slider value={warmupEpochs} onChange={(e, v) => setWarmupEpochs(Math.min(v, epochs))}
-                                    min={0} max={epochs} step={1} sx={{ width: 80, color: '#ff9800' }} />
-                                <Typography variant="body2" sx={{ color: '#ff9800', fontWeight: 'bold', minWidth: 20 }}>{warmupEpochs}</Typography>
-                                <Typography variant="caption" sx={{ color: '#555' }}>🧊frozen</Typography>
+                                    min={0} max={epochs} step={1} sx={{ width: 80, color: 'var(--warn)' }} />
+                                <Typography variant="body2" sx={{ color: 'var(--warn)', fontWeight: 'bold', minWidth: 20 }}>{warmupEpochs}</Typography>
+                                <Typography variant="caption"sx={{ color: 'var(--muted)'}}>frozen</Typography>
                             </Box>
                         </Box>
 
                         {trainingMode === 'resume' && (
                             <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-                                <InputLabel sx={{ color: '#888' }}>Resume from model</InputLabel>
+                                <InputLabel sx={{ color: 'var(--dim)' }}>Resume from model</InputLabel>
                                 <Select
                                     value={resumeModel}
                                     onChange={e => setResumeModel(e.target.value)}
                                     label="Resume from model"
-                                    sx={{ color: '#fff', '.MuiOutlinedInput-notchedOutline': { borderColor: '#333' } }}
+                                    sx={{ color: 'var(--text)', '.MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' } }}
                                 >
                                     {models.filter(m => m.name.includes('binary')).map(m => (
                                         <MenuItem key={m.name} value={m.name}>{m.name}</MenuItem>
@@ -359,7 +364,7 @@ function PairwiseBinaryPage({ serverUrl }) {
                                 startIcon={isTraining ? <CircularProgress size={18} color="inherit" /> : <PlayArrow />}
                                 onClick={handleStartTraining}
                                 disabled={isTraining || selectedPerformers.length === 0}
-                                sx={{ bgcolor: '#4caf50', '&:hover': { bgcolor: '#388e3c' } }}
+                                sx={{ bgcolor: 'var(--ok)', '&:hover': { bgcolor: 'var(--ok)' } }}
                             >
                                 {isTraining ? 'Training...' : 'Start Training'}
                             </Button>
@@ -372,15 +377,19 @@ function PairwiseBinaryPage({ serverUrl }) {
 
                         {/* Terminal log */}
                         <Box sx={{
-                            bgcolor: '#000', color: '#0f0', p: 2, borderRadius: 1,
-                            fontFamily: 'monospace', fontSize: '11px',
+                            bgcolor: 'var(--bg)', color: 'var(--ok)', p: SPACE.md,
+                            borderRadius: 'var(--radius-sm, 4px)',
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            fontSize: 11,
                             height: 280, overflowY: 'auto', whiteSpace: 'pre-wrap',
-                            border: '1px solid #1a1a1a'
+                            border: '1px solid var(--line)'
                         }}>
                             {trainingLogs.length === 0 ? (
-                                <span style={{ color: '#444' }}>Waiting for training to start...</span>
+                                <span style={{ color: 'var(--muted)' }}>Waiting for training to start…</span>
                             ) : trainingLogs.map((log, i) => (
-                                <div key={i} style={{ color: log.includes('ERR') ? '#f44' : log.includes('✅') ? '#4f4' : '#0f0' }}>
+                                // The original ternary had an empty-string test that always
+                                // matched, so every non-error line took the same branch.
+                                <div key={i} style={{ color: log.includes('ERR') ? 'var(--bad)' : 'var(--ok)' }}>
                                     {log}
                                 </div>
                             ))}
@@ -391,8 +400,8 @@ function PairwiseBinaryPage({ serverUrl }) {
                     {/* Binary Server Status + Load Model */}
                     <Paper sx={{ p: 3, bgcolor: darkBg }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                            <Typography variant="h6" sx={{ color: '#00d9ff' }}>Binary Inference Server</Typography>
-                            <Button size="small" startIcon={<Refresh />} onClick={checkBinaryHealth} sx={{ color: '#888' }}>
+                            <Typography variant="h6" sx={{ color: 'var(--accent)' }}>Binary Inference Server</Typography>
+                            <Button size="small" startIcon={<Refresh />} onClick={checkBinaryHealth} sx={{ color: 'var(--dim)' }}>
                                 Refresh
                             </Button>
                         </Box>
@@ -410,7 +419,7 @@ function PairwiseBinaryPage({ serverUrl }) {
                             </Alert>
                         )}
 
-                        <Typography variant="body2" sx={{ color: '#888', mb: 1 }}>Load a binary model:</Typography>
+                        <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 1 }}>Load a binary model:</Typography>
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                             {models.filter(m => m.name.includes('binary')).map(m => (
                                 <Button
@@ -420,13 +429,13 @@ function PairwiseBinaryPage({ serverUrl }) {
                                     onClick={() => handleLoadBinaryModel(m.name)}
                                     disabled={!!loadingModel || !binaryServerRunning}
                                     startIcon={loadingModel === m.name ? <CircularProgress size={14} /> : null}
-                                    sx={{ color: '#00d9ff', borderColor: '#00d9ff', fontSize: 12 }}
+                                    sx={{ color: 'var(--accent)', borderColor: 'var(--accent)', fontSize: 12 }}
                                 >
                                     {m.name}
                                 </Button>
                             ))}
                             {models.filter(m => m.name.includes('binary')).length === 0 && (
-                                <Typography variant="caption" sx={{ color: '#666' }}>
+                                <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                                     No binary models found. Train one first.
                                 </Typography>
                             )}
@@ -435,23 +444,23 @@ function PairwiseBinaryPage({ serverUrl }) {
 
                     {/* Evaluate Section */}
                     <Paper sx={{ p: 3, bgcolor: darkBg }}>
-                        <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>Evaluate Accuracy</Typography>
-                        <Typography variant="body2" sx={{ color: '#888', mb: 2 }}>
+                        <Typography variant="h6" sx={{ mb: 2, color: 'var(--accent)' }}>Evaluate Accuracy</Typography>
+                        <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 2 }}>
                             Tests the loaded binary model against keep/delete images of selected performers. Up to 200 images per class, sampled randomly.
                         </Typography>
 
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                            <Typography variant="body2" sx={{ color: '#888' }}>Threshold:</Typography>
+                            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Threshold:</Typography>
                             <Slider value={evalThreshold} onChange={(e, v) => setEvalThreshold(v)}
-                                min={0} max={100} step={1} sx={{ width: 150, color: '#00d9ff' }} />
-                            <Typography variant="body2" sx={{ color: '#00d9ff', fontWeight: 'bold' }}>{evalThreshold}</Typography>
+                                min={0} max={100} step={1} sx={{ width: 150, color: 'var(--accent)' }} />
+                            <Typography variant="body2" sx={{ color: 'var(--accent)', fontWeight: 'bold' }}>{evalThreshold}</Typography>
 
                             <Button
                                 variant="contained"
                                 startIcon={isEvaluating ? <CircularProgress size={18} color="inherit" /> : <Science />}
                                 onClick={handleEvaluate}
                                 disabled={isEvaluating || !binaryHealth?.model_loaded || selectedPerformers.length === 0}
-                                sx={{ bgcolor: '#9c27b0', '&:hover': { bgcolor: '#7b1fa2' } }}
+                                sx={{ bgcolor: 'var(--accent)', '&:hover': { bgcolor: '#7b1fa2' } }}
                             >
                                 {isEvaluating ? 'Evaluating...' : 'Evaluate'}
                             </Button>
@@ -463,35 +472,35 @@ function PairwiseBinaryPage({ serverUrl }) {
                                     <Box sx={{ textAlign: 'center' }}>
                                         <Typography variant="h3" sx={{
                                             fontWeight: 'bold',
-                                            color: evalResults.accuracy >= 80 ? '#4caf50' : evalResults.accuracy >= 65 ? '#ff9800' : '#f44336'
+                                            color: evalResults.accuracy >= 80 ? 'var(--ok)' : evalResults.accuracy >= 65 ? 'var(--warn)' : '#f44336'
                                         }}>
                                             {evalResults.accuracy}%
                                         </Typography>
-                                        <Typography variant="body2" sx={{ color: '#888' }}>Overall Accuracy</Typography>
+                                        <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Overall Accuracy</Typography>
                                     </Box>
                                     <Box sx={{ textAlign: 'center' }}>
-                                        <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#4caf50' }}>
+                                        <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'var(--ok)' }}>
                                             {evalResults.keep_accuracy}%
                                         </Typography>
-                                        <Typography variant="body2" sx={{ color: '#888' }}>Keep Correct</Typography>
-                                        <Typography variant="caption" sx={{ color: '#555' }}>
+                                        <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Keep Correct</Typography>
+                                        <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                                             mean score: {evalResults.keep_mean_score}
                                         </Typography>
                                     </Box>
                                     <Box sx={{ textAlign: 'center' }}>
-                                        <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#f44336' }}>
+                                        <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'var(--bad)' }}>
                                             {evalResults.delete_accuracy}%
                                         </Typography>
-                                        <Typography variant="body2" sx={{ color: '#888' }}>Delete Correct</Typography>
-                                        <Typography variant="caption" sx={{ color: '#555' }}>
+                                        <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Delete Correct</Typography>
+                                        <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                                             mean score: {evalResults.delete_mean_score}
                                         </Typography>
                                     </Box>
                                     <Box sx={{ textAlign: 'center' }}>
-                                        <Typography variant="h5" sx={{ color: '#888' }}>
+                                        <Typography variant="h5" sx={{ color: 'var(--dim)' }}>
                                             {evalResults.sampled?.keep} / {evalResults.sampled?.delete}
                                         </Typography>
-                                        <Typography variant="body2" sx={{ color: '#555' }}>Keep / Delete sampled</Typography>
+                                        <Typography variant="body2" sx={{ color: 'var(--muted)' }}>Keep / Delete sampled</Typography>
                                     </Box>
                                 </Box>
 
@@ -499,9 +508,9 @@ function PairwiseBinaryPage({ serverUrl }) {
                                     variant="determinate"
                                     value={evalResults.accuracy}
                                     sx={{
-                                        height: 10, borderRadius: 5, bgcolor: '#0f3460',
+                                        height: 10, borderRadius: 5, bgcolor: 'var(--raised)',
                                         '& .MuiLinearProgress-bar': {
-                                            bgcolor: evalResults.accuracy >= 80 ? '#4caf50' : evalResults.accuracy >= 65 ? '#ff9800' : '#f44336'
+                                            bgcolor: evalResults.accuracy >= 80 ? 'var(--ok)' : evalResults.accuracy >= 65 ? 'var(--warn)' : '#f44336'
                                         }
                                     }}
                                 />
@@ -510,7 +519,7 @@ function PairwiseBinaryPage({ serverUrl }) {
                     </Paper>
                 </Box>
             </Box>
-        </Box>
+        </PageShell>
     );
 }
 

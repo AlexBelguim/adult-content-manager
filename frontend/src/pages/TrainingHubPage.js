@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Paper, Grid, LinearProgress, Chip,
-  AppBar, Toolbar, IconButton, Card, CardContent, Select, MenuItem,
+  IconButton, Tooltip, Card, CardContent, Select, MenuItem,
   FormControl, InputLabel, TextField, CircularProgress, Alert, Divider,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
   Collapse, Slider
 } from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import SchoolIcon from '@mui/icons-material/School';
+import { PageShell, PageHeader, iconBtnSx } from '../components/layout';
 import ModelTrainingIcon from '@mui/icons-material/ModelTraining';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -32,7 +30,7 @@ const MODEL_TYPES = [
   {
     id: 'binary', name: 'Simple Binary', icon: <FilterAltIcon />,
     desc: 'Keep vs Delete classifier. Fast training, good for general quality filtering.',
-    color: '#4caf50', output: 'binary_filtering.pt',
+    color: 'var(--ok)', output: 'binary_filtering.pt',
     requirements: 'Needs keep + delete image folders',
     pros: ['Fast Training', 'Direct Application'],
     cons: ['Subject Bias', 'Global Average'],
@@ -40,7 +38,7 @@ const MODEL_TYPES = [
   {
     id: 'pairwise', name: 'Pairwise Preference', icon: <CompareIcon />,
     desc: 'Learns relative image preference from A vs B comparisons.',
-    color: '#2196f3', output: 'pairwise_preference.pt',
+    color: 'var(--info)', output: 'pairwise_preference.pt',
     requirements: 'Needs 50+ labeled pairs from pairwise labeling',
     pros: ['High Precision', 'Scale Invariant'],
     cons: ['Data Intensive', 'No Absolute Baseline'],
@@ -48,7 +46,7 @@ const MODEL_TYPES = [
   {
     id: 'context_binary', name: 'Context-Aware Binary', icon: <PsychologyIcon />,
     desc: 'Personalized filtering using performer gallery as baseline context.',
-    color: '#ff9800', output: 'context_binary.pt',
+    color: 'var(--warn)', output: 'context_binary.pt',
     requirements: 'Needs keep + delete folders with performer subdirectories',
     pros: ['Personalized', 'Highest Accuracy'],
     cons: ['Complex Inference', 'Cold Start Problem'],
@@ -56,7 +54,6 @@ const MODEL_TYPES = [
 ];
 
 export default function TrainingHubPage() {
-  const navigate = useNavigate();
   const [dataSummary, setDataSummary] = useState(null);
   const [aiHealth, setAiHealth] = useState(null);
   const [trainingStatus, setTrainingStatus] = useState(null);
@@ -194,43 +191,40 @@ export default function TrainingHubPage() {
   const progress = trainingStatus?.active ? ((trainingStatus.epoch || 0) / (trainingStatus.total_epochs || 1)) * 100 : 0;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#0a0a0f', color: '#fff' }}>
-      <AppBar position="sticky" sx={{
-        bgcolor: 'rgba(15,15,26,0.9)', backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(139,92,246,0.15)'
-      }}>
-        <Toolbar>
-          <IconButton onClick={() => navigate(-1)} sx={{ color: '#fff', mr: 2 }}>
-            <ArrowBackIcon />
-          </IconButton>
-          <SchoolIcon sx={{ color: '#8b5cf6', mr: 1.5, fontSize: 28 }} />
-          <Typography variant="h5" sx={{
-            fontWeight: 900, flexGrow: 1,
-            background: 'linear-gradient(135deg, #8b5cf6, #06b6d4)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
-          }}>
-            TRAINING HUB
-          </Typography>
-          <IconButton onClick={loadData} sx={{ color: '#8b5cf6' }}>
-            <RefreshIcon />
-          </IconButton>
-          <Chip
-            icon={aiHealth ? <CheckCircleIcon /> : <ErrorIcon />}
-            label={aiHealth ? `AI Online (${aiHealth.device})` : 'AI Offline'}
-            sx={{
-              bgcolor: aiHealth ? 'rgba(76,175,80,0.15)' : 'rgba(244,67,54,0.15)',
-              color: aiHealth ? '#4caf50' : '#f44336',
-              border: `1px solid ${aiHealth ? 'rgba(76,175,80,0.3)' : 'rgba(244,67,54,0.3)'}`,
-              fontWeight: 700
-            }}
-          />
-        </Toolbar>
-      </AppBar>
-
-      <Box sx={{ maxWidth: 1400, mx: 'auto', p: 3 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg)', color: 'var(--text)' }}>
+      {/* This page used to render its own sticky AppBar — a second app bar
+          stacked under the real one, with its own blur, its own accent-tinted
+          border and a 900-weight all-caps title. That is the "different design
+          language" problem: the chrome, not the content. The controls it held
+          are real, so they move into the shared PageHeader instead. */}
+      <PageShell>
+        <PageHeader
+          title="Training Hub"
+          subtitle={aiHealth ? `AI online · ${aiHealth.device}` : 'AI offline'}
+          actions={
+            <>
+              <Chip
+                size="small"
+                icon={aiHealth ? <CheckCircleIcon /> : <ErrorIcon />}
+                label={aiHealth ? 'AI online' : 'AI offline'}
+                sx={{
+                  bgcolor: aiHealth ? 'var(--ok-quiet)' : 'var(--bad-quiet)',
+                  color: aiHealth ? 'var(--ok)' : 'var(--bad)',
+                  border: `1px solid ${aiHealth ? 'var(--ok-quiet)' : 'var(--bad-quiet)'}`,
+                  fontWeight: 600
+                }}
+              />
+              <Tooltip title="Refresh">
+                <IconButton onClick={loadData} sx={iconBtnSx('var(--dim)')}>
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}>
-            <CircularProgress sx={{ color: '#8b5cf6' }} />
+            <CircularProgress sx={{ color: 'var(--accent)' }} />
           </Box>
         ) : (
           <Grid container spacing={3}>
@@ -238,10 +232,10 @@ export default function TrainingHubPage() {
             <Grid item xs={12}>
               <Paper sx={{
                 p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3,
-                border: '1px solid rgba(139,92,246,0.15)'
+                border: '1px solid var(--accent-quiet)'
               }}>
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <StorageIcon sx={{ color: '#8b5cf6' }} /> Training Data Available
+                  <StorageIcon sx={{ color: 'var(--accent)' }} /> Training Data Available
                 </Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={6} md={3}>
@@ -269,7 +263,7 @@ export default function TrainingHubPage() {
             {/* ── Model Selection Cards ────────────────────── */}
             <Grid item xs={12}>
               <Typography variant="h6" sx={{ mb: 2, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <ModelTrainingIcon sx={{ color: '#8b5cf6' }} /> Select Model Type
+                <ModelTrainingIcon sx={{ color: 'var(--accent)' }} /> Select Model Type
               </Typography>
               <Grid container spacing={2}>
                 {MODEL_TYPES.map(m => (
@@ -279,7 +273,7 @@ export default function TrainingHubPage() {
                       sx={{
                         cursor: 'pointer', borderRadius: 3,
                         bgcolor: selectedType === m.id ? `${m.color}15` : 'rgba(20,20,35,0.6)',
-                        border: `2px solid ${selectedType === m.id ? m.color : 'rgba(255,255,255,0.05)'}`,
+                        border: `2px solid ${selectedType === m.id ? m.color: 'var(--muted)'}`,
                         transition: 'all 0.2s ease',
                         '&:hover': { borderColor: `${m.color}80`, transform: 'translateY(-2px)' }
                       }}
@@ -287,26 +281,26 @@ export default function TrainingHubPage() {
                       <CardContent>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
                           <Box sx={{ color: m.color, fontSize: 28 }}>{m.icon}</Box>
-                          <Typography variant="h6" sx={{ fontWeight: 800, color: '#fff' }}>{m.name}</Typography>
+                          <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--text)' }}>{m.name}</Typography>
                         </Box>
-                        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.6)', mb: 2, minHeight: 40 }}>
+                        <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 2, minHeight: 40 }}>
                           {m.desc}
                         </Typography>
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
                           {m.pros.map(p => (
                             <Chip key={p} label={p} size="small" sx={{
-                              bgcolor: 'rgba(76,175,80,0.12)', color: '#4caf50',
+                              bgcolor: 'var(--ok-quiet)', color: 'var(--ok)',
                               fontSize: '0.7rem', height: 22
                             }} />
                           ))}
                           {m.cons.map(c => (
                             <Chip key={c} label={c} size="small" sx={{
-                              bgcolor: 'rgba(244,67,54,0.12)', color: '#f44336',
+                              bgcolor: 'var(--bad-quiet)', color: 'var(--bad)',
                               fontSize: '0.7rem', height: 22
                             }} />
                           ))}
                         </Box>
-                        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.35)' }}>
+                        <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                           Output: {m.output}
                         </Typography>
                       </CardContent>
@@ -320,23 +314,23 @@ export default function TrainingHubPage() {
             <Grid item xs={12} md={6}>
               <Paper sx={{
                 p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3,
-                border: '1px solid rgba(139,92,246,0.15)'
+                border: '1px solid var(--accent-quiet)'
               }}>
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TuneIcon sx={{ color: '#8b5cf6' }} /> Configuration
+                  <TuneIcon sx={{ color: 'var(--accent)' }} /> Configuration
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <TextField label="Epochs" type="number" value={epochs}
                     onChange={e => setEpochs(parseInt(e.target.value) || 1)}
                     InputProps={{ inputProps: { min: 1, max: 50 } }}
-                    sx={{ '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' } },
-                          '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.5)' } }}
+                    sx={{ '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'var(--line-strong)' } },
+                          '& .MuiInputLabel-root': { color: 'var(--dim)' } }}
                   />
                   <TextField label="Batch Size" type="number" value={batchSize}
                     onChange={e => setBatchSize(parseInt(e.target.value) || 1)}
                     InputProps={{ inputProps: { min: 1, max: 64 } }}
-                    sx={{ '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' } },
-                          '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.5)' } }}
+                    sx={{ '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'var(--line-strong)' } },
+                          '& .MuiInputLabel-root': { color: 'var(--dim)' } }}
                   />
                   <TextField 
                     label="Finetune Start Epoch" 
@@ -346,14 +340,14 @@ export default function TrainingHubPage() {
                     onChange={e => setFinetuneStart(parseInt(e.target.value))}
                     InputProps={{ inputProps: { min: 0, max: 50 } }}
                     sx={{ 
-                      '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'rgba(255,255,255,0.15)' } },
-                      '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.5)' },
-                      '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.4)' }
+                      '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'var(--line-strong)' } },
+                      '& .MuiInputLabel-root': { color: 'var(--dim)' },
+                      '& .MuiFormHelperText-root': { color: 'var(--muted)' }
                     }}
                   />
                   
-                  <Box sx={{ p: 2, bgcolor: 'rgba(139,92,246,0.05)', borderRadius: 2, border: '1px solid rgba(139,92,246,0.1)' }}>
-                    <Typography variant="subtitle2" sx={{ color: '#8b5cf6', mb: 1, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ p: 2, bgcolor: 'var(--accent-quiet)', borderRadius: 2, border: '1px solid var(--accent-quiet)' }}>
+                    <Typography variant="subtitle2" sx={{ color: 'var(--accent)', mb: 1, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
                       <AutoAwesomeIcon fontSize="small" /> Advanced Training Logic
                     </Typography>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -381,12 +375,12 @@ export default function TrainingHubPage() {
                       </Box>
                       {enableMining && (
                         <Box sx={{ pl: 2, mt: 1 }}>
-                          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>Failure Multiplier: {miningMultiplier}x</Typography>
+                          <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Failure Multiplier: {miningMultiplier}x</Typography>
                           <Slider 
                             value={miningMultiplier} 
                             min={2} max={10} step={1}
                             onChange={(_, v) => setMiningMultiplier(v)}
-                            sx={{ color: '#8b5cf6', py: 1 }}
+                            sx={{ color: 'var(--accent)', py: 1 }}
                           />
                         </Box>
                       )}
@@ -403,7 +397,7 @@ export default function TrainingHubPage() {
                       </Box>
                     </Box>
                   </Box>
-                  <Alert severity="info" sx={{ bgcolor: 'rgba(33,150,243,0.08)', color: '#90caf9' }}>
+                  <Alert severity="info" sx={{ bgcolor: 'var(--info-quiet)', color: 'var(--info)' }}>
                     {selectedModel?.requirements}
                   </Alert>
                   <Button
@@ -414,15 +408,15 @@ export default function TrainingHubPage() {
                     sx={{
                       py: 1.5, fontWeight: 900, fontSize: '1rem',
                       background: trainingStatus?.active
-                        ? 'linear-gradient(135deg, #f44336, #d32f2f)'
-                        : 'linear-gradient(135deg, #8b5cf6, #06b6d4)',
-                      '&:disabled': { bgcolor: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.3)' }
+                        ? 'linear-gradient(135deg, var(--bad), #d32f2f)'
+                        : 'linear-gradient(135deg, var(--accent), #06b6d4)',
+                      '&:disabled': { bgcolor: 'rgba(255,255,255,0.08)', color: 'var(--muted)' }
                     }}
                   >
                     {startingTraining ? 'Starting...' : trainingStatus?.active ? 'Training in Progress...' : `Start ${selectedModel?.name} Training`}
                   </Button>
                   {!aiHealth && (
-                    <Alert severity="warning" sx={{ bgcolor: 'rgba(255,152,0,0.08)', color: '#ffb74d' }}>
+                    <Alert severity="warning" sx={{ bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }}>
                       AI Inference App is offline. Start it first.
                     </Alert>
                   )}
@@ -434,11 +428,11 @@ export default function TrainingHubPage() {
             <Grid item xs={12} md={6}>
               <Paper sx={{
                 p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3,
-                border: `1px solid ${trainingStatus?.active ? 'rgba(139,92,246,0.4)' : 'rgba(139,92,246,0.15)'}`,
+                border: `1px solid ${trainingStatus?.active ? 'var(--accent-quiet)' : 'var(--accent-quiet)'}`,
                 transition: 'border-color 0.3s'
               }}>
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <AutoAwesomeIcon sx={{ color: trainingStatus?.active ? '#8b5cf6' : 'rgba(255,255,255,0.3)',
+                  <AutoAwesomeIcon sx={{ color: trainingStatus?.active ? 'var(--accent)' : 'rgba(255,255,255,0.3)',
                     animation: trainingStatus?.active ? 'pulse 1.5s infinite' : 'none',
                     '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.5 } }
                   }} />
@@ -448,60 +442,60 @@ export default function TrainingHubPage() {
                   <Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Chip label={trainingStatus.type?.toUpperCase()} size="small"
-                        sx={{ bgcolor: 'rgba(139,92,246,0.15)', color: '#8b5cf6', fontWeight: 700 }} />
+                        sx={{ bgcolor: 'var(--accent-quiet)', color: 'var(--accent)', fontWeight: 700 }} />
                       <Chip label={trainingStatus.phase} size="small"
                         sx={{
-                          bgcolor: trainingStatus.phase === 'complete' ? 'rgba(76,175,80,0.15)' :
-                            trainingStatus.phase === 'error' ? 'rgba(244,67,54,0.15)' : 'rgba(255,152,0,0.15)',
-                          color: trainingStatus.phase === 'complete' ? '#4caf50' :
-                            trainingStatus.phase === 'error' ? '#f44336' : '#ff9800',
+                          bgcolor: trainingStatus.phase === 'complete' ? 'var(--ok-quiet)' :
+                            trainingStatus.phase === 'error' ? 'var(--bad-quiet)' : 'var(--warn-quiet)',
+                          color: trainingStatus.phase === 'complete' ? 'var(--ok)' :
+                            trainingStatus.phase === 'error' ? 'var(--bad)' : 'var(--warn)',
                           fontWeight: 700
                         }} />
                     </Box>
                     <LinearProgress variant="determinate" value={progress} sx={{
                       mb: 2, height: 8, borderRadius: 4,
-                      bgcolor: 'rgba(255,255,255,0.05)',
+                      bgcolor: 'var(--raised)',
                       '& .MuiLinearProgress-bar': {
-                        background: 'linear-gradient(90deg, #8b5cf6, #06b6d4)',
+                        background: 'linear-gradient(90deg, var(--accent), #06b6d4)',
                         borderRadius: 4
                       }
                     }} />
                     <Grid container spacing={1}>
                       <Grid item xs={4}>
-                        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>Epoch</Typography>
+                        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Epoch</Typography>
                         <Typography variant="h6" sx={{ fontWeight: 800 }}>
                           {trainingStatus.epoch}/{trainingStatus.total_epochs}
                         </Typography>
                       </Grid>
                       <Grid item xs={4}>
-                        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>Val Accuracy</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 800, color: '#4caf50' }}>
+                        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Val Accuracy</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--ok)' }}>
                           {(trainingStatus.val_acc * 100).toFixed(1)}%
                         </Typography>
                       </Grid>
                       <Grid item xs={4}>
-                        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>Best</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 800, color: '#8b5cf6' }}>
+                        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Best</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--accent)' }}>
                           {(trainingStatus.best_val_acc * 100).toFixed(1)}%
                         </Typography>
                       </Grid>
                     </Grid>
                     {trainingStatus.message && (
-                      <Typography variant="body2" sx={{ mt: 2, color: 'rgba(255,255,255,0.6)', fontStyle: 'italic' }}>
+                      <Typography variant="body2" sx={{ mt: 2, color: 'var(--dim)', fontStyle: 'italic' }}>
                         {trainingStatus.message}
                       </Typography>
                     )}
                     {trainingStatus.error && (
-                      <Alert severity="error" sx={{ mt: 2, bgcolor: 'rgba(244,67,54,0.08)', color: '#ef9a9a' }}>
+                      <Alert severity="error" sx={{ mt: 2, bgcolor: 'var(--bad-quiet)', color: 'var(--bad)' }}>
                         {trainingStatus.error}
                       </Alert>
                     )}
                     {/* Live Log */}
                     {trainingStatus.log?.length > 0 && (
                       <Box sx={{
-                        mt: 2, p: 1.5, bgcolor: '#0a0a0f', borderRadius: 2,
+                        mt: 2, p: 2, bgcolor: 'var(--bg)', borderRadius: 2,
                         maxHeight: 200, overflowY: 'auto', fontFamily: 'monospace', fontSize: '0.75rem',
-                        color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.1)'
+                        color: 'var(--accent)', border: '1px solid var(--accent-quiet)'
                       }}>
                         {trainingStatus.log.slice(-15).map((line, i) => (
                           <div key={i}>{line}</div>
@@ -510,7 +504,7 @@ export default function TrainingHubPage() {
                     )}
                   </Box>
                 ) : (
-                  <Box sx={{ textAlign: 'center', py: 4, color: 'rgba(255,255,255,0.3)' }}>
+                  <Box sx={{ textAlign: 'center', py: 4, color: 'var(--muted)' }}>
                     <ModelTrainingIcon sx={{ fontSize: 48, mb: 1, opacity: 0.3 }} />
                     <Typography>No training in progress</Typography>
                     <Typography variant="caption">Select a model type and click Start</Typography>
@@ -537,20 +531,20 @@ export default function TrainingHubPage() {
             <Grid item xs={12}>
               <Paper sx={{
                 p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3,
-                border: '1px solid rgba(139,92,246,0.15)'
+                border: '1px solid var(--accent-quiet)'
               }}>
                 <Box
                   onClick={() => setShowPerfTable(!showPerfTable)}
                   sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                 >
                   <Typography variant="h6" sx={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <PersonIcon sx={{ color: '#8b5cf6' }} /> Per-Performer Training Data
+                    <PersonIcon sx={{ color: 'var(--accent)' }} /> Per-Performer Training Data
                     {perfStats?.summary && (
                       <Chip label={`${perfStats.summary.withData}/${perfStats.summary.total} have data`}
-                        size="small" sx={{ ml: 1, bgcolor: 'rgba(139,92,246,0.12)', color: '#8b5cf6', fontWeight: 600 }} />
+                        size="small" sx={{ ml: 1, bgcolor: 'var(--accent-quiet)', color: 'var(--accent)', fontWeight: 600 }} />
                     )}
                   </Typography>
-                  <IconButton sx={{ color: '#8b5cf6' }}>
+                  <IconButton sx={{ color: 'var(--accent)' }}>
                     {showPerfTable ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                   </IconButton>
                 </Box>
@@ -559,11 +553,11 @@ export default function TrainingHubPage() {
                 {perfStats?.summary && (
                   <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
                     <Chip size="small" label={`Avg Quality: ${perfStats.summary.avgQuality}%`}
-                      sx={{ bgcolor: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }} />
+                      sx={{ bgcolor: 'var(--accent-quiet)', color: 'var(--accent)' }} />
                     <Chip size="small" label={`Binary-Ready: ${perfStats.summary.readyForBinary}`}
-                      sx={{ bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />
+                      sx={{ bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />
                     <Chip size="small" label={`Pairwise-Ready: ${perfStats.summary.readyForPairwise}`}
-                      sx={{ bgcolor: 'rgba(33,150,243,0.1)', color: '#2196f3' }} />
+                      sx={{ bgcolor: 'var(--info-quiet)', color: 'var(--info)' }} />
                   </Box>
                 )}
 
@@ -571,14 +565,14 @@ export default function TrainingHubPage() {
                   {perfStats?.performers?.length > 0 ? (
                     <PerformerTable performers={perfStats.performers} />
                   ) : (
-                    <Typography sx={{ mt: 2, color: 'rgba(255,255,255,0.4)' }}>No performer data available</Typography>
+                    <Typography sx={{ mt: 2, color: 'var(--muted)' }}>No performer data available</Typography>
                   )}
                 </Collapse>
               </Paper>
             </Grid>
           </Grid>
         )}
-      </Box>
+      </PageShell>
     </Box>
   );
 }
@@ -593,11 +587,11 @@ function StatCard({ label, value, ready, color }) {
       <Typography variant="h4" sx={{ fontWeight: 900, color: color }}>
         {typeof value === 'number' ? value.toLocaleString() : value}
       </Typography>
-      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+      <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
         {label}
       </Typography>
       {ready && (
-        <CheckCircleIcon sx={{ display: 'block', mx: 'auto', mt: 0.5, fontSize: 16, color: '#4caf50' }} />
+        <CheckCircleIcon sx={{ display: 'block', mx: 'auto', mt: 0.5, fontSize: 16, color: 'var(--ok)' }} />
       )}
     </Paper>
   );
@@ -634,7 +628,7 @@ function PerformerTable({ performers }) {
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
-  const qualityColor = (q) => q >= 70 ? '#4caf50' : q >= 40 ? '#ff9800' : q >= 15 ? '#ffeb3b' : 'rgba(255,255,255,0.2)';
+  const qualityColor = (q) => q >= 70 ? 'var(--ok)' : q >= 40 ? 'var(--warn)' : q >= 15 ? 'var(--warn)' : 'rgba(255,255,255,0.2)';
 
   const cols = [
     { id: 'name', label: 'Performer' },
@@ -653,17 +647,17 @@ function PerformerTable({ performers }) {
         placeholder="Search performers..."
         value={filter} onChange={e => setFilter(e.target.value)}
         size="small" fullWidth
-        sx={{ mb: 1, '& .MuiOutlinedInput-root': { color: '#fff', bgcolor: 'rgba(10,10,15,0.5)',
-          '& fieldset': { borderColor: 'rgba(255,255,255,0.1)' } },
-          '& .MuiInputBase-input::placeholder': { color: 'rgba(255,255,255,0.3)' } }}
+        sx={{ mb: 1, '& .MuiOutlinedInput-root': { color: 'var(--text)', bgcolor: 'rgba(10,10,15,0.5)',
+          '& fieldset': { borderColor: 'var(--line)' } },
+          '& .MuiInputBase-input::placeholder': { color: 'var(--muted)' } }}
       />
       <TableContainer sx={{ maxHeight: 500, bgcolor: 'transparent' }}>
         <Table stickyHeader size="small">
           <TableHead>
             <TableRow>
               {cols.map(c => (
-                <TableCell key={c.id} sx={{ bgcolor: '#0f0f1a', color: '#8b5cf6',
-                  fontWeight: 800, borderBottom: '1px solid rgba(139,92,246,0.2)', fontSize: '0.75rem' }}>
+                <TableCell key={c.id} sx={{ bgcolor: '#0f0f1a', color: 'var(--accent)',
+                  fontWeight: 800, borderBottom: '1px solid var(--accent-quiet)', fontSize: '0.75rem' }}>
                   <TableSortLabel
                     active={sortBy === c.id} direction={sortBy === c.id ? sortDir : 'asc'}
                     onClick={() => handleSort(c.id)}
@@ -677,11 +671,11 @@ function PerformerTable({ performers }) {
           </TableHead>
           <TableBody>
             {sorted.map(p => (
-              <TableRow key={p.id} sx={{ '&:hover': { bgcolor: 'rgba(139,92,246,0.05)' } }}>
-                <TableCell sx={{ color: '#fff', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <TableRow key={p.id} sx={{ '&:hover': { bgcolor: 'var(--accent-quiet)' } }}>
+                <TableCell sx={{ color: 'var(--text)', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   {p.name}
                   {p.movedToAfter && <Chip label="moved" size="small" sx={{ ml: 0.5, height: 16, fontSize: '0.6rem',
-                    bgcolor: 'rgba(76,175,80,0.12)', color: '#4caf50' }} />}
+                    bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
                 </TableCell>
                 <TableCell sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   <Box sx={{ width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center',
@@ -691,31 +685,31 @@ function PerformerTable({ performers }) {
                     {p.quality}
                   </Box>
                 </TableCell>
-                <TableCell sx={{ color: 'rgba(255,255,255,0.7)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <TableCell sx={{ color: 'var(--dim)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   {p.totalImages.toLocaleString()}
                 </TableCell>
                 <TableCell sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <LinearProgress variant="determinate" value={p.filter.progress}
-                      sx={{ flexGrow: 1, height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.05)',
+                      sx={{ flexGrow: 1, height: 6, borderRadius: 3, bgcolor: 'var(--raised)',
                         '& .MuiLinearProgress-bar': {
-                          bgcolor: p.filter.progress >= 80 ? '#4caf50' : p.filter.progress >= 40 ? '#ff9800' : '#f44336',
+                          bgcolor: p.filter.progress >= 80 ? 'var(--ok)' : p.filter.progress >= 40 ? 'var(--warn)' : 'var(--bad)',
                           borderRadius: 3 } }} />
-                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', minWidth: 32 }}>
+                    <Typography variant="caption" sx={{ color: 'var(--dim)', minWidth: 32 }}>
                       {p.filter.progress}%
                     </Typography>
                   </Box>
                 </TableCell>
-                <TableCell sx={{ color: '#4caf50', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <TableCell sx={{ color: 'var(--ok)', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   {p.filter.kept || '\u2014'}
                 </TableCell>
-                <TableCell sx={{ color: '#f44336', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <TableCell sx={{ color: 'var(--bad)', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   {p.filter.deleted || '\u2014'}
                 </TableCell>
-                <TableCell sx={{ color: '#2196f3', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <TableCell sx={{ color: 'var(--info)', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   {p.pairwise.total || '\u2014'}
                   {p.pairwise.total > 0 && (
-                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', display: 'block', fontSize: '0.6rem' }}>
+                    <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block', fontSize: '0.6rem' }}>
                       {p.pairwise.intra}i / {p.pairwise.inter}x
                     </Typography>
                   )}
@@ -723,12 +717,12 @@ function PerformerTable({ performers }) {
                 <TableCell sx={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   {p.disk.keep > 0 || p.disk.delete > 0 ? (
                     <Typography variant="caption">
-                      <span style={{ color: '#4caf50' }}>{p.disk.keep}</span>
+                      <span style={{ color: 'var(--ok)' }}>{p.disk.keep}</span>
                       {' / '}
-                      <span style={{ color: '#f44336' }}>{p.disk.delete}</span>
+                      <span style={{ color: 'var(--bad)' }}>{p.disk.delete}</span>
                     </Typography>
                   ) : (
-                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.2)' }}>{'\u2014'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'var(--muted)' }}>{'\u2014'}</Typography>
                   )}
                 </TableCell>
               </TableRow>
@@ -736,7 +730,7 @@ function PerformerTable({ performers }) {
           </TableBody>
         </Table>
       </TableContainer>
-      <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'rgba(255,255,255,0.3)' }}>
+      <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'var(--muted)' }}>
         Showing {sorted.length} of {performers.length} performers · Quality = composite score (labels + pairs + disk data)
       </Typography>
     </Box>
@@ -748,15 +742,15 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
   const [loadingModel, setLoadingModel] = useState(null);
 
   const typeLabels = {
-    binary: { label: 'Binary (Keep/Delete)', color: '#4caf50', icon: '🎯' },
-    pairwise: { label: 'Pairwise (A vs B)', color: '#2196f3', icon: '⚖️' },
-    context_binary: { label: 'Context-Aware Binary', color: '#ff9800', icon: '🧠' },
-    performer_ranker: { label: 'Performer Ranker', color: '#ff6f00', icon: '⭐' },
-    ranked_binary: { label: 'Ranked Binary', color: '#00d9ff', icon: '📊' },
-    ranked_siamese_binary: { label: 'Ranked Siamese', color: '#9c27b0', icon: '👑' },
-    siamese_binary: { label: 'Siamese Ranker', color: '#e91e63', icon: '🔬' },
-    rank_aware_siamese: { label: 'Rank-Aware Siamese', color: '#795548', icon: '📦' },
-    unknown: { label: 'Unknown Type', color: '#9e9e9e', icon: '❓' },
+    binary: { label: 'Binary (Keep/Delete)', color: 'var(--ok)', icon: ''},
+    pairwise: { label: 'Pairwise (A vs B)', color: 'var(--info)', icon: ''},
+    context_binary: { label: 'Context-Aware Binary', color: 'var(--warn)', icon: ''},
+    performer_ranker: { label: 'Performer Ranker', color: '#ff6f00', icon: ''},
+    ranked_binary: { label: 'Ranked Binary', color: 'var(--accent)', icon: ''},
+    ranked_siamese_binary: { label: 'Ranked Siamese', color: 'var(--accent)', icon: ''},
+    siamese_binary: { label: 'Siamese Ranker', color: '#e91e63', icon: ''},
+    rank_aware_siamese: { label: 'Rank-Aware Siamese', color: '#795548', icon: ''},
+    unknown: { label: 'Unknown Type', color: '#9e9e9e', icon: ''},
   };
 
   // Group models by type
@@ -818,7 +812,7 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
   };
 
   const AccuracyMeter = ({ value, label }) => {
-    const color = value >= 0.8 ? '#4caf50' : value >= 0.6 ? '#ff9800' : '#f44336';
+    const color = value >= 0.8 ? 'var(--ok)' : value >= 0.6 ? 'var(--warn)' : 'var(--bad)';
     return (
       <Box sx={{ textAlign: 'center', minWidth: 60 }}>
         <Box sx={{ position: 'relative', display: 'inline-flex' }}>
@@ -830,7 +824,7 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
             </Typography>
           </Box>
         </Box>
-        <Typography variant="caption" sx={{ display: 'block', color: 'rgba(255,255,255,0.4)', fontSize: '0.6rem', mt: 0.3 }}>
+        <Typography variant="caption" sx={{ display: 'block', color: 'var(--muted)', fontSize: '0.6rem', mt: 0.3 }}>
           {label}
         </Typography>
       </Box>
@@ -838,22 +832,22 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
   };
 
   return (
-    <Paper sx={{ p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3, border: '1px solid rgba(139,92,246,0.15)' }}>
+    <Paper sx={{ p: 3, bgcolor: 'rgba(20,20,35,0.8)', borderRadius: 3, border: '1px solid var(--accent-quiet)' }}>
       <Box onClick={() => setExpanded(!expanded)}
         sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
         <Typography variant="h6" sx={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <RocketLaunchIcon sx={{ color: '#8b5cf6' }} /> Model Arsenal
+          <RocketLaunchIcon sx={{ color: 'var(--accent)' }} /> Model Arsenal
           <Chip label={`${models.length} models`} size="small"
-            sx={{ ml: 1, bgcolor: 'rgba(139,92,246,0.12)', color: '#8b5cf6', fontWeight: 600 }} />
+            sx={{ ml: 1, bgcolor: 'var(--accent-quiet)', color: 'var(--accent)', fontWeight: 600 }} />
         </Typography>
-        <IconButton sx={{ color: '#8b5cf6' }}>
+        <IconButton sx={{ color: 'var(--accent)' }}>
           {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
         </IconButton>
       </Box>
 
       <Collapse in={expanded}>
         {models.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4, color: 'rgba(255,255,255,0.3)' }}>
+          <Box sx={{ textAlign: 'center', py: 4, color: 'var(--muted)' }}>
             <ScienceIcon sx={{ fontSize: 48, mb: 1, opacity: 0.3 }} />
             <Typography>No models found</Typography>
             <Typography variant="caption">Train a model above to get started</Typography>
@@ -878,24 +872,24 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                     return (
                       <Grid item xs={12} sm={6} md={4} key={m.filename}>
                         <Paper sx={{
-                          p: 2, bgcolor: isLoaded ? 'rgba(76,175,80,0.08)' : 'rgba(10,10,20,0.6)',
-                          borderRadius: 2, border: `1px solid ${isLoaded ? '#4caf5050' : 'rgba(255,255,255,0.06)'}`,
+                          p: 2, bgcolor: isLoaded ? 'var(--ok-quiet)' : 'rgba(10,10,20,0.6)',
+                          borderRadius: 2, border: `1px solid ${isLoaded ? 'var(--ok)' : 'rgba(255,255,255,0.06)'}`,
                           transition: 'all 0.2s', '&:hover': { border: `1px solid ${tInfo.color}40` }
                         }}>
                           {/* Header */}
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                             <Box>
-                              <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', wordBreak: 'break-all' }}>
+                              <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text)', wordBreak: 'break-all' }}>
                                 {m.filename}
                               </Typography>
-                              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+                              <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                                 {m.size_mb} MB · {formatDate(m.modified)}
                               </Typography>
                             </Box>
                             {isLoaded && (
                               <Chip label="ACTIVE" size="small" sx={{
                                 height: 20, fontSize: '0.6rem', fontWeight: 900,
-                                bgcolor: 'rgba(76,175,80,0.15)', color: '#4caf50', border: '1px solid #4caf5030'
+                                bgcolor: 'var(--ok-quiet)', color: 'var(--ok)', border: '1px solid var(--ok-quiet)'
                               }} />
                             )}
                           </Box>
@@ -904,15 +898,15 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                             {m.backbone && (
                               <Chip label={m.backbone.split('/').pop()} size="small"
-                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)' }} />
+                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--raised)', color: 'var(--dim)' }} />
                             )}
                             {m.val_acc != null && (
                               <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small"
-                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(76,175,80,0.1)', color: '#4caf50' }} />
+                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />
                             )}
                             {m.epochs && (
                               <Chip label={`${m.epochs} epochs`} size="small"
-                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.4)' }} />
+                                sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--raised)', color: 'var(--muted)' }} />
                             )}
                           </Box>
 
@@ -923,18 +917,18 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                               {result.avg_keep_score != null && (
                                 <Box sx={{ flex: 1, fontSize: '0.65rem' }}>
                                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
-                                    <Typography variant="caption" sx={{ color: '#4caf50', fontSize: '0.65rem' }}>Keep avg: {(result.avg_keep_score * 100).toFixed(0)}%</Typography>
+                                    <Typography variant="caption" sx={{ color: 'var(--ok)', fontSize: '0.65rem' }}>Keep avg: {(result.avg_keep_score * 100).toFixed(0)}%</Typography>
                                   </Box>
                                   <LinearProgress variant="determinate" value={result.avg_keep_score * 100}
-                                    sx={{ height: 3, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.05)', mb: 0.5,
-                                      '& .MuiLinearProgress-bar': { bgcolor: '#4caf50', borderRadius: 2 } }} />
+                                    sx={{ height: 3, borderRadius: 2, bgcolor: 'var(--raised)', mb: 0.5,
+                                      '& .MuiLinearProgress-bar': { bgcolor: 'var(--ok)', borderRadius: 2 } }} />
                                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
-                                    <Typography variant="caption" sx={{ color: '#f44336', fontSize: '0.65rem' }}>Delete avg: {(result.avg_delete_score * 100).toFixed(0)}%</Typography>
+                                    <Typography variant="caption" sx={{ color: 'var(--bad)', fontSize: '0.65rem' }}>Delete avg: {(result.avg_delete_score * 100).toFixed(0)}%</Typography>
                                   </Box>
                                   <LinearProgress variant="determinate" value={result.avg_delete_score * 100}
-                                    sx={{ height: 3, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.05)',
-                                      '& .MuiLinearProgress-bar': { bgcolor: '#f44336', borderRadius: 2 } }} />
-                                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.6rem', mt: 0.3, display: 'block' }}>
+                                    sx={{ height: 3, borderRadius: 2, bgcolor: 'var(--raised)',
+                                      '& .MuiLinearProgress-bar': { bgcolor: 'var(--bad)', borderRadius: 2 } }} />
+                                  <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.6rem', mt: 0.3, display: 'block' }}>
                                     Separation: {(result.separation * 100).toFixed(0)}% · {result.total_tested} images tested
                                   </Typography>
                                 </Box>
@@ -951,7 +945,7 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                               disabled={isLoaded || isLoadingThis || !aiHealth}
                               onClick={() => handleLoad(m)}
                               sx={{ flex: 1, fontSize: '0.65rem', textTransform: 'none',
-                                borderColor: `${tInfo.color}40`, color: isLoaded ? '#fff' : tInfo.color,
+                                borderColor: `${tInfo.color}40`, color: isLoaded ? 'var(--text)' : tInfo.color,
                                 bgcolor: isLoaded ? `${tInfo.color}30` : 'transparent',
                                 '&:hover': { bgcolor: `${tInfo.color}20` } }}>
                               {isLoadingThis ? <CircularProgress size={14} /> : isLoaded ? '✓ Active' : 'Activate'}
@@ -960,12 +954,12 @@ function ModelArsenal({ models, aiUrl, aiHealth, testingModel, setTestingModel, 
                               disabled={isTesting || !aiHealth}
                               onClick={() => handleTest(m)}
                               sx={{ flex: 1, fontSize: '0.65rem', textTransform: 'none',
-                                borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)',
-                                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' } }}>
+                                borderColor: 'var(--line)', color: 'var(--dim)',
+                                '&:hover': { bgcolor: 'var(--raised)' } }}>
                               {isTesting ? <CircularProgress size={14} /> : <><ScienceIcon sx={{ fontSize: 14, mr: 0.5 }} />Test</>}
                             </Button>
                             <IconButton size="small" onClick={() => handleDelete(m)}
-                              sx={{ color: 'rgba(255,255,255,0.15)', '&:hover': { color: '#f44336' } }}>
+                              sx={{ color: 'var(--muted)', '&:hover': { color: 'var(--bad)' } }}>
                               <DeleteOutlineIcon sx={{ fontSize: 16 }} />
                             </IconButton>
                           </Box>

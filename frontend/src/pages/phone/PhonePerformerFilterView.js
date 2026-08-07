@@ -322,7 +322,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
       left: 0,
       right: 0,
       bottom: 0,
-      bgcolor: 'black',
+      bgcolor: 'var(--bg)',
       display: 'flex',
       flexDirection: 'column'
     }}>
@@ -332,12 +332,12 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <IconButton 
               onClick={() => handleBackWithRefresh()}
-              sx={{ color: 'white' }}
+              sx={{ color: 'var(--text)' }}
             >
               <CloseIcon />
             </IconButton>
             
-            <Typography variant="h6" sx={{ color: 'white', fontWeight: 'bold' }}>
+            <Typography variant="h6" sx={{ color: 'var(--text)', fontWeight: 'bold' }}>
               {currentIndex + 1} / {currentItems.length}
             </Typography>
           </Box>
@@ -350,7 +350,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
               onClick={handleTag}
               sx={{ 
                 bgcolor: 'primary.main',
-                color: 'white',
+                color: 'var(--text)',
                 minWidth: '80px',
                 height: '36px'
               }}
@@ -366,7 +366,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
                 onClick={handleMoveToFunscript}
                 sx={{ 
                   bgcolor: 'secondary.main',
-                  color: 'white',
+                  color: 'var(--text)',
                   minWidth: '100px',
                   height: '36px'
                 }}
@@ -396,7 +396,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
                 top: 0,
                 width: '50%',
                 height: contentType === 'vids' ? 'calc(100% - 80px)' : '100%', // Leave space for video controls
-                bgcolor: currentIndex === 0 ? 'rgba(156, 39, 176, 0.3)' : 'transparent', // Invisible after first file
+                bgcolor: currentIndex === 0 ? 'var(--accent-quiet)' : 'transparent', // Invisible after first file
                 border: currentIndex === 0 ? '4px solid #9C27B0' : 'none',
                 borderTop: '4px solid #9C27B0', // Always show top border
                 display: 'flex',
@@ -410,7 +410,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
                 <Typography 
                   variant="h3" 
                   sx={{ 
-                    color: '#9C27B0',
+                    color: 'var(--accent)',
                     fontWeight: 'bold',
                     textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
                   }}
@@ -429,7 +429,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
                 top: 0,
                 width: '50%',
                 height: contentType === 'vids' ? 'calc(100% - 80px)' : '100%', // Leave space for video controls
-                bgcolor: currentIndex === 0 ? 'rgba(76, 175, 80, 0.3)' : 'transparent', // Invisible after first file
+                bgcolor: currentIndex === 0 ? 'var(--ok-quiet)' : 'transparent', // Invisible after first file
                 border: currentIndex === 0 ? '4px solid #4CAF50' : 'none',
                 borderTop: '4px solid #4CAF50', // Always show top border
                 display: 'flex',
@@ -443,7 +443,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
                 <Typography 
                   variant="h3" 
                   sx={{ 
-                    color: '#4CAF50',
+                    color: 'var(--ok)',
                     fontWeight: 'bold',
                     textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
                   }}
@@ -489,7 +489,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
               
               {contentType === 'funscripts' && (
                 <Box sx={{ 
-                  color: 'white', 
+                  color: 'var(--text)', 
                   textAlign: 'center',
                   p: 4
                 }}>
@@ -513,7 +513,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'white'
+            color: 'var(--text)'
           }}>
             <Typography variant="h5">Loading...</Typography>
           </Box>
@@ -527,7 +527,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'white',
+            color: 'var(--text)',
             textAlign: 'center',
             p: 4
           }}>
@@ -550,7 +550,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
           onClick={handlePrevious}
           disabled={currentIndex === 0}
           sx={{ 
-            color: 'white',
+            color: 'var(--text)',
             bgcolor: 'rgba(255, 255, 255, 0.1)',
             width: '60px',
             height: '60px'
@@ -565,8 +565,8 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
           disabled={filterActions.length === 0}
           startIcon={<UndoIcon />}
           sx={{
-            bgcolor: '#4CAF50',
-            color: 'white',
+            bgcolor: 'var(--ok)',
+            color: 'var(--text)',
             minWidth: '120px',
             height: '48px',
             fontSize: '1.1rem',
@@ -580,7 +580,7 @@ function PhonePerformerFilterView({ performer, onBack, handyIntegration, handyCo
           onClick={handleNext}
           disabled={currentIndex >= currentItems.length - 1}
           sx={{ 
-            color: 'white',
+            color: 'var(--text)',
             bgcolor: 'rgba(255, 255, 255, 0.1)',
             width: '60px',
             height: '60px'

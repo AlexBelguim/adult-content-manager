@@ -158,7 +158,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       // Warn if AI server failed (images returned with default "keep" and no predictions)
       if (data.ai_error) {
         console.warn('AI Server error:', data.ai_error);
-        alert(`⚠️ AI Server Error: ${data.ai_error}\n\nImages are shown without AI predictions. Check your Inference Server URL in settings.`);
+        alert(`AI Server Error: ${data.ai_error}\n\nImages are shown without AI predictions. Check your Inference Server URL in settings.`);
       }
 
       // Update threshold ONLY on the very first real batch fetch, and ONLY for pairwise/siamese
@@ -327,7 +327,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       return;
     }
     if (['ranked_binary', 'ranked_siamese_binary'].includes(type) && performerRank === null) {
-      alert('Run the ⭐ Performer Ranker first (Step 1) so the model can be calibrated for this performer.');
+      alert('Run the Performer Ranker first (Step 1) so the model can be calibrated for this performer.');
       return;
     }
 
@@ -397,7 +397,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
       setPerformerRank(rankRes.rank);
       setRankerStatus('done');
-      alert(`⭐ Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nYou can now load Ranked Binary or Ranked Siamese.`);
+      alert(`Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nYou can now load Ranked Binary or Ranked Siamese.`);
     } catch (err) {
       console.error('Ranker pipeline failed:', err);
       setRankerStatus('error');
@@ -539,9 +539,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   if (loadingPerformer) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: '#0a0a0f' }}>
-        <CircularProgress size={60} thickness={4} sx={{ color: '#00d9ff' }} />
-        <Typography variant="h6" sx={{ color: '#888', fontWeight: 'bold', letterSpacing: 2 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: 'var(--bg)' }}>
+        <CircularProgress size={60} thickness={4} sx={{ color: 'var(--accent)' }} />
+        <Typography variant="h6" sx={{ color: 'var(--dim)', fontWeight: 'bold', letterSpacing: 2 }}>
           FETCHING PERFORMER...
         </Typography>
       </Box>
@@ -557,7 +557,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         alignItems: 'center', 
         justifyContent: 'center',
         background: 'radial-gradient(circle at center, #1a1a2e 0%, #0a0a0f 100%)',
-        color: 'white',
+        color: 'var(--text)',
         textAlign: 'center',
         position: 'relative',
         overflow: 'hidden'
@@ -565,19 +565,19 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         {/* Animated Background Elements */}
         <Box sx={{ 
           position: 'absolute', top: '-10%', left: '-10%', width: '40%', height: '40%', 
-          borderRadius: '50%', background: 'rgba(0, 217, 255, 0.03)', filter: 'blur(100px)',
+          borderRadius: '50%', background: 'var(--accent-quiet)', filter: 'blur(100px)',
           animation: 'pulse 10s infinite alternate'
         }} />
         <Box sx={{ 
           position: 'absolute', bottom: '-10%', right: '-10%', width: '40%', height: '40%', 
-          borderRadius: '50%', background: 'rgba(124, 77, 255, 0.03)', filter: 'blur(100px)',
+          borderRadius: '50%', background: 'var(--accent-quiet)', filter: 'blur(100px)',
           animation: 'pulse 8s infinite alternate-reverse'
         }} />
 
         {/* Settings Icon on Splash Screen */}
         <IconButton 
           onClick={() => setShowSettings(true)}
-          sx={{ position: 'absolute', top: 20, right: 20, color: 'rgba(255,255,255,0.3)', '&:hover': { color: '#00d9ff', bgcolor: 'rgba(0,217,255,0.1)' } }}
+          sx={{ position: 'absolute', top: 20, right: 20, color: 'var(--muted)', '&:hover': { color: 'var(--accent)', bgcolor: 'var(--accent-quiet)' } }}
         >
           <SettingsIcon />
         </IconButton>
@@ -586,16 +586,16 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           <Box sx={{ 
             position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
             width: 140, height: 140, borderRadius: '50%', 
-            background: 'rgba(0, 217, 255, 0.1)', filter: 'blur(20px)'
+            background: 'var(--accent-quiet)', filter: 'blur(20px)'
           }} />
-          <MagicIcon sx={{ fontSize: 100, color: '#00d9ff', filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.6))' }} />
+          <MagicIcon sx={{ fontSize: 100, color: 'var(--accent)', filter: 'drop-shadow(0 0 20px var(--accent-quiet))' }} />
         </Box>
 
         <Box sx={{ mb: 6 }}>
-          <Typography variant="h3" sx={{ fontWeight: 900, mb: 1, color: '#fff', letterSpacing: -1 }}>
+          <Typography variant="h3" sx={{ fontWeight: 900, mb: 1, color: 'var(--text)', letterSpacing: -1 }}>
             AI SMART FILTER
           </Typography>
-          <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.5)', maxWidth: 600, mx: 'auto', fontWeight: 400 }}>
+          <Typography variant="h6" sx={{ color: 'var(--dim)', maxWidth: 600, mx: 'auto', fontWeight: 400 }}>
             Automate your filtering process with deep learning. 
             The AI will scan images and group them by quality and content.
           </Typography>
@@ -603,15 +603,15 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
         <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%', maxWidth: 800 }}>
           {/* ============ STANDARD MODELS ============ */}
-          <Box sx={{ width: '100%', p: 2.5, bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2, mb: 1.5, textAlign: 'center' }}>
+          <Box sx={{ width: '100%', p: 2, bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2, mb: 1.5, textAlign: 'center' }}>
               Standard Models
             </Typography>
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap' }}>
               {[
-                { type: 'binary', label: 'Binary', icon: <FilterAlt />, color: '#00d9ff' },
-                { type: 'pairwise', label: 'Pairwise', icon: <Compare />, color: '#00d9ff' },
-                { type: 'siamese', label: 'Siamese', icon: <MagicIcon />, color: '#00d9ff' }
+                { type: 'binary', label: 'Binary', icon: <FilterAlt />, color: 'var(--accent)' },
+                { type: 'pairwise', label: 'Pairwise', icon: <Compare />, color: 'var(--accent)' },
+                { type: 'siamese', label: 'Siamese', icon: <MagicIcon />, color: 'var(--accent)' }
               ].map(m => {
                 const isActive = activeModelType === m.type;
                 const isLoading = loadingModelType === m.type;
@@ -625,7 +625,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                     sx={{
                       minWidth: 150, py: 1.5, borderRadius: 2, fontWeight: 800, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: 1,
                       ...(isActive
-                        ? { bgcolor: m.color, color: '#000', '&:hover': { bgcolor: '#fff' } }
+                        ? { bgcolor: m.color, color: 'var(--bg)', '&:hover': { bgcolor: 'var(--text)' } }
                         : { borderColor: `${m.color}50`, color: m.color, '&:hover': { borderColor: m.color, bgcolor: `${m.color}10` } })
                     }}
                   >
@@ -637,42 +637,42 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           </Box>
 
           {/* ============ RANK-CONDITIONED MODELS ============ */}
-          <Box sx={{ width: '100%', p: 2.5, bgcolor: 'rgba(124,77,255,0.06)', border: '1px solid rgba(124,77,255,0.2)', borderRadius: 3 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#b388ff', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2, mb: 1.5, textAlign: 'center' }}>
+          <Box sx={{ width: '100%', p: 2, bgcolor: 'var(--accent-quiet)', border: '1px solid var(--accent-quiet)', borderRadius: 3 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: 'var(--accent)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 2, mb: 1.5, textAlign: 'center' }}>
               Rank-Conditioned Models
             </Typography>
 
             {/* Step 1: Rank the performer */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, mb: 2 }}>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>STEP 1 — Analyze performer</Typography>
+              <Typography variant="caption" sx={{ color: 'var(--dim)', fontWeight: 700 }}>STEP 1 — Analyze performer</Typography>
               <Button
                 variant={rankerStatus === 'done' ? 'outlined' : 'contained'}
                 disabled={isLoadingModel}
                 onClick={runRanker}
                 startIcon={
                   ['loading', 'ranking', 'unloading'].includes(rankerStatus)
-                    ? <CircularProgress size={16} sx={{ color: '#fff' }} />
-                    : rankerStatus === 'done' ? <KeepIcon /> : <span style={{ fontSize: '1rem' }}>⭐</span>
+                    ? <CircularProgress size={16} sx={{ color: 'var(--text)' }} />
+                    : rankerStatus === 'done'? <KeepIcon />: <span style={{ fontSize: '1rem'}}></span>
                 }
                 sx={{
                   minWidth: 280, py: 1.5, borderRadius: 2, fontWeight: 800, textTransform: 'none', fontSize: '0.85rem',
                   ...(rankerStatus === 'done'
-                    ? { borderColor: '#4caf5080', color: '#4caf50', '&:hover': { borderColor: '#4caf50', bgcolor: 'rgba(76,175,80,0.1)' } }
-                    : { bgcolor: '#7c4dff', color: '#fff', '&:hover': { bgcolor: '#651fff' } })
+                    ? { borderColor: 'var(--ok)', color: 'var(--ok)', '&:hover': { borderColor: 'var(--ok)', bgcolor: 'var(--ok-quiet)' } }
+                    : { bgcolor: 'var(--accent)', color: 'var(--text)', '&:hover': { bgcolor: '#651fff' } })
                 }}
               >
                 {rankerStatus === 'idle' && 'Run Performer Ranker'}
                 {rankerStatus === 'loading' && 'Loading ranker…'}
                 {rankerStatus === 'ranking' && 'Analyzing 200 images…'}
                 {rankerStatus === 'unloading' && 'Freeing VRAM…'}
-                {rankerStatus === 'done' && performerRank !== null && `⭐ Rank: ${performerRank.toFixed(2)} / 5.0 (re-run)`}
-                {rankerStatus === 'error' && '⚠ Retry Ranker'}
+                {rankerStatus === 'done'&& performerRank !== null && `Rank: ${performerRank.toFixed(2)} / 5.0 (re-run)`}
+                {rankerStatus === 'error'&& 'Retry Ranker'}
               </Button>
             </Box>
 
             {/* Step 2: Pick a rank-conditioned classifier (gated on Step 1 completion) */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, opacity: rankerStatus === 'done' ? 1 : 0.4 }}>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>
+              <Typography variant="caption" sx={{ color: 'var(--dim)', fontWeight: 700 }}>
                 STEP 2 — Load classifier {rankerStatus !== 'done' && '(run ranker first)'}
               </Typography>
               <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap' }}>
@@ -688,12 +688,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                       variant={isActive ? 'contained' : 'outlined'}
                       disabled={rankerStatus !== 'done' || (isLoadingModel && !isLoading)}
                       onClick={() => loadClassifier(m.type)}
-                      startIcon={isLoading ? <CircularProgress size={16} sx={{ color: '#b388ff' }} /> : (isActive ? <KeepIcon /> : m.icon)}
+                      startIcon={isLoading ? <CircularProgress size={16} sx={{ color: 'var(--accent)' }} /> : (isActive ? <KeepIcon /> : m.icon)}
                       sx={{
                         minWidth: 180, py: 1.5, borderRadius: 2, fontWeight: 800, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: 1,
                         ...(isActive
-                          ? { bgcolor: '#b388ff', color: '#000', '&:hover': { bgcolor: '#fff' } }
-                          : { borderColor: '#b388ff50', color: '#b388ff', '&:hover': { borderColor: '#b388ff', bgcolor: 'rgba(179,136,255,0.1)' } })
+                          ? { bgcolor: 'var(--accent)', color: 'var(--bg)', '&:hover': { bgcolor: 'var(--text)' } }
+                          : { borderColor: 'var(--accent)', color: 'var(--accent)', '&:hover': { borderColor: 'var(--accent)', bgcolor: 'var(--accent-quiet)' } })
                       }}
                     >
                       {isLoading ? 'Loading…' : isActive ? `${m.label} Active` : `Load ${m.label}`}
@@ -707,8 +707,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
         <Box sx={{ flexShrink: 0, minWidth: 200, px: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant="caption" sx={{ color: '#aaa', fontWeight: 700 }}>BATCH SIZE</Typography>
-            <Chip label={batchSize} size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+            <Typography variant="caption" sx={{ color: 'var(--dim)', fontWeight: 700 }}>BATCH SIZE</Typography>
+            <Chip label={batchSize} size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: 'rgba(255,255,255,0.1)', color: 'var(--text)' }} />
           </Box>
           <Slider
             value={batchSize}
@@ -716,7 +716,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             max={200}
             step={4}
             onChange={(e, v) => setBatchSize(v)}
-            sx={{ color: '#8b5cf6', height: 4, '& .MuiSlider-thumb': { width: 12, height: 12 } }}
+            sx={{ color: 'var(--accent)', height: 4, '& .MuiSlider-thumb': { width: 12, height: 12 } }}
           />
         </Box>
 
@@ -727,23 +727,23 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             onClick={handleStartScanning}
             disabled={isLoadingModel || !activeModelType}
             sx={{
-              bgcolor: activeModelType ? '#00d9ff' : 'rgba(0,217,255,0.2)',
-              color: '#000',
+              bgcolor: activeModelType ? 'var(--accent)' : 'var(--accent-quiet)',
+              color: 'var(--bg)',
               fontWeight: 900,
               px: 8,
               py: 2.5,
               borderRadius: '50px',
               fontSize: '1.1rem',
               letterSpacing: 1,
-              boxShadow: activeModelType ? '0 10px 30px rgba(0, 217, 255, 0.3)' : 'none',
+              boxShadow: activeModelType ? '0 10px 30px var(--accent-quiet)' : 'none',
               transition: 'all 0.3s ease',
               '&:hover': {
-                bgcolor: activeModelType ? '#fff' : 'rgba(0,217,255,0.2)',
+                bgcolor: activeModelType ? 'var(--text)' : 'var(--accent-quiet)',
                 transform: activeModelType ? 'translateY(-3px)' : 'none',
-                boxShadow: activeModelType ? '0 15px 40px rgba(0, 217, 255, 0.4)' : 'none'
+                boxShadow: activeModelType ? '0 15px 40px var(--accent-quiet)' : 'none'
               },
               '&.Mui-disabled': {
-                bgcolor: 'rgba(0, 217, 255, 0.15)',
+                bgcolor: 'var(--accent-quiet)',
                 color: 'rgba(0, 0, 0, 0.4)'
               }
             }}
@@ -755,9 +755,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             onClick={onBack} 
             variant="text" 
             sx={{ 
-              color: 'rgba(255,255,255,0.3)', 
+              color: 'var(--muted)', 
               fontWeight: 600,
-              '&:hover': { color: '#fff', bgcolor: 'transparent' }
+              '&:hover': { color: 'var(--text)', bgcolor: 'transparent' }
             }}
           >
             Back to Normal Filtering
@@ -778,9 +778,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
   if (loading && results.length === 0) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: '#0a0a0f' }}>
-        <CircularProgress size={60} thickness={4} sx={{ color: '#00d9ff' }} />
-        <Typography variant="h6" sx={{ color: '#888', fontWeight: 'bold', letterSpacing: 2 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: 'var(--bg)' }}>
+        <CircularProgress size={60} thickness={4} sx={{ color: 'var(--accent)' }} />
+        <Typography variant="h6" sx={{ color: 'var(--dim)', fontWeight: 'bold', letterSpacing: 2 }}>
           AI IS ANALYZING YOUR TASTE...
         </Typography>
       </Box>
@@ -791,9 +791,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   try {
     if (!performer) {
       return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: '#0a0a0f' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 2, bgcolor: 'var(--bg)' }}>
           <CircularProgress />
-          <Typography sx={{ color: '#888' }}>Loading Performer...</Typography>
+          <Typography sx={{ color: 'var(--dim)' }}>Loading Performer...</Typography>
         </Box>
       );
     }
@@ -803,24 +803,24 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const uncertainCount = results.filter(r => r.decision === 'uncertain').length;
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#0a0a0f', color: '#fff', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg)', color: 'var(--text)', display: 'flex', flexDirection: 'column' }}>
       {/* Header with AppBar */}
-      <AppBar position="sticky" sx={{ bgcolor: 'rgba(15, 15, 26, 0.8)', backdropFilter: 'blur(10px)', borderBottom: '1px solid rgba(0, 217, 255, 0.1)' }}>
+      <AppBar position="sticky" sx={{ bgcolor: 'rgba(15, 15, 26, 0.8)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--accent-quiet)' }}>
         <Toolbar sx={{ justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <IconButton onClick={onBack} sx={{ color: '#fff' }}>
+            <IconButton onClick={onBack} sx={{ color: 'var(--text)' }}>
               <CloseIcon />
             </IconButton>
-            <Typography variant="h5" sx={{ fontWeight: 800, background: 'linear-gradient(45deg, #00d9ff, #00b4d8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--text)', }}>
               SMART FILTER
             </Typography>
             <Chip 
               label={performer.name} 
               sx={{ 
-                bgcolor: 'rgba(0, 217, 255, 0.1)', 
-                color: '#00d9ff', 
+                bgcolor: 'var(--accent-quiet)', 
+                color: 'var(--accent)', 
                 fontWeight: 'bold',
-                border: '1px solid rgba(0, 217, 255, 0.2)'
+                border: '1px solid var(--accent-quiet)'
               }} 
             />
           </Box>
@@ -835,14 +835,14 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 bgcolor: 'rgba(0,0,0,0.2)',
                 border: '1px solid rgba(255,255,255,0.1)',
                 '& .MuiToggleButton-root': {
-                  color: 'rgba(255,255,255,0.5)',
+                  color: 'var(--dim)',
                   px: 2,
                   py: 0.5,
                   fontSize: '0.7rem',
                   fontWeight: 'bold',
                   textTransform: 'uppercase',
                   '&.Mui-selected': {
-                    color: '#fff',
+                    color: 'var(--text)',
                     bgcolor: 'rgba(255,255,255,0.1)',
                     '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' }
                   }
@@ -853,7 +853,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 <FilterAlt sx={{ fontSize: 16 }} /> Binary
               </ToggleButton>
               <ToggleButton value="ranked_binary" sx={{ gap: 1 }}>
-                <FilterAlt sx={{ fontSize: 16, color: '#00d9ff' }} /> Rank Bin
+                <FilterAlt sx={{ fontSize: 16, color: 'var(--accent)' }} /> Rank Bin
               </ToggleButton>
               <ToggleButton value="pairwise" sx={{ gap: 1 }}>
                 <Compare sx={{ fontSize: 16 }} /> Pairwise
@@ -862,7 +862,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 <MagicIcon sx={{ fontSize: 16 }} /> Siamese
               </ToggleButton>
               <ToggleButton value="ranked_siamese_binary" sx={{ gap: 1 }}>
-                <MagicIcon sx={{ fontSize: 16, color: '#673ab7' }} /> Rank Smn
+                <MagicIcon sx={{ fontSize: 16, color: 'var(--accent)' }} /> Rank Smn
               </ToggleButton>
             </ToggleButtonGroup>
 
@@ -871,7 +871,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             </IconButton>
             
             <Box sx={{ width: 120 }}>
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', lineHeight: 1, textTransform: 'uppercase', fontWeight: 'bold' }}>
+              <Typography variant="caption" sx={{ color: 'var(--dim)', display: 'block', lineHeight: 1, textTransform: 'uppercase', fontWeight: 'bold' }}>
                 {modelType}: {(modelType === 'binary' || modelType === 'ranked_binary') ? 'Fixed 50%' : `${threshold}%`}
               </Typography>
               <Slider
@@ -881,7 +881,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                 size="small"
                 disabled={modelType === 'binary' || modelType === 'ranked_binary'}
                 sx={{
-                  color: (modelType === 'binary' || modelType === 'ranked_binary') ? 'rgba(255,255,255,0.2)' : '#00d9ff',
+                  color: (modelType === 'binary' || modelType === 'ranked_binary') ? 'rgba(255,255,255,0.2)' : 'var(--accent)',
                   py: 1,
                   '& .MuiSlider-thumb': { display: (modelType === 'binary' || modelType === 'ranked_binary') ? 'none' : 'block' }
                 }} 
@@ -894,7 +894,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               onClick={handleSaveBatch}
               disabled={saving || results.length === 0}
               sx={{ 
-                bgcolor: '#00d9ff', color: '#000', fontWeight: '900',
+                bgcolor: 'var(--accent)', color: 'var(--bg)', fontWeight: '900',
                 '&:hover': { bgcolor: '#00b4d8' },
                 borderRadius: '12px',
                 px: 3
@@ -910,17 +910,17 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         {/* Stats Header */}
         <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', gap: 2 }}>
-            <Paper sx={{ px: 2, py: 1, bgcolor: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.2)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
-              <KeepIcon sx={{ color: '#4caf50' }} />
-              <Typography sx={{ color: '#4caf50', fontWeight: 'bold' }}>KEEP: {keepCount}</Typography>
+            <Paper sx={{ px: 2, py: 1, bgcolor: 'var(--ok-quiet)', border: '1px solid var(--ok-quiet)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <KeepIcon sx={{ color: 'var(--ok)' }} />
+              <Typography sx={{ color: 'var(--ok)', fontWeight: 'bold' }}>KEEP: {keepCount}</Typography>
             </Paper>
-            <Paper sx={{ px: 2, py: 1, bgcolor: 'rgba(244, 67, 54, 0.1)', border: '1px solid rgba(244, 67, 54, 0.2)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
-              <DeleteIcon sx={{ color: '#f44336' }} />
-              <Typography sx={{ color: '#f44336', fontWeight: 'bold' }}>DELETE: {deleteCount}</Typography>
+            <Paper sx={{ px: 2, py: 1, bgcolor: 'var(--bad-quiet)', border: '1px solid var(--bad-quiet)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <DeleteIcon sx={{ color: 'var(--bad)' }} />
+              <Typography sx={{ color: 'var(--bad)', fontWeight: 'bold' }}>DELETE: {deleteCount}</Typography>
             </Paper>
             {uncertainCount > 0 && (
-              <Paper sx={{ px: 2, py: 1, bgcolor: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.3)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography sx={{ color: '#ff9800', fontWeight: 'bold' }}>⚠️ UNCERTAIN: {uncertainCount}</Typography>
+              <Paper sx={{ px: 2, py: 1, bgcolor: 'var(--warn-quiet)', border: '1px solid var(--warn-quiet)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography sx={{ color: 'var(--warn)', fontWeight: 'bold'}}>UNCERTAIN: {uncertainCount}</Typography>
               </Paper>
             )}
           </Box>
@@ -928,12 +928,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             {loadingNext && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CircularProgress size={16} sx={{ color: '#00d9ff' }} />
-                <Typography variant="caption" sx={{ color: '#00d9ff' }}>PREFETCHING NEXT BATCH...</Typography>
+                <CircularProgress size={16} sx={{ color: 'var(--accent)' }} />
+                <Typography variant="caption" sx={{ color: 'var(--accent)' }}>PREFETCHING NEXT BATCH...</Typography>
               </Box>
             )}
             {batchCount > 0 && (
-              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>
+              <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                 Batches processed: {batchCount}
               </Typography>
             )}
@@ -944,7 +944,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
         {results.length === 0 ? (
           <Box sx={{ textAlign: 'center', mt: 10 }}>
-            <Typography variant="h4" sx={{ color: '#444' }}>No more images to filter!</Typography>
+            <Typography variant="h4" sx={{ color: 'var(--faint)' }}>No more images to filter!</Typography>
             <Button onClick={onBack} sx={{ mt: 2 }}>Go Back</Button>
           </Box>
         ) : (
@@ -952,8 +952,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             {results.map((item, index) => (
               <Grid item xs={12} sm={6} md={4} lg={2.4} xl={2} key={item.path}>
                 <Card sx={{ 
-                  position: 'relative', bgcolor: '#1a1a2e', borderRadius: 2, overflow: 'hidden',
-                  border: item.decision === 'keep' ? '3px solid #4caf50' : item.decision === 'uncertain' ? '3px solid #ff9800' : '3px solid #f44336',
+                  position: 'relative', bgcolor: 'var(--surface)', borderRadius: 2, overflow: 'hidden',
+                  border: item.decision === 'keep' ? '3px solid var(--ok)' : item.decision === 'uncertain' ? '3px solid var(--warn)' : '3px solid var(--bad)',
                   transition: 'transform 0.1s ease',
                   '&:hover': { transform: 'scale(1.02)', zIndex: 10 },
                   cursor: 'pointer'
@@ -979,10 +979,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                   {/* Decision Overlay */}
                   <Box sx={{ 
                     position: 'absolute', top: 0, right: 0, p: 0.5,
-                    bgcolor: item.decision === 'keep' ? 'rgba(76, 175, 80, 0.9)' : item.decision === 'uncertain' ? 'rgba(255, 152, 0, 0.9)' : 'rgba(244, 67, 54, 0.9)',
+                    bgcolor: item.decision === 'keep' ? 'var(--ok-quiet)' : item.decision === 'uncertain' ? 'var(--warn-quiet)' : 'var(--bad-quiet)',
                     borderBottomLeftRadius: 8, display: 'flex', alignItems: 'center'
                   }}>
-                    {item.decision === 'keep' ? <KeepIcon fontSize="small" /> : item.decision === 'uncertain' ? <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', lineHeight: 1, color: '#fff' }}>?</Typography> : <DeleteIcon fontSize="small" />}
+                    {item.decision === 'keep' ? <KeepIcon fontSize="small" /> : item.decision === 'uncertain' ? <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', lineHeight: 1, color: 'var(--text)' }}>?</Typography> : <DeleteIcon fontSize="small" />}
                   </Box>
 
                   {/* Probability Bar + Score Text */}
@@ -993,7 +993,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                         variant="caption" 
                         sx={{ 
                           position: 'absolute', bottom: 8, left: 6,
-                          color: '#fff', fontWeight: 'bold', fontSize: '0.7rem',
+                          color: 'var(--text)', fontWeight: 'bold', fontSize: '0.7rem',
                           textShadow: '0 1px 3px rgba(0,0,0,0.9)',
                           lineHeight: 1
                         }}
@@ -1001,7 +1001,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                         {Math.round(item.score)}%
                         {item.predicted_rank !== undefined && (
                           <Typography component="span" sx={{ ml: 1, color: '#ffca28', fontSize: '0.65rem', fontWeight: 900 }}>
-                            ⭐ {item.predicted_rank}
+                            {item.predicted_rank}
                           </Typography>
                         )}
                       </Typography>
@@ -1011,7 +1011,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
                         sx={{ 
                           height: 6, bgcolor: 'rgba(255,255,255,0.1)',
                           '& .MuiLinearProgress-bar': {
-                            bgcolor: item.score > 70 ? '#4caf50' : item.score > 30 ? '#ff9800' : '#f44336'
+                            bgcolor: item.score > 70 ? 'var(--ok)' : item.score > 30 ? 'var(--warn)' : '#f44336'
                           }
                         }} 
                       />
@@ -1044,12 +1044,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
       {/* AI Settings Dialog */}
       <Dialog open={showSettings} onClose={() => setShowSettings(false)}>
-        <DialogTitle sx={{ bgcolor: '#1a1a2e', color: '#fff' }}>AI Settings</DialogTitle>
-        <DialogContent sx={{ bgcolor: '#1a1a2e', color: '#fff', pt: 2 }}>
-          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 1 }}>AI Server</Typography>
-          <Typography variant="body2" sx={{ color: '#7c4dff', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
-          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', display: 'block', mb: 3 }}>
-            Change in <span style={{ color: '#7c4dff', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
+        <DialogTitle sx={{ bgcolor: 'var(--surface)', color: 'var(--text)' }}>AI Settings</DialogTitle>
+        <DialogContent sx={{ bgcolor: 'var(--surface)', color: 'var(--text)', pt: 2 }}>
+          <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 1 }}>AI Server</Typography>
+          <Typography variant="body2" sx={{ color: 'var(--accent)', fontFamily: 'monospace', mb: 0.5 }}>{inferenceUrl}</Typography>
+          <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block', mb: 3 }}>
+            Change in <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => { setShowSettings(false); window.location.href = '/taste-dashboard'; }}>Taste Dashboard</span>
           </Typography>
 
           <Button 
@@ -1062,8 +1062,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             FREE GPU MEMORY (UNLOAD MODEL)
           </Button>
         </DialogContent>
-        <DialogActions sx={{ bgcolor: '#1a1a2e', p: 2 }}>
-          <Button onClick={() => setShowSettings(false)} sx={{ color: '#7c4dff' }}>
+        <DialogActions sx={{ bgcolor: 'var(--surface)', p: 2 }}>
+          <Button onClick={() => setShowSettings(false)} sx={{ color: 'var(--accent)' }}>
             Close
           </Button>
         </DialogActions>
@@ -1073,10 +1073,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   } catch (renderError) {
     console.error('[SmartFilter] RENDER CRASH:', renderError);
     return (
-      <Box sx={{ p: 5, bgcolor: '#1a0a0a', minHeight: '100vh', color: '#ff4444', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <Typography variant="h4">⚠️ Component Crash</Typography>
+      <Box sx={{ p: 3, bgcolor: '#1a0a0a', minHeight: '100vh', color: '#ff4444', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography variant="h4">Component Crash</Typography>
         <Typography variant="body1" sx={{ mt: 2 }}>{renderError.message}</Typography>
-        <pre style={{ fontSize: '10px', opacity: 0.5, overflow: 'auto', maxWidth: '80vw', maxHeight: '50vh', mt: 2, bgcolor: 'black', p: 2 }}>{renderError.stack}</pre>
+        <pre style={{ fontSize: '10px', opacity: 0.5, overflow: 'auto', maxWidth: '80vw', maxHeight: '50vh', mt: 2, bgcolor: 'var(--bg)', p: 2 }}>{renderError.stack}</pre>
         <Button onClick={() => window.location.reload()} variant="contained" sx={{ mt: 4 }}>Reload Page</Button>
       </Box>
     );

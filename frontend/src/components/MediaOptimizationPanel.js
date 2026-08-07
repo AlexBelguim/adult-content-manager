@@ -136,7 +136,7 @@ function MediaOptimizationPanel({ performerId }) {
             elevation={0}
             sx={{
                 mb: 2,
-                bgcolor: '#1a1a1a',
+                bgcolor: 'var(--bg)',
                 border: '1px solid #333',
                 borderRadius: 2,
                 overflow: 'hidden'
@@ -150,19 +150,19 @@ function MediaOptimizationPanel({ performerId }) {
                     justifyContent: 'space-between',
                     p: 2,
                     cursor: 'pointer',
-                    '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' }
+                    '&:hover': { bgcolor: 'var(--raised)' }
                 }}
                 onClick={() => setExpanded(!expanded)}
             >
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                    <CompressIcon sx={{ color: '#4fc3f7' }} />
-                    <Typography variant="h6" sx={{ color: '#fff' }}>
+                    <CompressIcon sx={{ color: 'var(--info)' }} />
+                    <Typography variant="h6" sx={{ color: 'var(--text)' }}>
                         Media Optimization
                     </Typography>
                     {status?.ffmpegAvailable ? (
-                        <Chip label="FFmpeg Ready" size="small" sx={{ bgcolor: 'rgba(76, 175, 80, 0.2)', color: '#4caf50', fontSize: '0.7rem' }} />
+                        <Chip label="FFmpeg Ready" size="small" sx={{ bgcolor: 'var(--ok-quiet)', color: 'var(--ok)', fontSize: '0.7rem' }} />
                     ) : (
-                        <Chip label="FFmpeg Not Found" size="small" sx={{ bgcolor: 'rgba(244, 67, 54, 0.2)', color: '#f44336', fontSize: '0.7rem' }} />
+                        <Chip label="FFmpeg Not Found" size="small" sx={{ bgcolor: 'var(--bad-quiet)', color: 'var(--bad)', fontSize: '0.7rem' }} />
                     )}
                 </Box>
 
@@ -172,12 +172,12 @@ function MediaOptimizationPanel({ performerId }) {
                             size="small"
                             variant="outlined"
                             onClick={(e) => { e.stopPropagation(); handleAnalyze(); }}
-                            sx={{ borderColor: '#4fc3f7', color: '#4fc3f7' }}
+                            sx={{ borderColor: 'var(--info)', color: 'var(--info)' }}
                         >
                             Analyze Savings
                         </Button>
                     )}
-                    <IconButton size="small" sx={{ color: '#888' }}>
+                    <IconButton size="small" sx={{ color: 'var(--dim)' }}>
                         {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                 </Box>
@@ -186,7 +186,7 @@ function MediaOptimizationPanel({ performerId }) {
             {/* Content */}
             <Collapse in={expanded}>
                 <Box sx={{ p: 2, pt: 0 }}>
-                    <Divider sx={{ bgcolor: '#333', mb: 2 }} />
+                    <Divider sx={{ bgcolor: 'var(--raised)', mb: 2 }} />
 
                     {error && (
                         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -196,21 +196,21 @@ function MediaOptimizationPanel({ performerId }) {
 
                     {loading && (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 3, justifyContent: 'center' }}>
-                            <CircularProgress size={24} sx={{ color: '#4fc3f7' }} />
-                            <Typography sx={{ color: '#888' }}>Analyzing files...</Typography>
+                            <CircularProgress size={24} sx={{ color: 'var(--info)' }} />
+                            <Typography sx={{ color: 'var(--dim)' }}>Analyzing files...</Typography>
                         </Box>
                     )}
 
                     {!loading && !estimate && (
                         <Box sx={{ textAlign: 'center', py: 3 }}>
-                            <Typography sx={{ color: '#666', mb: 2 }}>
+                            <Typography sx={{ color: 'var(--muted)', mb: 2 }}>
                                 Analyze performer files to see potential space savings
                             </Typography>
                             <Button
                                 variant="contained"
                                 onClick={handleAnalyze}
                                 startIcon={<StorageIcon />}
-                                sx={{ bgcolor: '#4fc3f7', '&:hover': { bgcolor: '#29b6f6' } }}
+                                sx={{ bgcolor: 'var(--info)', '&:hover': { bgcolor: 'var(--info)' } }}
                             >
                                 Analyze Files
                             </Button>
@@ -222,40 +222,40 @@ function MediaOptimizationPanel({ performerId }) {
                             {/* Savings Summary */}
                             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mb: 2 }}>
                                 {/* Total */}
-                                <Paper sx={{ p: 2, bgcolor: '#252525', border: '1px solid #333', textAlign: 'center' }}>
-                                    <Typography variant="caption" sx={{ color: '#888' }}>Total Savings</Typography>
-                                    <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 'bold' }}>
+                                <Paper sx={{ p: 2, bgcolor: 'var(--surface)', border: '1px solid #333', textAlign: 'center' }}>
+                                    <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Total Savings</Typography>
+                                    <Typography variant="h5" sx={{ color: 'var(--ok)', fontWeight: 'bold' }}>
                                         ~{estimate.total.savingsPercent}%
                                     </Typography>
-                                    <Typography variant="caption" sx={{ color: '#666' }}>
+                                    <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                                         {estimate.formatted?.total.savings || formatSize(estimate.total.savings)}
                                     </Typography>
                                 </Paper>
 
                                 {/* Videos */}
-                                <Paper sx={{ p: 2, bgcolor: '#252525', border: '1px solid #333', textAlign: 'center' }}>
+                                <Paper sx={{ p: 2, bgcolor: 'var(--surface)', border: '1px solid #333', textAlign: 'center' }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 0.5 }}>
-                                        <MovieIcon sx={{ fontSize: 14, color: '#ce93d8' }} />
-                                        <Typography variant="caption" sx={{ color: '#888' }}>Videos</Typography>
+                                        <MovieIcon sx={{ fontSize: 14, color: 'var(--accent)' }} />
+                                        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Videos</Typography>
                                     </Box>
-                                    <Typography variant="body1" sx={{ color: '#fff' }}>
+                                    <Typography variant="body1" sx={{ color: 'var(--text)' }}>
                                         {estimate.videos.count - estimate.videos.alreadyOptimized} to optimize
                                     </Typography>
-                                    <Typography variant="caption" sx={{ color: '#4caf50' }}>
+                                    <Typography variant="caption" sx={{ color: 'var(--ok)' }}>
                                         Save {estimate.formatted?.videos.savings || formatSize(estimate.videos.savings)}
                                     </Typography>
                                 </Paper>
 
                                 {/* Images */}
-                                <Paper sx={{ p: 2, bgcolor: '#252525', border: '1px solid #333', textAlign: 'center' }}>
+                                <Paper sx={{ p: 2, bgcolor: 'var(--surface)', border: '1px solid #333', textAlign: 'center' }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 0.5 }}>
-                                        <ImageIcon sx={{ fontSize: 14, color: '#90caf9' }} />
-                                        <Typography variant="caption" sx={{ color: '#888' }}>Images</Typography>
+                                        <ImageIcon sx={{ fontSize: 14, color: 'var(--info)' }} />
+                                        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Images</Typography>
                                     </Box>
-                                    <Typography variant="body1" sx={{ color: '#fff' }}>
+                                    <Typography variant="body1" sx={{ color: 'var(--text)' }}>
                                         {estimate.images.count - estimate.images.alreadyOptimized} to optimize
                                     </Typography>
-                                    <Typography variant="caption" sx={{ color: '#4caf50' }}>
+                                    <Typography variant="caption" sx={{ color: 'var(--ok)' }}>
                                         Save {estimate.formatted?.images.savings || formatSize(estimate.images.savings)}
                                     </Typography>
                                 </Paper>
@@ -264,25 +264,25 @@ function MediaOptimizationPanel({ performerId }) {
                             {/* Size Comparison Bar */}
                             <Box sx={{ mb: 2 }}>
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                    <Typography variant="caption" sx={{ color: '#888' }}>
+                                    <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
                                         Current: {estimate.formatted?.total.originalSize || formatSize(estimate.total.originalSize)}
                                     </Typography>
-                                    <Typography variant="caption" sx={{ color: '#4caf50' }}>
+                                    <Typography variant="caption" sx={{ color: 'var(--ok)' }}>
                                         After: {estimate.formatted?.total.estimatedSize || formatSize(estimate.total.estimatedSize)}
                                     </Typography>
                                 </Box>
-                                <Box sx={{ display: 'flex', height: 8, borderRadius: 1, overflow: 'hidden', bgcolor: '#333' }}>
+                                <Box sx={{ display: 'flex', height: 8, borderRadius: 1, overflow: 'hidden', bgcolor: 'var(--raised)' }}>
                                     <Box sx={{
                                         width: `${100 - estimate.total.savingsPercent}%`,
-                                        bgcolor: 'linear-gradient(90deg, #4fc3f7, #4caf50)',
-                                        background: 'linear-gradient(90deg, #4fc3f7, #4caf50)'
+                                        bgcolor: 'linear-gradient(90deg, #4fc3f7, var(--ok))',
+                                        background: 'linear-gradient(90deg, #4fc3f7, var(--ok))'
                                     }} />
                                 </Box>
                             </Box>
 
                             {/* Already Optimized Info */}
                             {(estimate.videos.alreadyOptimized > 0 || estimate.images.alreadyOptimized > 0) && (
-                                <Alert severity="info" sx={{ mb: 2, bgcolor: 'rgba(33, 150, 243, 0.1)' }}>
+                                <Alert severity="info" sx={{ mb: 2, bgcolor: 'var(--info-quiet)' }}>
                                     {estimate.videos.alreadyOptimized > 0 && (
                                         <Typography variant="body2">{estimate.videos.alreadyOptimized} videos already H.265</Typography>
                                     )}
@@ -300,9 +300,9 @@ function MediaOptimizationPanel({ performerId }) {
                                     disabled={!estimate.files?.length || !status?.ffmpegAvailable}
                                     startIcon={<PlayArrowIcon />}
                                     sx={{
-                                        background: 'linear-gradient(45deg, #4fc3f7, #4caf50)',
+                                        background: 'linear-gradient(45deg, #4fc3f7, var(--ok))',
                                         '&:hover': { background: 'linear-gradient(45deg, #29b6f6, #43a047)' },
-                                        '&:disabled': { bgcolor: '#333', color: '#666' }
+                                        '&:disabled': { bgcolor: 'var(--raised)', color: 'var(--muted)' }
                                     }}
                                 >
                                     Start Optimization ({estimate.files?.length || 0} files)
@@ -310,7 +310,7 @@ function MediaOptimizationPanel({ performerId }) {
                                 <Button
                                     variant="outlined"
                                     onClick={handleAnalyze}
-                                    sx={{ borderColor: '#555', color: '#888' }}
+                                    sx={{ borderColor: 'var(--line-strong)', color: 'var(--dim)' }}
                                 >
                                     Refresh
                                 </Button>

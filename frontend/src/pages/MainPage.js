@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useMediaQuery } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import FolderAdder from '../components/FolderAdder';
 import FilterView from '../components/FilterView';
+import PhoneFilterView from './phone/PhoneFilterView';
 import GalleryView from '../components/GalleryView';
 import OrphanedPerformersModal from '../components/OrphanedPerformersModal';
 import { offlineStorage } from '../services/OfflineStorage';
@@ -21,6 +24,12 @@ function MainPage({ mode, subMode, basePath, handyIntegration, handyCode, handyC
 
   // Shared genre data for Gallery view
   const [cachedGenres, setCachedGenres] = useState(null);
+
+  // PhoneFilterView + PhonePerformerFilterView existed but nothing ever
+  // imported them, so phones got the desktop FilterView. Same breakpoint the
+  // phone components already use internally, so the two agree.
+  const theme = useTheme();
+  const isPhone = useMediaQuery(theme.breakpoints.down('md'));
 
   useEffect(() => {
     // Load folders on mount
@@ -242,7 +251,7 @@ function MainPage({ mode, subMode, basePath, handyIntegration, handyCode, handyC
       {/* New performers notification */}
       {newPerformers.length > 0 && (
         <div className="new-performers-notification">
-          <span>🔔 {newPerformers.length} new performer(s) found!</span>
+          <span>{newPerformers.length} new performer(s) found!</span>
           <div className="new-performers-list">
             {newPerformers.map((performer, index) => (
               <div key={index} className="new-performer-item">
@@ -256,17 +265,25 @@ function MainPage({ mode, subMode, basePath, handyIntegration, handyCode, handyC
       {/* Main content */}
       <div className="main-content">
         {mode === 'filter' ? (
-          <FilterView
-            subMode={subMode}
-            basePath={basePath}
-            handyIntegration={handyIntegration}
-            handyConnected={handyConnected}
-            cachedPerformers={cachedPerformers.filter}
-            onPerformersUpdate={(performers) => {
-              setCachedPerformers(prev => ({ ...prev, filter: performers }));
-              setLastFetchTime(prev => ({ ...prev, filter: Date.now() }));
-            }}
-          />
+          isPhone ? (
+            <PhoneFilterView
+              basePath={basePath}
+              handyIntegration={handyIntegration}
+              handyConnected={handyConnected}
+            />
+          ) : (
+            <FilterView
+              subMode={subMode}
+              basePath={basePath}
+              handyIntegration={handyIntegration}
+              handyConnected={handyConnected}
+              cachedPerformers={cachedPerformers.filter}
+              onPerformersUpdate={(performers) => {
+                setCachedPerformers(prev => ({ ...prev, filter: performers }));
+                setLastFetchTime(prev => ({ ...prev, filter: Date.now() }));
+              }}
+            />
+          )
         ) : (
           <GalleryView
             subMode={subMode}

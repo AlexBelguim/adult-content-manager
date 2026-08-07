@@ -1,9 +1,25 @@
 /* ============================================================
-   Dark Panel Design System
-   Shared styles matching Hash Management / Hash Results pages
+   Dark Panel utilities
+
+   This file used to be a SECOND design system ("Dark Panel Design System")
+   running alongside the token layer: its own radii (8px / 4px), its own
+   tabs, its own gradient button, its own chips, and !important on ~30 rules
+   so it beat anything the primitives set. That is why the pages built on it
+   (Local Import, Performer Management, Taste Dashboard) never matched the
+   rest of the app no matter how much colour work was done.
+
+   It is now a thin utility layer over the same tokens the primitives use:
+     - one radius scale (--radius-lg for panels, --radius-sm for insets)
+     - one accent, no gradients, no glow shadows
+     - !important only where MUI's own specificity genuinely requires it
+
+   Anything that duplicates a primitive should be deleted rather than
+   re-styled here. See components/layout/index.js.
    ============================================================ */
 
-/* Page container */
+/* Page container.
+   Kept as an alias of PageShell so any straggler markup still lines up;
+   new code should use <PageShell>. */
 .dp-page {
   padding: 24px;
   min-height: 100vh;
@@ -11,160 +27,168 @@
   margin: 0 auto;
 }
 
-/* Gradient page title */
+/* Page title — matches the PageHeader primitive. */
 .dp-title {
-  font-weight: bold !important;
-  background: linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-light, #b085f5) 100%) !important;
-  -webkit-background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  margin-bottom: 4px !important;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  margin-bottom: 4px;
 }
 
-/* Sidebar panel (sticky left) */
+/* Sidebar panel (sticky left). Same surface treatment as Panel. */
 .dp-sidebar {
   padding: 24px;
-  background-color: #1E1E1E;
-  border-radius: 8px;
-  border: 1px solid #333;
+  background-color: var(--surface);
+  border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--line);
   position: sticky;
   top: 16px;
 }
 
-/* Main content panel */
+/* Main content panel — identical to Panel. */
 .dp-panel {
-  background-color: #1E1E1E;
-  border-radius: 8px;
-  border: 1px solid #333;
+  background-color: var(--surface);
+  border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--line);
   overflow: hidden;
 }
 
 /* Panel header bar */
 .dp-panel-header {
   padding: 12px 16px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-/* Stat box in sidebar */
+/* Stat box in sidebar.
+   Was background:--surface inside a --surface sidebar, so it was invisible.
+   Uses --raised so it actually reads as an inset tile. */
 .dp-stat-box {
   padding: 12px;
-  background-color: #252525;
-  border-radius: 4px;
+  background-color: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 4px);
   text-align: center;
 }
 
-/* Section label */
+/* Section label — matches the Section primitive's caption. */
 .dp-section-label {
-  color: #888 !important;
+  color: var(--muted) !important;
   margin-bottom: 8px !important;
 }
 
 /* Dark text field */
 .dp-textfield .MuiOutlinedInput-root {
-  color: #fff;
+  color: var(--text);
+  border-radius: var(--radius, 6px);
 }
 .dp-textfield .MuiOutlinedInput-root fieldset {
-  border-color: #444;
+  border-color: var(--line);
 }
 .dp-textfield .MuiOutlinedInput-root:hover fieldset {
-  border-color: var(--primary-main, #7e57c2);
+  border-color: var(--line-strong);
 }
 .dp-textfield .MuiOutlinedInput-root.Mui-focused fieldset {
-  border-color: var(--primary-main, #7e57c2);
+  border-color: var(--accent);
+  border-width: 1px;
 }
 .dp-textfield .MuiInputBase-input::placeholder {
-  color: #666;
+  color: var(--muted);
 }
 .dp-textfield .MuiSelect-icon {
-  color: #888;
+  color: var(--dim);
 }
 .dp-textfield .MuiInputLabel-root {
-  color: rgba(255,255,255,0.5);
+  color: var(--dim);
 }
 
 /* Dark table styles */
 .dp-table .MuiTableCell-head {
-  background-color: #252525;
-  color: #aaa;
-  border-bottom: 1px solid #333;
+  background-color: var(--surface);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
 }
 .dp-table .MuiTableCell-body {
-  border-bottom: 1px solid #333;
-  color: #ccc;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
 }
 .dp-table .MuiTableRow-root:hover {
-  background-color: rgba(255,255,255,0.03);
+  background-color: var(--raised);
 }
-.dp-table .MuiTableSortLabel-root.Mui-active {
-  color: var(--primary-light, #b085f5) !important;
-}
+.dp-table .MuiTableSortLabel-root.Mui-active,
 .dp-table .MuiTableSortLabel-icon {
-  color: var(--primary-light, #b085f5) !important;
+  color: var(--accent) !important;
 }
 
-/* Gradient button */
+/* Primary action.
+   Was .dp-gradient-btn: a 135deg gradient with a coloured glow shadow —
+   the single loudest generic tell in the app, and the thing removed from
+   every other button. Flat accent now. The class name is kept so call
+   sites don't have to change. */
 .dp-gradient-btn {
-  background: linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%) !important;
-  color: #fff !important;
-  font-weight: bold !important;
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
+  font-weight: 650 !important;
   text-transform: none !important;
-  box-shadow: 0 3px 5px 2px rgba(126, 87, 194, .3) !important;
+  box-shadow: none !important;
 }
 .dp-gradient-btn:hover {
-  background: linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%) !important;
-  box-shadow: 0 3px 10px 2px rgba(126, 87, 194, .4) !important;
+  background: var(--accent-hover) !important;
+  box-shadow: none !important;
 }
 .dp-gradient-btn:disabled {
-  background: #444 !important;
-  color: #777 !important;
+  background: var(--raised) !important;
+  color: var(--muted) !important;
   box-shadow: none !important;
 }
 
-/* Outline refresh button */
+/* Outline / secondary action */
 .dp-outline-btn {
-  border-color: #444 !important;
-  color: #aaa !important;
+  border-color: var(--line-strong) !important;
+  color: var(--dim) !important;
+  text-transform: none !important;
 }
 .dp-outline-btn:hover {
-  border-color: var(--primary-main, #7e57c2) !important;
-  color: var(--primary-main, #7e57c2) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
 }
 
-/* Location chips */
-.dp-chip-before {
-  background-color: rgba(237, 108, 2, 0.15) !important;
-  color: #ed6c02 !important;
-  font-weight: bold !important;
+/* Location chips — all four now derive from the status tokens. */
+.dp-chip-before,
+.dp-chip-after,
+.dp-chip-error,
+.dp-chip-default {
+  font-weight: 650 !important;
   font-size: 0.65rem !important;
+  border-radius: var(--radius-sm, 4px) !important;
+}
+.dp-chip-before {
+  background-color: var(--warn-quiet) !important;
+  color: var(--warn) !important;
 }
 .dp-chip-after {
-  background-color: rgba(76, 175, 80, 0.15) !important;
-  color: #4caf50 !important;
-  font-weight: bold !important;
-  font-size: 0.65rem !important;
+  background-color: var(--ok-quiet) !important;
+  color: var(--ok) !important;
 }
 .dp-chip-error {
-  background-color: rgba(244, 67, 54, 0.15) !important;
-  color: #f44336 !important;
-  font-weight: bold !important;
-  font-size: 0.65rem !important;
+  background-color: var(--bad-quiet) !important;
+  color: var(--bad) !important;
 }
 .dp-chip-default {
-  background-color: rgba(255,255,255,0.08) !important;
-  color: #888 !important;
-  font-weight: bold !important;
-  font-size: 0.65rem !important;
+  background-color: var(--raised) !important;
+  color: var(--dim) !important;
 }
 
-/* Collapsible section (matching hash results deleted/kept sections) */
+/* Collapsible section */
 .dp-collapsible {
-  background-color: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
+  background-color: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg, 10px);
   margin-bottom: 16px;
   overflow: hidden;
 }
@@ -176,39 +200,43 @@
   cursor: pointer;
 }
 .dp-collapsible-header:hover {
-  background-color: rgba(255,255,255,0.03);
+  background-color: var(--raised);
 }
 
-/* Tabs in dark theme */
+/* Tabs — selected state is the accent, matching the Toolbar's mode toggle.
+   It previously used --primary-light, so selection read as a different
+   colour here than everywhere else in the app. */
 .dp-tabs .MuiTab-root {
-  color: #888;
+  color: var(--dim);
   text-transform: none;
-  font-weight: 600;
+  font-weight: 550;
   min-height: 42px;
 }
 .dp-tabs .MuiTab-root.Mui-selected {
-  color: var(--primary-light, #b085f5);
+  color: var(--accent);
+  font-weight: 650;
 }
 .dp-tabs .MuiTabs-indicator {
-  background-color: var(--primary-main, #7e57c2);
+  background-color: var(--accent);
+  height: 2px;
 }
 
-/* Expanded row detail cards in dark theme */
+/* Expanded row detail cards */
 .dp-detail-card {
-  background-color: #1a1a1a !important;
-  border: 1px solid #333 !important;
-  border-left: 4px solid var(--primary-main, #7e57c2) !important;
-  border-radius: 4px !important;
+  background-color: var(--bg) !important;
+  border: 1px solid var(--line) !important;
+  border-left: 3px solid var(--accent) !important;
+  border-radius: var(--radius-sm, 4px) !important;
 }
 .dp-detail-card .MuiCardContent-root {
-  color: #ccc;
+  color: var(--dim);
 }
 
 /* Info row in detail cards */
 .dp-info-row {
   padding: 8px 12px;
-  background-color: #252525;
-  border-radius: 4px;
+  background-color: var(--surface);
+  border-radius: var(--radius-sm, 4px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -217,23 +245,27 @@
 /* Queue list items */
 .dp-queue-item {
   padding: 12px 16px;
-  border-bottom: 1px solid #333;
-  transition: background-color 0.2s;
+  border-bottom: 1px solid var(--line);
+  transition: background-color 0.16s ease;
 }
 .dp-queue-item:hover {
-  background-color: rgba(255,255,255,0.03);
+  background-color: var(--raised);
 }
 
-/* Scrollbar for dark panels */
+/* Scrollbar for dark panels.
+   Was accent-coloured, which made every scrollbar a vermillion stripe.
+   Neutral, matching the global scrollbar in components.css. */
 .dp-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 .dp-scroll::-webkit-scrollbar-thumb {
-  background-color: var(--primary-main, #7e57c2);
-  border-radius: 3px;
+  background-color: var(--raised);
+  border-radius: var(--radius-sm, 4px);
+}
+.dp-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
 }
 .dp-scroll::-webkit-scrollbar-track {
-  background-color: #1a1a1a;
-  border-radius: 3px;
+  background-color: var(--surface);
 }

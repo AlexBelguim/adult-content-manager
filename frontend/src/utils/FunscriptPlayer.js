@@ -280,7 +280,7 @@ class FunscriptPlayer extends HTMLElement {
   renderTagAssignButton() {
     if (this.getAttribute('tagassign') !== 'true') return '';
     return `
-      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: #1976d2; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: var(--info); color: var(--text); border: none; border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 101;">
         🏷️
       </button>
     `;
@@ -293,7 +293,7 @@ class FunscriptPlayer extends HTMLElement {
     if (this.getAttribute('type') === 'image') return ''; // Only for videos
 
     return `
-      <button class="scenemanager-btn" title="Manage scenes" style="position: absolute; top: 10px; left: 60px; background: #9C27B0; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="scenemanager-btn" title="Manage scenes" style="position: absolute; top: 10px; left: 60px; background: var(--accent); color: var(--text); border: none; border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 101;">
         🎬
       </button>
     `;
@@ -304,7 +304,7 @@ class FunscriptPlayer extends HTMLElement {
     if (this.getAttribute('mode') !== 'modal') return ''; // Only in modal/preview mode
 
     return `
-      <button class="thumbnail-refresh-btn" title="Generate new thumbnail from random position" style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); color: white; border: none; border-radius: 50%; width: 28px; height: 28px; font-size: 0.8rem; cursor: pointer; z-index: 101; transition: all 0.3s ease;">
+      <button class="thumbnail-refresh-btn" title="Generate new thumbnail from random position" style="position: absolute; bottom: 8px; right: 8px; background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius-sm, 4px); width: 28px; height: 28px; font-size: 0.8rem; cursor: pointer; z-index: 101; transition: all 0.3s ease;">
         🔄
       </button>
     `;
@@ -355,7 +355,7 @@ class FunscriptPlayer extends HTMLElement {
         // Show success feedback
         if (btn) {
           btn.style.animation = '';
-          btn.style.background = '#4CAF50';
+          btn.style.background = 'var(--ok)';
           btn.disabled = false;
           setTimeout(() => {
             const currentBtn = this.shadowRoot.querySelector('.thumbnail-refresh-btn');
@@ -369,7 +369,7 @@ class FunscriptPlayer extends HTMLElement {
       console.error('Error regenerating thumbnail:', err);
       if (btn) {
         btn.style.animation = '';
-        btn.style.background = '#f44336';
+        btn.style.background = 'var(--bad)';
         btn.disabled = false;
         setTimeout(() => {
           const currentBtn = this.shadowRoot.querySelector('.thumbnail-refresh-btn');
@@ -753,35 +753,35 @@ class FunscriptPlayer extends HTMLElement {
     // Funscript button handlers - Use capturing phase to handle FIRST
     this.shadowRoot.addEventListener('click', (e) => {
       // Tag assign button
-      if (e.target.classList.contains('tagassign-btn')) {
+      if (e.target.closest('.tagassign-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.openTagModal();
         return false;
       }
       // Scene manager button
-      if (e.target.classList.contains('scenemanager-btn')) {
+      if (e.target.closest('.scenemanager-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.openSceneManager();
         return false;
       }
       // Thumbnail refresh button
-      if (e.target.classList.contains('thumbnail-refresh-btn')) {
+      if (e.target.closest('.thumbnail-refresh-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.regenerateThumbnail();
         return false;
       }
       // Tag modal close
-      if (e.target.classList.contains('tag-modal-close')) {
+      if (e.target.closest('.tag-modal-close')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.closeTagModal();
         return false;
       }
       // Tag add
-      if (e.target.classList.contains('tag-add-btn')) {
+      if (e.target.closest('.tag-add-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         const input = this.shadowRoot.querySelector('.tag-input');
@@ -793,7 +793,7 @@ class FunscriptPlayer extends HTMLElement {
         return false;
       }
       // Tag remove
-      if (e.target.classList.contains('tag-remove-btn')) {
+      if (e.target.closest('.tag-remove-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         const tag = e.target.dataset.tag;
@@ -803,49 +803,49 @@ class FunscriptPlayer extends HTMLElement {
         return false;
       }
       // Funscript button
-      if (e.target.classList.contains('funscript-btn')) {
+      if (e.target.closest('.funscript-btn')) {
         e.stopImmediatePropagation(); // Stop ALL other handlers
         e.preventDefault();
         this.handleFunscriptAction();
         return false;
       }
-      if (e.target.classList.contains('keep-btn')) {
+      if (e.target.closest('.keep-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.handleKeepScript(e.target.dataset.script);
         return false;
       }
-      if (e.target.classList.contains('delete-btn')) {
+      if (e.target.closest('.delete-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.handleDeleteScript(e.target.dataset.script);
         return false;
       }
-      if (e.target.classList.contains('script-option')) {
+      if (e.target.closest('.script-option')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.uploadFunscript({ path: e.target.dataset.script, name: e.target.textContent });
         this.shadowRoot.querySelector('.funscript-selector').style.display = 'none';
         return false;
       }
-      if (e.target.classList.contains('modal-close')) {
+      if (e.target.closest('.modal-close')) {
         this.closeModal();
       }
 
       // Custom video control handlers
-      if (e.target.classList.contains('play-pause-btn')) {
+      if (e.target.closest('.play-pause-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.togglePlayPause();
         return false;
       }
-      if (e.target.classList.contains('volume-btn')) {
+      if (e.target.closest('.volume-btn')) {
         e.stopImmediatePropagation();
         e.preventDefault();
         this.toggleMute();
         return false;
       }
-      if (e.target.classList.contains('fullscreen-btn')) {
+      if (e.target.closest('.fullscreen-btn')) {
         console.log('🎥 Fullscreen button clicked!');
         e.stopImmediatePropagation();
         e.preventDefault();
@@ -970,49 +970,52 @@ class FunscriptPlayer extends HTMLElement {
   enterFullscreen() {
     console.log('🎥 enterFullscreen() called');
 
-    // Try native browser fullscreen first (gives true fullscreen experience)
     const video = this.shadowRoot.querySelector('video');
-    const mediaContainer = this.shadowRoot.querySelector('.media-container');
-    const elementToFullscreen = video || mediaContainer || this;
 
-    if (elementToFullscreen.requestFullscreen) {
-      elementToFullscreen.requestFullscreen()
-        .then(() => {
-          console.log('🎥 Native browser fullscreen activated');
-          this.classList.add('fullscreen');
-          document.body.style.overflow = 'hidden';
-
-          // Ensure video fills the fullscreen container properly with correct aspect ratio
-          if (video) {
-            video.style.objectFit = 'contain'; // Maintain aspect ratio, no stretching
-            video.style.width = '100%';
-            video.style.height = '100%';
-          }
-        })
-        .catch((err) => {
-          // Don't use CSS fallback - just log and continue playing normally
-          console.warn('🎥 Native fullscreen failed (user interaction required):', err.message);
-        });
-    } else {
-      console.log('🎥 requestFullscreen not supported');
+    // Fullscreen the HOST, not the <video>.
+    //
+    // Preferring the raw video element is why fullscreen was broken: only the
+    // fullscreened element and its descendants are painted, so the custom
+    // control bar, the scene overlay and the funscript strip — siblings of the
+    // video, not children — all vanished and you were left with the browser's
+    // own chrome. The host contains the video AND the controls, so everything
+    // comes with it and the buttons keep working.
+    if (!this.requestFullscreen) {
+      console.warn('🎥 requestFullscreen not supported');
+      return;
     }
 
-    // Listen for escape key
-    this.fullscreenEscapeHandler = (e) => {
-      if (e.key === 'Escape') {
-        this.exitFullscreen();
-      }
-    };
-    document.addEventListener('keydown', this.fullscreenEscapeHandler);
+    this.requestFullscreen()
+      .then(() => {
+        this.classList.add('fullscreen');
+        // Remember what overflow actually was; exit used to hardcode 'auto'.
+        this.prevBodyOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
 
-    // Listen for fullscreenchange to detect when user exits via browser controls
-    this.fullscreenChangeHandler = () => {
-      if (!document.fullscreenElement && this.classList.contains('fullscreen')) {
-        console.log('🎥 Browser fullscreen exited, cleaning up');
-        this.exitFullscreen();
-      }
-    };
-    document.addEventListener('fullscreenchange', this.fullscreenChangeHandler);
+        if (video) {
+          video.style.objectFit = 'contain';
+          video.style.width = '100%';
+          video.style.height = '100%';
+        }
+
+        // Attached only after fullscreen actually succeeded. These used to be
+        // added unconditionally, so a rejected request (no user gesture) left a
+        // live pair behind and the next attempt added another set.
+        this.fullscreenEscapeHandler = (e) => {
+          if (e.key === 'Escape') this.exitFullscreen();
+        };
+        document.addEventListener('keydown', this.fullscreenEscapeHandler);
+
+        this.fullscreenChangeHandler = () => {
+          if (!document.fullscreenElement && this.classList.contains('fullscreen')) {
+            this.exitFullscreen();
+          }
+        };
+        document.addEventListener('fullscreenchange', this.fullscreenChangeHandler);
+      })
+      .catch((err) => {
+        console.warn('🎥 Native fullscreen failed (needs a user gesture):', err.message);
+      });
   }
 
   // CSS-based fullscreen fallback (for when native fullscreen is not available)
@@ -1044,7 +1047,7 @@ class FunscriptPlayer extends HTMLElement {
     this.style.transform = 'none';
     this.style.margin = '0';
     this.style.padding = '0';
-    this.style.background = '#000';
+    this.style.background = 'var(--bg)';
     this.style.minWidth = '100vw';
     this.style.minHeight = '100vh';
     this.style.maxWidth = '100vw';
@@ -1084,7 +1087,9 @@ class FunscriptPlayer extends HTMLElement {
   exitFullscreen() {
     console.log('🎥 exitFullscreen() called');
     this.classList.remove('fullscreen');
-    document.body.style.overflow = 'auto';
+    // Restore what was there. Forcing 'auto' overrode the page's own overflow.
+    document.body.style.overflow = this.prevBodyOverflow || '';
+    this.prevBodyOverflow = null;
 
     // Exit native browser fullscreen if active
     if (document.fullscreenElement) {
@@ -1385,7 +1390,7 @@ class FunscriptPlayer extends HTMLElement {
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: #000000;
+      background: var(--bg);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1418,7 +1423,7 @@ class FunscriptPlayer extends HTMLElement {
         height: 100vh;
         max-width: 100vw;
         max-height: 100vh;
-        object-fit: fill;
+        object-fit: contain;
         margin: 0;
         padding: 0;
         border: none;
@@ -1473,7 +1478,7 @@ class FunscriptPlayer extends HTMLElement {
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: #000000;
+      background: var(--bg);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1821,7 +1826,7 @@ class FunscriptPlayer extends HTMLElement {
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: #222;
+      background: var(--surface);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1831,7 +1836,7 @@ class FunscriptPlayer extends HTMLElement {
     // Modal content
     const modalContent = document.createElement('div');
     modalContent.style.cssText = `
-      background: #fff;
+      background: var(--text);
       border-radius: 12px;
       padding: 32px 24px;
       min-width: 340px;
@@ -1853,13 +1858,11 @@ class FunscriptPlayer extends HTMLElement {
       position: absolute;
       top: 12px;
       right: 12px;
-      background: rgba(0,0,0,0.7);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      font-size: 1.5rem;
+      background: var(--scrim-strong, rgba(16,16,18,0.88));
+      color: var(--text);
+      border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+      border-radius: var(--radius, 6px);
+      width: 34px; height: 34px; font-size: 1rem;
       cursor: pointer;
       z-index: 10;
     `;
@@ -1869,24 +1872,24 @@ class FunscriptPlayer extends HTMLElement {
     // Title
     const title = document.createElement('div');
     title.textContent = 'Manage Funscripts';
-    title.style.cssText = 'color: #fff; font-size: 1.3rem; margin-bottom: 18px; font-weight: bold;';
+    title.style.cssText = 'color: var(--text); font-size: 1.3rem; margin-bottom: 18px; font-weight: bold;';
     modalContent.appendChild(title);
 
     // Script list
     this.state.availableFunscripts.forEach(script => {
       const item = document.createElement('div');
-      item.style.cssText = 'display: flex; align-items: center; gap: 12px; margin-bottom: 12px; background: #333; border-radius: 6px; padding: 10px 12px; width: 100%;';
+      item.style.cssText = 'display: flex; align-items: center; gap: 12px; margin-bottom: 12px; background: var(--raised); border-radius: 6px; padding: 10px 12px; width: 100%;';
 
       const nameSpan = document.createElement('span');
       nameSpan.textContent = script.name;
-      nameSpan.style.cssText = 'flex: 1; color: #fff; font-size: 1rem;';
+      nameSpan.style.cssText = 'flex: 1; color: var(--text); font-size: 1rem;';
       item.appendChild(nameSpan);
 
       // Upload button (now triggers uploadFunscript)
       const uploadBtn = document.createElement('button');
       uploadBtn.textContent = 'Upload';
       uploadBtn.className = 'upload-btn';
-      uploadBtn.style.cssText = 'background: #4CAF50; color: white; border: none; border-radius: 3px; padding: 6px 14px; cursor: pointer; font-size: 0.95rem;';
+      uploadBtn.style.cssText = 'background: var(--ok); color: var(--text); border: none; border-radius: 3px; padding: 6px 14px; cursor: pointer; font-size: 0.95rem;';
       uploadBtn.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -1899,7 +1902,7 @@ class FunscriptPlayer extends HTMLElement {
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = 'Delete';
       deleteBtn.className = 'delete-btn';
-      deleteBtn.style.cssText = 'background: #e53935; color: white; border: none; border-radius: 3px; padding: 6px 14px; cursor: pointer; font-size: 0.95rem;';
+      deleteBtn.style.cssText = 'background: var(--bad); color: var(--text); border: none; border-radius: 3px; padding: 6px 14px; cursor: pointer; font-size: 0.95rem;';
       deleteBtn.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -1915,7 +1918,7 @@ class FunscriptPlayer extends HTMLElement {
     if (this.state.availableFunscripts.length === 0) {
       const emptyMsg = document.createElement('div');
       emptyMsg.textContent = 'No funscripts available.';
-      emptyMsg.style.cssText = 'color: #bbb; font-size: 1rem; margin-top: 20px;';
+      emptyMsg.style.cssText = 'color: var(--dim); font-size: 1rem; margin-top: 20px;';
       modalContent.appendChild(emptyMsg);
     }
 
@@ -1976,7 +1979,7 @@ class FunscriptPlayer extends HTMLElement {
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: #000000;
+      background: var(--bg);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1985,7 +1988,7 @@ class FunscriptPlayer extends HTMLElement {
 
     modal.innerHTML = `
       <div class="modal-video-container" style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; align-items: center; justify-content: center;">
-        <button id="modal-close-btn" style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.5rem; cursor: pointer; z-index: 10;">×</button>
+        <button id="modal-close-btn" style="position: absolute; top: 10px; right: 10px; background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 10;">×</button>
         ${mediaElement}
         ${type === 'video' ? this.renderModalCustomControls() : ''}
         ${this.getAttribute('funscriptmode') === 'true' ? this.renderModalFunscriptButton() : ''}
@@ -2001,7 +2004,7 @@ class FunscriptPlayer extends HTMLElement {
         this.closeModal();
       }
       // Handle funscript button clicks in modal
-      if (e.target.classList.contains('modal-funscript-btn')) {
+      if (e.target.closest('.modal-funscript-btn')) {
         e.stopPropagation();
         e.preventDefault();
         console.log('🤖 Modal funscript button clicked!');
@@ -2022,7 +2025,7 @@ class FunscriptPlayer extends HTMLElement {
         this.updateModalFunscriptButton(modal);
         return false;
       }
-      if (e.target.classList.contains('modal-rating-btn')) {
+      if (e.target.closest('.modal-rating-btn')) {
         e.stopPropagation();
         e.preventDefault();
         const panel = modal.querySelector('.modal-rating-panel');
@@ -2035,7 +2038,7 @@ class FunscriptPlayer extends HTMLElement {
         return false;
       }
       // Handle scene manager button clicks in modal
-      if (e.target.classList.contains('modal-scenemanager-btn')) {
+      if (e.target.closest('.modal-scenemanager-btn')) {
         e.stopPropagation();
         e.preventDefault();
         console.log('🎬 Modal scene manager button clicked!');
@@ -2043,19 +2046,19 @@ class FunscriptPlayer extends HTMLElement {
         // Do NOT close the video modal
         return false;
       }
-      if (e.target.classList.contains('modal-tagassign-btn')) {
+      if (e.target.closest('.modal-tagassign-btn')) {
         e.stopPropagation();
         e.preventDefault();
         this.openTagModal();
         return false;
       }
-      if (e.target.classList.contains('modal-delete-btn')) {
+      if (e.target.closest('.modal-delete-btn')) {
         e.stopPropagation();
         e.preventDefault();
         this.handleDeleteWithFunscripts();
         return false;
       }
-      if (e.target.classList.contains('modal-script-option')) {
+      if (e.target.closest('.modal-script-option')) {
         e.stopPropagation();
         e.preventDefault();
         // Find the script object by path
@@ -2068,19 +2071,19 @@ class FunscriptPlayer extends HTMLElement {
       }
 
       // Handle modal custom control clicks
-      if (e.target.classList.contains('modal-play-pause-btn')) {
+      if (e.target.closest('.modal-play-pause-btn')) {
         e.stopPropagation();
         e.preventDefault();
         this.toggleModalPlayPause(modal);
         return false;
       }
-      if (e.target.classList.contains('modal-volume-btn')) {
+      if (e.target.closest('.modal-volume-btn')) {
         e.stopPropagation();
         e.preventDefault();
         this.toggleModalMute(modal);
         return false;
       }
-      if (e.target.classList.contains('modal-fullscreen-btn')) {
+      if (e.target.closest('.modal-fullscreen-btn')) {
         e.stopPropagation();
         e.preventDefault();
         this.toggleModalFullscreen(modal);
@@ -2095,7 +2098,7 @@ class FunscriptPlayer extends HTMLElement {
 
       const ratingPanel = modal.querySelector('.modal-rating-panel');
       if (ratingPanel && ratingPanel.classList.contains('active')) {
-        if (!e.target.closest('.modal-rating-panel') && !e.target.classList.contains('modal-rating-btn')) {
+        if (!e.target.closest('.modal-rating-panel') && !e.target.closest('.modal-rating-btn')) {
           ratingPanel.classList.remove('active');
         }
       }
@@ -2684,8 +2687,8 @@ class FunscriptPlayer extends HTMLElement {
         position: fixed;
         top: 20px;
         right: 20px;
-        background: rgba(33, 150, 243, 0.9);
-        color: white;
+        background: var(--info-quiet);
+        color: var(--text);
         padding: 10px 20px;
         border-radius: 5px;
         z-index: 1000000;
@@ -2821,17 +2824,19 @@ class FunscriptPlayer extends HTMLElement {
           pointer-events: auto;
         ">
           <button class="modal-play-pause-btn" title="Play/Pause" style="
-            background: rgba(255,255,255,0.9);
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            background: var(--scrim-strong, rgba(16,16,18,0.88));
+            color: var(--text);
+            border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+            border-radius: var(--radius, 6px);
+            width: 34px;
+            height: 34px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
-            transition: all 0.2s ease;
+            font-size: 14px;
+            line-height: 1;
+            transition: background-color .16s ease, border-color .16s ease;
             flex-shrink: 0;
           ">
             <span class="modal-play-icon">▶️</span>
@@ -2857,7 +2862,7 @@ class FunscriptPlayer extends HTMLElement {
             ">
               <div class="modal-progress-filled" style="
                 height: 100%;
-                background: #fff;
+                background: var(--text);
                 border-radius: 3px;
                 width: 0%;
                 transition: width 0.1s ease;
@@ -2870,7 +2875,7 @@ class FunscriptPlayer extends HTMLElement {
                 transform: translate(-50%, -50%);
                 width: 14px;
                 height: 14px;
-                background: #fff;
+                background: var(--text);
                 border-radius: 50%;
                 opacity: 0;
                 transition: opacity 0.2s ease;
@@ -2890,44 +2895,48 @@ class FunscriptPlayer extends HTMLElement {
           </div>
           
           <div class="modal-time-display" style="
-            color: white;
+            color: var(--text);
             font-size: 12px;
             font-family: monospace;
             white-space: nowrap;
             flex-shrink: 0;
           ">
             <span class="modal-current-time">0:00</span>
-            <span style="color: rgba(255,255,255,0.7);"> / </span>
+            <span style="color: var(--dim);"> / </span>
             <span class="modal-duration">0:00</span>
           </div>
           
           <button class="modal-volume-btn" title="Mute/Unmute" style="
-            background: rgba(255,255,255,0.9);
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            background: var(--scrim-strong, rgba(16,16,18,0.88));
+            color: var(--text);
+            border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+            border-radius: var(--radius, 6px);
+            width: 34px;
+            height: 34px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
-            transition: all 0.2s ease;
+            font-size: 14px;
+            line-height: 1;
+            transition: background-color .16s ease, border-color .16s ease;
             flex-shrink: 0;
           ">🔊</button>
           
           <button class="modal-fullscreen-btn" title="Fullscreen" style="
-            background: rgba(255,255,255,0.9);
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            background: var(--scrim-strong, rgba(16,16,18,0.88));
+            color: var(--text);
+            border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+            border-radius: var(--radius, 6px);
+            width: 34px;
+            height: 34px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
-            transition: all 0.2s ease;
+            font-size: 14px;
+            line-height: 1;
+            transition: background-color .16s ease, border-color .16s ease;
             flex-shrink: 0;
           ">⛶</button>
         </div>
@@ -2943,13 +2952,11 @@ class FunscriptPlayer extends HTMLElement {
       position: absolute; 
       top: 10px; 
       left: 10px; 
-      background: rgba(0,0,0,0.7); 
-      color: white; 
-      border: none; 
-      border-radius: 50%; 
-      width: 40px; 
-      height: 40px; 
-      font-size: 1.2rem; 
+      background: var(--scrim-strong, rgba(16,16,18,0.88)); 
+      color: var(--text); 
+      border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); 
+      border-radius: var(--radius, 6px); 
+      width: 34px; height: 34px; font-size: 1rem; 
       cursor: pointer; 
       z-index: 100;
       pointer-events: auto;
@@ -2962,7 +2969,7 @@ class FunscriptPlayer extends HTMLElement {
       background: rgba(0,0,0,0.9); 
       border-radius: 5px; 
       padding: 10px; 
-      color: white; 
+      color: var(--text); 
       z-index: 100; 
       min-width: 200px; 
       display: none;
@@ -3007,13 +3014,11 @@ class FunscriptPlayer extends HTMLElement {
       position: absolute; 
       top: 10px; 
       left: 60px; 
-      background: rgba(156, 39, 176, 0.9); 
-      color: white; 
+      background: var(--accent-quiet); 
+      color: var(--text); 
       border: none; 
-      border-radius: 50%; 
-      width: 40px; 
-      height: 40px; 
-      font-size: 1.2rem; 
+      border-radius: var(--radius, 6px); 
+      width: 34px; height: 34px; font-size: 1rem; 
       cursor: pointer; 
       z-index: 100;
       pointer-events: auto;
@@ -3034,12 +3039,10 @@ class FunscriptPlayer extends HTMLElement {
       top: 10px;
       left: 160px;
       background: rgba(25, 118, 210, 0.9);
-      color: white;
+      color: var(--text);
       border: none;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      font-size: 1.2rem;
+      border-radius: var(--radius, 6px);
+      width: 34px; height: 34px; font-size: 1rem;
       cursor: pointer;
       z-index: 100;
       pointer-events: auto;
@@ -3058,12 +3061,10 @@ class FunscriptPlayer extends HTMLElement {
       top: 10px;
       left: 110px;
       background: rgba(255, 215, 0, 0.9);
-      color: #333;
+      color: var(--faint);
       border: none;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      font-size: 1.2rem;
+      border-radius: var(--radius, 6px);
+      width: 34px; height: 34px; font-size: 1rem;
       cursor: pointer;
       z-index: 100;
       pointer-events: auto;
@@ -3091,7 +3092,7 @@ class FunscriptPlayer extends HTMLElement {
           border: 1px solid rgba(255, 255, 255, 0.15);
           border-radius: 8px;
           padding: 16px;
-          color: white;
+          color: var(--text);
           min-width: 240px;
           display: none;
           flex-direction: column;
@@ -3108,7 +3109,7 @@ class FunscriptPlayer extends HTMLElement {
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.05em;
-          color: rgba(255,255,255,0.8);
+          color: var(--dim);
         }
         .modal-rating-row {
           display: flex;
@@ -3118,7 +3119,7 @@ class FunscriptPlayer extends HTMLElement {
         .modal-rating-label {
           width: 70px;
           font-size: 0.9rem;
-          color: rgba(255,255,255,0.7);
+          color: var(--dim);
           text-transform: uppercase;
         }
         .modal-rating-stars {
@@ -3141,7 +3142,7 @@ class FunscriptPlayer extends HTMLElement {
           font-size: 24px;
         }
         .modal-rating-star::before {
-          color: rgba(255, 255, 255, 0.25);
+          color: var(--muted);
         }
         .modal-rating-star::after {
           color: #ffd700;
@@ -3179,8 +3180,8 @@ class FunscriptPlayer extends HTMLElement {
           pointer-events: none;
         }
         .modal-delete-btn {
-          background: rgba(244, 67, 54, 0.9);
-          color: white;
+          background: var(--bad-quiet);
+          color: var(--text);
           border: none;
           border-radius: 6px;
           padding: 8px 12px;
@@ -3197,13 +3198,13 @@ class FunscriptPlayer extends HTMLElement {
         }
         .modal-delete-warning {
           font-size: 0.8rem;
-          color: rgba(255, 255, 255, 0.6);
+          color: var(--dim);
           line-height: 1.4;
           text-align: center;
         }
         .modal-rating-hint {
           font-size: 0.75rem;
-          color: rgba(255, 255, 255, 0.55);
+          color: var(--dim);
           text-align: center;
         }
       </style>
@@ -3291,7 +3292,7 @@ class FunscriptPlayer extends HTMLElement {
           <img src="${videoThumbnailUrl}" alt="Video preview" 
                onload="console.log('Video thumbnail loaded for: ${filePath}')"
                onerror="console.error('Video thumbnail failed for: ${filePath}'); this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-          <div class="fallback-placeholder" style="display: none; width: 100%; height: 100%; background: #333; color: white; align-items: center; justify-content: center; flex-direction: column;">
+          <div class="fallback-placeholder" style="display: none; width: 100%; height: 100%; background: var(--raised); color: var(--text); align-items: center; justify-content: center; flex-direction: column;">
             <div style="font-size: 3rem;">🎬</div>
             <div style="margin-top: 10px;">Video Preview</div>
           </div>
@@ -3592,29 +3593,36 @@ class FunscriptPlayer extends HTMLElement {
           left: 50%;
           transform: translate(-50%, -50%);
           font-size: 3rem;
-          color: white;
+          color: var(--text);
           text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
           pointer-events: none;
         }
 
+        /* Overlay chips over the video. Same treatment as overlayChipSx on the
+           performer card: squared, translucent scrim, hairline border. These
+           were circles with scale() bounces, and the failed state was a
+           literal red keyword. */
         .funscript-btn {
           position: absolute;
           top: 10px;
           right: 10px;
-          background: rgba(0,0,0,0.7);
-          color: white;
-          border: none;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          font-size: 1.2rem;
+          background: var(--scrim-strong, rgba(16,16,18,0.88));
+          color: var(--text, #EDEDEF);
+          border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+          border-radius: var(--radius, 6px);
+          width: 34px;
+          height: 34px;
+          font-size: 1rem;
           cursor: pointer;
           z-index: 100;
           pointer-events: auto;
+          transition: background-color .16s ease, border-color .16s ease, color .16s ease;
         }
 
         .funscript-btn:hover {
-          background: rgba(0,0,0,0.9);
+          background: var(--accent, #F0703A);
+          border-color: var(--accent, #F0703A);
+          color: var(--on-accent, #1A0E08);
         }
 
         .funscript-btn.uploading {
@@ -3622,35 +3630,38 @@ class FunscriptPlayer extends HTMLElement {
         }
 
         .funscript-btn.success {
-          background: #4CAF50 !important;
-          transform: scale(1.1);
-          transition: all 0.3s ease;
+          background: var(--ok, #5FA97B) !important;
+          border-color: var(--ok, #5FA97B) !important;
+          color: var(--bg, #0B0B0C) !important;
         }
 
         .funscript-btn.failed {
-          background: red;
+          background: var(--bad, #C9564B);
+          border-color: var(--bad, #C9564B);
+          color: var(--bg, #0B0B0C);
         }
 
         .thumbnail-refresh-btn {
           position: absolute;
           bottom: 8px;
           right: 8px;
-          background: rgba(0,0,0,0.6);
-          color: white;
-          border: none;
-          border-radius: 50%;
-          width: 28px;
-          height: 28px;
+          background: var(--scrim-strong, rgba(16,16,18,0.88));
+          color: var(--text, #EDEDEF);
+          border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+          border-radius: var(--radius-sm, 4px);
+          width: 26px;
+          height: 26px;
           font-size: 0.8rem;
           cursor: pointer;
           z-index: 101;
           pointer-events: auto;
-          transition: all 0.3s ease;
+          transition: background-color .16s ease, border-color .16s ease, color .16s ease;
         }
 
         .thumbnail-refresh-btn:hover {
-          background: rgba(0,0,0,0.9);
-          transform: scale(1.1);
+          background: var(--accent, #F0703A);
+          border-color: var(--accent, #F0703A);
+          color: var(--on-accent, #1A0E08);
         }
 
         @keyframes spin {
@@ -3662,10 +3673,11 @@ class FunscriptPlayer extends HTMLElement {
           position: absolute;
           top: 10px;
           right: 10px;
-          background: rgba(0,0,0,0.8);
+          background: var(--scrim-strong, rgba(16,16,18,0.88));
+          border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
           padding: 10px;
-          border-radius: 5px;
-          color: white;
+          border-radius: var(--radius, 6px);
+          color: var(--text, #EDEDEF);
           z-index: 100;
           max-width: 300px;
           pointer-events: auto;
@@ -3683,12 +3695,13 @@ class FunscriptPlayer extends HTMLElement {
 
         .funscript-selector {
           position: absolute;
-          top: 60px;
+          top: 56px;
           right: 10px;
-          background: rgba(0,0,0,0.9);
-          border-radius: 5px;
-          padding: 10px;
-          color: white;
+          background: var(--scrim-strong, rgba(16,16,18,0.88));
+          border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+          border-radius: var(--radius, 6px);
+          padding: 6px;
+          color: var(--text, #EDEDEF);
           z-index: 100;
           min-width: 200px;
           display: none;
@@ -3698,11 +3711,13 @@ class FunscriptPlayer extends HTMLElement {
         .script-option {
           padding: 8px;
           cursor: pointer;
-          border-bottom: 1px solid rgba(255,255,255,0.2);
+          border-radius: var(--radius-sm, 4px);
+          border-bottom: 1px solid var(--line, rgba(255,255,255,0.08));
         }
 
         .script-option:hover {
-          background: rgba(255,255,255,0.1);
+          background: var(--raised, #1C1C1F);
+          color: var(--accent, #F0703A);
         }
 
         .script-option:last-child {
@@ -3742,13 +3757,11 @@ class FunscriptPlayer extends HTMLElement {
           position: absolute;
           top: 10px;
           right: 10px;
-          background: rgba(0,0,0,0.7);
-          color: white;
-          border: none;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          font-size: 1.5rem;
+          background: var(--scrim-strong, rgba(16,16,18,0.88));
+          color: var(--text);
+          border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+          border-radius: var(--radius, 6px);
+          width: 34px; height: 34px; font-size: 1rem;
           cursor: pointer;
           z-index: 10;
         }
@@ -3785,28 +3798,34 @@ class FunscriptPlayer extends HTMLElement {
           pointer-events: auto;
         }
 
+        /* Transport buttons.
+           Were 40px near-white circles with a scale(1.1) bounce on hover —
+           the generic video-player look. Squared, translucent over the video,
+           accent on hover, no bounce, matching every other control in the app. */
         .play-pause-btn,
         .volume-btn,
         .fullscreen-btn {
-          background: rgba(255,255,255,0.9);
-          border: none;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
+          background: var(--scrim-strong, rgba(16,16,18,0.88));
+          border: 1px solid var(--line-strong, rgba(255,255,255,0.14));
+          border-radius: var(--radius, 6px);
+          color: var(--text, #EDEDEF);
+          width: 34px;
+          height: 34px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 16px;
-          transition: all 0.2s ease;
+          font-size: 15px;
+          transition: background-color .16s ease, border-color .16s ease, color .16s ease;
           flex-shrink: 0;
         }
 
         .play-pause-btn:hover,
         .volume-btn:hover,
         .fullscreen-btn:hover {
-          background: white;
-          transform: scale(1.1);
+          background: var(--accent, #F0703A);
+          border-color: var(--accent, #F0703A);
+          color: var(--on-accent, #1A0E08);
         }
 
         .progress-container {
@@ -3820,18 +3839,20 @@ class FunscriptPlayer extends HTMLElement {
 
         .progress-bar {
           width: 100%;
-          height: 6px;
-          background: rgba(255,255,255,0.3);
-          border-radius: 3px;
+          height: 4px;
+          background: rgba(255,255,255,0.22);
+          border-radius: 2px;
           position: relative;
           cursor: pointer;
           overflow: hidden;
         }
 
+        /* Accent, not white — playback position is the one thing on this
+           surface worth marking with the accent colour. */
         .progress-filled {
           height: 100%;
-          background: #fff;
-          border-radius: 3px;
+          background: var(--accent, #F0703A);
+          border-radius: 2px;
           width: 0%;
           transition: width 0.1s ease;
           position: relative;
@@ -3842,12 +3863,13 @@ class FunscriptPlayer extends HTMLElement {
           position: absolute;
           top: 50%;
           transform: translate(-50%, -50%);
-          width: 14px;
-          height: 14px;
-          background: #fff;
-          border-radius: 50%;
+          width: 10px;
+          height: 10px;
+          background: var(--accent, #F0703A);
+          border: 1px solid var(--on-accent, #1A0E08);
+          border-radius: var(--radius-sm, 3px);
           opacity: 0;
-          transition: opacity 0.2s ease;
+          transition: opacity 0.16s ease;
           cursor: pointer;
           z-index: 4;
         }
@@ -3867,7 +3889,7 @@ class FunscriptPlayer extends HTMLElement {
         }
 
         .time-display {
-          color: white;
+          color: var(--text);
           font-size: 12px;
           font-family: monospace;
           white-space: nowrap;
@@ -3876,7 +3898,7 @@ class FunscriptPlayer extends HTMLElement {
 
         .time-display .current-time::after {
           content: " / ";
-          color: rgba(255,255,255,0.7);
+          color: var(--dim);
         }
 
         /* Fullscreen styles */
@@ -3910,41 +3932,35 @@ class FunscriptPlayer extends HTMLElement {
           max-height: none !important;
         }
 
+        /* The host is the fullscreen element now, so it already fills the
+           screen — the video just has to fill the host. It used to be pinned
+           position:fixed at z-index 999998, which put it ON TOP of the control
+           bar, and object-fit:fill distorted it to the viewport's aspect ratio
+           instead of letterboxing. Both are why fullscreen looked stretched
+           and lost its buttons. */
         :host(.fullscreen) .media-container video {
-          width: 100vw !important;
-          height: 100vh !important;
-          max-width: none !important;
-          max-height: none !important;
-          min-width: 100vw !important;
-          min-height: 100vh !important;
-          object-fit: fill !important;
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: 100% !important;
+          max-height: 100% !important;
+          object-fit: contain !important;
           margin: 0 !important;
           padding: 0 !important;
           border: none !important;
           transform: none !important;
-          z-index: 999998 !important;
           box-sizing: border-box !important;
         }
 
         :host(.fullscreen) .media-container img {
-          width: 100vw !important;
-          height: 100vh !important;
-          max-width: none !important;
-          max-height: none !important;
-          min-width: 100vw !important;
-          min-height: 100vh !important;
-          object-fit: fill !important;
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: 100% !important;
+          max-height: 100% !important;
+          object-fit: contain !important;
           margin: 0 !important;
           padding: 0 !important;
           border: none !important;
           transform: none !important;
-          z-index: 999998 !important;
           box-sizing: border-box !important;
         }
 
@@ -4245,7 +4261,7 @@ class FunscriptImage extends HTMLElement {
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: #000000;
+      background: var(--bg);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -4254,16 +4270,16 @@ class FunscriptImage extends HTMLElement {
 
     modal.innerHTML = `
       <div style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; align-items: center; justify-content: center;">
-        <button id="modal-close-btn" style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.5rem; cursor: pointer; z-index: 10;">×</button>
+        <button id="modal-close-btn" style="position: absolute; top: 10px; right: 10px; background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 10;">×</button>
         ${navInfo.hasPrev ? `
-          <button id="modal-prev-btn" style="position: absolute; left: 20px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 1.5rem; cursor: pointer; z-index: 10;">‹</button>
+          <button id="modal-prev-btn" style="position: absolute; left: 20px; top: 50%; transform: translateY(-50%); background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 10;">‹</button>
         ` : ''}
         ${navInfo.hasNext ? `
-          <button id="modal-next-btn" style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 1.5rem; cursor: pointer; z-index: 10;">›</button>
+          <button id="modal-next-btn" style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 10;">›</button>
         ` : ''}
         <img src="/api/files/raw?path=${encodeURIComponent(filePath)}" alt="Content" style="max-width: 100%; max-height: 90vh; object-fit: contain;" />
         ${navInfo.current !== null && navInfo.total > 0 ? `
-          <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px;">
+          <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: var(--text); padding: 8px 16px; border-radius: 20px; font-size: 14px;">
             ${navInfo.current + 1} / ${navInfo.total}
           </div>
         ` : ''}
@@ -4317,7 +4333,7 @@ class FunscriptImage extends HTMLElement {
         const newPrevBtn = document.createElement('button');
         newPrevBtn.id = 'modal-prev-btn';
         newPrevBtn.innerHTML = '‹';
-        newPrevBtn.style.cssText = 'position: absolute; left: 20px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 1.5rem; cursor: pointer; z-index: 10;';
+        newPrevBtn.style.cssText = 'position: absolute; left: 20px; top: 50%; transform: translateY(-50%); background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 10;';
 
         // Add click event listener
         newPrevBtn.addEventListener('click', (e) => {
@@ -4333,7 +4349,7 @@ class FunscriptImage extends HTMLElement {
         const newNextBtn = document.createElement('button');
         newNextBtn.id = 'modal-next-btn';
         newNextBtn.innerHTML = '›';
-        newNextBtn.style.cssText = 'position: absolute; right: 20px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 1.5rem; cursor: pointer; z-index: 10;';
+        newNextBtn.style.cssText = 'position: absolute; right: 20px; top: 50%; transform: translateY(-50%); background: var(--scrim-strong, rgba(16,16,18,0.88)); color: var(--text); border: 1px solid var(--line-strong, rgba(255,255,255,0.14)); border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 10;';
 
         // Add click event listener
         newNextBtn.addEventListener('click', (e) => {
@@ -4448,7 +4464,7 @@ class FunscriptImage extends HTMLElement {
   renderTagAssignButton() {
     if (this.getAttribute('tagassign') !== 'true') return '';
     return `
-      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: #1976d2; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; z-index: 101;">
+      <button class="tagassign-btn" title="Assign tags to this file" style="position: absolute; top: 10px; left: 10px; background: var(--info); color: var(--text); border: none; border-radius: var(--radius, 6px); width: 34px; height: 34px; font-size: 1rem; cursor: pointer; z-index: 101;">
         🏷️
       </button>
     `;
@@ -4458,17 +4474,17 @@ class FunscriptImage extends HTMLElement {
 
   setupEventListeners() {
     this.shadowRoot.addEventListener('click', (e) => {
-      if (e.target.classList.contains('tagassign-btn')) {
+      if (e.target.closest('.tagassign-btn')) {
         e.preventDefault();
         this.openTagModal();
         return false;
       }
-      if (e.target.classList.contains('tag-modal-close')) {
+      if (e.target.closest('.tag-modal-close')) {
         e.preventDefault();
         this.closeTagModal();
         return false;
       }
-      if (e.target.classList.contains('tag-add-btn')) {
+      if (e.target.closest('.tag-add-btn')) {
         e.preventDefault();
         const input = this.shadowRoot.querySelector('.tag-input');
         const tag = input.value.trim();
@@ -4478,7 +4494,7 @@ class FunscriptImage extends HTMLElement {
         }
         return false;
       }
-      if (e.target.classList.contains('tag-remove-btn')) {
+      if (e.target.closest('.tag-remove-btn')) {
         e.preventDefault();
         const tag = e.target.dataset.tag;
         if (tag) {

@@ -8,7 +8,7 @@ import {
 } from '@mui/icons-material';
 import FlagEmoji from '../FlagEmoji';
 
-const ACCENT = '#e94560';
+const ACCENT = 'var(--accent)';
 const CYAN = '#00d2ff';
 
 /**
@@ -37,7 +37,7 @@ export default function GamerEdgeCard({ cardProps }) {
     return (
       <Box sx={{
         position: 'absolute', top: 10, right: 10,
-        bgcolor: 'rgba(15, 16, 21, 0.85)', color: '#fff', 
+        bgcolor: 'rgba(15, 16, 21, 0.85)', color: 'var(--text)', 
         px: 1.5, py: 0.5, borderRadius: '4px',
         display: 'flex', alignItems: 'center', gap: 1,
         border: `1px solid ${CYAN}40`,
@@ -70,10 +70,10 @@ export default function GamerEdgeCard({ cardProps }) {
   const Outer = ({ children }) => (
     <Box sx={{
       width: 280, height: 520, position: 'relative', p: '3px',
-      background: `linear-gradient(135deg, #1a1a2e, #16213e)`,
+      background: `linear-gradient(135deg, var(--surface), var(--surface))`,
       clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%)',
       cursor: 'pointer', transition: 'all 0.2s',
-      '&::before': { content: '""', position: 'absolute', inset: 0, background: `linear-gradient(45deg, ${ACCENT}, #0f3460)`, zIndex: 0 },
+      '&::before': { content: '""', position: 'absolute', inset: 0, background: `linear-gradient(45deg, ${ACCENT}, var(--raised))`, zIndex: 0 },
       '&:hover': { transform: 'translateY(-3px)', boxShadow: `0 0 30px ${ACCENT}40` }
     }} onClick={onClick}
       onContextMenu={(e) => { e.preventDefault(); if (onSettings && mode === 'filter') onSettings(performer); }}
@@ -92,28 +92,28 @@ export default function GamerEdgeCard({ cardProps }) {
     return (
       <Outer>
         {/* Header — name, stats, icons */}
-        <Box sx={{ p: 1.5, borderBottom: `1px solid rgba(233,69,96,0.3)` }}>
+        <Box sx={{ p: 1.5, borderBottom: `1px solid var(--accent-quiet)` }}>
           <Typography variant="h6" color="#fff" fontWeight="bold" sx={{
             fontStyle: 'italic', textTransform: 'uppercase', fontSize: '1rem',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
           }}>{performer.name}</Typography>
-          <Box sx={{ display: 'flex', gap: 1, color: '#aaa', fontSize: '0.75rem', mt: 0.5 }}>
+          <Box sx={{ display: 'flex', gap: 1, color: 'var(--dim)', fontSize: '0.75rem', mt: 0.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><StorageIcon sx={{ fontSize: 13 }} />{stats.size}G</Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><ImageIcon sx={{ fontSize: 13 }} />{stats.pics}</Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><FolderIcon sx={{ fontSize: 13 }} />{stats.vids}</Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><GameIcon sx={{ fontSize: 13 }} />{stats.funscripts}</Box>
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
-            <Typography sx={{ color: '#888', fontSize: '0.7rem' }}>⬇ {daysSinceImport !== null ? `${daysSinceImport} days ago` : '—'}</Typography>
+            <Typography sx={{ color: 'var(--dim)', fontSize: '0.7rem' }}>⬇ {daysSinceImport !== null ? `${daysSinceImport} days ago` : '—'}</Typography>
             <Box sx={{ display: 'flex', gap: 0.5 }}>
-              {onSettings && <IconButton onClick={(e) => { e.stopPropagation(); onSettings(performer); }} sx={{ ...iconSx, color: '#ffeb3b' }}><SettingsIcon /></IconButton>}
+              {onSettings && <IconButton onClick={(e) => { e.stopPropagation(); onSettings(performer); }} sx={{ ...iconSx, color: 'var(--warn)' }}><SettingsIcon /></IconButton>}
               {onOpenHash && (
                 <IconButton onClick={(e) => { e.stopPropagation(); if (performer.latest_internal_run_id) window.open(`/hash-results/${performer.latest_internal_run_id}`, '_blank'); else onOpenHash(performer.id); }}
                   sx={{ ...iconSx, color: CYAN }}>
-                  {performer.hash_verified ? <CheckCircleIcon sx={{ color: '#4caf50' }} /> : performer.internal_duplicate_count > 0 ? <Badge badgeContent={performer.internal_duplicate_count} color="error" max={99} sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', height: '14px', minWidth: '14px', padding: '0 3px' } }}><FingerprintIcon /></Badge> : <FingerprintIcon />}
+                  {performer.hash_verified ? <CheckCircleIcon sx={{ color: 'var(--ok)' }} /> : performer.internal_duplicate_count > 0 ? <Badge badgeContent={performer.internal_duplicate_count} color="error" max={99} sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem', height: '14px', minWidth: '14px', padding: '0 3px' } }}><FingerprintIcon /></Badge> : <FingerprintIcon />}
                 </IconButton>
               )}
-              <IconButton onClick={handleSmartScan} disabled={smartScanLoading} sx={{ ...iconSx, color: '#ce93d8' }}>
+              <IconButton onClick={handleSmartScan} disabled={smartScanLoading} sx={{ ...iconSx, color: 'var(--accent)' }}>
                 {smartScanLoading ? <CircularProgress size={14} color="inherit" /> : <AutoFixHighIcon />}
               </IconButton>
               <IconButton onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
@@ -136,7 +136,7 @@ export default function GamerEdgeCard({ cardProps }) {
             {[
               { l: 'PIC', v: picsPercentage, c: CYAN, type: 'pics' },
               { l: 'VID', v: vidsPercentage, c: ACCENT, type: 'vids' },
-              { l: 'FUN', v: funscriptPercentage, c: '#fddb3a', type: 'funscript_vids' }
+              { l: 'FUN', v: funscriptPercentage, c: 'var(--warn)', type: 'funscript_vids' }
             ].map(p => (
               <Box key={p.l} onClick={(e) => { e.stopPropagation(); if (onProgressClick) onProgressClick(performer, p.type); }}
                 sx={{
@@ -166,7 +166,7 @@ export default function GamerEdgeCard({ cardProps }) {
         {/* Skewed rating badge */}
         <Box onClick={handleRatingBadgeClick} sx={{
           position: 'absolute', top: 10, left: 10,
-          bgcolor: `${ACCENT}e6`, color: '#fff', px: 1.5, py: 0.5,
+          bgcolor: `${ACCENT}e6`, color: 'var(--text)', px: 1.5, py: 0.5,
           fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer',
           transform: 'skewX(-10deg)', zIndex: 2
         }}>
@@ -194,7 +194,7 @@ export default function GamerEdgeCard({ cardProps }) {
             </IconButton>
           </Box>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1, color: '#aaa', fontSize: '0.75rem' }}>
+        <Box sx={{ display: 'flex', gap: 1, color: 'var(--dim)', fontSize: '0.75rem' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><StorageIcon sx={{ fontSize: 13 }} />{stats.size}G</Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><ImageIcon sx={{ fontSize: 13 }} />{stats.pics}</Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}><FolderIcon sx={{ fontSize: 13 }} />{stats.vids}</Box>

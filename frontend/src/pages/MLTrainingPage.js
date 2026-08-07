@@ -89,7 +89,7 @@ function MLTrainingPage({ basePath }) {
         alignItems: 'center', 
         bgcolor: 'grey.900', 
         borderRadius: 1, 
-        p: 1.5,
+        p: 2,
         fontFamily: 'monospace',
         fontSize: '0.85rem',
         color: 'grey.100',
@@ -375,7 +375,7 @@ function MLTrainingPage({ basePath }) {
               <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden', gap: 2, mt: 2 }}>
                 {/* Left Side - Image */}
                 <Box sx={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                  <Box sx={{ flexGrow: 1, bgcolor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 1 }}>
+                  <Box sx={{ flexGrow: 1, bgcolor: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 1 }}>
                     <img 
                       src={`/api/files/raw?path=${encodeURIComponent(
                         (reviewTab === 'KEEP' ? reviewDataset.keepImages : reviewDataset.deleteImages)[reviewIndex]?.path || ''

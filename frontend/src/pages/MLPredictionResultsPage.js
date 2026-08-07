@@ -81,13 +81,13 @@ function MLPredictionResultsPage() {
     const level = getConfidenceLevel(confidence);
     
     if (prediction === 0) { // Delete (0 = delete in training data)
-      if (level === 'high') return '🔴';
-      if (level === 'medium') return '🟠';
-      return '🟡';
+      if (level === 'high') return '';
+      if (level === 'medium') return '';
+      return '';
     } else { // Keep (1 = keep)
-      if (level === 'high') return '🟢';
-      if (level === 'medium') return '🟡';
-      return '⚪';
+      if (level === 'high') return '';
+      if (level === 'medium') return '';
+      return '';
     }
   };
 
@@ -164,7 +164,7 @@ function MLPredictionResultsPage() {
       <Box sx={{ 
         mb: 3, 
         p: 2, 
-        bgcolor: '#121212', 
+        bgcolor: 'var(--bg)', 
         borderRadius: 2,
         display: 'flex',
         gap: 3,
@@ -187,7 +187,7 @@ function MLPredictionResultsPage() {
         <Box>
           <Typography variant="caption" color="text.secondary">High Conf. Keep</Typography>
           <Typography variant="h6" fontWeight="bold" color="success.main">
-            🟢 {stats.highConfidenceKeep}
+            {stats.highConfidenceKeep}
           </Typography>
         </Box>
         <Box>
@@ -201,7 +201,7 @@ function MLPredictionResultsPage() {
       </Box>
 
       {/* Filter Options */}
-      <Box sx={{ mb: 3, p: 2, bgcolor: 'white', borderRadius: 2, border: '1px solid #e0e0e0' }}>
+      <Box sx={{ mb: 3, p: 2, bgcolor: 'var(--text)', borderRadius: 2, border: '1px solid #e0e0e0' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 2 }}>
           <Typography variant="subtitle1" fontWeight="bold">
             Filter Options
@@ -234,8 +234,8 @@ function MLPredictionResultsPage() {
 
         <Alert severity="info" icon={false} sx={{ mt: 2 }}>
           <Typography variant="body2">
-            <strong>Legend:</strong> 🔴 High confidence delete • 🟠 Medium confidence delete • 
-            🟢 High confidence keep • 🟡 Medium confidence keep/delete • ⚪ Low confidence keep
+            <strong>Legend:</strong>High confidence delete • Medium confidence delete •
+            High confidence keep • Medium confidence keep/delete • Low confidence keep
           </Typography>
         </Alert>
       </Box>
@@ -278,14 +278,14 @@ function MLPredictionResultsPage() {
           const isVideo = /\.(mp4|webm|mov|avi|mkv|m4v)$/i.test(item.file_path);
           const confidenceLevel = getConfidenceLevel(item.confidence);
           const icon = getConfidenceIcon(item.prediction, item.confidence);
-          const color = item.prediction === 1 ? '#f44336' : '#4caf50';
+          const color = item.prediction === 1 ? 'var(--bad)' : 'var(--ok)';
           
           return (
             <Card key={index} elevation={3} sx={{ display: 'flex', flexDirection: 'column' }}>
               {/* Header with prediction */}
               <Box sx={{
                 p: 1,
-                bgcolor: item.prediction === 1 ? '#ffebee' : '#e8f5e9',
+                bgcolor: item.prediction === 1 ? 'var(--bad-quiet)' : 'var(--ok-quiet)',
                 borderBottom: '2px solid',
                 borderColor: color
               }}>
@@ -310,7 +310,7 @@ function MLPredictionResultsPage() {
                 >
                   <Box sx={{ 
                     position: 'relative', 
-                    bgcolor: '#121212', 
+                    bgcolor: 'var(--bg)', 
                     minHeight: 280,
                     maxHeight: 400,
                     display: 'flex', 
@@ -346,7 +346,7 @@ function MLPredictionResultsPage() {
                     
                     {/* Model type badge */}
                     <Chip
-                      label={item.file_type === 'video' ? '🎬 Video' : '📸 Image'}
+                      label={item.file_type === 'video'? 'Video': 'Image'}
                       size="small"
                       sx={{ 
                         position: 'absolute', 
@@ -355,8 +355,8 @@ function MLPredictionResultsPage() {
                         height: 22,
                         fontSize: '0.65rem',
                         fontWeight: 'bold',
-                        bgcolor: item.file_type === 'video' ? '#e3f2fd' : '#f3e5f5',
-                        color: item.file_type === 'video' ? '#7e57c2' : '#7b1fa2',
+                        bgcolor: item.file_type === 'video' ? 'var(--info-quiet)' : 'var(--accent-quiet)',
+                        color: item.file_type === 'video' ? 'var(--accent)' : '#7b1fa2',
                         boxShadow: 2
                       }}
                     />
@@ -379,7 +379,7 @@ function MLPredictionResultsPage() {
                   </Box>
 
                   {/* Filename */}
-                  <Box sx={{ p: 0.5, bgcolor: '#121212' }}>
+                  <Box sx={{ p: 0.5, bgcolor: 'var(--bg)' }}>
                     <Tooltip title={item.file_path}>
                       <Typography 
                         variant="caption" 
@@ -391,7 +391,7 @@ function MLPredictionResultsPage() {
                           whiteSpace: 'nowrap'
                         }}
                       >
-                        📁 {item.file_name || 'Unknown file'}
+                        {item.file_name || 'Unknown file'}
                       </Typography>
                     </Tooltip>
                   </Box>
@@ -458,11 +458,11 @@ function MLPredictionResultsPage() {
       >
         <IconButton
           onClick={() => setSelectedImage(null)}
-          sx={{ position: 'absolute', right: 8, top: 8, color: 'white', bgcolor: 'rgba(0,0,0,0.5)' }}
+          sx={{ position: 'absolute', right: 8, top: 8, color: 'var(--text)', bgcolor: 'rgba(0,0,0,0.5)' }}
         >
           <CloseIcon />
         </IconButton>
-        <DialogContent sx={{ p: 0, bgcolor: 'black' }}>
+        <DialogContent sx={{ p: 0, bgcolor: 'var(--bg)' }}>
           {selectedImage && (
             <Box>
               <img
@@ -470,7 +470,7 @@ function MLPredictionResultsPage() {
                 alt={selectedImage.file_name}
                 style={{ width: '100%', height: 'auto', display: 'block' }}
               />
-              <Box sx={{ p: 2, bgcolor: 'white' }}>
+              <Box sx={{ p: 2, bgcolor: 'var(--text)' }}>
                 <Typography variant="h6">{selectedImage.file_name}</Typography>
                 <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
                   <Chip

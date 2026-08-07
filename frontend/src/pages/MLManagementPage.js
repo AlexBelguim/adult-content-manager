@@ -460,9 +460,9 @@ function MLManagementPage({ basePath }) {
                       {/* Image Model Card */}
                       {session.imageModel && (
                         <Grid item xs={12} md={session.videoModel ? 6 : 12}>
-                          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#121212' }}>
+                          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'var(--bg)' }}>
                             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
-                              📸 Image Model
+                              Image Model
                               <Chip
                                 label={session.imageModel.status || 'unknown'}
                                 color={session.imageModel.status === 'completed' ? 'success' : 'default'}
@@ -490,9 +490,9 @@ function MLManagementPage({ basePath }) {
                       {/* Video Model Card */}
                       {session.videoModel && (
                         <Grid item xs={12} md={session.imageModel ? 6 : 12}>
-                          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#121212' }}>
+                          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'var(--bg)' }}>
                             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
-                              🎬 Video Model
+                              Video Model
                               <Chip
                                 label={session.videoModel.status || 'unknown'}
                                 color={session.videoModel.status === 'completed' ? 'success' : 'default'}
@@ -574,7 +574,7 @@ function MLManagementPage({ basePath }) {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom variant="caption">
-                  📸 Image Balance
+                  Image Balance
                 </Typography>
                 <Typography variant="h4" color="warning.main">
                   {trainingStats.image_balance || 0}%
@@ -589,7 +589,7 @@ function MLManagementPage({ basePath }) {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom variant="caption">
-                  🎬 Video Balance
+                  Video Balance
                 </Typography>
                 <Typography variant="h4" color="warning.main">
                   {trainingStats.video_balance || 0}%
@@ -637,13 +637,13 @@ function MLManagementPage({ basePath }) {
             size="small"
           >
             <ToggleButton value="both">
-              📸 + 🎬 Both Models
+              + Both Models
             </ToggleButton>
             <ToggleButton value="image">
-              📸 Image Only
+              Image Only
             </ToggleButton>
             <ToggleButton value="video">
-              🎬 Video Only
+              Video Only
             </ToggleButton>
           </ToggleButtonGroup>
           <Typography variant="caption" display="block" sx={{ mt: 1 }} color="textSecondary">
@@ -675,12 +675,12 @@ function MLManagementPage({ basePath }) {
                           <span>
                             {performer.total_samples} samples ({performer.image_samples || 0} images, {performer.video_samples || 0} videos)
                             <br />
-                            <span style={{ color: '#f44336' }}>{performer.deleted_samples} deleted</span> / 
-                            <span style={{ color: '#4caf50' }}> {performer.kept_samples} kept</span>
+                            <span style={{ color: 'var(--bad)' }}>{performer.deleted_samples} deleted</span> / 
+                            <span style={{ color: 'var(--ok)' }}> {performer.kept_samples} kept</span>
                             {' • '}
                             <strong>{performer.balance.toFixed(1)}% deleted</strong>
                             <br />
-                            <span style={{ fontSize: '0.75rem', color: '#666' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                               CLIP: {performer.image_clips || 0} images, {performer.video_clips || 0} videos
                             </span>
                           </span>
@@ -704,7 +704,7 @@ function MLManagementPage({ basePath }) {
 
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle2" gutterBottom>
-              Included Performers ({getCurrentIncludedList().length}) - {selectedModelType === 'image' ? '📸 Image Only' : selectedModelType === 'video' ? '🎬 Video Only' : '📸🎬 Both Models'}
+              Included Performers ({getCurrentIncludedList().length}) - {selectedModelType === 'image'? 'Image Only': selectedModelType === 'video'? 'Video Only': 'Both Models'}
             </Typography>
             <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto' }}>
               <List dense>
@@ -719,12 +719,12 @@ function MLManagementPage({ basePath }) {
                             <span>
                               {performer.total_samples} samples ({performer.image_samples || 0} images, {performer.video_samples || 0} videos)
                               <br />
-                              <span style={{ color: '#f44336' }}>{performer.deleted_samples} deleted</span> / 
-                              <span style={{ color: '#4caf50' }}> {performer.kept_samples} kept</span>
+                              <span style={{ color: 'var(--bad)' }}>{performer.deleted_samples} deleted</span> / 
+                              <span style={{ color: 'var(--ok)' }}> {performer.kept_samples} kept</span>
                               {' • '}
                               <strong>{performer.balance.toFixed(1)}% deleted</strong>
                               <br />
-                              <span style={{ fontSize: '0.75rem', color: '#666' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                                 CLIP: {performer.image_clips || 0} images, {performer.video_clips || 0} videos
                               </span>
                             </span>
@@ -789,7 +789,7 @@ function MLManagementPage({ basePath }) {
             <Alert severity="info" sx={{ mb: 3 }}>
               Active Model: <strong>{activeModel.name ? activeModel.name.replace(/ \((Image|Video)\)$/, '') : activeModel.id}</strong>
               {' - '}
-              Using dual-model system (📸 Image + 🎬 Video models)
+              Using dual-model system ( Image + Video models)
             </Alert>
 
             <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>

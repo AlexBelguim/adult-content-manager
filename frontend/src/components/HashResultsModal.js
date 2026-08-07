@@ -374,7 +374,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
               <Box sx={{
                 mb: 3,
                 p: 2,
-                bgcolor: '#252525',
+                bgcolor: 'var(--surface)',
                 borderRadius: 2,
                 border: '1px solid #444',
                 display: 'flex',
@@ -382,21 +382,21 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
                 flexWrap: 'wrap'
               }}>
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#888' }}>Total Matches</Typography>
-                  <Typography variant="h6" fontWeight="bold" sx={{ color: '#fff' }}>{filteredItems.length}</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Total Matches</Typography>
+                  <Typography variant="h6" fontWeight="bold" sx={{ color: 'var(--text)' }}>{filteredItems.length}</Typography>
                 </Box>
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#888' }}>Selected</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Selected</Typography>
                   <Typography variant="h6" fontWeight="bold" sx={{ color: 'primary.light' }}>{selectedItems.size}</Typography>
                 </Box>
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#888' }}>Exact Matches</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Exact Matches</Typography>
                   <Typography variant="h6" fontWeight="bold" color="error">
                     {filteredItems.filter(i => i.exact_match).length}
                   </Typography>
                 </Box>
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#888' }}>Similar Matches</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Similar Matches</Typography>
                   <Typography variant="h6" fontWeight="bold" color="warning.main">
                     {filteredItems.filter(i => !i.exact_match).length}
                   </Typography>
@@ -405,7 +405,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
             )}
 
             {/* Controls placeholder */}
-            <Box sx={{ mb: 3, p: 2, bgcolor: '#1E1E1E', borderRadius: 2, border: '1px solid #333' }}>
+            <Box sx={{ mb: 3, p: 2, bgcolor: 'var(--surface)', borderRadius: 2, border: '1px solid #333' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 2 }}>
                 <Typography variant="subtitle1" fontWeight="bold">
                   Filter Options
@@ -498,7 +498,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
                     '& .MuiSlider-thumb': {
                       height: 20,
                       width: 20,
-                      backgroundColor: '#fff',
+                      backgroundColor: 'var(--text)',
                       border: '2px solid currentColor',
                       '&:focus, &:hover, &.Mui-active, &.Mui-focusVisible': {
                         boxShadow: 'inherit',
@@ -557,7 +557,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
             {/* Deleted File Matches Section - Compact View */}
             {deletedGroups.length > 0 && (
               <Box sx={{ mt: 4, mb: 4, pt: 3, borderTop: '1px solid #333' }}>
-                <Typography variant="h6" sx={{ mb: 2, color: '#aaa', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'var(--dim)', display: 'flex', alignItems: 'center', gap: 1 }}>
                   <DeleteIcon color="disabled" /> Matches with Deleted Files ({deletedGroups.length})
                 </Typography>
 
@@ -567,7 +567,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
                       key={`del-group-${groupIdx}`}
                       sx={{
                         p: 1.5,
-                        bgcolor: '#1a1a1a',
+                        bgcolor: 'var(--bg)',
                         borderRadius: 2,
                         border: '1px solid #333',
                         display: 'flex',
@@ -600,7 +600,7 @@ const HashResultsModal = ({ open, onClose, runId, standalone = false }) => {
                       </Box>
 
                       {/* Divider Icon */}
-                      <CompareArrowsIcon sx={{ color: '#444' }} />
+                      <CompareArrowsIcon sx={{ color: 'var(--faint)' }} />
 
                       {/* Sources (Right) */}
                       <Box sx={{ display: 'flex', gap: 1, overflowX: 'auto', p: 0.5 }}>

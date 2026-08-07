@@ -961,7 +961,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           variant="contained"
           onClick={handleNext}
           sx={{
-            backgroundColor: '#4caf50',
+            backgroundColor: 'var(--ok)',
             '&:hover': { backgroundColor: '#45a049' },
             mr: 1
           }}
@@ -980,7 +980,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           startIcon={<ImageIcon />}
           onClick={() => setCurrentTab('pics')}
           disabled={loadingFiles}
-          sx={{ backgroundColor: currentTab === 'pics' ? '#2e7d32' : 'transparent' }}
+          sx={{ backgroundColor: currentTab === 'pics' ? 'var(--ok)' : 'transparent' }}
         >
           Pictures
         </Button>
@@ -989,7 +989,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           startIcon={<MovieIcon />}
           onClick={() => setCurrentTab('vids')}
           disabled={loadingFiles}
-          sx={{ backgroundColor: currentTab === 'vids' ? '#1565c0' : 'transparent' }}
+          sx={{ backgroundColor: currentTab === 'vids' ? 'var(--info)' : 'transparent' }}
         >
           Videos
         </Button>
@@ -998,7 +998,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
           startIcon={<GameIcon />}
           onClick={() => setCurrentTab('funscript_vids')}
           disabled={loadingFiles}
-          sx={{ backgroundColor: currentTab === 'funscript_vids' ? '#c62828' : 'transparent' }}
+          sx={{ backgroundColor: currentTab === 'funscript_vids' ? 'var(--bad)' : 'transparent' }}
         >
           Funscript Videos
         </Button>
@@ -1106,14 +1106,14 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                     backgroundColor: (() => {
                       const pred = predictions[currentFile.hash_id];
                       if (pred.confidence > 0.8) {
-                        return pred.prediction === 1 ? '#ffebee' : '#e8f5e9';
+                        return pred.prediction === 1 ? 'var(--bad-quiet)' : 'var(--ok-quiet)';
                       }
-                      return '#fff3e0';
+                      return 'var(--warn-quiet)';
                     })(),
                     color: (() => {
                       const pred = predictions[currentFile.hash_id];
                       if (pred.confidence > 0.8) {
-                        return pred.prediction === 1 ? '#c62828' : '#2e7d32';
+                        return pred.prediction === 1 ? 'var(--bad)' : 'var(--ok)';
                       }
                       return '#e65100';
                     })(),
@@ -1121,9 +1121,9 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                     borderColor: (() => {
                       const pred = predictions[currentFile.hash_id];
                       if (pred.confidence > 0.8) {
-                        return pred.prediction === 1 ? '#ef5350' : '#66bb6a';
+                        return pred.prediction === 1 ? 'var(--bad)' : 'var(--ok)';
                       }
-                      return '#ffb74d';
+                      return 'var(--warn)';
                     })()
                   }}>
                     <span style={{ fontSize: '16px' }}>
@@ -1148,9 +1148,9 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                     borderRadius: '4px',
                     fontSize: '0.75rem',
                     fontWeight: 'bold',
-                    backgroundColor: currentFile.filtered === 'keep' ? '#4caf50' :
-                      currentFile.filtered === 'delete' ? '#f44336' : '#ff9800',
-                    color: 'white'
+                    backgroundColor: currentFile.filtered === 'keep' ? 'var(--ok)' :
+                      currentFile.filtered === 'delete' ? 'var(--bad)' : 'var(--warn)',
+                    color: 'var(--text)'
                   }}>
                     {currentFile.filtered === 'keep' ? 'KEPT' :
                       currentFile.filtered === 'delete' ? 'DELETED' :
@@ -1167,7 +1167,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
               sx={{
                 height: '60vh',
                 width: '100%',
-                backgroundColor: 'black',
+                backgroundColor: 'var(--bg)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -1285,7 +1285,7 @@ function PerformerFilterView({ performer, onBack, onNext, onComplete, handyInteg
                           startIcon={<UploadIcon />}
                           onClick={() => handleFunscriptUpload(funscript)}
                           sx={{
-                            backgroundColor: '#9c27b0',
+                            backgroundColor: 'var(--accent)',
                             '&:hover': { backgroundColor: '#7b1fa2' }
                           }}
                         >

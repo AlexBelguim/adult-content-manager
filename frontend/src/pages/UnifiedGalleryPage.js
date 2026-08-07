@@ -3,7 +3,7 @@ import UnifiedGallery from '../components/UnifiedGallery';
 
 const UnifiedGalleryPage = ({ handyIntegration, handyCode, handyConnected }) => {
   useEffect(() => {
-    console.log('🔍 UnifiedGalleryPage props:', { 
+    console.log('UnifiedGalleryPage props:', {
       handyConnected, 
       handyCode, 
       handyIntegration: !!handyIntegration 

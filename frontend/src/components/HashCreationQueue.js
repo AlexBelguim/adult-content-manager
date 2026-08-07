@@ -61,9 +61,9 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
       case 'processing':
         return <HourglassEmptyIcon sx={{ fontSize: 20, color: 'primary.main' }} />;
       case 'completed':
-        return <CheckCircleIcon sx={{ fontSize: 20, color: '#4caf50' }} />;
+        return <CheckCircleIcon sx={{ fontSize: 20, color: 'var(--ok)' }} />;
       case 'error':
-        return <ErrorIcon sx={{ fontSize: 20, color: '#f44336' }} />;
+        return <ErrorIcon sx={{ fontSize: 20, color: 'var(--bad)' }} />;
       case 'queued':
       default:
         return <HourglassEmptyIcon sx={{ fontSize: 20, color: '#9e9e9e' }} />;
@@ -109,7 +109,7 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
         sx={{
           p: 1.5,
           bgcolor: 'primary.main',
-          color: 'white',
+          color: 'var(--text)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -124,17 +124,17 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
           <Chip
             label={`${queue.filter(j => j.status !== 'completed' && j.status !== 'error').length} active`}
             size="small"
-            sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white', height: 20, fontSize: '0.7rem' }}
+            sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'var(--text)', height: 20, fontSize: '0.7rem' }}
           />
         </Box>
         <Box>
           <Tooltip title={minimized ? 'Expand' : 'Minimize'}>
-            <IconButton size="small" sx={{ color: 'white' }} onClick={(e) => { e.stopPropagation(); setMinimized(!minimized); }}>
+            <IconButton size="small" sx={{ color: 'var(--text)' }} onClick={(e) => { e.stopPropagation(); setMinimized(!minimized); }}>
               {minimized ? <MaximizeIcon fontSize="small" /> : <MinimizeIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
           <Tooltip title="Close (cancels all jobs)">
-            <IconButton size="small" sx={{ color: 'white' }} onClick={(e) => { e.stopPropagation(); handleClose(); }}>
+            <IconButton size="small" sx={{ color: 'var(--text)' }} onClick={(e) => { e.stopPropagation(); handleClose(); }}>
               <CloseIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -145,7 +145,7 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
         <Box sx={{ maxHeight: 'calc(80vh - 60px)', overflow: 'auto' }}>
           {/* Active Jobs */}
           {activeJobs.length > 0 && activeJobs.map((activeJob) => (
-            <Box key={activeJob.id} sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#121212' }}>
+            <Box key={activeJob.id} sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: 'var(--bg)' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   {getStatusIcon(activeJob.status)}
@@ -187,7 +187,9 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
                     sx={{
                       px: 1,
                       py: 0.5,
-                      bgcolor: index % 2 === 0 ? '#fafafa' : 'white',
+                      // Zebra striping. The alternate row was literally 'white',
+                      // which on a dark theme rendered as a blinding band.
+                      bgcolor: index % 2 === 0 ? 'var(--surface)' : 'var(--raised)',
                       borderRadius: 1,
                       mb: 0.5,
                     }}
@@ -243,7 +245,7 @@ const HashCreationQueue = ({ queue, onClose, onCancel, title = "Hash Creation Qu
                     sx={{
                       px: 1,
                       py: 0.5,
-                      bgcolor: job.status === 'completed' ? '#e8f5e9' : '#ffebee',
+                      bgcolor: job.status === 'completed' ? 'var(--ok-quiet)' : 'var(--bad-quiet)',
                       borderRadius: 1,
                       mb: 0.5,
                     }}

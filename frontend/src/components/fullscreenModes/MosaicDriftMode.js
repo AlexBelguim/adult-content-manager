@@ -66,8 +66,11 @@ export default function MosaicDriftMode({ performers, onPhotoClick, active }) {
     };
   }, [items, size]);
 
-  // Track size
+  // Track size. Re-runs when `active` flips so the ResizeObserver attaches
+  // the moment this mode actually becomes active (containerRef is null
+  // while we're returning null from the early-return below).
   useEffect(() => {
+    if (!active) return;
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
@@ -78,7 +81,7 @@ export default function MosaicDriftMode({ performers, onPhotoClick, active }) {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [active]);
 
   if (!active) return null;
 

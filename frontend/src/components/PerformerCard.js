@@ -28,8 +28,10 @@ import {
   Clear as ClearIcon,
   Fingerprint as FingerprintIcon,
   AutoFixHigh as AutoFixHighIcon,
-  CheckCircle as CheckCircleIcon
+  CheckCircle as CheckCircleIcon,
+  Star as StarIcon
 } from '@mui/icons-material';
+import { overlayChipSx, ICON } from './layout';
 import { getPerformerLiveStats } from '../utils/api';
 import { ensureFlag } from '../utils/countryFlags';
 import FlagEmoji from './FlagEmoji';
@@ -470,10 +472,10 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Rating value={ratingValue} precision={0.1} max={5} onChange={handleRatingChange} disabled={ratingSaving}
-              sx={{ color: '#ffeb3b', '& .MuiRating-iconEmpty': { color: 'rgba(255,255,255,0.25)' } }} />
-            {ratingSaving ? <CircularProgress size={20} sx={{ color: '#ffeb3b' }} /> : (
+              sx={{ color: 'var(--warn)', '& .MuiRating-iconEmpty': { color: 'var(--muted)' } }} />
+            {ratingSaving ? <CircularProgress size={20} sx={{ color: 'var(--warn)' }} /> : (
               <Tooltip title="Clear rating"><span>
-                <IconButton size="small" sx={{ color: '#ffeb3b', padding: 0, width: '28px', height: '28px' }}
+                <IconButton size="small" sx={{ color: 'var(--warn)', padding: 0, width: '28px', height: '28px' }}
                   onClick={handleRatingClear} disabled={ratingValue === null}><ClearIcon fontSize="small" /></IconButton>
               </span></Tooltip>
             )}
@@ -487,13 +489,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
           <DialogTitle onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}>Performer Actions: {performer.name}</DialogTitle>
           <DialogContent onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}>
             <Typography variant="body1" gutterBottom sx={{ mb: 3 }}>What would you like to do with this performer?</Typography>
-            <Box sx={{ border: '2px solid #2196f3', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'rgba(33,150,243,0.1)' }}>
-              <Typography variant="h6" sx={{ color: '#2196f3', mb: 1 }}>🔄 Move Back to "Before Filter Performer"</Typography>
+            <Box sx={{ border: '2px solid #2196f3', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--info-quiet)' }}>
+              <Typography variant="h6" sx={{ color: 'var(--info)', mb: 1 }}>🔄 Move Back to "Before Filter Performer"</Typography>
               <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Move this performer back to the "before filter performer" folder for re-filtering.</Typography>
               <Box sx={{ mt: 2 }}><Button variant="contained" color="primary" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleMoveToBeforeFilter(); }} disabled={deleting} fullWidth>{deleting ? 'Moving...' : 'Move to Before Filter Performer'}</Button></Box>
             </Box>
-            <Box sx={{ border: '2px solid #f44336', borderRadius: 2, p: 2, backgroundColor: 'rgba(244,67,54,0.1)' }}>
-              <Typography variant="h6" sx={{ color: '#f44336', mb: 1 }}>🗑️ Completely Delete Performer</Typography>
+            <Box sx={{ border: '2px solid #f44336', borderRadius: 2, p: 2, backgroundColor: 'var(--bad-quiet)' }}>
+              <Typography variant="h6" sx={{ color: 'var(--bad)', mb: 1 }}>🗑️ Completely Delete Performer</Typography>
               <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Permanently delete all database records and optionally remove all files.</Typography>
               <Alert severity="warning" sx={{ mb: 2 }}>This action cannot be undone!</Alert>
               <FormControlLabel control={<Checkbox checked={deleteFromSystem} onChange={(e) => { e.stopPropagation(); setDeleteFromSystem(e.target.checked); }} color="error" onClick={(e) => e.stopPropagation()} />}
@@ -512,7 +514,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
             <Typography>We found a match for <strong>{performer.name}</strong>:</Typography>
             <Box sx={{ my: 2, p: 2, border: '1px solid #444', borderRadius: 1 }}>
               <Typography variant="h6" color="primary">{smartScanMatch?.name}</Typography>
-              <Typography variant="caption" sx={{ color: '#aaa' }}>Files: {(smartScanMatch?.pics_count || 0) + (smartScanMatch?.vids_count || 0)} | Folder: {smartScanMatch?.moved_to_after ? 'After Filter' : 'Before Filter'}</Typography>
+              <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Files: {(smartScanMatch?.pics_count || 0) + (smartScanMatch?.vids_count || 0)} | Folder: {smartScanMatch?.moved_to_after ? 'After Filter' : 'Before Filter'}</Typography>
             </Box>
             <Typography>Do you want to <strong>MERGE</strong> {performer.name} into {smartScanMatch?.name}?</Typography>
           </DialogContent>
@@ -547,7 +549,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         minHeight: '520px', // Minimum height to maintain consistency
         borderRadius: '8px',
         overflow: 'hidden',
-        backgroundColor: imageLoaded ? 'rgba(18, 18, 18, 0.7)' : 'rgba(40, 40, 40, 0.9)',
+        backgroundColor: imageLoaded ? 'var(--scrim)' : 'var(--scrim-strong)',
         boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
         position: 'relative',
         cursor: 'pointer',
@@ -558,7 +560,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         transition: 'all 0.3s ease',
         // Loading skeleton animation
         ...(!imageLoaded && {
-          background: 'linear-gradient(90deg, rgba(40, 40, 40, 0.9) 25%, rgba(60, 60, 60, 0.9) 50%, rgba(40, 40, 40, 0.9) 75%)',
+          background: 'linear-gradient(90deg, var(--scrim-strong) 25%, var(--scrim-strong) 50%, var(--scrim-strong) 75%)',
           backgroundSize: '200% 100%',
           animation: 'loading-skeleton 1.5s ease-in-out infinite',
           '@keyframes loading-skeleton': {
@@ -645,7 +647,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
               '100%': { transform: 'rotate(360deg)' }
             }
           }} />
-          <Typography sx={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '12px' }}>
+          <Typography sx={{ color: 'var(--dim)', fontSize: '12px' }}>
             Loading...
           </Typography>
         </Box>
@@ -681,30 +683,21 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
       {/* Rating overlay - gallery mode */}
       {mode === 'gallery' && (
         <Box className="rating-badge" sx={{
+          ...overlayChipSx(ratingValue !== null ? 'var(--warn)' : 'var(--dim)'),
           position: 'absolute',
           top: '10px',
           left: '10px',
           zIndex: 3,
-          background: ratingValue !== null ? 'rgba(0, 0, 0, 0.75)' : 'rgba(0, 0, 0, 0.65)',
-          borderRadius: '20px',
-          padding: '6px 12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          border: '2px solid rgba(255, 235, 59, 0.35)',
-          color: '#ffeb3b',
-          fontWeight: 'bold',
-          fontSize: '0.9rem',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.45)',
           cursor: 'pointer',
-          transition: 'transform 0.2s ease'
+          transition: 'border-color .16s ease, color .16s ease',
+          '&:hover': { borderColor: 'var(--warn)', color: 'var(--warn)' }
         }}
           onClick={handleRatingBadgeClick}
           onMouseDown={(e) => {
             e.stopPropagation();
           }}
         >
-          <span role="img" aria-label="rating">⭐</span>
+          <StarIcon sx={{ width: ICON.inline, height: ICON.inline }} />
           {ratingValue !== null ? formatRating(ratingValue) : 'Rate'}
         </Box>
       )}
@@ -712,38 +705,28 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
       {/* Age and Country Flag overlay - only in gallery mode */}
       {mode === 'gallery' && (performer.age || countryFlag) && (
         <Box sx={{
+          // Same overlayChipSx as the rating badge on the opposite corner, so
+          // the two read as a matched pair instead of two unrelated widgets.
+          ...overlayChipSx('var(--text)'),
           position: 'absolute',
           top: '10px',
           right: '10px',
-          zIndex: 3,
-          background: 'rgba(0, 0, 0, 0.8)',
-          backdropFilter: 'blur(10px)',
-          borderRadius: '20px',
-          padding: '6px 12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.75,
-          border: '2px solid rgba(255, 255, 255, 0.2)',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
-          minHeight: '32px',
-          height: '32px'
+          zIndex: 3
         }}>
           {performer.age && (
-            <Typography sx={{
-              color: 'white',
-              fontSize: '1.1rem',
-              fontWeight: 'bold',
-              textShadow: '0 2px 4px rgba(0, 0, 0, 0.8)',
-              lineHeight: 1
-            }}>
-              {displayAge}
-            </Typography>
+            <Box component="span">{displayAge}</Box>
+          )}
+          {performer.age && countryFlag && (
+            <Box sx={{ width: '1px', alignSelf: 'stretch', bgcolor: 'var(--line-strong)' }} />
           )}
           {countryFlag && (
+            // 0.95rem matches the chip's own font-size. At 1.05rem the flag was
+            // the tallest thing in the chip, making this badge 1.6px taller
+            // than the rating badge on the opposite corner.
             <FlagEmoji
               countryCode={countryFlag}
-              size="1.3rem"
-              style={{ marginLeft: performer.age ? '4px' : '0', display: 'flex', alignItems: 'center' }}
+              size="0.95rem"
+              style={{ display: 'flex', alignItems: 'center', lineHeight: 1 }}
             />
           )}
         </Box>
@@ -762,7 +745,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         {mode === 'filter' && (
           <Box className="card-header" sx={{
             padding: '12px',
-            background: 'rgba(35, 35, 35, 0.8)',
+            background: 'var(--scrim)',
             margin: '10px 10px 0 10px',
             borderRadius: '8px',
             boxShadow: '0 2px 4px rgba(0, 0, 0, 1)'
@@ -779,7 +762,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   margin: 0,
                   fontSize: '1.1rem',
                   fontWeight: 'bold',
-                  color: 'white',
+                  color: 'var(--text)',
                   textShadow: '0 1px 1px rgba(0, 0, 0, 0.3)',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -795,7 +778,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                     if (Array.isArray(aliasArray) && aliasArray.length > 0) {
                       return (
                         <Typography variant="caption" sx={{
-                          color: 'rgba(255, 255, 255, 0.7)',
+                          color: 'var(--dim)',
                           fontSize: '0.7rem',
                           fontStyle: 'italic',
                           textShadow: '0 1px 1px rgba(0, 0, 0, 0.3)',
@@ -832,13 +815,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <StorageIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.size} GB
                 </Box>
@@ -846,13 +829,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <ImageIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.pics}
                 </Box>
@@ -860,13 +843,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <FolderIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.vids}
                 </Box>
@@ -874,13 +857,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <GameIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.funscripts}
                 </Box>
@@ -891,7 +874,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                color: 'rgba(255, 255, 255, 0.7)',
+                color: 'var(--dim)',
                 fontSize: '0.75rem'
               }}>
                 <Box sx={{
@@ -912,18 +895,18 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                       sx={{
                         background: 'transparent',
                         border: 'none',
-                        color: '#ffeb3b',
+                        color: 'var(--warn)',
                         padding: 0,
                         margin: 0,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        width: '24px',
-                        height: '24px',
+                        width: '26px',
+                        height: '26px',
                         cursor: 'pointer',
                         '& svg': {
-                          width: '18px',
-                          height: '18px'
+                          width: '17px',
+                          height: '17px'
                         }
                       }}
                     >
@@ -953,21 +936,21 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                           background: 'transparent',
                           border: 'none',
                           color: performer.hash_verified
-                            ? '#4caf50'
+                            ? 'var(--ok)'
                             : performer.internal_duplicate_count > 0
-                              ? '#f44336'
-                              : '#2196f3',
+                              ? 'var(--bad)'
+                              : 'var(--info)',
                           padding: 0,
                           margin: 0,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          width: '24px',
-                          height: '24px',
+                          width: '26px',
+                          height: '26px',
                           cursor: 'pointer',
                           '& svg': {
-                            width: '18px',
-                            height: '18px'
+                            width: '17px',
+                            height: '17px'
                           }
                         }}
                       >
@@ -1024,16 +1007,16 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                     sx={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#ce93d8', // Purple magic color
+                      color: 'var(--accent)', // Purple magic color
                       padding: 0,
                       margin: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: '24px',
-                      height: '24px',
+                      width: '26px',
+                      height: '26px',
                       cursor: 'pointer',
-                      '& svg': { width: '18px', height: '18px' }
+                      '& svg': { width: '17px', height: '17px' }
                     }}
                   >
                     {smartScanLoading ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon className="scan-icon" />}
@@ -1052,18 +1035,18 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                     sx={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#ff3a3a',
+                      color: 'var(--bad)',
                       padding: 0,
                       margin: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: '24px',
-                      height: '24px',
+                      width: '26px',
+                      height: '26px',
                       cursor: 'pointer',
                       '& svg': {
-                        width: '18px',
-                        height: '18px'
+                        width: '17px',
+                        height: '17px'
                       }
                     }}
                   >
@@ -1117,7 +1100,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         {mode === 'gallery' && (
           <Box className="card-info-section" sx={{
             padding: '12px',
-            background: 'rgba(35, 35, 35, 0.9)',
+            background: 'var(--scrim)',
             margin: '0 10px 10px 10px',
             borderRadius: '8px',
             boxShadow: '0 2px 4px rgba(0, 0, 0, 1)'
@@ -1133,7 +1116,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                 margin: 0,
                 fontSize: '1.1rem',
                 fontWeight: 'bold',
-                color: 'white',
+                color: 'var(--text)',
                 textShadow: '0 1px 1px rgba(0, 0, 0, 0.3)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
@@ -1153,18 +1136,18 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                     sx={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#2196f3',
+                      color: 'var(--info)',
                       padding: 0,
                       margin: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: '24px',
-                      height: '24px',
+                      width: '26px',
+                      height: '26px',
                       cursor: 'pointer',
                       '& svg': {
-                        width: '18px',
-                        height: '18px'
+                        width: '17px',
+                        height: '17px'
                       }
                     }}
                   >
@@ -1177,18 +1160,18 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                     sx={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#f44336',
+                      color: 'var(--bad)',
                       padding: 0,
                       margin: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: '24px',
-                      height: '24px',
+                      width: '26px',
+                      height: '26px',
                       cursor: 'pointer',
                       '& svg': {
-                        width: '18px',
-                        height: '18px'
+                        width: '17px',
+                        height: '17px'
                       }
                     }}
                   >
@@ -1209,18 +1192,18 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   sx={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#ff3a3a',
+                    color: 'var(--bad)',
                     padding: 0,
                     margin: 0,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    width: '24px',
-                    height: '24px',
+                    width: '26px',
+                    height: '26px',
                     cursor: 'pointer',
                     '& svg': {
-                      width: '18px',
-                      height: '18px'
+                      width: '17px',
+                      height: '17px'
                     }
                   }}
                 >
@@ -1246,13 +1229,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <StorageIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.size} GB
                 </Box>
@@ -1260,13 +1243,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <ImageIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.pics}
                 </Box>
@@ -1274,13 +1257,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <FolderIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.vids}
                 </Box>
@@ -1288,13 +1271,13 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: '0.8rem',
-                  color: 'rgba(255, 255, 255, 0.9)'
+                  color: 'var(--text)'
                 }}>
                   <GameIcon sx={{
                     marginRight: '4px',
                     opacity: 0.7,
-                    width: '14px',
-                    height: '14px'
+                    width: '15px',
+                    height: '15px'
                   }} />
                   {stats.funscripts}
                 </Box>
@@ -1307,7 +1290,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         {mode === 'filter' && (
           <Box className="card-progress-section" sx={{
             padding: '12px',
-            background: 'rgba(35, 35, 35, 0.8)',
+            background: 'var(--scrim)',
             margin: '0 10px 15px 10px', // Increased bottom margin from 10px to 15px
             borderRadius: '8px',
             boxShadow: '0 2px 4px rgba(0, 0, 0, 1)',
@@ -1324,8 +1307,8 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                 }
               }}
               sx={{
-                backgroundColor: '#2e7d32',
-                color: 'white',
+                backgroundColor: 'var(--ok)',
+                color: 'var(--bg)',
                 padding: '4px 8px',
                 borderRadius: '4px',
                 fontSize: '0.8rem',
@@ -1351,8 +1334,8 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                 }
               }}
               sx={{
-                backgroundColor: '#1565c0',
-                color: 'white',
+                backgroundColor: 'var(--info)',
+                color: 'var(--bg)',
                 padding: '4px 8px',
                 borderRadius: '4px',
                 fontSize: '0.8rem',
@@ -1378,8 +1361,8 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
                 }
               }}
               sx={{
-                backgroundColor: '#c62828',
-                color: 'white',
+                backgroundColor: 'var(--bad)',
+                color: 'var(--bg)',
                 padding: '4px 8px',
                 borderRadius: '4px',
                 fontSize: '0.8rem',
@@ -1434,21 +1417,21 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
             onChange={handleRatingChange}
             disabled={ratingSaving}
             sx={{
-              color: '#ffeb3b',
+              color: 'var(--warn)',
               '& .MuiRating-iconEmpty': {
-                color: 'rgba(255, 255, 255, 0.25)'
+                color: 'var(--muted)'
               }
             }}
           />
           {ratingSaving ? (
-            <CircularProgress size={20} sx={{ color: '#ffeb3b' }} />
+            <CircularProgress size={20} sx={{ color: 'var(--warn)' }} />
           ) : (
             <Tooltip title="Clear rating">
               <span>
                 <IconButton
                   size="small"
                   sx={{
-                    color: '#ffeb3b',
+                    color: 'var(--warn)',
                     padding: 0,
                     width: '28px',
                     height: '28px'
@@ -1514,9 +1497,9 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
             borderRadius: 2,
             p: 2,
             mb: 2,
-            backgroundColor: 'rgba(33, 150, 243, 0.1)'
+            backgroundColor: 'var(--info-quiet)'
           }}>
-            <Typography variant="h6" sx={{ color: '#2196f3', mb: 1 }}>
+            <Typography variant="h6" sx={{ color: 'var(--info)', mb: 1 }}>
               🔄 Move Back to "Before Filter Performer"
             </Typography>
             <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
@@ -1546,9 +1529,9 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
             border: '2px solid #f44336',
             borderRadius: 2,
             p: 2,
-            backgroundColor: 'rgba(244, 67, 54, 0.1)'
+            backgroundColor: 'var(--bad-quiet)'
           }}>
-            <Typography variant="h6" sx={{ color: '#f44336', mb: 1 }}>
+            <Typography variant="h6" sx={{ color: 'var(--bad)', mb: 1 }}>
               🗑️ Completely Delete Performer
             </Typography>
             <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
@@ -1627,7 +1610,7 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
           </Typography>
           <Box sx={{ my: 2, p: 2, border: '1px solid #444', borderRadius: 1 }}>
             <Typography variant="h6" color="primary">{smartScanMatch?.name}</Typography>
-            <Typography variant="caption" sx={{ color: '#aaa' }}>
+            <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
               Files: {smartScanMatch?.pics_count + smartScanMatch?.vids_count} |
               Folder: {smartScanMatch?.moved_to_after ? 'After Filter' : 'Before Filter'}
             </Typography>

@@ -361,7 +361,7 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
                       borderColor: isActive ? 'primary.main' : 'divider',
                       bgcolor: isActive ? 'rgba(255,255,255,0.05)' : 'transparent',
                       transition: 'all 0.2s',
-                      '&:hover': { borderColor: primary, bgcolor: 'rgba(255,255,255,0.03)' },
+                      '&:hover': { borderColor: primary, bgcolor: 'var(--raised)' },
                     }}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -397,7 +397,7 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
                   alignItems: 'center', 
                   gap: 2,
                   p: 1.5,
-                  bgcolor: 'rgba(255,255,255,0.03)',
+                  bgcolor: 'var(--raised)',
                   borderRadius: 2,
                   border: '1px solid',
                   borderColor: recordingKey === action ? 'primary.main' : 'divider',
@@ -459,7 +459,7 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
               alignItems: 'center',
               gap: 2,
               p: 2,
-              bgcolor: 'rgba(126, 87, 194, 0.08)',
+              bgcolor: 'var(--accent-quiet)',
               borderRadius: 2,
               border: '1px solid',
               borderColor: 'divider',
@@ -551,7 +551,7 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
                         </Typography>
 
                         {trueNASStatus.detailedIssues?.length > 0 && (
-                          <Box sx={{ maxHeight: 120, overflow: 'auto', bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, p: 1 }}>
+                          <Box sx={{ maxHeight: 120, overflow: 'auto', bgcolor: 'var(--raised)', borderRadius: 1, p: 1 }}>
                             {trueNASStatus.detailedIssues.slice(0, 5).map((issue, i) => (
                               <Typography key={i} variant="caption" color="text.secondary" display="block">• {issue}</Typography>
                             ))}
@@ -654,7 +654,7 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
             <br />
             • Content genre information
             <br /><br />
-            <strong style={{ color: '#4caf50' }}>Your files will NOT be deleted from the system.</strong>
+            <strong style={{ color: 'var(--ok)' }}>Your files will NOT be deleted from the system.</strong>
           </DialogContentText>
         </DialogContent>
         <DialogActions>

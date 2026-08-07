@@ -36,8 +36,8 @@ const SceneManagerPage = () => {
           justifyContent: 'center',
           alignItems: 'center',
           gap: 2,
-          backgroundColor: '#121212',
-          color: '#ffffff'
+          backgroundColor: 'var(--bg)',
+          color: 'var(--text)'
         }}
       >
         <Typography variant="h5" sx={{ fontWeight: 600 }}>

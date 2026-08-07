@@ -69,7 +69,7 @@ function ThumbnailSelectorWrapper() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#1a1a1a' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'var(--bg)' }}>
         <CircularProgress />
       </Box>
     );
@@ -77,7 +77,7 @@ function ThumbnailSelectorWrapper() {
 
   if (!performer) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#1a1a1a', color: '#fff' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'var(--bg)', color: 'var(--text)' }}>
         Performer not found
       </Box>
     );

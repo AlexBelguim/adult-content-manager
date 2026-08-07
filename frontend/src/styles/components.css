@@ -1,0 +1,185 @@
+/* ══════════════════════════════════════════════════════════════════
+   Shared component styles — token driven.
+
+   REPLACES styles/themes/{cinematic,cleanSplit,gamer,gamerEdge,tokyoNight}.css.
+
+   Those five files were 691 lines that declared the SAME ~26 selectors five
+   times over, once per theme, each with hardcoded colours and !important on
+   every line. Because they only matched a fixed set of class names, they were
+   also the reason theming appeared to work on the gallery and nowhere else.
+
+   This file declares each selector once against CSS variables, so every theme
+   — present and future — gets it for free. No !important: nothing here needs
+   to out-shout anything now that the values come from one place.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ─── Performer card ──────────────────────────────────────────── */
+.performer-card {
+  border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  box-shadow: none;
+  transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
+}
+
+.performer-card:hover {
+  border-color: var(--line-strong);
+  background-color: var(--raised);
+  transform: translateY(-2px);
+}
+
+.performer-card .card-header {
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.performer-card .card-info-section {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+.performer-card .performer-name {
+  color: var(--text);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+/* .rating-badge is styled by overlayChipSx in components/layout — the same
+   style the age/country badge uses, so the two corners of the card match.
+   Declaring it here as well only created a second source of truth. */
+
+/* Action icons share one resting/hover treatment */
+.performer-card .settings-icon,
+.performer-card .hash-icon,
+.performer-card .scan-icon,
+.performer-card .refresh-icon {
+  color: var(--dim);
+  transition: color .14s ease;
+}
+
+.performer-card .settings-icon:hover,
+.performer-card .hash-icon:hover,
+.performer-card .scan-icon:hover,
+.performer-card .refresh-icon:hover {
+  color: var(--accent);
+}
+
+/* ─── Content / gallery cards ─────────────────────────────────── */
+.content-card,
+.unified-gallery-card {
+  border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  box-shadow: none;
+  transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
+}
+
+.content-card:hover,
+.unified-gallery-card:hover {
+  border-color: var(--line-strong);
+  background-color: var(--raised);
+  transform: translateY(-2px);
+}
+
+.content-card .MuiCardContent-root {
+  background: transparent;
+}
+
+.content-card .genre-avatar {
+  background: var(--accent-quiet);
+  color: var(--accent);
+}
+
+/* ─── Section headings ────────────────────────────────────────── */
+.section-title {
+  color: var(--text);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+/* ─── Gallery chrome ──────────────────────────────────────────── */
+.gallery-container {
+  background: var(--bg);
+}
+
+.gallery-controls,
+.filter-controls {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg, 10px);
+}
+
+.progress-btn {
+  background: var(--accent);
+  color: var(--on-fill, var(--bg));
+  border-radius: var(--radius, 6px);
+}
+
+.progress-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* ─── MUI surfaces that these cards live inside ───────────────── */
+.MuiDialog-paper {
+  background-color: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg, 10px);
+}
+
+.MuiChip-filled {
+  background-color: var(--raised);
+  color: var(--text);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border-color: var(--accent);
+}
+
+/* ─── Links ───────────────────────────────────────────────────────
+   Bare <a> tags fall back to the browser default #0000EE, which is a
+   bright blue on this dark shell. Scoped to anchors that carry an href
+   and no MUI class, so MUI's own Link/Button-as-anchor keep their own
+   styling. */
+a[href]:not([class*="Mui"]) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a[href]:not([class*="Mui"]):hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* MUI Box rendered as an anchor: inherit rather than take the UA blue */
+a[href].MuiBox-root {
+  color: inherit;
+  text-decoration: none;
+}
+
+a[href].MuiBox-root:hover {
+  color: var(--accent);
+}
+
+/* ─── Scrollbars ──────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--raised);
+  border-radius: var(--radius-sm, 4px);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}

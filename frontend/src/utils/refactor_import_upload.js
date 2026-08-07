@@ -4,7 +4,7 @@ const path = require('path');
 function refactorFile(filePath) {
     let content = fs.readFileSync(filePath, 'utf8');
 
-    // 1. Remove background: '#1E1E1E' and color: '#fff' from Paper
+    // 1. Remove background: 'var(--surface)' and color: 'var(--text)' from Paper
     content = content.replace(/background:\s*['"]#1E1E1E['"],?/g, '');
     content = content.replace(/bgcolor:\s*['"]#1E1E1E['"],?/g, '');
     content = content.replace(/color:\s*['"]#fff['"],?/g, '');
@@ -47,29 +47,29 @@ function refactorFile(filePath) {
     content = content.replace(/bgcolor:\s*['"]rgba\(76,\s*175,\s*80,\s*0\.08\)['"]/g, "bgcolor: 'action.hover'");
     content = content.replace(/bgcolor:\s*['"]rgba\(76,\s*175,\s*80,\s*0\.2\)['"]/g, "bgcolor: 'action.selected'");
     // Box shadow for green
-    content = content.replace(/boxShadow:\s*['"]0 3px 5px 2px rgba\(76, 175, 80, \.3\)['"]/g, "boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)'");
+    content = content.replace(/boxShadow:\s*['"]0 3px 5px 2px rgba\(76, 175, 80, \.3\)['"]/g, "boxShadow: '0 3px 5px 2px var(--accent-quiet)'");
 
     // Upload queue interactions (orange/pink to primary)
     content = content.replace(/borderColor:\s*['"]#b085f5['"]/g, "borderColor: 'primary.main'");
     content = content.replace(/color:\s*['"]#b085f5['"]/g, "color: 'primary.main'");
     content = content.replace(/bgcolor:\s*['"]rgba\(255,\s*142,\s*83,\s*0\.2\)['"]/g, "bgcolor: 'action.selected'");
     content = content.replace(/bgcolor:\s*['"]rgba\(255,\s*142,\s*83,\s*0\.05\)['"]/g, "bgcolor: 'action.hover'");
-    content = content.replace(/boxShadow:\s*['"]0 3px 5px 2px rgba\(255, 105, 135, \.3\)['"]/g, "boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)'");
+    content = content.replace(/boxShadow:\s*['"]0 3px 5px 2px rgba\(255, 105, 135, \.3\)['"]/g, "boxShadow: '0 3px 5px 2px var(--accent-quiet)'");
 
     // General background elements
     content = content.replace(/bgcolor:\s*['"]#333['"]/g, "bgcolor: 'background.default'");
     content = content.replace(/bgcolor:\s*['"]#252525['"]/g, "bgcolor: 'background.paper'");
 
     // Specifically for progress bars (green -> primary)
-    content = content.replace(/& \.MuiLinearProgress-bar': { bgcolor: '#4CAF50' }/g, "& .MuiLinearProgress-bar': { bgcolor: 'primary.main' }");
+    content = content.replace(/& \.MuiLinearProgress-bar': { bgcolor: 'var(--ok)' }/g, "& .MuiLinearProgress-bar': { bgcolor: 'primary.main' }");
 
     // List item hover effect
     content = content.replace(/bgcolor:\s*['"]rgba\(255,255,255,0\.03\)['"]/g, "bgcolor: 'action.hover'");
     content = content.replace(/bgcolor:\s*['"]rgba\(255,255,255,0\.02\)['"]/g, "bgcolor: 'action.hover'");
 
     // Input fields
-    content = content.replace(/& \.MuiInput-underline:after': { borderBottomColor: '#4CAF50' }/g, "& .MuiInput-underline:after': { borderBottomColor: 'primary.main' }");
-    content = content.replace(/& \.MuiInput-underline:before': { borderBottomColor: '#444' }/g, "& .MuiInput-underline:before': { borderBottomColor: 'divider' }");
+    content = content.replace(/& \.MuiInput-underline:after': { borderBottomColor: 'var(--ok)' }/g, "& .MuiInput-underline:after': { borderBottomColor: 'primary.main' }");
+    content = content.replace(/& \.MuiInput-underline:before': { borderBottomColor: 'var(--line-strong)' }/g, "& .MuiInput-underline:before': { borderBottomColor: 'divider' }");
 
     fs.writeFileSync(filePath, content, 'utf8');
     console.log(`Refactored ${filePath}`);

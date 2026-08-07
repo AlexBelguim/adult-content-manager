@@ -112,7 +112,7 @@ export default function FullscreenGalleryDialog({ open, onClose, performers, onP
       open={open}
       onClose={onClose}
       sx={{
-        '& .MuiDialog-paper': { backgroundColor: '#0a0a0a', overflow: 'hidden' },
+        '& .MuiDialog-paper': { backgroundColor: 'var(--bg)', overflow: 'hidden' },
       }}
     >
       <Box
@@ -121,7 +121,7 @@ export default function FullscreenGalleryDialog({ open, onClose, performers, onP
           height: '100vh',
           position: 'relative',
           overflow: 'hidden',
-          backgroundColor: '#000',
+          backgroundColor: 'var(--bg)',
         }}
       >
         {/* Render only the active mode (mounted = animations running) */}
@@ -151,7 +151,7 @@ export default function FullscreenGalleryDialog({ open, onClose, performers, onP
           <IconButton
             onClick={onClose}
             sx={{
-              color: 'white',
+              color: 'var(--text)',
               backgroundColor: 'rgba(0,0,0,0.55)',
               backdropFilter: 'blur(8px)',
               '&:hover': { backgroundColor: 'rgba(0,0,0,0.75)' },
@@ -194,16 +194,16 @@ export default function FullscreenGalleryDialog({ open, onClose, performers, onP
                 <IconButton
                   onClick={() => handleSetMode(m.id)}
                   sx={{
-                    color: selected ? '#fff' : 'rgba(255,255,255,0.6)',
+                    color: selected ? 'var(--text)' : 'rgba(255,255,255,0.6)',
                     background: selected
-                      ? 'linear-gradient(135deg, rgba(124,77,255,0.85) 0%, rgba(0,229,255,0.85) 100%)'
+                      ? 'linear-gradient(135deg, var(--accent-quiet) 0%, rgba(0,229,255,0.85) 100%)'
                       : 'transparent',
-                    boxShadow: selected ? '0 4px 16px rgba(124,77,255,0.45)' : 'none',
+                    boxShadow: selected ? '0 4px 16px var(--accent-quiet)' : 'none',
                     width: 42,
                     height: 42,
                     transition: 'all 0.25s ease',
                     '&:hover': {
-                      color: '#fff',
+                      color: 'var(--text)',
                       backgroundColor: selected ? undefined : 'rgba(255,255,255,0.1)',
                     },
                   }}
@@ -236,7 +236,7 @@ export default function FullscreenGalleryDialog({ open, onClose, performers, onP
         >
           <Typography
             sx={{
-              color: 'white',
+              color: 'var(--text)',
               fontSize: 38,
               fontWeight: 300,
               letterSpacing: 2,

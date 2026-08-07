@@ -153,18 +153,18 @@ function AdminPage() {
 
   if (error && !stats) {
     return (
-      <Box sx={{ p: 4 }}>
+      <Box sx={{ p: 3 }}>
         <Alert severity="error">{error}</Alert>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ p: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
+    <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh' }}>
       {/* Header */}
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-          ⚙️ Admin Dashboard
+          Admin Dashboard
         </Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button

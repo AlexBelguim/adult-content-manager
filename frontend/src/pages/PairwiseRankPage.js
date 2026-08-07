@@ -1,17 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Box, Typography, Button, Chip, CircularProgress, IconButton, useTheme, useMediaQuery } from '@mui/material';
-import { ArrowBack, Refresh, ThumbDown, Undo } from '@mui/icons-material';
+import { Box, Typography, Button, Chip, IconButton, useMediaQuery } from '@mui/material';
+import { ArrowBack, Refresh, ThumbDown, Undo, EmojiEvents } from '@mui/icons-material';
+import { EmptyState, LoadingState, SPACE } from '../components/layout';
 
 /**
  * Lightweight pairwise image ranking page.
  * Uses /api/pairwise/next-pair to get pairs and /api/pairwise/submit to record choices.
  * Opens from the "Rank Images" button in the unified gallery.
+ *
+ * Deliberately NOT wrapped in PageShell: this is a full-bleed comparison tool
+ * where the two images should fill the viewport edge to edge. PageShell's max
+ * width and padding would shrink them for no benefit.
  */
 function PairwiseRankPage() {
   const [searchParams] = useSearchParams();
-  const theme = useTheme();
+  // Fold 6 cover screen turned sideways is 880x360, so it lands here. The inner
+  // screen (884x774) is tablet-sized and keeps the full-height chrome.
   const isLandscape = useMediaQuery('(max-height:500px) and (orientation:landscape)');
+  // Too narrow for two side by side: on a 360px cover screen each pane would be
+  // ~175px, far too small to judge. Keyed on width alone rather than
+  // `orientation:portrait` — width is what actually decides whether two panes
+  // fit, and the orientation feature is unreliable in emulated viewports.
+  // A landscape cover screen is 880 wide, so it stays side by side.
+  const isNarrowPortrait = useMediaQuery('(max-width:600px)');
+  // Touch devices never fire :hover, so a hover-only "Pick this" label is
+  // invisible on exactly the devices that most need the affordance.
+  const isTouch = useMediaQuery('(hover: none)');
   const performerId = searchParams.get('performerId');
   const performerName = searchParams.get('performerName') || 'Unknown';
   const basePath = searchParams.get('basePath') || '';
@@ -51,7 +66,7 @@ function PairwiseRankPage() {
       const res = await fetch(`/api/pairwise/stats?performer_id=${performerId}`);
       const data = await res.json();
       setStats(data);
-    } catch (_) {}
+    } catch (_) { }
   }, [performerId]);
 
   useEffect(() => {
@@ -76,7 +91,6 @@ function PairwiseRankPage() {
       setPairCount(prev => prev + 1);
       // Refresh stats every 5 pairs
       if ((pairCount + 1) % 5 === 0) fetchStats();
-      // Get next pair
       await fetchNextPair();
     } catch (err) {
       console.error('Submit failed:', err);
@@ -123,8 +137,41 @@ function PairwiseRankPage() {
     setSubmitting(false);
   };
 
+  /**
+   * Leave the ranker.
+   *
+   * This was window.history.back(), which does nothing here: the gallery opens
+   * this page with window.open(..., '_blank'), so the tab starts with a single
+   * history entry and there is nothing to go back to. Close the tab when we
+   * were opened by a script, otherwise fall back to real navigation.
+   */
+  const handleBack = () => {
+    if (window.opener && !window.opener.closed) {
+      window.close();
+      return;
+    }
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    window.location.href = (performerName && performerName !== 'Unknown' && basePath)
+      ? `/unified-gallery?performer=${encodeURIComponent(performerName)}&basePath=${encodeURIComponent(basePath)}`
+      : '/';
+  };
+
   const getImageUrl = (imgPath) => {
     if (!imgPath) return '';
+
+    // /api/files/cached-image hard-requires basePath — it 400s without one,
+    // which renders as two blank panes with the VS badge floating between them.
+    // basePath only reaches this page as a query param, so any entry point that
+    // omits it (a bookmark, a reopened tab, a gallery opened without it) broke
+    // the whole page. /preview needs nothing but the path, so fall back to it
+    // rather than failing; the only thing lost is the on-disk cache.
+    if (!basePath) {
+      return `/api/files/preview?path=${encodeURIComponent(imgPath)}`;
+    }
+
     // Determine folderType from the path itself
     const folderType = imgPath.includes('before filter performer') ? 'before' : 'after';
     return `/api/files/cached-image?path=${encodeURIComponent(imgPath)}&basePath=${encodeURIComponent(basePath)}&folderType=${folderType}`;
@@ -132,48 +179,86 @@ function PairwiseRankPage() {
 
   if (loading && !pair) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'background.default' }}>
-        <CircularProgress size={60} color="primary" />
+      <Box sx={{ height: ['100vh','100dvh'], bgcolor: 'var(--bg)', display: 'grid', placeItems: 'center' }}>
+        <LoadingState label="Loading next pair…" />
       </Box>
     );
   }
 
   if (done || (error && !pair)) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'background.default', gap: 2 }}>
-        <Typography variant="h5" sx={{ color: 'primary.main' }}>🏆</Typography>
-        <Typography variant="h6" sx={{ color: 'text.primary' }}>{error || 'All pairs compared!'}</Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-          {pairCount > 0 ? `You ranked ${pairCount} pairs this session.` : 'Try adding more images to this performer.'}
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button variant="outlined" onClick={fetchNextPair}>Try Again</Button>
-          <Button variant="outlined" color="error" onClick={() => window.close()}>Close</Button>
-        </Box>
+      <Box sx={{ height: ['100vh','100dvh'], bgcolor: 'var(--bg)', display: 'grid', placeItems: 'center', p: SPACE.lg }}>
+        <EmptyState
+          icon={<EmojiEvents />}
+          title={error || 'All pairs compared'}
+          description={pairCount > 0
+            ? `You ranked ${pairCount} pairs this session.`
+            : 'Try adding more images to this performer.'}
+          action={
+            <Box sx={{ display: 'flex', gap: SPACE.sm }}>
+              <Button variant="contained" onClick={fetchNextPair}>Try again</Button>
+              {/* Same fallback chain — a bare window.close() is a no-op unless
+                  the tab was script-opened. */}
+              <Button variant="outlined" onClick={handleBack}>Close</Button>
+            </Box>
+          }
+          sx={{ maxWidth: 460 }}
+        />
       </Box>
     );
   }
 
+  /** One side of the comparison. */
+  const Side = ({ side, path, onPick }) => (
+    <Box
+      onClick={onPick}
+      sx={{
+        flex: 1, cursor: submitting ? 'wait' : 'pointer', position: 'relative',
+        overflow: 'hidden', transition: 'flex .15s ease', bgcolor: 'var(--bg)',
+        '&:hover': { flex: 1.15 },
+        '&:hover .pick-label': { opacity: 1 }
+      }}
+    >
+      <img
+        src={getImageUrl(path)}
+        alt={side === 'left' ? 'Left option' : 'Right option'}
+        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+      />
+      <Box className="pick-label" sx={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        py: isLandscape ? SPACE.sm : SPACE.md,
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.75))',
+        display: 'flex', justifyContent: 'center',
+        opacity: isTouch ? 1 : 0, transition: 'opacity .2s'
+      }}>
+        <Typography sx={{ color: 'var(--accent)', fontWeight: 700, fontSize: isLandscape ? '0.8rem' : undefined }}>
+          {isNarrowPortrait
+            ? (side === 'left' ? '↑ Pick this' : 'Pick this ↓')
+            : (side === 'left' ? '← Pick this' : 'Pick this →')}
+        </Typography>
+      </Box>
+    </Box>
+  );
+
   return (
-    <Box sx={{ height: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Header */}
+    <Box sx={{ height: ['100vh','100dvh'], bgcolor: 'var(--bg)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <Box sx={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        px: isLandscape ? 1 : 2, py: isLandscape ? 0.5 : 1,
-        borderBottom: 1, borderColor: 'divider',
-        background: `linear-gradient(180deg, ${theme.palette.primary.main}14 0%, transparent 100%)`
+        px: isLandscape ? SPACE.sm : SPACE.md, py: isLandscape ? 0.5 : SPACE.sm,
+        borderBottom: '1px solid var(--line)', bgcolor: 'var(--surface)'
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <IconButton onClick={() => window.history.back()} sx={{ color: 'text.secondary' }}>
-            <ArrowBack />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, minWidth: 0 }}>
+          <IconButton onClick={handleBack} aria-label="Back" sx={{ color: 'var(--dim)' }} size="small">
+            <ArrowBack fontSize="small" />
           </IconButton>
-          <Typography variant={isLandscape ? 'body1' : 'h6'} noWrap sx={{ color: 'text.primary', fontWeight: 700 }}>
-            🏆 Rank — {performerName}
+          <Typography noWrap sx={{ color: 'var(--text)', fontWeight: 640 }}>
+            Rank — {performerName}
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Chip label={`${pairCount} this session`} color="primary" variant="outlined" size="small" />
-          {stats && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexShrink: 0 }}>
+          <Chip label={`${pairCount} this session`} variant="outlined" size="small"
+            sx={{ borderColor: 'var(--accent)', color: 'var(--accent)' }} />
+          {stats && !isLandscape && (
             <>
               <Chip label={`${stats.total_pairs || 0} total`} variant="outlined" size="small" />
               <Chip label={`${stats.scored_images || stats.totalScoredImages || 0} scored`} variant="outlined" size="small" />
@@ -182,85 +267,59 @@ function PairwiseRankPage() {
         </Box>
       </Box>
 
-      {/* Comparison area */}
-      <Box sx={{ flex: 1, display: 'flex', gap: 0, p: 0, minHeight: 0, touchAction: 'manipulation' }}>
+      <Box sx={{
+        flex: 1, display: 'flex', minHeight: 0, touchAction: 'manipulation',
+        flexDirection: isNarrowPortrait ? 'column' : 'row'
+      }}>
         {pair && (
           <>
-            {/* Left image */}
-            <Box
-              sx={{
-                flex: 1, cursor: submitting ? 'wait' : 'pointer', position: 'relative',
-                overflow: 'hidden', transition: 'all 0.15s', bgcolor: 'background.default',
-                '&:hover': { flex: 1.15 },
-                '&:hover .pick-label': { opacity: 1 },
-                '&:active': { borderLeft: `3px solid ${theme.palette.success.main}` }
-              }}
-              onClick={() => handleChoice(pair.left, pair.right)}
-            >
-              <img
-                src={getImageUrl(pair.left)}
-                alt="Left"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-              />
-              <Box className="pick-label" sx={{
-                position: 'absolute', bottom: 0, left: 0, right: 0, py: 2,
-                background: 'linear-gradient(transparent, rgba(76,175,80,0.5))',
-                display: 'flex', justifyContent: 'center', opacity: 0, transition: 'opacity 0.2s'
-              }}>
-                <Typography variant="h6" sx={{ color: '#fff', fontWeight: 700, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
-                  ← Pick This
-                </Typography>
-              </Box>
-            </Box>
+            <Side side="left" path={pair.left} onPick={() => handleChoice(pair.left, pair.right)} />
 
-            {/* Center divider */}
             <Box sx={{
-              width: 3, bgcolor: 'divider',
+              // '1px', NOT 1 — MUI's sx treats a unitless 0..1 as a FRACTION, so
+              // `width: 1` meant 100%. This hairline was eating the entire row
+              // and both image panes resolved to zero width, which is why the
+              // page rendered as nothing but the VS badge.
+              width: isNarrowPortrait ? '100%' : '1px',
+              height: isNarrowPortrait ? '1px' : 'auto',
+              flexShrink: 0,
+              // The right pane is a later sibling, so it painted over the badge —
+              // which is why VS showed up half-covered once the panes had real
+              // width. Lift the whole divider above both.
+              zIndex: 2,
+              bgcolor: 'var(--line-strong)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative'
             }}>
+              {/* Centred on the hairline explicitly. Absolute inside a 1px-wide
+                  parent otherwise anchors to its left edge and hangs off to one
+                  side, which is what made VS look cut in half. */}
               <Box sx={{
-                position: 'absolute', bgcolor: 'background.default', border: 1, borderColor: 'divider',
-                borderRadius: '50%', width: isLandscape ? 28 : 36, height: isLandscape ? 28 : 36, display: 'flex', alignItems: 'center', justifyContent: 'center'
+                position: 'absolute',
+                left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+                bgcolor: 'var(--surface)',
+                border: '1px solid var(--line-strong)',
+                borderRadius: 'var(--radius-sm, 4px)',
+                width: isLandscape ? 28 : 34, height: isLandscape ? 22 : 26,
+                display: 'grid', placeItems: 'center'
               }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700 }}>VS</Typography>
-              </Box>
-            </Box>
-
-            {/* Right image */}
-            <Box
-              sx={{
-                flex: 1, cursor: submitting ? 'wait' : 'pointer', position: 'relative',
-                overflow: 'hidden', transition: 'all 0.15s', bgcolor: 'background.default',
-                '&:hover': { flex: 1.15 },
-                '&:hover .pick-label': { opacity: 1 },
-                '&:active': { borderRight: `3px solid ${theme.palette.success.main}` }
-              }}
-              onClick={() => handleChoice(pair.right, pair.left)}
-            >
-              <img
-                src={getImageUrl(pair.right)}
-                alt="Right"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-              />
-              <Box className="pick-label" sx={{
-                position: 'absolute', bottom: 0, left: 0, right: 0, py: 2,
-                background: 'linear-gradient(transparent, rgba(76,175,80,0.5))',
-                display: 'flex', justifyContent: 'center', opacity: 0, transition: 'opacity 0.2s'
-              }}>
-                <Typography variant="h6" sx={{ color: '#fff', fontWeight: 700, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
-                  Pick This →
+                <Typography variant="caption" sx={{ color: 'var(--muted)', fontWeight: 700, letterSpacing: '.05em' }}>
+                  VS
                 </Typography>
               </Box>
             </Box>
+
+            <Side side="right" path={pair.right} onPick={() => handleChoice(pair.right, pair.left)} />
           </>
         )}
       </Box>
 
-      {/* Bottom controls */}
       <Box sx={{
-        display: 'flex', justifyContent: 'center', gap: isLandscape ? 1 : 2, py: isLandscape ? 0.5 : 1.5,
-        borderTop: 1, borderColor: 'divider',
-        background: `linear-gradient(0deg, ${theme.palette.primary.main}0d 0%, transparent 100%)`
+        display: 'flex', justifyContent: 'center', gap: SPACE.sm,
+        py: isLandscape ? 0.5 : SPACE.sm,
+        px: SPACE.sm, flexWrap: 'wrap',
+        borderTop: '1px solid var(--line)', bgcolor: 'var(--surface)',
+        // Keeps the row off the gesture bar / rounded corners on a phone.
+        pb: `calc(${isLandscape ? '4px' : '8px'} + env(safe-area-inset-bottom, 0px))`
       }}>
         <Button
           variant="outlined"
@@ -268,7 +327,6 @@ function PairwiseRankPage() {
           onClick={handleUndo}
           disabled={submitting || pairCount === 0}
           size={isLandscape ? 'small' : 'medium'}
-          sx={{ color: 'text.secondary' }}
         >
           Undo
         </Button>
@@ -278,29 +336,25 @@ function PairwiseRankPage() {
           startIcon={<ThumbDown />}
           onClick={handleBothBad}
           disabled={submitting}
+          size={isLandscape ? 'small' : 'medium'}
         >
-          Both Bad
+          Both bad
         </Button>
         <Button
           variant="outlined"
           onClick={fetchNextPair}
           disabled={submitting}
           size={isLandscape ? 'small' : 'medium'}
-          sx={{ color: 'text.secondary' }}
         >
           Skip
         </Button>
         <Button
           variant="outlined"
           startIcon={<Refresh />}
-          onClick={() => {
-            const url = `/api/pairwise/image-rankings?performer_id=${performerId}`;
-            window.open(url, '_blank');
-          }}
+          onClick={() => window.open(`/api/pairwise/image-rankings?performer_id=${performerId}`, '_blank')}
           size={isLandscape ? 'small' : 'medium'}
-          color="primary"
         >
-          View Rankings
+          View rankings
         </Button>
       </Box>
     </Box>

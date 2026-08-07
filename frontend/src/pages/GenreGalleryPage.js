@@ -32,6 +32,7 @@ import {
   PlayArrow
 } from '@mui/icons-material';
 import { useParams } from 'react-router-dom';
+import { EmptyState } from '../components/layout';
 
 function GenreGalleryPage() {
   const { genreName } = useParams();
@@ -143,28 +144,28 @@ function GenreGalleryPage() {
             icon={<PhotoLibrary sx={{ color: 'primary.main' }} />}
             label={<span><b>{content.pics.length}</b> pics</span>}
             size="small"
-            sx={{ bgcolor: '#e3f2fd', color: 'primary.main', fontWeight: 500, px: 1.2, height: 28, fontSize: 14, borderRadius: 2 }}
+            sx={{ bgcolor: 'var(--info-quiet)', color: 'primary.main', fontWeight: 500, px: 1.2, height: 28, fontSize: 14, borderRadius: 2 }}
           />
           <Chip
-            label={<span style={{ color: taggedPicsCount > 0 ? '#388e3c' : '#aaa', fontWeight: 600 }}>
+            label={<span style={{ color: taggedPicsCount > 0 ? 'var(--ok)' : 'var(--dim)', fontWeight: 600 }}>
               +{taggedPicsCount}
             </span>}
             size="small"
-            sx={{ bgcolor: taggedPicsCount > 0 ? 'rgba(76, 175, 80, 0.25)' : '#2a2a2a', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
+            sx={{ bgcolor: taggedPicsCount > 0 ? 'var(--ok-quiet)' : 'var(--raised)', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
             title="Tagged pictures"
           />
           <Chip
-            icon={<VideoLibrary sx={{ color: '#d32f2f' }} />}
+            icon={<VideoLibrary sx={{ color: 'var(--bad)' }} />}
             label={<span><b>{content.vids.length}</b> videos</span>}
             size="small"
-            sx={{ bgcolor: '#ffebee', color: '#d32f2f', fontWeight: 500, px: 1.2, height: 28, fontSize: 14, borderRadius: 2 }}
+            sx={{ bgcolor: 'var(--bad-quiet)', color: 'var(--bad)', fontWeight: 500, px: 1.2, height: 28, fontSize: 14, borderRadius: 2 }}
           />
           <Chip
-            label={<span style={{ color: taggedVidsCount > 0 ? '#388e3c' : '#aaa', fontWeight: 600 }}>
+            label={<span style={{ color: taggedVidsCount > 0 ? 'var(--ok)' : 'var(--dim)', fontWeight: 600 }}>
               +{taggedVidsCount}
             </span>}
             size="small"
-            sx={{ bgcolor: taggedVidsCount > 0 ? 'rgba(76, 175, 80, 0.25)' : '#2a2a2a', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
+            sx={{ bgcolor: taggedVidsCount > 0 ? 'var(--ok-quiet)' : 'var(--raised)', height: 24, fontSize: 13, px: 1, borderRadius: 2, ml: -0.5 }}
             title="Tagged videos"
           />
         </Box>
@@ -272,7 +273,7 @@ function GenreGalleryPage() {
                       borderRadius: 1,
                       p: 0.5
                     }}>
-                      <PlayArrow sx={{ color: 'white', fontSize: 20 }} />
+                      <PlayArrow sx={{ color: 'var(--text)', fontSize: 20 }} />
                     </Box>
                   </>
                 )}
@@ -292,7 +293,7 @@ function GenreGalleryPage() {
                   {item.tags && item.tags.length > 0 && (
                     <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                       {item.tags.map((tag, i) => (
-                        <Chip key={i} label={tag} size="small" sx={{ bgcolor: '#e3f2fd', color: 'primary.main', fontWeight: 500 }} />
+                        <Chip key={i} label={tag} size="small" sx={{ bgcolor: 'var(--info-quiet)', color: 'primary.main', fontWeight: 500 }} />
                       ))}
                     </Box>
                   )}
@@ -302,18 +303,11 @@ function GenreGalleryPage() {
           ))}
         </Grid>
       ) : (
-        <Box sx={{ 
-          textAlign: 'center', 
-          py: 8,
-          color: 'text.secondary'
-        }}>
-          <Typography variant="h6" gutterBottom>
-            No {selectedTab === 0 ? 'pictures' : 'videos'} found
-          </Typography>
-          <Typography variant="body2">
-            This genre doesn't contain any {selectedTab === 0 ? 'pictures' : 'videos'} yet.
-          </Typography>
-        </Box>
+        <EmptyState
+          icon={selectedTab === 0 ? <PhotoLibrary /> : <VideoLibrary />}
+          title={`No ${selectedTab === 0 ? 'pictures' : 'videos'} found`}
+          description={`This genre doesn't contain any ${selectedTab === 0 ? 'pictures' : 'videos'} yet.`}
+        />
       )}
 
       {/* Media Dialog */}

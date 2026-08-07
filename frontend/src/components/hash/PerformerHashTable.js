@@ -116,24 +116,24 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
   };
 
   const gradientButtonStyle = {
-    background: 'linear-gradient(135deg, var(--primary-main, #7e57c2) 0%, var(--primary-dark, #5e35b1) 100%)',
-    color: '#fff',
+    background: 'linear-gradient(135deg, var(--primary-main, var(--accent)) 0%, var(--primary-dark, #5e35b1) 100%)',
+    color: 'var(--text)',
     fontWeight: 'bold',
     textTransform: 'none',
-    boxShadow: '0 3px 5px 2px rgba(126, 87, 194, .3)',
+    boxShadow: '0 3px 5px 2px var(--accent-quiet)',
     '&:hover': {
       background: 'linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%)',
-      boxShadow: '0 3px 10px 2px rgba(126, 87, 194, .4)',
+      boxShadow: '0 3px 10px 2px var(--accent-quiet)',
     },
     '&:disabled': {
-      background: '#444',
+      background: 'var(--raised)',
       color: '#777',
       boxShadow: 'none'
     }
   };
 
   return (
-    <Paper sx={{ p: 3, bgcolor: '#252525', borderRadius: 3, border: '1px solid #333' }}>
+    <Paper sx={{ p: 3, bgcolor: 'var(--surface)', borderRadius: 3, border: '1px solid #333' }}>
       {/* Filters and Controls */}
       <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
@@ -191,74 +191,74 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
       <TableContainer sx={{ border: '1px solid #333', borderRadius: 2 }}>
         <Table size="small">
           <TableHead>
-            <TableRow sx={{ bgcolor: 'rgba(255,255,255,0.05)' }}>
-              <TableCell sx={{ color: '#aaa', borderBottom: '1px solid #333' }}>
+            <TableRow sx={{ bgcolor: 'var(--raised)' }}>
+              <TableCell sx={{ color: 'var(--dim)', borderBottom: '1px solid #333' }}>
                 <TableSortLabel
                   active={orderBy === 'canonical_name'}
                   direction={orderBy === 'canonical_name' ? order : 'asc'}
                   onClick={() => handleSort('canonical_name')}
                   sx={{
-                    '&.Mui-active': { color: '#fff' },
-                    '&.Mui-active .MuiTableSortLabel-icon': { color: '#fff' }
+                    '&.Mui-active': { color: 'var(--text)' },
+                    '&.Mui-active .MuiTableSortLabel-icon': { color: 'var(--text)' }
                   }}
                 >
                   Performer Name
                 </TableSortLabel>
               </TableCell>
-              <TableCell sx={{ color: '#aaa', borderBottom: '1px solid #333' }}>
+              <TableCell sx={{ color: 'var(--dim)', borderBottom: '1px solid #333' }}>
                 <TableSortLabel
                   active={orderBy === 'location'}
                   direction={orderBy === 'location' ? order : 'asc'}
                   onClick={() => handleSort('location')}
                   sx={{
-                    '&.Mui-active': { color: '#fff' },
-                    '&.Mui-active .MuiTableSortLabel-icon': { color: '#fff' }
+                    '&.Mui-active': { color: 'var(--text)' },
+                    '&.Mui-active .MuiTableSortLabel-icon': { color: 'var(--text)' }
                   }}
                 >
                   Location
                 </TableSortLabel>
               </TableCell>
-              <TableCell align="center" sx={{ color: '#aaa', borderBottom: '1px solid #333' }}>
+              <TableCell align="center" sx={{ color: 'var(--dim)', borderBottom: '1px solid #333' }}>
                 <TableSortLabel
                   active={orderBy === 'has_hash_db'}
                   direction={orderBy === 'has_hash_db' ? order : 'asc'}
                   onClick={() => handleSort('has_hash_db')}
                   sx={{
-                    '&.Mui-active': { color: '#fff' },
-                    '&.Mui-active .MuiTableSortLabel-icon': { color: '#fff' }
+                    '&.Mui-active': { color: 'var(--text)' },
+                    '&.Mui-active .MuiTableSortLabel-icon': { color: 'var(--text)' }
                   }}
                 >
                   Hash DB
                 </TableSortLabel>
               </TableCell>
 
-              <TableCell align="right" sx={{ color: '#aaa', borderBottom: '1px solid #333' }}>
+              <TableCell align="right" sx={{ color: 'var(--dim)', borderBottom: '1px solid #333' }}>
                 <TableSortLabel
                   active={orderBy === 'file_count'}
                   direction={orderBy === 'file_count' ? order : 'asc'}
                   onClick={() => handleSort('file_count')}
                   sx={{
-                    '&.Mui-active': { color: '#fff' },
-                    '&.Mui-active .MuiTableSortLabel-icon': { color: '#fff' }
+                    '&.Mui-active': { color: 'var(--text)' },
+                    '&.Mui-active .MuiTableSortLabel-icon': { color: 'var(--text)' }
                   }}
                 >
                   Files
                 </TableSortLabel>
               </TableCell>
-              <TableCell sx={{ color: '#aaa', borderBottom: '1px solid #333' }}>
+              <TableCell sx={{ color: 'var(--dim)', borderBottom: '1px solid #333' }}>
                 <TableSortLabel
                   active={orderBy === 'last_updated'}
                   direction={orderBy === 'last_updated' ? order : 'asc'}
                   onClick={() => handleSort('last_updated')}
                   sx={{
-                    '&.Mui-active': { color: '#fff' },
-                    '&.Mui-active .MuiTableSortLabel-icon': { color: '#fff' }
+                    '&.Mui-active': { color: 'var(--text)' },
+                    '&.Mui-active .MuiTableSortLabel-icon': { color: 'var(--text)' }
                   }}
                 >
                   Last Updated
                 </TableSortLabel>
               </TableCell>
-              <TableCell align="right" sx={{ color: '#aaa', borderBottom: '1px solid #333' }}>Actions</TableCell>
+              <TableCell align="right" sx={{ color: 'var(--dim)', borderBottom: '1px solid #333' }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -280,11 +280,11 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
                     '&:hover': { bgcolor: 'rgba(255,255,255,0.03) !important' }
                   }}
                 >
-                  <TableCell sx={{ borderBottom: '1px solid #333', color: '#fff' }}>
-                    <Typography variant="body2" fontWeight="medium" sx={{ color: '#fff', fontSize: '0.95rem' }}>
+                  <TableCell sx={{ borderBottom: '1px solid #333', color: 'var(--text)' }}>
+                    <Typography variant="body2" fontWeight="medium" sx={{ color: 'var(--text)', fontSize: '0.95rem' }}>
                       {performer.canonical_name}
                     </Typography>
-                    <Typography variant="caption" sx={{ display: 'block', color: '#bbb' }}>
+                    <Typography variant="caption" sx={{ display: 'block', color: 'var(--dim)' }}>
                       {performer.folder_path}
                     </Typography>
                   </TableCell>
@@ -309,13 +309,13 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
                     )}
                   </TableCell>
 
-                  <TableCell align="right" sx={{ borderBottom: '1px solid #333', color: '#fff' }}>
+                  <TableCell align="right" sx={{ borderBottom: '1px solid #333', color: 'var(--text)' }}>
                     <Typography variant="body2" fontWeight="bold">
                       {performer.file_count || 0}
                     </Typography>
                   </TableCell>
                   <TableCell sx={{ borderBottom: '1px solid #333' }}>
-                    <Typography variant="body2" sx={{ color: '#bbb' }}>
+                    <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                       {formatDate(performer.last_updated)}
                     </Typography>
                   </TableCell>
@@ -359,9 +359,9 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
                             onClick={(e) => { e.stopPropagation(); onCheckInternal(performer.id); }}
                             disabled={!performer.has_hash_db || processingActions.has(`internal-${performer.id}`)}
                             sx={{
-                              color: '#29b6f6',
+                              color: 'var(--info)',
                               borderColor: 'rgba(41, 182, 246, 0.5)',
-                              '&:hover': { borderColor: '#29b6f6', bgcolor: 'rgba(41, 182, 246, 0.08)' }
+                              '&:hover': { borderColor: 'var(--info)', bgcolor: 'rgba(41, 182, 246, 0.08)' }
                             }}
                           >
                             {processingActions.has(`internal-${performer.id}`) ? 'Checking...' : 'Internal'}
@@ -378,9 +378,9 @@ function PerformerHashTable({ performers, onCreateHashDB, onCompare, onRefresh, 
                             onClick={(e) => { e.stopPropagation(); onCompare(performer.id); }}
                             disabled={!performer.has_hash_db}
                             sx={{
-                              color: '#ce93d8',
+                              color: 'var(--accent)',
                               borderColor: 'rgba(206, 147, 216, 0.5)',
-                              '&:hover': { borderColor: '#ce93d8', bgcolor: 'rgba(206, 147, 216, 0.08)' }
+                              '&:hover': { borderColor: 'var(--accent)', bgcolor: 'rgba(206, 147, 216, 0.08)' }
                             }}
                           >
                             Compare

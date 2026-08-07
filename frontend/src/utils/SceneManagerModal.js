@@ -2068,7 +2068,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
         >
           {widthPercent > 5 && (
             <Typography variant="caption" sx={{ 
-              color: '#fff', 
+              color: 'var(--text)', 
               fontSize: '0.65rem', 
               whiteSpace: 'nowrap',
               textShadow: '1px 1px 2px black',
@@ -2152,9 +2152,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             {/* Tabs Header */}
             <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: 'background.paper' }}>
               <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} textColor="inherit" indicatorColor="primary" variant="fullWidth">
-                <Tab icon={<MovieIcon />} iconPosition="start" label={`Scenes (${scenes.length})`} sx={{ color: '#fff', minHeight: '48px' }} />
-                <Tab icon={<AutoFixHighIcon />} iconPosition="start" label="AI" sx={{ color: '#fff', minHeight: '48px' }} />
-                <Tab icon={<TerminalIcon />} iconPosition="start" label="Logs" sx={{ color: '#fff', minHeight: '48px' }} />
+                <Tab icon={<MovieIcon />} iconPosition="start" label={`Scenes (${scenes.length})`} sx={{ color: 'var(--text)', minHeight: '48px' }} />
+                <Tab icon={<AutoFixHighIcon />} iconPosition="start" label="AI" sx={{ color: 'var(--text)', minHeight: '48px' }} />
+                <Tab icon={<TerminalIcon />} iconPosition="start" label="Logs" sx={{ color: 'var(--text)', minHeight: '48px' }} />
               </Tabs>
             </Box>
 
@@ -2179,7 +2179,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         color: 'warning.main',
                         '&:hover': {
                           borderColor: 'warning.dark',
-                          backgroundColor: 'rgba(255, 152, 0, 0.1)'
+                          backgroundColor: 'var(--warn-quiet)'
                         },
                         '&:disabled': {
                           borderColor: 'divider',
@@ -2201,7 +2201,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       color: 'secondary.main',
                       '&:hover': {
                         borderColor: 'secondary.dark',
-                        backgroundColor: 'rgba(156, 39, 176, 0.1)'
+                        backgroundColor: 'var(--accent-quiet)'
                       },
                       '&:disabled': {
                         borderColor: 'divider',
@@ -2273,7 +2273,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         borderColor: 'warning.main',
                         fontSize: '0.7rem',
                         '&:hover': {
-                          backgroundColor: 'rgba(255, 152, 0, 0.1)'
+                          backgroundColor: 'var(--warn-quiet)'
                         }
                       }}
                       startIcon={<CutIcon />}
@@ -2291,7 +2291,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         borderColor: 'success.main',
                         fontSize: '0.7rem',
                         '&:hover': {
-                          backgroundColor: 'rgba(76, 175, 80, 0.1)'
+                          backgroundColor: 'var(--ok-quiet)'
                         }
                       }}
                     >
@@ -2308,7 +2308,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         borderColor: 'secondary.main',
                         fontSize: '0.7rem',
                         '&:hover': {
-                          backgroundColor: 'rgba(156, 39, 176, 0.1)'
+                          backgroundColor: 'var(--accent-quiet)'
                         }
                       }}
                     >
@@ -2494,9 +2494,9 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 
                 {/* Analysis Status */}
                 {isAnalyzing && (
-                  <Alert severity="info" sx={{ mb: 2, backgroundColor: 'info.dark', color: '#fff' }}>
+                  <Alert severity="info" sx={{ mb: 2, backgroundColor: 'info.dark', color: 'var(--text)' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CircularProgress size={16} sx={{ color: '#fff' }} />
+                      <CircularProgress size={16} sx={{ color: 'var(--text)' }} />
                       <span>{analysisProgress || 'Analyzing...'}</span>
                     </Box>
                   </Alert>
@@ -2511,7 +2511,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       size="small" 
                       sx={{ 
                         backgroundColor: serviceRunning === null ? 'text.disabled' : serviceRunning ? 'success.main' : 'error.main',
-                        color: '#fff'
+                        color: 'var(--text)'
                       }} 
                     />
                     {serviceRunning && (
@@ -2587,7 +2587,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         flex: 1,
                         backgroundColor: analysisConfig.mode === 'basic' ? 'primary.main' : 'transparent',
                         borderColor: 'divider',
-                        color: analysisConfig.mode === 'basic' ? '#fff' : 'text.secondary',
+                        color: analysisConfig.mode === 'basic' ? 'var(--text)' : 'text.secondary',
                         '&:hover': { borderColor: 'primary.main' }
                       }}
                     >
@@ -2601,7 +2601,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         flex: 1,
                         backgroundColor: analysisConfig.mode === 'advanced' ? '#7b1fa2' : 'transparent',
                         borderColor: 'divider',
-                        color: analysisConfig.mode === 'advanced' ? '#fff' : 'text.secondary',
+                        color: analysisConfig.mode === 'advanced' ? 'var(--text)' : 'text.secondary',
                         '&:hover': { borderColor: '#7b1fa2' }
                       }}
                     >
@@ -2610,7 +2610,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                   </Box>
 
                   {analysisConfig.mode === 'advanced' && (
-                    <Alert severity="info" sx={{ mb: 2, backgroundColor: '#1a237e', color: '#fff', '& .MuiAlert-icon': { color: '#90caf9' } }}>
+                    <Alert severity="info" sx={{ mb: 2, backgroundColor: '#1a237e', color: 'var(--text)', '& .MuiAlert-icon': { color: 'var(--info)' } }}>
                       Advanced mode uses Florence-2 for object detection + multi-resolution scanning (macro → action → refinement). Best for long videos and accurate toy detection.
                     </Alert>
                   )}
@@ -2626,7 +2626,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       mb: 2,
                       '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                       '& .MuiOutlinedInput-root': { 
-                        color: '#fff',
+                        color: 'var(--text)',
                         '& fieldset': { borderColor: 'divider' },
                         '&:hover fieldset': { borderColor: 'text.disabled' }
                       },
@@ -2649,7 +2649,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                           width: 220,
                           '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                           '& .MuiOutlinedInput-root': { 
-                            color: '#fff',
+                            color: 'var(--text)',
                             '& fieldset': { borderColor: 'divider' },
                             '&:hover fieldset': { borderColor: 'text.disabled' }
                           },
@@ -2670,7 +2670,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             width: 200,
                             '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                             '& .MuiOutlinedInput-root': { 
-                              color: '#fff',
+                              color: 'var(--text)',
                               '& fieldset': { borderColor: 'divider' },
                               '&:hover fieldset': { borderColor: 'text.disabled' }
                             },
@@ -2689,7 +2689,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             width: 200,
                             '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                             '& .MuiOutlinedInput-root': { 
-                              color: '#fff',
+                              color: 'var(--text)',
                               '& fieldset': { borderColor: 'divider' },
                               '&:hover fieldset': { borderColor: 'text.disabled' }
                             },
@@ -2710,7 +2710,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                         width: 180,
                         '& .MuiInputLabel-root': { color: 'text.disabled' }, 
                         '& .MuiOutlinedInput-root': { 
-                          color: '#fff',
+                          color: 'var(--text)',
                           '& fieldset': { borderColor: 'divider' },
                           '&:hover fieldset': { borderColor: 'text.disabled' }
                         },
@@ -2728,7 +2728,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       }
                       label={
                         <Box>
-                          <Typography sx={{ color: '#fff' }}>Keep Existing Scenes</Typography>
+                          <Typography sx={{ color: 'var(--text)' }}>Keep Existing Scenes</Typography>
                           <Typography variant="caption" sx={{ color: 'text.disabled' }}>Don't delete previous [Auto] scenes</Typography>
                         </Box>
                       }
@@ -2776,7 +2776,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       sx={{ 
                         borderColor: 'warning.main', 
                         color: 'warning.main',
-                        '&:hover': { borderColor: 'warning.dark', backgroundColor: 'rgba(255, 152, 0, 0.1)' },
+                        '&:hover': { borderColor: 'warning.dark', backgroundColor: 'var(--warn-quiet)' },
                         flex: 1,
                         minWidth: 200
                       }}
@@ -2802,7 +2802,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       sx={{ 
                         borderColor: 'error.main', 
                         color: 'error.main',
-                        '&:hover': { borderColor: 'error.dark', backgroundColor: 'rgba(244, 67, 54, 0.1)' }
+                        '&:hover': { borderColor: 'error.dark', backgroundColor: 'var(--bad-quiet)' }
                       }}
                     >
                       ⏹ Stop Analysis
@@ -2811,12 +2811,12 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 </Box>
 
                 {!serviceRunning && serviceRunning !== null && (
-                  <Alert severity="warning" sx={{ mt: 2, backgroundColor: '#5d4037', color: '#fff' }}>
+                  <Alert severity="warning" sx={{ mt: 2, backgroundColor: '#5d4037', color: 'var(--text)' }}>
                     AI Inference Server is not running. Start it with Run_AI.bat or click "Start AI Server" above.
                   </Alert>
                 )}
                 {serviceRunning && !ollamaConnected && (
-                  <Alert severity="info" sx={{ mt: 2, backgroundColor: '#1a237e', color: '#fff' }}>
+                  <Alert severity="info" sx={{ mt: 2, backgroundColor: '#1a237e', color: 'var(--text)' }}>
                     AI Server is connected but Ollama is offline. Start Ollama to enable video analysis.
                   </Alert>
                 )}
@@ -3121,7 +3121,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
               flexDirection: 'column',
               height: '100%'
             }}>
-                <Box sx={{ position: 'relative', mb: 2, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000', overflow: 'hidden' }}>
+                <Box sx={{ position: 'relative', mb: 2, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg)', overflow: 'hidden' }}>
                   <video
                     ref={videoRef}
                     src={streamingVideoSrc}
@@ -3191,7 +3191,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                             '&:hover, &.Mui-focusVisible': {
                               boxShadow: 'none',
                               '&::after': {
-                                backgroundColor: '#64B5F6'
+                                backgroundColor: 'var(--info)'
                               }
                             }
                           },
@@ -3219,7 +3219,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                               borderColor: 'success.main',
                               backgroundColor: playbackRate === speed ? 'success.main' : 'transparent',
                               '&:hover': {
-                                backgroundColor: playbackRate === speed ? '#45a049' : 'rgba(76, 175, 80, 0.1)'
+                                backgroundColor: playbackRate === speed ? '#45a049' : 'var(--ok-quiet)'
                               }
                             }}
                           >
@@ -3480,7 +3480,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
           {/* Service not running - show start button */}
           {serviceRunning === false && !startingService && (
             <Box sx={{ textAlign: 'center', py: 3 }}>
-              <Typography variant="body1" sx={{ mb: 2, color: '#ff9800' }}>
+              <Typography variant="body1" sx={{ mb: 2, color: 'var(--warn)' }}>
                 ⚠️ Video Analysis Service Not Running
               </Typography>
               <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
@@ -3564,7 +3564,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             value={analysisConfig.allowedActions}
             onChange={(e) => setAnalysisConfig(prev => ({ ...prev, allowedActions: e.target.value }))}
             placeholder="e.g. reverse-cowgirl, blowjob, handjob"
-            sx={{ mb: 3, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } } }}
+            sx={{ mb: 3, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'divider' } } }}
             helperText="Leave empty to detect all supported actions."
           />
 
@@ -3575,7 +3575,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             value={analysisConfig.windowSize}
             onChange={(e) => setAnalysisConfig(prev => ({ ...prev, windowSize: e.target.value }))}
             placeholder={videoDuration ? `${Math.max(4, Math.min(8, Math.floor(videoDuration * 0.025)))}` : "Auto"}
-            sx={{ mb: 1, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } } }}
+            sx={{ mb: 1, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'divider' } } }}
             helperText={`Controls the context window for analysis. Default is calculated based on video length.`}
           />
         </DialogContent>
@@ -3616,7 +3616,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
             fullWidth
             value={transitionParams.prompt}
             onChange={(e) => setTransitionParams(prev => ({ ...prev, prompt: e.target.value }))}
-            sx={{ mb: 3, mt: 1, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } } }}
+            sx={{ mb: 3, mt: 1, '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'divider' } } }}
             helperText="Leave empty to allow all actions, or specify expected actions."
           />
           
@@ -3629,7 +3629,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 fullWidth
                 inputProps={{ step: 0.1 }}
                 helperText={formatTime(transitionParams.startTime)}
-                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
+                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
             />
             <TextField
                 label="End Time (s)"
@@ -3639,7 +3639,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 fullWidth
                 inputProps={{ step: 0.1 }}
                 helperText={formatTime(transitionParams.endTime)}
-                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
+                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
             />
             <TextField
                 label="Original Window (s)"
@@ -3649,7 +3649,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                 fullWidth
                 inputProps={{ step: 1, min: 0 }}
                 helperText="Window size used in analysis"
-                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
+                sx={{ '& .MuiInputLabel-root': { color: 'text.secondary' }, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'divider' } }, '& .MuiFormHelperText-root': { color: 'text.disabled' } }}
             />
           </Box>
         </DialogContent>

@@ -13,24 +13,27 @@ import {
  * Improvements over the original:
  *   - Subtle breathing/zoom layered on top of the slow camera pan
  *   - Tape, frame, and hero styling preserved
- *   - Smooth fade-in instead of pop-in
  *   - Pointer-hover still pops a photo to the front
+ *   - Renders progressively as soon as the first layout is ready (instead of
+ *     holding the wall invisible behind opacity:0 for the entire fetch)
  */
 export default function PhotoWallMode({ performers, onPhotoClick, active }) {
   const [layout, setLayout] = useState([]);
-  const [ready, setReady] = useState(false);
+  const [loading, setLoading] = useState(false);
   const bagsRef = useRef({});
 
   useEffect(() => {
     if (!active || !performers || performers.length === 0) return;
     let cancelled = false;
-    setReady(false);
+    setLoading(true);
     (async () => {
-      const { layout: items } = await generatePhotoWallLayout(performers, bagsRef.current);
-      if (cancelled) return;
-      setLayout(items);
-      // Stagger the reveal slightly so it feels alive
-      requestAnimationFrame(() => setReady(true));
+      try {
+        const { layout: items } = await generatePhotoWallLayout(performers, bagsRef.current);
+        if (cancelled) return;
+        setLayout(items);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -48,6 +51,26 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
         background: 'radial-gradient(ellipse at center, #1f1a17 0%, #0c0a09 80%)',
       }}
     >
+      {/* Loading hint while the first batch of images is being collected */}
+      {loading && layout.length === 0 && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'rgba(255,255,255,0.55)',
+            fontSize: 14,
+            letterSpacing: 2,
+            textTransform: 'uppercase',
+            pointerEvents: 'none',
+            zIndex: 5,
+          }}
+        >
+          Building the wall…
+        </Box>
+      )}
       <Box
         sx={{
           position: 'relative',
@@ -64,8 +87,6 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
           animationDuration: `${30 * PHOTO_WALL_CONFIG.screenMultiplier}s, 18s`,
           animationTimingFunction: 'ease-in-out, ease-in-out',
           animationIterationCount: 'infinite, infinite',
-          opacity: ready ? 1 : 0,
-          transition: 'opacity 800ms ease-out',
         }}
       >
         {layout.map((item, index) => {

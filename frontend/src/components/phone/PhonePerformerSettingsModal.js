@@ -276,7 +276,7 @@ function PhonePerformerSettingsModal({ performer, open, onClose, onUpdate }) {
                   size="medium"
                   sx={{ 
                     fontWeight: 'bold',
-                    '& .MuiChip-label': { color: 'white' },
+                    '& .MuiChip-label': { color: 'var(--text)' },
                     height: '40px',
                     fontSize: '1rem'
                   }}
@@ -288,7 +288,7 @@ function PhonePerformerSettingsModal({ performer, open, onClose, onUpdate }) {
                   size="medium"
                   sx={{ 
                     fontWeight: 'bold',
-                    '& .MuiChip-label': { color: 'white' },
+                    '& .MuiChip-label': { color: 'var(--text)' },
                     height: '40px',
                     fontSize: '1rem'
                   }}
@@ -300,7 +300,7 @@ function PhonePerformerSettingsModal({ performer, open, onClose, onUpdate }) {
                   size="medium"
                   sx={{ 
                     fontWeight: 'bold',
-                    '& .MuiChip-label': { color: 'white' },
+                    '& .MuiChip-label': { color: 'var(--text)' },
                     height: '40px',
                     fontSize: '1rem'
                   }}

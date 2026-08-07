@@ -19,11 +19,11 @@ import HashCreationQueue from './components/HashCreationQueue';
 // Pairwise Labeler (integrated from vision-llm-pairwise)
 import PairwisePage from './pages/PairwisePage';
 import './App.css';
-import './styles/themes/gamerEdge.css';
-import './styles/themes/gamer.css';
-import './styles/themes/tokyoNight.css';
-import './styles/themes/cinematic.css';
-import './styles/themes/cleanSplit.css';
+// One token-driven stylesheet replaces the five per-theme files
+// (gamerEdge / gamer / tokyoNight / cinematic / cleanSplit), which declared
+// the same 26 selectors five times over with hardcoded colours. Those files
+// are still on disk but no longer imported — delete them once you're happy.
+import './styles/components.css';
 import './styles/darkPanel.css';
 import BatchQueuePage from './pages/BatchQueuePage';
 import UploadQueuePage from './pages/UploadQueuePage';
@@ -44,7 +44,8 @@ import VRPage from './pages/VRPage';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
-import { getThemeById, getStoredThemeId, setStoredThemeId } from './theme';
+import { getThemeById, getStoredThemeId, setStoredThemeId, getTokensById } from './theme';
+import { applyTokens } from './styles/tokens';
 
 function LicenseModal({ open, onSubmit, onCancel, defaultKey, verifying, error }) {
   const [key, setKey] = useState(defaultKey || '');
@@ -485,6 +486,29 @@ function AppContent({ onThemeChange, currentThemeId }) {
       .catch(err => console.error('Error loading folders after deletion:', err));
   };
 
+  // Every route that keeps the app chrome renders the same Toolbar with the
+  // same thirteen props. That block was copy-pasted five times, so adding a
+  // prop meant editing five call sites and missing one failed silently. One
+  // object, one helper — and adding chrome to a route is now a one-line change.
+  const toolbarProps = {
+    mode, subMode,
+    onModeChange: handleModeChange, onSubModeChange: handleSubModeChange,
+    onHandyConnect: handleHandyConnect, onHandyDisconnect: handleHandyDisconnect,
+    handyCode, handyConnected,
+    basePath, onFolderDeleted: handleFolderDeleted,
+    onScanPerformers, isScanning,
+    onThemeChange, currentThemeId
+  };
+  // Plain function, not a component — returning JSX inline keeps the element
+  // identity React already had. A nested component defined here would remount
+  // its whole subtree on every App render.
+  const shell = (page, extra) => (
+    <>
+      <Toolbar {...toolbarProps} {...extra} />
+      {page}
+    </>
+  );
+
   return (
     <Router>
       <div className="App">
@@ -494,23 +518,25 @@ function AppContent({ onThemeChange, currentThemeId }) {
           </Box>
         ) : (
           <Routes>
-            <Route path="/admin" element={
-              <AdminPage />
-            } />
-            <Route path="/unified-gallery" element={
+            {/* Chrome-free by design: immersive or standalone surfaces where the
+                app bar would be in the way — /vr (WebXR), the scene editor and
+                /pairwise-mobile (opened as tools, often in their own tab), and
+                /thumbnail-selector (a picker). Everything else gets shell(). */}
+            <Route path="/admin" element={shell(<AdminPage />)} />
+            <Route path="/unified-gallery" element={shell(
               <UnifiedGalleryPage
                 handyIntegration={handyIntegration}
                 handyCode={handyCode}
                 handyConnected={handyConnected}
               />
-            } />
+            )} />
             <Route path="/scene-manager" element={
               <SceneManagerPage />
             } />
             <Route path="/scene-editor" element={
               <SceneManagerPage />
             } />
-            <Route path="/hash-management" element={
+            <Route path="/hash-management" element={shell(
               <HashManagementPage
                 basePath={basePath}
                 hashQueue={hashQueue}
@@ -519,103 +545,37 @@ function AppContent({ onThemeChange, currentThemeId }) {
                 pollingIntervalRef={pollingIntervalRef}
                 setShowGlobalQueue={setShowGlobalQueue}
               />
-            } />
-            <Route path="/hash-results/:runId" element={
-              <HashResultsPage />
-            } />
+            )} />
+            <Route path="/hash-results/:runId" element={shell(<HashResultsPage />)} />
 
-            <Route path="/upload-queue" element={
-              <>{/* Redirect to combined local-import page */}
-                <Toolbar
-                  mode={mode} subMode={subMode}
-                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
-                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
-                  handyCode={handyCode} handyConnected={handyConnected}
-                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
-                  onScanPerformers={onScanPerformers} isScanning={isScanning}
-                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
-                />
-                <LocalImportPage basePath={basePath} />
-              </>
-            } />
-            <Route path="/local-import" element={
-              <>
-                <Toolbar
-                  mode={mode} subMode={subMode}
-                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
-                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
-                  handyCode={handyCode} handyConnected={handyConnected}
-                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
-                  onScanPerformers={onScanPerformers} isScanning={isScanning}
-                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
-                />
-                <LocalImportPage basePath={basePath} />
-              </>
-            } />
-            <Route path="/tindersorting" element={
-              <TinderSortingPage basePath={basePath} />
-            } />
-            <Route path="/performer-management" element={
-              <>
-                <Toolbar
-                  mode={mode} subMode={subMode}
-                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
-                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
-                  handyCode={handyCode} handyConnected={handyConnected}
-                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
-                  onScanPerformers={onScanPerformers} isScanning={isScanning}
-                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
-                />
-                <PerformerManagementPage />
-              </>
-            } />
-            <Route path="/pairwise/*" element={
-              <PairwisePage />
-            } />
+            {/* /upload-queue is an alias — it renders the combined import page */}
+            <Route path="/upload-queue" element={shell(<LocalImportPage basePath={basePath} />)} />
+            <Route path="/local-import" element={shell(<LocalImportPage basePath={basePath} />)} />
+            <Route path="/tindersorting" element={shell(<TinderSortingPage basePath={basePath} />)} />
+            <Route path="/performer-management" element={shell(<PerformerManagementPage />)} />
+            <Route path="/pairwise/*" element={shell(<PairwisePage />)} />
             <Route path="/pairwise-mobile" element={
               <PairwiseMobilePage />
             } />
-            <Route path="/ranking-insight" element={
-              <RankingInsightPage />
-            } />
-            <Route path="/active-learning" element={ // Keeping it top level for now or inside pairwise? Plan said inside pairwise tab. Let's look at PairwisePage.
+            <Route path="/ranking-insight" element={shell(<RankingInsightPage />)} />
+            {/* Kept top level rather than inside the Pairwise tabs, for now. */}
+            <Route path="/active-learning" element={shell(
               <PairwiseRefinePage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
-            } />
-            <Route path="/auto-label" element={
+            )} />
+            <Route path="/auto-label" element={shell(
               <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
-            } />
-            <Route path="/group-rate" element={
-              <GroupRatePage />
-            } />
-            <Route path="/smart-compare" element={
-              <SmartComparePage />
-            } />
-            <Route path="/smart-filter/:performerId" element={
-              <SmartFilterPage />
-            } />
-            <Route path="/taste-dashboard" element={
-              <>
-                <Toolbar
-                  mode={mode} subMode={subMode}
-                  onModeChange={handleModeChange} onSubModeChange={handleSubModeChange}
-                  onHandyConnect={handleHandyConnect} onHandyDisconnect={handleHandyDisconnect}
-                  handyCode={handyCode} handyConnected={handyConnected}
-                  basePath={basePath} onFolderDeleted={handleFolderDeleted}
-                  onScanPerformers={onScanPerformers} isScanning={isScanning}
-                  onThemeChange={onThemeChange} currentThemeId={currentThemeId}
-                />
-                <TasteDashboardPage />
-              </>
-            } />
-            <Route path="/pairwise-rank" element={
-              <PairwiseRankPage />
-            } />
-            <Route path="/training-hub" element={
-              <TrainingHubPage />
-            } />
-            <Route path="/funpipe" element={
-              <FunpipePage />
-            } />
+            )} />
+            <Route path="/group-rate" element={shell(<GroupRatePage />)} />
+            <Route path="/smart-compare" element={shell(<SmartComparePage />)} />
+            <Route path="/smart-filter/:performerId" element={shell(<SmartFilterPage />)} />
+            <Route path="/taste-dashboard" element={shell(<TasteDashboardPage />)} />
+            {/* Chrome-free: a full-bleed comparison tool opened in its own tab
+                from the gallery. On the Fold's cover screen in landscape the
+                toolbar ate 64px of a 360px-tall viewport and pushed the
+                Undo/Skip row off the bottom. */}
+            <Route path="/pairwise-rank" element={<PairwiseRankPage />} />
+            <Route path="/training-hub" element={shell(<TrainingHubPage />)} />
+            <Route path="/funpipe" element={shell(<FunpipePage />)} />
             <Route path="/vr" element={
               <VRPage />
             } />
@@ -623,38 +583,20 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/thumbnail-selector/:performerId" element={
               <ThumbnailSelectorWrapper />
             } />
-            <Route path="*" element={
-              <>
-                <Toolbar
-                  mode={mode}
-                  subMode={subMode}
-                  onModeChange={handleModeChange}
-                  onSubModeChange={handleSubModeChange}
-                  onHandyConnect={handleHandyConnect}
-                  onHandyDisconnect={handleHandyDisconnect}
-                  handyCode={handyCode}
-                  handyConnected={handyConnected}
-                  basePath={basePath}
-                  onFolderDeleted={handleFolderDeleted}
-                  onScanPerformers={onScanPerformers}
-                  onUploadFolder={() => setShowUploadImport(true)}
-                  isScanning={isScanning}
-                  onThemeChange={onThemeChange}
-                  currentThemeId={currentThemeId}
-                />
-                <MainPage
-                  mode={mode}
-                  subMode={subMode}
-                  basePath={basePath}
-                  handyIntegration={handyIntegration}
-                  handyCode={handyCode}
-                  handyConnected={handyConnected}
-                  onFolderAdded={handleFolderAdded}
-                  setOnScanPerformers={setOnScanPerformers}
-                  setIsScanning={setIsScanning}
-                />
-              </>
-            } />
+            <Route path="*" element={shell(
+              <MainPage
+                mode={mode}
+                subMode={subMode}
+                basePath={basePath}
+                handyIntegration={handyIntegration}
+                handyCode={handyCode}
+                handyConnected={handyConnected}
+                onFolderAdded={handleFolderAdded}
+                setOnScanPerformers={setOnScanPerformers}
+                setIsScanning={setIsScanning}
+              />,
+              { onUploadFolder: () => setShowUploadImport(true) }
+            )} />
           </Routes >
         )
         }
@@ -685,13 +627,23 @@ function App() {
     setStoredThemeId(newId);
   };
 
-  // Inject CSS custom properties from the MUI theme so gradient strings,
-  // inline styles, and template literals can reference them via var(--xxx)
+  // Publish the design tokens as CSS custom properties on <html>.
+  //
+  // This is what makes a theme reach the WHOLE app. MUI's palette only
+  // resolves inside `sx`; plain `style={{}}` and .css files cannot see it.
+  // CSS variables resolve in all three, so every call site references
+  // var(--…) and a single switch restyles everything.
   useEffect(() => {
     const root = document.documentElement;
-    const p = currentTheme.palette;
-    // Set data-theme attribute so CSS files can target with [data-theme="xxx"]
+    applyTokens(getTokensById(themeId));
+
+    // Legacy: styles/themes/*.css target [data-theme="id"]. Kept until those
+    // files are retired so existing saved preferences keep working.
     root.setAttribute('data-theme', themeId);
+
+    // Legacy variable names, still referenced by ~9 older components.
+    // Mapped onto the active theme so they can't drift from the tokens.
+    const p = currentTheme.palette;
     root.style.setProperty('--primary-main', p.primary.main);
     root.style.setProperty('--primary-light', p.primary.light);
     root.style.setProperty('--primary-dark', p.primary.dark);

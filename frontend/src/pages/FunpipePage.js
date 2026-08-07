@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, IconButton, Chip, Alert,
-  LinearProgress, Stack, Card, CardContent, Collapse, Tooltip, Divider,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Checkbox, Snackbar
+  LinearProgress, Stack, Collapse, Tooltip, Divider,
+  TextField, Checkbox, Snackbar
 } from '@mui/material';
+import { PageShell, PageHeader, Panel, StatRow, SPACE, ICON, iconBtnSx } from '../components/layout';
+import MovieIcon from '@mui/icons-material/Movie';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
@@ -32,6 +33,67 @@ const STATUS_META = {
 
 const QUEUEABLE = ['no_script', 'incomplete', 'failed'];
 
+/* MUI palette names don't reach plain CSS, and the rows need the colour as a
+   var() for borders and text. One map, both uses. */
+const STATUS_TONE = {
+  running: 'accent', queued: 'default', needs_review: 'warn', reviewed: 'ok',
+  external: 'info', no_script: 'bad', incomplete: 'warn', failed: 'bad'
+};
+const TONE_VAR = {
+  accent: 'var(--accent)', ok: 'var(--ok)', warn: 'var(--warn)',
+  bad: 'var(--bad)', info: 'var(--info)', default: 'var(--dim)'
+};
+/* Worst first — the summary should open on what needs attention, not on the
+   videos that are already done. */
+const STAT_ORDER = ['no_script', 'failed', 'incomplete', 'needs_review', 'running', 'queued', 'reviewed', 'external'];
+
+const filterChipSx = (active, tone) => ({
+  height: 24,
+  fontSize: '0.7rem',
+  fontWeight: active ? 650 : 550,
+  cursor: 'pointer',
+  bgcolor: active ? (tone || 'var(--accent)') : 'var(--bg)',
+  color: active ? 'var(--bg)' : (tone || 'var(--dim)'),
+  border: '1px solid',
+  borderColor: tone || 'var(--line)',
+  '&:hover': { bgcolor: active ? (tone || 'var(--accent)') : 'var(--raised)' }
+});
+
+/**
+ * Poster frame for one video.
+ *
+ * The old table had no imagery at all — a video library rendered entirely as
+ * text. Falls back to a toned tile when the frame grab fails, which it will for
+ * codecs ffmpeg can't open, or files that moved since the last library scan.
+ */
+function VideoThumb({ path, tone }) {
+  const [failed, setFailed] = useState(false);
+  const box = {
+    width: 64, height: 44, flexShrink: 0, borderRadius: 'var(--radius-sm, 4px)',
+    overflow: 'hidden', bgcolor: 'var(--raised)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center'
+  };
+  if (failed) {
+    return (
+      <Box sx={{ ...box, color: tone, '& svg': { fontSize: 18, opacity: 0.7 } }}>
+        <MovieIcon />
+      </Box>
+    );
+  }
+  return (
+    <Box sx={box}>
+      <Box
+        component="img"
+        loading="lazy"
+        src={`/api/files/video-thumbnail?path=${encodeURIComponent(path)}`}
+        alt=""
+        onError={() => setFailed(true)}
+        sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </Box>
+  );
+}
+
 function fmtBytes(b) {
   if (!b) return '—';
   const gb = b / 1024 ** 3;
@@ -54,6 +116,7 @@ export default function FunpipePage() {
   const [expandedJob, setExpandedJob] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [statusFilter, setStatusFilter] = useState(null);
+  const [query, setQuery] = useState('');
   const [toast, setToast] = useState(null);
   const [editor, setEditor] = useState({ running: false, url: null });
   const [editorBusy, setEditorBusy] = useState(false);
@@ -163,12 +226,18 @@ export default function FunpipePage() {
 
   // ── derived ───────────────────────────────────────────────
   const filtered = useMemo(() => {
-    const rows = statusFilter ? library.videos.filter(v => v.status === statusFilter) : library.videos;
+    const q = query.trim().toLowerCase();
+    const rows = library.videos.filter(v => {
+      if (statusFilter && v.status !== statusFilter) return false;
+      if (!q) return true;
+      return v.name.toLowerCase().includes(q) || (v.performer || '').toLowerCase().includes(q);
+    });
     return [...rows].sort((a, b) =>
       a.performer.localeCompare(b.performer) || a.name.localeCompare(b.name));
-  }, [library.videos, statusFilter]);
+  }, [library.videos, statusFilter, query]);
 
   const selectableInView = filtered.filter(v => QUEUEABLE.includes(v.status));
+  const allInViewSelected = selectableInView.length > 0 && selectableInView.every(v => selected.has(v.path));
   const online = queue.ok !== false;
 
   const toggle = (path) => setSelected(s => {
@@ -182,15 +251,26 @@ export default function FunpipePage() {
   const reviewUrl = (v) => `${editor.url}/?v=${encodeURIComponent(v.stem)}`;
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1400, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-        <Typography variant="h4">Funpipe</Typography>
+    <PageShell>
+      {/* No title block and no back arrow: the toolbar logo is the way home,
+          and "Funpipe" was stating what the Funscript library panel below
+          already says. The GPU explanation moved to the queue panel, where it
+          is about something you can actually see. Just the controls. */}
+      <Box
+        sx={{
+          display: 'flex', alignItems: 'center', gap: SPACE.sm,
+          flexWrap: 'wrap', mb: SPACE.md
+        }}
+      >
         <Chip
           size="small"
-          color={online ? 'success' : 'error'}
+          variant="outlined"
           label={online ? `Online — ${config.url}` : 'Offline'}
+          sx={{
+            borderColor: online ? 'var(--ok)' : 'var(--bad)',
+            color: online ? 'var(--ok)' : 'var(--bad)'
+          }}
         />
-        <Box sx={{ flex: 1 }} />
         <Tooltip title={editor.running
           ? 'Shut the review editor down when you\'re done — it holds the video files open'
           : 'Start the funscript review editor on the GPU machine'}>
@@ -198,7 +278,6 @@ export default function FunpipePage() {
             <Button
               size="small"
               variant={editor.running ? 'outlined' : 'contained'}
-              color={editor.running ? 'inherit' : 'primary'}
               startIcon={<EditNoteIcon />}
               disabled={!online || editorBusy}
               onClick={toggleEditor}
@@ -209,27 +288,20 @@ export default function FunpipePage() {
         </Tooltip>
         {editor.running && editor.url && (
           <Tooltip title="Open the review editor">
-            <IconButton component="a" href={editor.url} target="_blank" rel="noreferrer">
+            <IconButton component="a" href={editor.url} target="_blank" rel="noreferrer" sx={{ color: 'var(--dim)' }}>
               <OpenInNewIcon />
             </IconButton>
           </Tooltip>
         )}
         <Tooltip title="Runs on the AI Inference App — change its address in the Training Hub">
-          <IconButton onClick={() => navigate('/training-hub')}><SettingsIcon /></IconButton>
+          <IconButton onClick={() => navigate('/training-hub')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
         </Tooltip>
         <Tooltip title="Rescan funscript folders">
           <span>
-            <IconButton onClick={() => loadLibrary(true)} disabled={libraryLoading}><RefreshIcon /></IconButton>
+            <IconButton onClick={() => loadLibrary(true)} disabled={libraryLoading} sx={{ color: 'var(--dim)' }}><RefreshIcon /></IconButton>
           </span>
         </Tooltip>
-      </Stack>
-
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Videos moved to a funscript folder are queued for generation automatically. This page
-        shows what has a script, which scripts were generated here, and which still need a
-        human review pass. Generation runs on the AI Inference App and shares its GPU, so it
-        won't compete with image inference or training.
-      </Typography>
+      </Box>
 
       {!online && (
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -247,13 +319,20 @@ export default function FunpipePage() {
       )}
 
       {/* ── queue ── */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <QueueIcon />
-            <Typography variant="h6">Queue</Typography>
-            <Chip size="small" label={queue.running ? 'Worker running' : 'Idle'}
-                  color={queue.running ? 'info' : 'default'} />
+      <Panel sx={{ mb: SPACE.lg }}>
+        <Box>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: SPACE.sm, flexWrap: 'wrap' }}>
+            <QueueIcon sx={{ width: ICON.action, height: ICON.action, color: 'var(--dim)' }} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 620, color: 'var(--text)' }}>Queue</Typography>
+            <Chip
+              size="small"
+              variant="outlined"
+              label={queue.running ? 'Worker running' : 'Idle'}
+              sx={{
+                borderColor: queue.running ? 'var(--accent)' : 'var(--line-strong)',
+                color: queue.running ? 'var(--accent)' : 'var(--muted)'
+              }}
+            />
             <Box sx={{ flex: 1 }} />
             <Button size="small" startIcon={<PlayArrowIcon />} disabled={!online || queue.running}
                     onClick={() => post('/api/funpipe/queue/start').then(loadQueue)}>Start</Button>
@@ -264,7 +343,11 @@ export default function FunpipePage() {
           </Stack>
 
           {(!queue.jobs || queue.jobs.length === 0) && (
-            <Typography variant="body2" color="text.secondary">Nothing queued.</Typography>
+            <Typography variant="body2" sx={{ color: 'var(--muted)' }}>
+              Nothing queued. Videos moved to a funscript folder land here automatically —
+              generation shares the AI Inference App's GPU, so it won't compete with image
+              inference or training.
+            </Typography>
           )}
 
           <Stack divider={<Divider />}>
@@ -304,7 +387,12 @@ export default function FunpipePage() {
 
                 <Collapse in={expandedJob === job.id}>
                   <Box component="pre" sx={{
-                    mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1,
+                    mt: 1, p: SPACE.sm,
+                    bgcolor: 'var(--bg)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 'var(--radius-sm, 4px)',
+                    color: 'var(--dim)',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                     fontSize: '0.75rem', overflowX: 'auto', maxHeight: 200
                   }}>
                     {(job.log_tail || []).join('\n') || 'no output yet'}
@@ -313,15 +401,36 @@ export default function FunpipePage() {
               </Box>
             ))}
           </Stack>
-        </CardContent>
-      </Card>
+        </Box>
+      </Panel>
 
       {/* ── library ── */}
-      <Card>
-        <CardContent>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
-            <Typography variant="h6">Funscript library</Typography>
-            <Typography variant="body2" color="text.secondary">{library.total} video(s)</Typography>
+      {/* Status counts double as the filter. "What needs doing" is the only
+          question this page exists to answer, and as a sortable column it was
+          invisible — you had to scan every row to find the 24 that mattered. */}
+      {library.total > 0 && (
+        <StatRow
+          min={132}
+          sx={{ mb: SPACE.md }}
+          items={STAT_ORDER
+            .filter(s => library.counts?.[s])
+            .map(s => ({
+              label: STATUS_META[s].label,
+              value: library.counts[s],
+              tone: STATUS_TONE[s] || 'default'
+            }))}
+        />
+      )}
+
+      <Panel>
+        <Box>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: SPACE.sm, flexWrap: 'wrap' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 620, color: 'var(--text)' }}>Funscript library</Typography>
+            <Typography variant="body2" sx={{ color: 'var(--muted)' }}>
+              {filtered.length === library.total
+                ? `${library.total} video(s)`
+                : `${filtered.length} of ${library.total}`}
+            </Typography>
             <Box sx={{ flex: 1 }} />
             {selected.size > 0 && (
               <Button variant="contained" size="small" startIcon={<QueueIcon />}
@@ -331,112 +440,155 @@ export default function FunpipePage() {
             )}
           </Stack>
 
-          <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
-            <Chip label={`All (${library.total})`} size="small"
-                  color={statusFilter === null ? 'primary' : 'default'}
-                  onClick={() => setStatusFilter(null)} />
+          <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+            <Chip label={`All ${library.total}`} size="small"
+                  onClick={() => setStatusFilter(null)}
+                  sx={filterChipSx(statusFilter === null)} />
             {Object.entries(library.counts || {}).map(([status, count]) => (
               <Tooltip key={status} title={STATUS_META[status]?.help || status}>
                 <Chip
                   size="small"
-                  label={`${STATUS_META[status]?.label || status} (${count})`}
-                  color={statusFilter === status ? 'primary' : STATUS_META[status]?.color || 'default'}
-                  variant={statusFilter === status ? 'filled' : 'outlined'}
+                  label={`${STATUS_META[status]?.label || status} ${count}`}
                   onClick={() => setStatusFilter(statusFilter === status ? null : status)}
+                  sx={filterChipSx(statusFilter === status, TONE_VAR[STATUS_TONE[status]])}
                 />
               </Tooltip>
             ))}
+            <TextField
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search performer or file…"
+              size="small"
+              sx={{ flex: 1, minWidth: 180, '& .MuiInputBase-input': { fontSize: '0.8rem', py: 0.75 } }}
+            />
+            {selectableInView.length > 0 && (
+              <Button
+                size="small"
+                onClick={() => setSelected(allInViewSelected ? new Set() : new Set(selectableInView.map(v => v.path)))}
+                sx={{ color: 'var(--dim)', textTransform: 'none', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+              >
+                {allInViewSelected ? 'Clear' : `Select ${selectableInView.length}`}
+              </Button>
+            )}
           </Stack>
 
           {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
 
           {!libraryLoading && filtered.length === 0 && (
-            <Typography variant="body2" color="text.secondary">
-              No videos in any funscript folder yet. Use "Move to Funscript" while filtering a performer.
+            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
+              {library.total === 0
+                ? 'No videos in any funscript folder yet. Use "Move to Funscript" while filtering a performer.'
+                : 'Nothing matches those filters.'}
             </Typography>
           )}
 
           {filtered.length > 0 && (
-            <TableContainer sx={{ maxHeight: 600, overflowX: 'auto' }}>
-              <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        size="small"
-                        disabled={selectableInView.length === 0}
-                        checked={selectableInView.length > 0 && selectableInView.every(v => selected.has(v.path))}
-                        indeterminate={selectableInView.some(v => selected.has(v.path))
-                          && !selectableInView.every(v => selected.has(v.path))}
-                        onChange={(e) => setSelected(e.target.checked
-                          ? new Set(selectableInView.map(v => v.path))
-                          : new Set())}
-                      />
-                    </TableCell>
-                    <TableCell>Performer</TableCell>
-                    <TableCell>Video</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Scripts</TableCell>
-                    <TableCell align="right">Size</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filtered.map(v => {
-                    const meta = STATUS_META[v.status] || { label: v.status, color: 'default' };
-                    const queueable = QUEUEABLE.includes(v.status);
-                    return (
-                      <TableRow key={v.path} hover>
-                        <TableCell padding="checkbox">
-                          <Checkbox size="small" disabled={!queueable}
-                                    checked={selected.has(v.path)} onChange={() => toggle(v.path)} />
-                        </TableCell>
-                        <TableCell>{v.performer}</TableCell>
-                        <TableCell sx={{ maxWidth: 380, wordBreak: 'break-all' }}>{v.name}</TableCell>
-                        <TableCell>
-                          <Tooltip title={meta.help || ''}>
-                            <Chip size="small" label={meta.label} color={meta.color} variant="outlined" />
-                          </Tooltip>
-                          {v.job?.stage && (
-                            <Chip size="small" sx={{ ml: 0.5 }} label={v.job.stage} />
-                          )}
-                        </TableCell>
-                        <TableCell>{v.funscripts.length || '—'}</TableCell>
-                        <TableCell align="right">{fmtBytes(v.size)}</TableCell>
-                        <TableCell align="right">
-                          {v.fromFunpipe && editor.running && editor.url && (
-                            <Tooltip title="Review this script in the editor">
-                              <IconButton size="small" component="a" target="_blank"
-                                          rel="noreferrer" href={reviewUrl(v)}>
-                                <EditNoteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                          {queueable && (
-                            <Tooltip title="Queue this one now">
-                              <span>
-                                <IconButton size="small" disabled={!online} onClick={async () => {
-                                  const r = await post('/api/funpipe/queue/add', { videos: [v.path] });
-                                  setToast(r.queued
-                                    ? { severity: 'success', msg: `Queued ${v.name}` }
-                                    : { severity: 'warning', msg: r.error || 'funpipe accepted nothing' });
-                                  loadQueue();
-                                }}>
-                                  <QueueIcon fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, maxHeight: 640, overflowY: 'auto', pr: 0.5 }}>
+              {filtered.map(v => {
+                const meta = STATUS_META[v.status] || { label: v.status };
+                const queueable = QUEUEABLE.includes(v.status);
+                const tone = TONE_VAR[STATUS_TONE[v.status]] || 'var(--dim)';
+                const isSel = selected.has(v.path);
+                return (
+                  <Box
+                    key={v.path}
+                    sx={{
+                      display: 'flex', alignItems: 'center', gap: 1,
+                      // Required. .App is a flex column (App.css), so these rows
+                      // sit in a nested flex context where the default
+                      // flex-shrink:1 collapsed them to 17px — all 28 squeezed
+                      // into the 640px cap instead of scrolling — and the row's
+                      // overflow:hidden then clipped the 44px thumbnail and the
+                      // text to slivers. Measured: 17px before, 55px after.
+                      flexShrink: 0,
+                      background: isSel ? 'var(--accent-quiet)' : 'var(--bg)',
+                      border: '1px solid',
+                      borderColor: isSel ? 'var(--accent)' : 'var(--line)',
+                      borderRadius: 'var(--radius-lg, 10px)',
+                      overflow: 'hidden',
+                      transition: 'border-color .16s ease, background-color .16s ease',
+                      '&:hover': { borderColor: isSel ? 'var(--accent)' : 'var(--line-strong)' }
+                    }}
+                  >
+                    <Checkbox
+                      size="small" disabled={!queueable}
+                      checked={isSel} onChange={() => toggle(v.path)}
+                      sx={{ ml: 0.5, color: 'var(--muted)', '&.Mui-checked': { color: 'var(--accent)' } }}
+                    />
+
+                    <VideoThumb path={v.path} tone={tone} />
+
+                    <Box sx={{ flex: 1, minWidth: 0, py: 0.75 }}>
+                      {/* The filename is the thing you recognise a video by, so
+                          it leads. It used to sit in a 380px cell with
+                          wordBreak:'break-all', which shattered long names
+                          mid-word across three lines. */}
+                      <Typography
+                        title={v.name}
+                        sx={{
+                          fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                        }}
+                      >
+                        {v.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.25, flexWrap: 'wrap' }}>
+                        <Typography sx={{ fontSize: '0.72rem', color: 'var(--dim)' }}>{v.performer}</Typography>
+                        <Tooltip title={meta.help || ''}>
+                          <Box component="span" sx={{
+                            fontSize: '0.65rem', fontWeight: 700, color: tone,
+                            border: '1px solid', borderColor: tone, opacity: 0.95,
+                            borderRadius: 'var(--radius-sm, 4px)', px: 0.75, py: '1px'
+                          }}>
+                            {meta.label}
+                          </Box>
+                        </Tooltip>
+                        {v.job?.stage && (
+                          <Typography sx={{ fontSize: '0.68rem', color: 'var(--accent)' }}>{v.job.stage}</Typography>
+                        )}
+                        <Typography sx={{ fontSize: '0.7rem', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+                          {v.funscripts.length
+                            ? `${v.funscripts.length} script${v.funscripts.length > 1 ? 's' : ''}`
+                            : 'no script'}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.7rem', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+                          {fmtBytes(v.size)}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, pr: 1 }}>
+                      {v.fromFunpipe && editor.running && editor.url && (
+                        <Tooltip title="Review this script in the editor">
+                          <IconButton size="small" component="a" target="_blank"
+                                      rel="noreferrer" href={reviewUrl(v)} sx={iconBtnSx()}>
+                            <EditNoteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {queueable && (
+                        <Tooltip title="Queue this one now">
+                          <span>
+                            <IconButton size="small" disabled={!online} sx={iconBtnSx()} onClick={async () => {
+                              const r = await post('/api/funpipe/queue/add', { videos: [v.path] });
+                              setToast(r.queued
+                                ? { severity: 'success', msg: `Queued ${v.name}` }
+                                : { severity: 'warning', msg: r.error || 'funpipe accepted nothing' });
+                              loadQueue();
+                            }}>
+                              <QueueIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
           )}
-        </CardContent>
-      </Card>
+        </Box>
+      </Panel>
 
       <Snackbar
         open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)}
@@ -444,6 +596,6 @@ export default function FunpipePage() {
       >
         {toast ? <Alert severity={toast.severity} onClose={() => setToast(null)}>{toast.msg}</Alert> : undefined}
       </Snackbar>
-    </Box>
+    </PageShell>
   );
 }

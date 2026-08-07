@@ -1516,7 +1516,7 @@ function BatchQueuePage({ basePath }) {
                         <Typography variant="caption" color="text.secondary">
                           Progress: {completed}/{total} • Keep: {keepCount} • Delete: {deleteCount}
                           {session.settings && ` • Batch: ${session.settings.batchSize || 4}`}
-                          {session.settings?.secureMode && ' • 🔒 Secure'}
+                          {session.settings?.secureMode && '• Secure'}
                         </Typography>
                       </Box>
                       <Stack direction="row" spacing={1}>
@@ -1608,7 +1608,7 @@ function BatchQueuePage({ basePath }) {
                     disabled={isRunning}
                   />
                 }
-                label="🔒 Secure Mode"
+                label="Secure Mode"
               />
               <Typography variant="caption" display="block" color="text.secondary">
                 3x slower, higher accuracy
@@ -1832,7 +1832,7 @@ function BatchQueuePage({ basePath }) {
         <Typography variant="body2" color="text.secondary">
           1. Add performers to the queue using the dropdown above<br />
           2. Configure batch size and secure mode in the settings panel<br />
-          3. <strong>Click any performer</strong> or the ▶ button to start predictions for just that one<br />
+          3. <strong>Click any performer</strong>or the button to start predictions for just that one<br />
           4. Or click "Start Queue" to process all pending performers automatically<br />
           5. <strong>Progress is auto-saved!</strong> If your browser crashes, use "Recoverable Sessions" to resume<br />
           6. When running the full queue, performers process one after another<br />
@@ -1851,7 +1851,7 @@ function BatchQueuePage({ basePath }) {
               <Stack direction="row" spacing={1} alignItems="center">
                 <MovieIcon />
                 <Typography>
-                  Video Analysis Service: {videoServiceStatus.running ? '🟢 Running' : '🔴 Not Running'}
+                  Video Analysis Service: {videoServiceStatus.running ? 'Running': 'Not Running'}
                 </Typography>
               </Stack>
               {!videoServiceStatus.running && (
@@ -2199,7 +2199,7 @@ function BatchQueuePage({ basePath }) {
                                     sx={{ fontSize: '0.7rem' }}
                                     title="Quick refresh settings status only"
                                   >
-                                    ⚡ Settings
+                                    Settings
                                   </Button>
                                   <Button
                                     size="small"
@@ -2213,7 +2213,7 @@ function BatchQueuePage({ basePath }) {
                                     sx={{ fontSize: '0.7rem' }}
                                     title="Full reload (slower)"
                                   >
-                                    🔄 Full
+                                    Full
                                   </Button>
                                 </Box>
                               )}
@@ -2423,7 +2423,7 @@ function BatchQueuePage({ basePath }) {
               2. Add performers (uses their content folder) or custom folder paths<br />
               3. Adjust window multiplier - larger = fewer segments, smaller = more detailed<br />
               4. Toggle "Unprocessed Only" to skip videos that already have segments<br />
-              5. <strong>Click any item</strong> or the ▶ button to process just that source<br />
+              5. <strong>Click any item</strong>or the button to process just that source<br />
               6. Or click "Start Video Queue" to process all pending sources<br />
               7. Use the ↻ button on any video to reprocess with optional action labels<br />
               8. Segments are saved as JSON files next to each video

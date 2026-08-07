@@ -329,8 +329,8 @@ function PairwiseMobilePage() {
         return (
             <Box sx={{
                 height: '100vh',
-                bgcolor: '#000',
-                color: '#fff',
+                bgcolor: 'var(--bg)',
+                color: 'var(--text)',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -338,11 +338,11 @@ function PairwiseMobilePage() {
                 p: 3,
                 textAlign: 'center'
             }}>
-                <ScreenRotation sx={{ fontSize: 60, mb: 2, color: '#e94560' }} />
+                <ScreenRotation sx={{ fontSize: 60, mb: 2, color: 'var(--accent)' }} />
                 <Typography variant="h5" sx={{ mb: 1, fontWeight: 'bold' }}>
                     Please Rotate Device
                 </Typography>
-                <Typography variant="body1" sx={{ color: '#aaa' }}>
+                <Typography variant="body1" sx={{ color: 'var(--dim)' }}>
                     This app works best in landscape mode for comparing images side-by-side.
                 </Typography>
             </Box>
@@ -355,7 +355,7 @@ function PairwiseMobilePage() {
             flexDirection: 'column',
             height: '100vh', // fallback for browsers without dvh support
             '@supports (height: 100dvh)': { height: '100dvh' },
-            bgcolor: '#000',
+            bgcolor: 'var(--bg)',
             overflow: 'hidden'
         }}>
             {/* Top Bar - Settings & Stats */}
@@ -365,8 +365,8 @@ function PairwiseMobilePage() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 px: 2,
-                bgcolor: '#16213e',
-                borderBottom: '1px solid #333',
+                bgcolor: 'var(--surface)',
+                borderBottom: '1px solid var(--line)',
                 gap: 2
             }}>
                 {/* Type Toggle */}
@@ -377,13 +377,13 @@ function PairwiseMobilePage() {
                     size="small"
                     sx={{ height: 32 }}
                 >
-                    <ToggleButton value="mixed" sx={{ color: '#888', borderColor: '#333', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560', borderColor: '#e94560' } }}>
+                    <ToggleButton value="mixed" sx={{ color: 'var(--dim)', borderColor: 'var(--line)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)', borderColor: 'var(--accent)' } }}>
                         MIXED
                     </ToggleButton>
-                    <ToggleButton value="intra" sx={{ color: '#888', borderColor: '#333', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560', borderColor: '#e94560' } }}>
+                    <ToggleButton value="intra" sx={{ color: 'var(--dim)', borderColor: 'var(--line)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)', borderColor: 'var(--accent)' } }}>
                         SAME
                     </ToggleButton>
-                    <ToggleButton value="inter" sx={{ color: '#888', borderColor: '#333', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560', borderColor: '#e94560' } }}>
+                    <ToggleButton value="inter" sx={{ color: 'var(--dim)', borderColor: 'var(--line)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)', borderColor: 'var(--accent)' } }}>
                         CROSS
                     </ToggleButton>
                 </ToggleButtonGroup>
@@ -394,7 +394,7 @@ function PairwiseMobilePage() {
                     size="small"
                     startIcon={<FilterList />}
                     onClick={() => setShowPerformerModal(true)}
-                    sx={{ color: '#888', borderColor: '#333', height: 32 }}
+                    sx={{ color: 'var(--dim)', borderColor: 'var(--line)', height: 32 }}
                 >
                     SELECT ({selectedPerformers.length})
                 </Button>
@@ -402,14 +402,14 @@ function PairwiseMobilePage() {
                 <Box sx={{ flex: 1 }} />
 
                 {/* Stats */}
-                <Typography variant="caption" sx={{ color: '#aaa', display: 'flex', gap: 2, whiteSpace: 'nowrap' }}>
-                    <span>Labels: <strong style={{ color: '#00d9ff' }}>{stats.total}</strong></span>
+                <Typography variant="caption" sx={{ color: 'var(--dim)', display: 'flex', gap: 2, whiteSpace: 'nowrap' }}>
+                    <span>Labels: <strong style={{ color: 'var(--accent)' }}>{stats.total}</strong></span>
                 </Typography>
 
-                <IconButton size="small" onClick={toggleFullscreen} sx={{ color: '#aaa' }}>
+                <IconButton size="small" onClick={toggleFullscreen} sx={{ color: 'var(--dim)' }}>
                     <Fullscreen />
                 </IconButton>
-                <IconButton size="small" onClick={() => setShowSettings(true)} sx={{ color: '#aaa' }}>
+                <IconButton size="small" onClick={() => setShowSettings(true)} sx={{ color: 'var(--dim)' }}>
                     <Settings />
                 </IconButton>
             </Box>
@@ -421,8 +421,8 @@ function PairwiseMobilePage() {
                         <CircularProgress color="secondary" />
                     </Box>
                 ) : connectionError ? (
-                    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', p: 3, textAlign: 'center' }}>
-                        <WifiOff sx={{ fontSize: 60, mb: 2, color: '#f44336' }} />
+                    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', p: 3, textAlign: 'center' }}>
+                        <WifiOff sx={{ fontSize: 60, mb: 2, color: 'var(--bad)' }} />
                         <Typography variant="h6" color="error" gutterBottom>Connection Error</Typography>
                         <Typography variant="body2" sx={{ mb: 2 }}>
                             Cannot connect to server at <strong>{serverUrl}</strong>
@@ -439,7 +439,7 @@ function PairwiseMobilePage() {
                         </Button>
                     </Box>
                 ) : !datasetStats.loaded ? (
-                    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', p: 3, textAlign: 'center' }}>
+                    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', p: 3, textAlign: 'center' }}>
                         <CircularProgress color="secondary" sx={{ mb: 2 }} />
                         <Typography variant="h6" color="white" gutterBottom>Initializing Database...</Typography>
                         <Typography variant="body2" sx={{ mb: 2 }}>
@@ -451,8 +451,8 @@ function PairwiseMobilePage() {
                     </Box>
                 ) : !pair ? (
                     datasetStats.totalImages === 0 ? (
-                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', p: 3, textAlign: 'center' }}>
-                            <Warning sx={{ fontSize: 60, mb: 2, color: '#ff9800' }} />
+                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', p: 3, textAlign: 'center' }}>
+                            <Warning sx={{ fontSize: 60, mb: 2, color: 'var(--warn)' }} />
                             <Typography variant="h6" color="white" gutterBottom>No Images Found</Typography>
                             <Typography variant="body2" sx={{ mb: 2 }}>
                                 Server has 0 images loaded. Use Settings to configure Base Path.
@@ -462,8 +462,8 @@ function PairwiseMobilePage() {
                             </Button>
                         </Box>
                     ) : (
-                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888' }}>
-                            <CheckCircle sx={{ fontSize: 60, mb: 2, color: '#4caf50' }} />
+                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>
+                            <CheckCircle sx={{ fontSize: 60, mb: 2, color: 'var(--ok)' }} />
                             <Typography variant="h6">All done!</Typography>
                             <Typography variant="body2">No more pairs to label.</Typography>
                             <Button variant="outlined" onClick={fetchNextPair} sx={{ mt: 2 }}>Refresh</Button>
@@ -481,12 +481,12 @@ function PairwiseMobilePage() {
                                 borderRadius: 2,
                                 overflow: 'hidden',
                                 position: 'relative',
-                                bgcolor: '#0a0a15',
+                                bgcolor: 'var(--bg)',
                                 border: '2px solid transparent',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                '&:active': { borderColor: '#e94560', bgcolor: '#1a1a2e' } // Touch feedback
+                                '&:active': { borderColor: 'var(--accent)', bgcolor: 'var(--surface)' } // Touch feedback
                             }}
                         >
                             <img
@@ -508,9 +508,9 @@ function PairwiseMobilePage() {
                                 onClick={handleUndo}
                                 size="large"
                                 sx={{
-                                    bgcolor: '#333',
-                                    color: '#fff',
-                                    '&:hover': { bgcolor: '#555' }
+                                    bgcolor: 'var(--raised)',
+                                    color: 'var(--text)',
+                                    '&:hover': { bgcolor: 'var(--muted)' }
                                 }}
                             >
                                 <Undo />
@@ -520,8 +520,8 @@ function PairwiseMobilePage() {
                                 onClick={handleBothBad}
                                 size="large"
                                 sx={{
-                                    bgcolor: '#d32f2f',
-                                    color: '#fff',
+                                    bgcolor: 'var(--bad)',
+                                    color: 'var(--text)',
                                     '&:hover': { bgcolor: '#b71c1c' }
                                 }}
                             >
@@ -532,8 +532,8 @@ function PairwiseMobilePage() {
                                 onClick={handleSkip}
                                 size="large"
                                 sx={{
-                                    bgcolor: '#ff9800',
-                                    color: '#fff',
+                                    bgcolor: 'var(--warn)',
+                                    color: 'var(--text)',
                                     '&:hover': { bgcolor: '#e68900' }
                                 }}
                             >
@@ -551,12 +551,12 @@ function PairwiseMobilePage() {
                                 borderRadius: 2,
                                 overflow: 'hidden',
                                 position: 'relative',
-                                bgcolor: '#0a0a15',
+                                bgcolor: 'var(--bg)',
                                 border: '2px solid transparent',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                '&:active': { borderColor: '#4ecdc4', bgcolor: '#1a1a2e' } // Touch feedback
+                                '&:active': { borderColor: '#4ecdc4', bgcolor: 'var(--surface)' } // Touch feedback
                             }}
                         >
                             <img
@@ -575,11 +575,11 @@ function PairwiseMobilePage() {
                 onClose={() => setShowPerformerModal(false)}
                 maxWidth="sm"
                 fullWidth
-                PaperProps={{ sx: { bgcolor: '#16213e', color: '#fff' } }}
+                PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}
             >
-                <DialogTitle sx={{ color: '#e94560' }}>Select Performers</DialogTitle>
+                <DialogTitle sx={{ color: 'var(--accent)' }}>Select Performers</DialogTitle>
                 <DialogContent>
-                    <Typography variant="body2" sx={{ mb: 2, color: '#888' }}>
+                    <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
                         Focus on specific performers for labeling. Leave empty to label all.
                     </Typography>
                     <List sx={{ maxHeight: 300, overflow: 'auto' }}>
@@ -594,20 +594,20 @@ function PairwiseMobilePage() {
                                         );
                                     }}
                                     sx={{
-                                        bgcolor: selectedPerformers.includes(p.name) ? 'rgba(76, 175, 80, 0.2)' : 'transparent',
-                                        border: selectedPerformers.includes(p.name) ? '1px solid #4caf50' : '1px solid transparent',
+                                        bgcolor: selectedPerformers.includes(p.name) ? 'var(--ok-quiet)' : 'transparent',
+                                        border: selectedPerformers.includes(p.name) ? '1px solid var(--ok)' : '1px solid transparent',
                                         borderRadius: 1,
                                         mb: 0.5
                                     }}
                                 >
                                     <Checkbox
                                         checked={selectedPerformers.includes(p.name)}
-                                        sx={{ color: '#888' }}
+                                        sx={{ color: 'var(--dim)' }}
                                     />
                                     <ListItemText
                                         primary={p.name}
                                         secondary={`${p.totalCount} images • ${p.coverage}% labeled`}
-                                        secondaryTypographyProps={{ sx: { color: '#888' } }}
+                                        secondaryTypographyProps={{ sx: { color: 'var(--dim)' } }}
                                     />
                                 </ListItemButton>
                             </ListItem>
@@ -615,24 +615,24 @@ function PairwiseMobilePage() {
                     </List>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setSelectedPerformers([])} sx={{ color: '#888' }}>
+                    <Button onClick={() => setSelectedPerformers([])} sx={{ color: 'var(--dim)' }}>
                         Clear All
                     </Button>
-                    <Button onClick={() => setShowPerformerModal(false)} sx={{ color: '#888' }}>
+                    <Button onClick={() => setShowPerformerModal(false)} sx={{ color: 'var(--dim)' }}>
                         Cancel
                     </Button>
-                    <Button onClick={handlePerformerSelect} variant="contained" sx={{ bgcolor: '#e94560' }}>
+                    <Button onClick={handlePerformerSelect} variant="contained" sx={{ bgcolor: 'var(--accent)' }}>
                         Apply
                     </Button>
                 </DialogActions>
             </Dialog>
 
             {/* Settings Dialog */}
-            <Dialog open={showSettings} onClose={() => setShowSettings(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { bgcolor: '#222', color: '#fff' } }}>
+            <Dialog open={showSettings} onClose={() => setShowSettings(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}>
                 <DialogTitle>Settings</DialogTitle>
                 <DialogContent>
                     <Box sx={{ mb: 3 }}>
-                        <Typography variant="subtitle2" sx={{ color: '#aaa', mb: 1 }}>Server URL (Device IP)</Typography>
+                        <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Server URL (Device IP)</Typography>
                         <TextField
                             fullWidth
                             size="small"
@@ -640,31 +640,31 @@ function PairwiseMobilePage() {
                             onChange={(e) => setSettingsServerUrl(e.target.value)}
                             placeholder="http://192.168.1.X:3334"
                             sx={{
-                                bgcolor: '#333',
+                                bgcolor: 'var(--raised)',
                                 mb: 2,
-                                input: { color: '#fff' },
+                                input: { color: 'var(--text)' },
                                 '& .MuiOutlinedInput-root': {
-                                    '& fieldset': { borderColor: '#444' },
-                                    '&:hover fieldset': { borderColor: '#666' },
+                                    '& fieldset': { borderColor: 'var(--line-strong)' },
+                                    '&:hover fieldset': { borderColor: 'var(--line-strong)' },
                                 }
                             }}
                         />
 
-                        <Divider sx={{ my: 2, bgcolor: '#333' }} />
+                        <Divider sx={{ my: 2, bgcolor: 'var(--raised)' }} />
 
-                        <Typography variant="subtitle2" sx={{ color: '#aaa', mb: 1 }}>Dataset Base Path</Typography>
+                        <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Dataset Base Path</Typography>
                         <Box sx={{
                             width: '100%',
-                            bgcolor: '#222',
+                            bgcolor: 'var(--surface)',
                             p: 1,
                             borderRadius: 1,
-                            border: '1px solid #444'
+                            border: '1px solid var(--line-strong)'
                         }}>
-                            <Typography variant="body2" sx={{ color: '#aaa', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                            <Typography variant="body2" sx={{ color: 'var(--dim)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
                                 {newBasePath || 'Loading...'}
                             </Typography>
                         </Box>
-                        <Typography variant="caption" sx={{ color: '#666', mt: 0.5, display: 'block' }}>
+                        <Typography variant="caption" sx={{ color: 'var(--muted)', mt: 0.5, display: 'block' }}>
                             Update this if Stats show 0 images.
                         </Typography>
                         <Button
@@ -673,7 +673,7 @@ function PairwiseMobilePage() {
                             disabled={settingsLoading}
                             startIcon={<Save />}
                             fullWidth
-                            sx={{ mt: 2, bgcolor: '#e94560' }}
+                            sx={{ mt: 2, bgcolor: 'var(--accent)' }}
                         >
                             Save Settings
                         </Button>
@@ -685,12 +685,12 @@ function PairwiseMobilePage() {
                         startIcon={<Refresh />}
                         onClick={handleRefresh}
                         disabled={settingsLoading}
-                        sx={{ mb: 2, color: '#4caf50', borderColor: '#4caf50' }}
+                        sx={{ mb: 2, color: 'var(--ok)', borderColor: 'var(--ok)' }}
                     >
                         Rescan Folders
                     </Button>
 
-                    <Divider sx={{ my: 2, bgcolor: '#333' }} />
+                    <Divider sx={{ my: 2, bgcolor: 'var(--raised)' }} />
 
 
                     {settingsMessage && (
@@ -699,12 +699,12 @@ function PairwiseMobilePage() {
                         </Alert>
                     )}
 
-                    <Button onClick={() => window.location.reload()} fullWidth variant="outlined" sx={{ mb: 1, color: '#aaa', borderColor: '#444' }}>
+                    <Button onClick={() => window.location.reload()} fullWidth variant="outlined" sx={{ mb: 1, color: 'var(--dim)', borderColor: 'var(--line-strong)' }}>
                         Reload App
                     </Button>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setShowSettings(false)} sx={{ color: '#fff' }}>Close</Button>
+                    <Button onClick={() => setShowSettings(false)} sx={{ color: 'var(--text)' }}>Close</Button>
                 </DialogActions>
             </Dialog>
         </Box>

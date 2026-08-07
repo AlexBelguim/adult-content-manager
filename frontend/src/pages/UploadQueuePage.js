@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
     Box,
     Typography,
-    Paper,
     List,
     ListItem,
     ListItemText,
@@ -15,13 +14,12 @@ import {
     Divider,
     TextField,
     Grid,
-    Card,
-    CardContent,
     Switch,
     FormControlLabel,
     Tooltip,
     Fade
 } from '@mui/material';
+import { PageShell, PageHeader, Panel, ICON } from '../components/layout';
 import {
     Delete as DeleteIcon,
     Refresh as RefreshIcon,
@@ -429,11 +427,19 @@ function UploadQueuePage({ basePath }) {
 
     const uploadingCount = uploadingJobs.length;
 
+    // Fixed-height page: the queue list scrolls inside its own column rather
+    // than growing the document, so the height/overflow rules stay here and
+    // only the width + padding come from the shell. maxWidth/mx are dropped —
+    // PageShell already supplies CONTENT_MAX and centring.
     return (
-        <Box sx={{ p: 3, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxWidth: 1600, mx: 'auto' }}>
-            <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 'bold', background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                Upload Queue
-            </Typography>
+        <PageShell sx={{
+            height: '100vh',
+            minHeight: 0,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+        }}>
+            <PageHeader title="Upload Queue" />
 
             {error && (
                 <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
@@ -444,27 +450,20 @@ function UploadQueuePage({ basePath }) {
             <Grid container spacing={3} sx={{ flex: 1, overflow: 'hidden' }}>
                 {/* Upload Form (Left Side) */}
                 <Grid item xs={12} md={4} sx={{ height: '100%', overflow: 'auto' }}>
-                    <Paper
-                        elevation={6}
+                    <Panel
                         sx={{
                             p: 3,
                             height: '100%',
-                            
-                            
-                            borderRadius: 2,
                             display: 'flex',
                             flexDirection: 'column'
                         }}
                     >
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                            <Box sx={{
-                                width: 40, height: 40, borderRadius: '50%',
-                                bgcolor: 'action.selected', color: 'primary.main',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', mr: 2
-                            }}>
-                                <AddIcon />
-                            </Box>
-                            <Typography variant="h6" fontWeight="bold">
+                        {/* Section-title treatment: no circular avatar chip, the
+                            icon sits inline with the label like every other
+                            Section heading in the app. */}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                            <AddIcon sx={{ width: ICON.action, height: ICON.action, color: 'var(--accent)' }} />
+                            <Typography variant="subtitle1" sx={{ fontWeight: 620, color: 'var(--text)' }}>
                                 Add New Upload
                             </Typography>
                         </Box>
@@ -516,21 +515,23 @@ function UploadQueuePage({ basePath }) {
 
                         {selectedFiles.length > 0 && (
                             <Fade in>
-                                <Card variant="outlined" sx={{ mb: 3, bgcolor: 'background.paper', borderColor: 'divider' }}>
-                                    <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-                                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                                <Panel sx={{ mb: 3, p: 2, bgcolor: 'var(--raised)' }}>
+                                    <Box>
+                                        <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 1 }}>
                                             {selectedFiles.length} files selected
                                         </Typography>
                                         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                            <Chip icon={<ImageIcon sx={{ color: '#90caf9 !important' }} />} label={fileStats.pics} size="small" sx={{ bgcolor: 'rgba(144, 202, 249, 0.1)', color: '#90caf9' }} />
-                                            <Chip icon={<MovieIcon sx={{ color: '#ce93d8 !important' }} />} label={fileStats.vids} size="small" sx={{ bgcolor: 'rgba(206, 147, 216, 0.1)', color: '#ce93d8' }} />
+                                            {/* The `!important` inside these colour strings is why they
+                                                survived every earlier pass — the value isn't a bare literal. */}
+                                            <Chip icon={<ImageIcon sx={{ color: 'var(--info) !important' }} />} label={fileStats.pics} size="small" sx={{ bgcolor: 'var(--info-quiet)', color: 'var(--info)' }} />
+                                            <Chip icon={<MovieIcon sx={{ color: 'var(--accent) !important' }} />} label={fileStats.vids} size="small" sx={{ bgcolor: 'var(--accent-quiet)', color: 'var(--accent)' }} />
                                             {fileStats.funscript > 0 && (
-                                                <Chip label={`${fileStats.funscript} funscripts`} size="small" sx={{ bgcolor: 'rgba(255, 204, 128, 0.1)', color: '#ffcc80' }} />
+                                                <Chip label={`${fileStats.funscript} funscripts`} size="small" sx={{ bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }} />
                                             )}
-                                            <Chip label={formatFileSize(fileStats.totalSize)} size="small" sx={{ bgcolor: 'background.default',  }} />
+                                            <Chip label={formatFileSize(fileStats.totalSize)} size="small" sx={{ bgcolor: 'var(--bg)', color: 'var(--dim)' }} />
                                         </Box>
-                                    </CardContent>
-                                </Card>
+                                    </Box>
+                                </Panel>
                             </Fade>
                         )}
 
@@ -562,33 +563,30 @@ function UploadQueuePage({ basePath }) {
                                 disabled={!performerName.trim() || selectedFiles.length === 0}
                                 sx={{
                                     py: 1.5,
-                                    background: 'linear-gradient(45deg, #9c27b0 30%, #ce93d8 90%)',
+                                    background: 'linear-gradient(45deg, var(--accent) 30%, var(--accent) 90%)',
                                     fontWeight: 'bold',
-                                    boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)'
+                                    boxShadow: '0 3px 5px 2px var(--accent-quiet)'
                                 }}
                             >
                                 Add to Queue
                             </Button>
                         </Box>
-                    </Paper>
+                    </Panel>
                 </Grid>
 
                 {/* Queue List (Right Side) */}
                 <Grid item xs={12} md={8} sx={{ height: '100%', overflow: 'hidden' }}>
-                    <Paper
-                        elevation={6}
+                    <Panel
+                        padded={false}
                         sx={{
                             height: '100%',
                             display: 'flex',
-                            flexDirection: 'column',
-                            
-                            
-                            borderRadius: 2
+                            flexDirection: 'column'
                         }}
                     >
-                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--line)' }}>
                             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                                <Typography variant="h6" fontWeight="bold">Queue Activity</Typography>
+                                <Typography variant="subtitle1" sx={{ fontWeight: 620, color: 'var(--text)' }}>Queue Activity</Typography>
                                 {isProcessing && (
                                     <Chip
                                         icon={<ProcessingIcon sx={{ animation: 'spin 2s linear infinite' }} />}
@@ -615,7 +613,7 @@ function UploadQueuePage({ basePath }) {
 
                         <Box sx={{ flex: 1, overflow: 'auto', p: 0 }}>
                             {combinedQueue.length === 0 ? (
-                                <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                     <QueuedIcon sx={{ fontSize: 60, mb: 2, opacity: 0.2 }} />
                                     <Typography variant="h6" color="text.disabled">Queue is empty</Typography>
                                     <Typography variant="body2" color="text.disabled">Add uploads to get started</Typography>
@@ -662,7 +660,7 @@ function UploadQueuePage({ basePath }) {
                                                                     <LinearProgress
                                                                         variant="determinate"
                                                                         value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: '#29b6f6' } }}
+                                                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'background.default', '& .MuiLinearProgress-bar': { bgcolor: 'var(--info)' } }}
                                                                     />
                                                                 </Box>
                                                             )}
@@ -685,7 +683,7 @@ function UploadQueuePage({ basePath }) {
                                                                 </Typography>
                                                             )}
                                                             {job.status === 'completed' && (
-                                                                <Typography variant="caption" sx={{ color: '#66bb6a' }}>
+                                                                <Typography variant="caption" sx={{ color: 'var(--ok)' }}>
                                                                     Completed at {formatTime(job.completedAt)}
                                                                 </Typography>
                                                             )}
@@ -697,7 +695,7 @@ function UploadQueuePage({ basePath }) {
                                                         <IconButton
                                                             edge="end"
                                                             onClick={() => handleRemoveJob(job.id, job.status === 'uploading')}
-                                                            sx={{ color: 'text.disabled', '&:hover': { color: '#f44336' } }}
+                                                            sx={{ color: 'text.disabled', '&:hover': { color: 'var(--bad)' } }}
                                                         >
                                                             <DeleteIcon />
                                                         </IconButton>
@@ -709,7 +707,7 @@ function UploadQueuePage({ basePath }) {
                                 </List>
                             )}
                         </Box>
-                    </Paper>
+                    </Panel>
                 </Grid>
             </Grid>
             <style>{`
@@ -718,7 +716,7 @@ function UploadQueuePage({ basePath }) {
                     100% { transform: rotate(360deg); }
                 }
             `}</style>
-        </Box>
+        </PageShell>
     );
 }
 

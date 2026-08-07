@@ -265,7 +265,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                     }
                   }}
                 >
-                  <CircularProgress size={24} sx={{ color: 'rgba(255,255,255,0.2)' }} />
+                  <CircularProgress size={24} sx={{ color: 'var(--muted)' }} />
                 </Card>
               </Grid>
             ))}
@@ -334,7 +334,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                               bgcolor: 'rgba(0,0,0,0.5)'
                             }}
                           >
-                            <CircularProgress size={24} sx={{ color: 'rgba(255,255,255,0.3)' }} />
+                            <CircularProgress size={24} sx={{ color: 'var(--muted)' }} />
                           </Box>
                         )}
                         <img
@@ -366,7 +366,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                             top: 8,
                             left: 8,
                             bgcolor: 'primary.main',
-                            color: 'white',
+                            color: 'var(--text)',
                             borderRadius: '50%',
                             width: 36,
                             height: 36,
@@ -418,7 +418,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                           left: 0,
                           right: 0,
                           bgcolor: 'rgba(0,0,0,0.7)',
-                          color: 'white',
+                          color: 'var(--text)',
                           p: 0.5,
                           fontSize: '0.65rem',
                           whiteSpace: 'nowrap',
@@ -450,7 +450,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
                       opacity: 0.5
                     }}
                   >
-                    <CircularProgress size={20} sx={{ color: 'rgba(255,255,255,0.1)' }} />
+                    <CircularProgress size={20} sx={{ color: 'var(--muted)' }} />
                   </Card>
                 </Grid>
               ))
@@ -466,7 +466,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
         maxWidth="xl"
         fullWidth
       >
-        <DialogContent sx={{ bgcolor: '#000', p: 0 }}>
+        <DialogContent sx={{ bgcolor: 'var(--bg)', p: 0 }}>
           {previewImage && (
             <img
               src={`/api/files/raw?path=${encodeURIComponent(previewImage)}`}

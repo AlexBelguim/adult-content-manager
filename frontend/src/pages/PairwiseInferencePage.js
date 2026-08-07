@@ -4,6 +4,7 @@ import {
     FormControl, InputLabel, Grid, LinearProgress, TextField, Chip, Alert
 } from '@mui/material';
 import { Psychology, FolderOpen, CheckCircle, Error as ErrorIcon, Refresh, Settings } from '@mui/icons-material';
+import { PageShell, PageHeader } from '../components/layout';
 
 function PairwiseInferencePage({ serverUrl }) {
     const [performers, setPerformers] = useState([]);
@@ -259,9 +260,9 @@ function PairwiseInferencePage({ serverUrl }) {
     };
 
     const getScoreColor = (score) => {
-        if (score >= 70) return '#4caf50';
-        if (score >= 40) return '#ff9800';
-        return '#f44336';
+        if (score >= 70) return 'var(--ok)';
+        if (score >= 40) return 'var(--warn)';
+        return 'var(--bad)';
     };
 
     const formatBytes = (bytes) => {
@@ -271,16 +272,18 @@ function PairwiseInferencePage({ serverUrl }) {
     };
 
     return (
-        <Box sx={{ p: 3, color: '#fff' }}>
-            <Typography variant="h5" sx={{ mb: 3, color: '#e94560' }}>
-                Batch Inference
-            </Typography>
+        <PageShell>
+            <PageHeader
+                title="Batch Inference"
+                subtitle="Score a whole performer or an arbitrary folder against the loaded model."
+                back
+            />
 
             {/* Inference Server Status */}
-            <Paper sx={{ p: 2, mb: 3, bgcolor: '#16213e' }}>
+            <Paper sx={{ p: 2, mb: 3, bgcolor: 'var(--surface)' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Typography variant="h6" sx={{ color: '#00d9ff' }}>
+                        <Typography variant="h6" sx={{ color: 'var(--accent)' }}>
                             Inference Server
                         </Typography>
                         {inferenceHealth?.online ? (
@@ -305,7 +308,7 @@ function PairwiseInferencePage({ serverUrl }) {
                         size="small"
                         startIcon={checkingHealth ? <CircularProgress size={16} /> : <Refresh />}
                         onClick={checkInferenceHealth}
-                        sx={{ color: '#888' }}
+                        sx={{ color: 'var(--dim)' }}
                     >
                         Check
                     </Button>
@@ -319,38 +322,38 @@ function PairwiseInferencePage({ serverUrl }) {
                 )}
 
                 {inferenceHealth?.online && (
-                    <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', color: '#888' }}>
+                    <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', color: 'var(--dim)' }}>
                         <Typography variant="body2">
-                            URL: <strong style={{ color: '#fff' }}>{inferenceHealth.url}</strong>
+                            URL: <strong style={{ color: 'var(--text)' }}>{inferenceHealth.url}</strong>
                         </Typography>
                         <Typography variant="body2">
-                            Device: <strong style={{ color: '#4caf50' }}>{inferenceHealth.device}</strong>
+                            Device: <strong style={{ color: 'var(--ok)' }}>{inferenceHealth.device}</strong>
                         </Typography>
                         {inferenceHealth.model && (
                             <Typography variant="body2">
-                                Model: <strong style={{ color: '#00d9ff' }}>{inferenceHealth.model}</strong>
+                                Model: <strong style={{ color: 'var(--accent)' }}>{inferenceHealth.model}</strong>
                             </Typography>
                         )}
                     </Box>
                 )}
 
                 {/* Available Models & Loading */}
-                <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #333' }}>
-                    <Typography variant="subtitle2" sx={{ mb: 1, color: '#888' }}>
+                <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid var(--line)' }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1, color: 'var(--dim)' }}>
                         Model Management
                     </Typography>
 
                     <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                         <FormControl size="small" sx={{ minWidth: 250 }}>
-                            <InputLabel sx={{ color: '#aaa' }}>Select Model to Load</InputLabel>
+                            <InputLabel sx={{ color: 'var(--dim)' }}>Select Model to Load</InputLabel>
                             <Select
                                 value={selectedModel}
                                 onChange={(e) => setSelectedModel(e.target.value)}
                                 label="Select Model to Load"
                                 sx={{
-                                    bgcolor: '#0f3460', color: '#fff',
-                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#444' },
-                                    '& .MuiSvgIcon-root': { color: '#fff' }
+                                    bgcolor: 'var(--raised)', color: 'var(--text)',
+                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line-strong)' },
+                                    '& .MuiSvgIcon-root': { color: 'var(--text)' }
                                 }}
                             >
                                 <MenuItem value="">
@@ -369,14 +372,14 @@ function PairwiseInferencePage({ serverUrl }) {
                             disabled={!selectedModel || loadingModel}
                             onClick={handleLoadModel}
                             startIcon={loadingModel ? <CircularProgress size={20} color="inherit" /> : <Settings />}
-                            sx={{ bgcolor: '#4caf50', color: '#fff' }}
+                            sx={{ bgcolor: 'var(--ok)', color: 'var(--text)' }}
                         >
                             {loadingModel ? 'Loading...' : 'Load Model'}
                         </Button>
                     </Box>
 
                     {models.length === 0 && (
-                        <Typography variant="caption" sx={{ color: '#f44336', mt: 1, display: 'block' }}>
+                        <Typography variant="caption" sx={{ color: 'var(--bad)', mt: 1, display: 'block' }}>
                             No models found in <code>backend-pairwise/models/</code>
                         </Typography>
                     )}
@@ -384,20 +387,20 @@ function PairwiseInferencePage({ serverUrl }) {
             </Paper>
 
             {/* Performer Inference */}
-            <Paper sx={{ p: 3, mb: 3, bgcolor: '#16213e' }}>
-                <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>
+            <Paper sx={{ p: 3, mb: 3, bgcolor: 'var(--surface)' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'var(--accent)' }}>
                     Score Performer Images
                 </Typography>
 
                 <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
                     <FormControl sx={{ minWidth: 300 }}>
-                        <InputLabel sx={{ color: '#888' }}>Select Performer</InputLabel>
+                        <InputLabel sx={{ color: 'var(--dim)' }}>Select Performer</InputLabel>
                         <Select
                             value={selectedPerformer}
                             onChange={(e) => setSelectedPerformer(e.target.value)}
                             label="Select Performer"
                             disabled={loadingPerformers}
-                            sx={{ bgcolor: '#0f3460' }}
+                            sx={{ bgcolor: 'var(--raised)' }}
                         >
                             {performers.map((p) => (
                                 <MenuItem key={p.name} value={p.name}>
@@ -412,7 +415,7 @@ function PairwiseInferencePage({ serverUrl }) {
                         startIcon={loading ? <CircularProgress size={20} /> : <Psychology />}
                         onClick={handleRunInference}
                         disabled={!selectedPerformer || loading}
-                        sx={{ bgcolor: '#e94560', height: 56 }}
+                        sx={{ bgcolor: 'var(--accent)', height: 56 }}
                     >
                         Run Inference
                     </Button>
@@ -421,11 +424,11 @@ function PairwiseInferencePage({ serverUrl }) {
                 {loading && (
                     <Box sx={{ mt: 2 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                            <Typography variant="body2" sx={{ color: '#888' }}>
+                            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
                                 Scoring images... This may take a moment.
                             </Typography>
                             {progress && (
-                                <Typography variant="body2" sx={{ color: '#00d9ff', fontWeight: 'bold' }}>
+                                <Typography variant="body2" sx={{ color: 'var(--accent)', fontWeight: 'bold' }}>
                                     {progress.current} / {progress.total} ({Math.round((progress.current / progress.total) * 100)}%)
                                 </Typography>
                             )}
@@ -444,12 +447,12 @@ function PairwiseInferencePage({ serverUrl }) {
 
                 {results && (
                     <Box sx={{ mt: 3 }}>
-                        <Typography variant="body1" sx={{ mb: 2, color: '#4caf50' }}>
+                        <Typography variant="body1" sx={{ mb: 2, color: 'var(--ok)' }}>
                             ✓ Scored {results.totalImages} images for {results.performer}
                         </Typography>
 
                         {/* Score Distribution */}
-                        <Typography variant="subtitle2" sx={{ mb: 1, color: '#888' }}>
+                        <Typography variant="subtitle2" sx={{ mb: 1, color: 'var(--dim)' }}>
                             Score Distribution
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 0.5, mb: 3 }}>
@@ -483,7 +486,7 @@ function PairwiseInferencePage({ serverUrl }) {
                                                 }}
                                             />
                                         </Box>
-                                        <Typography variant="caption" sx={{ color: '#666' }}>
+                                        <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
                                             {bucket}
                                         </Typography>
                                     </Box>
@@ -492,7 +495,7 @@ function PairwiseInferencePage({ serverUrl }) {
                         </Box>
 
                         {/* Image Grid */}
-                        <Typography variant="subtitle2" sx={{ mb: 1, color: '#888' }}>
+                        <Typography variant="subtitle2" sx={{ mb: 1, color: 'var(--dim)' }}>
                             Scored Images (sorted high to low)
                         </Typography>
                         <div style={{
@@ -506,7 +509,7 @@ function PairwiseInferencePage({ serverUrl }) {
                                 <div key={i} style={{
                                     position: 'relative',
                                     aspectRatio: '1',
-                                    backgroundColor: '#0f3460',
+                                    backgroundColor: 'var(--raised)',
                                     borderRadius: '4px',
                                     overflow: 'hidden'
                                 }}>
@@ -538,8 +541,8 @@ function PairwiseInferencePage({ serverUrl }) {
             </Paper>
 
             {/* Folder Inference */}
-            <Paper sx={{ p: 3, bgcolor: '#16213e' }}>
-                <Typography variant="h6" sx={{ mb: 2, color: '#00d9ff' }}>
+            <Paper sx={{ p: 3, bgcolor: 'var(--surface)' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'var(--accent)' }}>
                     Score Folder
                 </Typography>
 
@@ -550,7 +553,7 @@ function PairwiseInferencePage({ serverUrl }) {
                         onChange={(e) => setFolderPath(e.target.value)}
                         fullWidth
                         placeholder="C:\path\to\images"
-                        sx={{ '& .MuiInputBase-root': { bgcolor: '#0f3460' } }}
+                        sx={{ '& .MuiInputBase-root': { bgcolor: 'var(--raised)' } }}
                     />
 
                     <Button
@@ -558,7 +561,7 @@ function PairwiseInferencePage({ serverUrl }) {
                         startIcon={loading ? <CircularProgress size={20} /> : <FolderOpen />}
                         onClick={handleRunFolderInference}
                         disabled={!folderPath || loading}
-                        sx={{ bgcolor: '#e94560', height: 56, minWidth: 150 }}
+                        sx={{ bgcolor: 'var(--accent)', height: 56, minWidth: 150 }}
                     >
                         Score
                     </Button>
@@ -566,7 +569,7 @@ function PairwiseInferencePage({ serverUrl }) {
 
                 {folderResults && (
                     <Box sx={{ mt: 3 }}>
-                        <Typography variant="body1" sx={{ mb: 2, color: '#4caf50' }}>
+                        <Typography variant="body1" sx={{ mb: 2, color: 'var(--ok)' }}>
                             ✓ Scored {folderResults.totalImages} images from {folderResults.folderPath}
                         </Typography>
 
@@ -581,7 +584,7 @@ function PairwiseInferencePage({ serverUrl }) {
                                 <div key={i} style={{
                                     position: 'relative',
                                     aspectRatio: '1',
-                                    backgroundColor: '#0f3460',
+                                    backgroundColor: 'var(--raised)',
                                     borderRadius: '4px',
                                     overflow: 'hidden'
                                 }}>
@@ -611,7 +614,7 @@ function PairwiseInferencePage({ serverUrl }) {
                     </Box>
                 )}
             </Paper>
-        </Box>
+        </PageShell>
     );
 }
 

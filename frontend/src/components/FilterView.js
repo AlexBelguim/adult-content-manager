@@ -496,7 +496,8 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
         })()
       }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600, color: 'text.primary' }}>
+          {/* Matches the PageHeader primitive — see GalleryView. */}
+          <Typography variant="h5" sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>
             Filter Performers
           </Typography>
           {allPerformers.length > 0 && (
@@ -576,7 +577,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
                   justifyContent: 'center'
                 }}
               >
-                <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '14px' }}>
+                <Typography sx={{ color: 'var(--dim)', fontSize: '14px' }}>
                   Loading...
                 </Typography>
               </Box>
@@ -604,7 +605,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
                     justifyContent: 'center'
                   }}
                 >
-                  <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '14px' }}>
+                  <Typography sx={{ color: 'var(--dim)', fontSize: '14px' }}>
                     Loading...
                   </Typography>
                 </Box>

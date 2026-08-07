@@ -9,7 +9,7 @@ export const modalContainerStyle = {
   maxWidth: 600,
   maxHeight: '90vh',
   overflow: 'auto',
-  bgcolor: '#ffffff',
+  bgcolor: 'var(--text)',
   borderRadius: 3,
   boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
   border: '1px solid #e0e0e0',
@@ -33,13 +33,13 @@ export const modalTitleStyle = {
 };
 
 export const modalSubtitleStyle = {
-  color: '#666666',
+  color: 'var(--muted)',
   fontWeight: 'medium'
 };
 
 export const modalCloseButtonStyle = {
-  color: '#666666',
-  '&:hover': { bgcolor: '#e0e0e0' }
+  color: 'var(--muted)',
+  '&:hover': { bgcolor: 'var(--text)' }
 };
 
 export const modalContentStyle = {
@@ -70,7 +70,7 @@ export const modalFormGroupStyle = {
 };
 
 export const modalTextStyle = {
-  color: '#1a1a1a',
+  color: 'var(--bg)',
   fontWeight: 'medium'
 };
 

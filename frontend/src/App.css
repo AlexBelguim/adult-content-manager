@@ -10,8 +10,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #1a1a1a;
-  color: white;
+  background-color: var(--bg);
+  color: var(--text);
 }
 
 /* Ensure emojis render correctly */
@@ -39,7 +39,7 @@ button {
 }
 
 button:focus {
-  outline: 2px solid #007acc;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -54,7 +54,7 @@ textarea {
 input[type="text"]:focus,
 input[type="password"]:focus,
 textarea:focus {
-  outline: 2px solid #007acc;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -64,22 +64,22 @@ textarea:focus {
 }
 
 ::-webkit-scrollbar-track {
-  background: #2a2a2a;
+  background: var(--raised);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #555;
+  background: var(--muted);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #666;
+  background: var(--muted);
 }
 
 /* Loading animation */
 .loading-spinner {
-  border: 2px solid #444;
-  border-top: 2px solid #007acc;
+  border: 2px solid var(--line-strong);
+  border-top: 2px solid var(--accent);
   border-radius: 50%;
   width: 20px;
   height: 20px;
@@ -98,19 +98,19 @@ textarea:focus {
 }
 
 .text-muted {
-  color: #999;
+  color: var(--dim);
 }
 
 .text-success {
-  color: #28a745;
+  color: var(--ok);
 }
 
 .text-error {
-  color: #dc3545;
+  color: var(--bad);
 }
 
 .text-warning {
-  color: #ffc107;
+  color: var(--warn);
 }
 
 .hidden {

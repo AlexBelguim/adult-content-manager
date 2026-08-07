@@ -193,8 +193,11 @@ function PairwiseLabelerPage({ serverUrl }) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [pair]);
 
+    // Full-height comparison tool inside the Pairwise tab shell, so it keeps
+    // height:100% rather than using PageShell — the two images should fill the
+    // available area. Background is --bg (the page), not --surface (a panel).
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: '#1a1a2e' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: 'var(--bg)' }}>
             {/* Controls */}
             <Paper
                 sx={{
@@ -204,8 +207,8 @@ function PairwiseLabelerPage({ serverUrl }) {
                     gap: 2,
                     py: 1.5,
                     px: 2,
-                    bgcolor: '#16213e',
-                    borderBottom: '1px solid #0f3460',
+                    bgcolor: 'var(--surface)',
+                    borderBottom: '1px solid var(--line)',
                     borderRadius: 0,
                     flexWrap: 'wrap'
                 }}
@@ -215,7 +218,7 @@ function PairwiseLabelerPage({ serverUrl }) {
                     size={isMobile ? 'medium' : 'small'}
                     onClick={handleUndo}
                     startIcon={<SkipNext sx={{ transform: 'rotate(180deg)' }} />}
-                    sx={{ color: '#888', borderColor: '#333', mr: 2, height: isMobile ? 48 : 32 }}
+                    sx={{ color: 'var(--dim)', borderColor: 'var(--line)', mr: 2, height: isMobile ? 48 : 32 }}
                 >
                     Undo Last
                 </Button>
@@ -227,13 +230,13 @@ function PairwiseLabelerPage({ serverUrl }) {
                     size={isMobile ? 'medium' : 'small'}
                     sx={{ height: isMobile ? 48 : 32 }}
                 >
-                    <ToggleButton value="mixed" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
+                    <ToggleButton value="mixed" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)' } }}>
                         Mixed
                     </ToggleButton>
-                    <ToggleButton value="intra" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
+                    <ToggleButton value="intra" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)' } }}>
                         Same Performer
                     </ToggleButton>
-                    <ToggleButton value="inter" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#e94560' } }}>
+                    <ToggleButton value="inter" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--accent)' } }}>
                         Cross Performer
                     </ToggleButton>
                 </ToggleButtonGroup>
@@ -245,13 +248,13 @@ function PairwiseLabelerPage({ serverUrl }) {
                     size={isMobile ? 'medium' : 'small'}
                     sx={{ height: isMobile ? 48 : 32 }}
                 >
-                    <ToggleButton value="all" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                    <ToggleButton value="all" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--ok)' } }}>
                         All Folders
                     </ToggleButton>
-                    <ToggleButton value="keep" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                    <ToggleButton value="keep" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--ok)' } }}>
                         Keep Only
                     </ToggleButton>
-                    <ToggleButton value="delete" sx={{ color: '#888', '&.Mui-selected': { color: '#fff', bgcolor: '#4caf50' } }}>
+                    <ToggleButton value="delete" sx={{ color: 'var(--dim)', '&.Mui-selected': { color: 'var(--text)', bgcolor: 'var(--ok)' } }}>
                         Delete Only
                     </ToggleButton>
                 </ToggleButtonGroup>
@@ -260,25 +263,25 @@ function PairwiseLabelerPage({ serverUrl }) {
                     variant="outlined"
                     size={isMobile ? 'medium' : 'small'}
                     onClick={() => setShowPerformerModal(true)}
-                    sx={{ color: '#888', borderColor: '#333', height: isMobile ? 48 : 32 }}
+                    sx={{ color: 'var(--dim)', borderColor: 'var(--line)', height: isMobile ? 48 : 32 }}
                 >
                     Select Performers ({selectedPerformers.length || 'All'})
                 </Button>
 
-                <Box sx={{ display: 'flex', gap: 2, color: '#888' }}>
+                <Box sx={{ display: 'flex', gap: 2, color: 'var(--dim)' }}>
                     <Typography variant="body2">
-                        Total: <strong style={{ color: '#00d9ff' }}>{stats.total}</strong>
+                        Total: <strong style={{ color: 'var(--accent)' }}>{stats.total}</strong>
                     </Typography>
                     <Typography variant="body2">
-                        Intra: <strong style={{ color: '#4caf50' }}>{stats.intra}</strong>
+                        Intra: <strong style={{ color: 'var(--ok)' }}>{stats.intra}</strong>
                     </Typography>
                     <Typography variant="body2">
-                        Inter: <strong style={{ color: '#ff9800' }}>{stats.inter}</strong>
+                        Inter: <strong style={{ color: 'var(--warn)' }}>{stats.inter}</strong>
                     </Typography>
                 </Box>
 
                 <Tooltip title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}>
-                    <IconButton onClick={toggleFullscreen} sx={{ color: '#aaa', ml: 1, p: isMobile ? 1.5 : 0.5 }}>
+                    <IconButton onClick={toggleFullscreen} sx={{ color: 'var(--dim)', ml: 1, p: isMobile ? 1.5 : 0.5 }}>
                         {isFullscreen ? <FullscreenExit fontSize={isMobile ? 'medium' : 'small'} /> : <Fullscreen fontSize={isMobile ? 'medium' : 'small'} />}
                     </IconButton>
                 </Tooltip>
@@ -286,9 +289,9 @@ function PairwiseLabelerPage({ serverUrl }) {
 
             {/* Pair Info */}
             {pair && (
-                <Box sx={{ textAlign: 'center', py: 1, bgcolor: '#0f3460' }}>
-                    <Typography variant="body2" sx={{ color: '#aaa' }}>
-                        {pair.type === 'intra' ? '👤 Same Performer' : '⚔️ Cross Performer'}: {pair.performer}
+                <Box sx={{ textAlign: 'center', py: 1, bgcolor: 'var(--raised)' }}>
+                    <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
+                        {pair.type === 'intra'? 'Same Performer': 'Cross Performer'}: {pair.performer}
                         {pair.uncertainty !== undefined && ` • Uncertainty: ${Math.round(pair.uncertainty)}`}
                     </Typography>
                 </Box>
@@ -301,10 +304,10 @@ function PairwiseLabelerPage({ serverUrl }) {
                         <CircularProgress />
                     </Box>
                 ) : !pair ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#888' }}>
-                        <Typography variant="h5" sx={{ mb: 2 }}>🎉 All pairs labeled!</Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--dim)' }}>
+                        <Typography variant="h5"sx={{ mb: 2 }}>All pairs labeled!</Typography>
                         <Typography variant="body1">No more pairs available with current settings.</Typography>
-                        <Button variant="contained" onClick={fetchNextPair} sx={{ mt: 2, bgcolor: '#e94560' }}>
+                        <Button variant="contained" onClick={fetchNextPair} sx={{ mt: 2, bgcolor: 'var(--accent)' }}>
                             Try Again
                         </Button>
                     </Box>
@@ -316,41 +319,41 @@ function PairwiseLabelerPage({ serverUrl }) {
                             sx={{
                                 flex: 1,
                                 maxWidth: '45%',
-                                bgcolor: '#16213e',
+                                bgcolor: 'var(--surface)',
                                 borderRadius: 3,
                                 overflow: 'hidden',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                border: chosenSide === 'left' ? '3px solid #4caf50' : '3px solid transparent',
-                                boxShadow: chosenSide === 'left' ? '0 0 30px rgba(76, 175, 80, 0.5)' : 'none',
+                                border: chosenSide === 'left' ? '3px solid var(--ok)' : '3px solid transparent',
+                                boxShadow: chosenSide === 'left' ? '0 0 30px var(--ok-quiet)' : 'none',
                                 transition: 'all 0.15s ease-out',
                                 // Only apply hover effects on devices that support hover (not touch)
                                 '@media (hover: hover)': {
                                     '&:hover': {
-                                        borderColor: chosenSide ? undefined : '#00d9ff',
-                                        boxShadow: chosenSide ? undefined : '0 0 30px rgba(0, 217, 255, 0.3)',
+                                        borderColor: chosenSide ? undefined: 'var(--accent)',
+                                        boxShadow: chosenSide ? undefined : '0 0 30px var(--accent-quiet)',
                                         transform: 'scale(1.01)'
                                     }
                                 },
                                 // Touch feedback — brief active state only
                                 '@media (hover: none)': {
                                     '&:active': {
-                                        borderColor: '#4caf50',
-                                        boxShadow: '0 0 20px rgba(76, 175, 80, 0.4)'
+                                        borderColor: 'var(--ok)',
+                                        boxShadow: '0 0 20px var(--ok-quiet)'
                                     }
                                 }
                             }}
                         >
-                            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', bgcolor: '#0a0a15' }}>
+                            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', bgcolor: 'var(--bg)' }}>
                                 <img
                                     src={`${serverUrl}/api/image?path=${encodeURIComponent(pair.left)}`}
                                     alt="Left"
                                     style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                                 />
                             </Box>
-                            <Box sx={{ p: 1.5, textAlign: 'center', bgcolor: 'rgba(0,0,0,0.3)' }}>
-                                <Typography variant="h6" sx={{ color: '#ff6b6b', fontWeight: 'bold' }}>
+                            <Box sx={{ p: 2, textAlign: 'center', bgcolor: 'rgba(0,0,0,0.3)' }}>
+                                <Typography variant="h6" sx={{ color: 'var(--bad)', fontWeight: 'bold' }}>
                                     ← LEFT (A)
                                 </Typography>
                             </Box>
@@ -362,38 +365,38 @@ function PairwiseLabelerPage({ serverUrl }) {
                             sx={{
                                 flex: 1,
                                 maxWidth: '45%',
-                                bgcolor: '#16213e',
+                                bgcolor: 'var(--surface)',
                                 borderRadius: 3,
                                 overflow: 'hidden',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                border: chosenSide === 'right' ? '3px solid #4caf50' : '3px solid transparent',
-                                boxShadow: chosenSide === 'right' ? '0 0 30px rgba(76, 175, 80, 0.5)' : 'none',
+                                border: chosenSide === 'right' ? '3px solid var(--ok)' : '3px solid transparent',
+                                boxShadow: chosenSide === 'right' ? '0 0 30px var(--ok-quiet)' : 'none',
                                 transition: 'all 0.15s ease-out',
                                 '@media (hover: hover)': {
                                     '&:hover': {
-                                        borderColor: chosenSide ? undefined : '#00d9ff',
-                                        boxShadow: chosenSide ? undefined : '0 0 30px rgba(0, 217, 255, 0.3)',
+                                        borderColor: chosenSide ? undefined: 'var(--accent)',
+                                        boxShadow: chosenSide ? undefined : '0 0 30px var(--accent-quiet)',
                                         transform: 'scale(1.01)'
                                     }
                                 },
                                 '@media (hover: none)': {
                                     '&:active': {
-                                        borderColor: '#4caf50',
-                                        boxShadow: '0 0 20px rgba(76, 175, 80, 0.4)'
+                                        borderColor: 'var(--ok)',
+                                        boxShadow: '0 0 20px var(--ok-quiet)'
                                     }
                                 }
                             }}
                         >
-                            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', bgcolor: '#0a0a15' }}>
+                            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', bgcolor: 'var(--bg)' }}>
                                 <img
                                     src={`${serverUrl}/api/image?path=${encodeURIComponent(pair.right)}`}
                                     alt="Right"
                                     style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                                 />
                             </Box>
-                            <Box sx={{ p: 1.5, textAlign: 'center', bgcolor: 'rgba(0,0,0,0.3)' }}>
+                            <Box sx={{ p: 2, textAlign: 'center', bgcolor: 'rgba(0,0,0,0.3)' }}>
                                 <Typography variant="h6" sx={{ color: '#4ecdc4', fontWeight: 'bold' }}>
                                     RIGHT (D) →
                                 </Typography>
@@ -404,22 +407,22 @@ function PairwiseLabelerPage({ serverUrl }) {
             </Box>
 
             {/* Instructions */}
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#16213e', borderTop: '1px solid #0f3460', borderRadius: 0 }}>
-                <Typography variant="body1" sx={{ mb: 1, color: '#eee' }}>
+            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'var(--surface)', borderTop: '1px solid var(--line)', borderRadius: 0 }}>
+                <Typography variant="body1" sx={{ mb: 1, color: 'var(--text)' }}>
                     Click the image you prefer, or use keyboard shortcuts
                 </Typography>
-                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 4, color: '#888' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 4, color: 'var(--dim)' }}>
                     <Typography variant="body2">
-                        <Chip label="A / ←" size="small" sx={{ mr: 1, bgcolor: '#0f3460' }} /> Left wins
+                        <Chip label="A / ←" size="small" sx={{ mr: 1, bgcolor: 'var(--raised)' }} /> Left wins
                     </Typography>
                     <Typography variant="body2">
-                        <Chip label="D / →" size="small" sx={{ mr: 1, bgcolor: '#0f3460' }} /> Right wins
+                        <Chip label="D / →" size="small" sx={{ mr: 1, bgcolor: 'var(--raised)' }} /> Right wins
                     </Typography>
                     <Typography variant="body2">
-                        <Chip label="S / Space" size="small" sx={{ mr: 1, bgcolor: '#0f3460' }} /> Skip
+                        <Chip label="S / Space" size="small" sx={{ mr: 1, bgcolor: 'var(--raised)' }} /> Skip
                     </Typography>
                     <Typography variant="body2">
-                        <Chip label="Z / Undo" size="small" sx={{ mr: 1, bgcolor: '#0f3460' }} /> Undo
+                        <Chip label="Z / Undo" size="small" sx={{ mr: 1, bgcolor: 'var(--raised)' }} /> Undo
                     </Typography>
                 </Box>
             </Paper>
@@ -430,11 +433,11 @@ function PairwiseLabelerPage({ serverUrl }) {
                 onClose={() => setShowPerformerModal(false)}
                 maxWidth="sm"
                 fullWidth
-                PaperProps={{ sx: { bgcolor: '#16213e', color: '#fff' } }}
+                PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}
             >
-                <DialogTitle sx={{ color: '#e94560' }}>Select Performers</DialogTitle>
+                <DialogTitle sx={{ color: 'var(--accent)' }}>Select Performers</DialogTitle>
                 <DialogContent>
-                    <Typography variant="body2" sx={{ mb: 2, color: '#888' }}>
+                    <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
                         Focus on specific performers for labeling. Leave empty to label all.
                     </Typography>
                     <List sx={{ maxHeight: 400, overflow: 'auto' }}>
@@ -449,15 +452,15 @@ function PairwiseLabelerPage({ serverUrl }) {
                                         );
                                     }}
                                     sx={{
-                                        bgcolor: selectedPerformers.includes(p.name) ? 'rgba(76, 175, 80, 0.2)' : 'transparent',
-                                        border: selectedPerformers.includes(p.name) ? '1px solid #4caf50' : '1px solid transparent',
+                                        bgcolor: selectedPerformers.includes(p.name) ? 'var(--ok-quiet)' : 'transparent',
+                                        border: selectedPerformers.includes(p.name) ? '1px solid var(--ok)' : '1px solid transparent',
                                         borderRadius: 1,
                                         mb: 0.5
                                     }}
                                 >
                                     <Checkbox
                                         checked={selectedPerformers.includes(p.name)}
-                                        sx={{ color: '#888' }}
+                                        sx={{ color: 'var(--dim)' }}
                                     />
                                     <ListItemText
                                         primary={
@@ -470,13 +473,13 @@ function PairwiseLabelerPage({ serverUrl }) {
                                                 )}
                                                 {!p.inAfter && p.inTraining && (
                                                     <Tooltip title="In Training Only (Needs Move)">
-                                                        <DriveFileMove fontSize="small" sx={{ color: '#ff9800' }} />
+                                                        <DriveFileMove fontSize="small" sx={{ color: 'var(--warn)' }} />
                                                     </Tooltip>
                                                 )}
                                             </Box>
                                         }
                                         secondary={`${p.totalCount} images • Peak: ${p.peakScore || 0} • ${p.coverage}% labeled`}
-                                        secondaryTypographyProps={{ sx: { color: '#888' } }}
+                                        secondaryTypographyProps={{ sx: { color: 'var(--dim)' } }}
                                     />
                                 </ListItemButton>
                             </ListItem>
@@ -484,13 +487,13 @@ function PairwiseLabelerPage({ serverUrl }) {
                     </List>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setSelectedPerformers([])} sx={{ color: '#888' }}>
+                    <Button onClick={() => setSelectedPerformers([])} sx={{ color: 'var(--dim)' }}>
                         Clear All
                     </Button>
-                    <Button onClick={() => setShowPerformerModal(false)} sx={{ color: '#888' }}>
+                    <Button onClick={() => setShowPerformerModal(false)} sx={{ color: 'var(--dim)' }}>
                         Cancel
                     </Button>
-                    <Button onClick={handlePerformerSelect} variant="contained" sx={{ bgcolor: '#e94560' }}>
+                    <Button onClick={handlePerformerSelect} variant="contained" sx={{ bgcolor: 'var(--accent)' }}>
                         Apply
                     </Button>
                 </DialogActions>

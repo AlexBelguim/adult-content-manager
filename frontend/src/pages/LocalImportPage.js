@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
     Box,
     Typography,
-    Paper,
     List,
     ListItem,
     ListItemText,
@@ -45,8 +44,40 @@ import {
     Add as AddIcon,
     CloudUpload as CloudUploadIcon
 } from '@mui/icons-material';
+import { PageShell, PageHeader, Panel, Toolbar as LayoutToolbar, ICON } from '../components/layout';
 
 const QUEUE_CACHE_KEY = 'uploadQueueCache_v1';
+
+/**
+ * One count on a folder card — "148 pics", "6 vids".
+ *
+ * These were Chips: a filled pill per number, three of them per row, each with
+ * its own tinted background. That much chrome around a two-digit number is what
+ * made the old list read as a control panel. Icon, number, unit.
+ */
+function MetaBit({ icon, tone, value, unit }) {
+    return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'var(--dim)' }}>
+            <Box sx={{ display: 'flex', color: tone, '& svg': { fontSize: ICON.inline } }}>{icon}</Box>
+            <Typography sx={{ fontSize: '0.7rem', fontVariantNumeric: 'tabular-nums' }}>
+                <Box component="span" sx={{ color: 'var(--text)', fontWeight: 600 }}>{value}</Box> {unit}
+            </Typography>
+        </Box>
+    );
+}
+
+/** Filter chip in the folder toolbar; active one carries the accent. */
+const chipFilterSx = (active) => ({
+    height: 24,
+    fontSize: '0.7rem',
+    fontWeight: active ? 650 : 550,
+    cursor: 'pointer',
+    bgcolor: active ? 'var(--accent)' : 'var(--bg)',
+    color: active ? 'var(--on-accent)' : 'var(--dim)',
+    border: '1px solid',
+    borderColor: active ? 'var(--accent)' : 'var(--line)',
+    '&:hover': { bgcolor: active ? 'var(--accent-hover)' : 'var(--raised)' }
+});
 
 function LocalImportPage({ basePath }) {
     // Server queue state (reused from upload queue)
@@ -69,10 +100,22 @@ function LocalImportPage({ basePath }) {
     const [createHashes, setCreateHashes] = useState(true);
     // name overrides: folderName -> custom performer name
     const [nameOverrides, setNameOverrides] = useState({});
-    // Track which performer's preview is expanded
-    const [expandedPreview, setExpandedPreview] = useState(null);
+    // Filters for the folder list. With previews visible the list is taller, so
+    // it needs a way to narrow down that isn't scrolling.
+    const [folderQuery, setFolderQuery] = useState('');
+    const [onlySelected, setOnlySelected] = useState(false);
     const [loadingDetails, setLoadingDetails] = useState(new Set());
     const [lightbox, setLightbox] = useState({ open: false, images: [], currentIndex: 0 });
+
+    const visibleFolders = useMemo(() => {
+        const q = folderQuery.trim().toLowerCase();
+        return performers.filter(p => {
+            if (onlySelected && !selectedPerformers.has(p.name)) return false;
+            if (!q) return true;
+            const shown = nameOverrides[p.name] ?? p.name;
+            return shown.toLowerCase().includes(q) || p.name.toLowerCase().includes(q);
+        });
+    }, [performers, folderQuery, onlySelected, selectedPerformers, nameOverrides]);
 
     // === Upload Folder state (merged from UploadQueuePage) ===
     const [uploadPerformerName, setUploadPerformerName] = useState('');
@@ -155,6 +198,10 @@ function LocalImportPage({ basePath }) {
                 setNameOverrides({});
                 if (data.performers.length === 0) {
                     setSuccess('No performer folders found in "before upload". Place performer folders there first.');
+                } else {
+                    // Deliberately not awaited — the folder list should paint
+                    // immediately and the previews fill in behind it.
+                    loadAllDetails(data.performers.map(p => p.name));
                 }
             } else {
                 setError(data.error || 'Failed to scan folder');
@@ -186,42 +233,54 @@ function LocalImportPage({ basePath }) {
         });
     };
 
-    const handleTogglePreview = async (performerName, e) => {
-        e.stopPropagation();
-        
-        const isExpanded = expandedPreview === performerName;
-        if (isExpanded) {
-            setExpandedPreview(null);
-            return;
-        }
-
-        setExpandedPreview(performerName);
-
-        const performer = performers.find(p => p.name === performerName);
-        if (performer && !performer.stats) {
-            setLoadingDetails(prev => new Set(prev).add(performerName));
-            try {
-                const response = await fetch(`/api/folders/scan-before-upload-details?basePath=${encodeURIComponent(basePath)}&performerName=${encodeURIComponent(performerName)}`);
-                const data = await response.json();
-                if (data.success) {
-                    setPerformers(prev => prev.map(p => {
-                        if (p.name === performerName) {
-                            return { ...p, stats: data.stats, previewImages: data.previewImages };
-                        }
-                        return p;
-                    }));
-                }
-            } catch (err) {
-                console.error("Failed to fetch performer details", err);
-            } finally {
-                setLoadingDetails(prev => {
-                    const next = new Set(prev);
-                    next.delete(performerName);
-                    return next;
-                });
+    /**
+     * Fetch stats + previewImages for one folder.
+     *
+     * This used to fire only when you expanded a row, which is why the previews
+     * were hidden: the data was lazy, so the UI had to be too. The card layout
+     * shows previews by default, so this now runs for every folder after a scan
+     * — see loadAllDetails.
+     */
+    const loadDetails = useCallback(async (performerName) => {
+        setLoadingDetails(prev => new Set(prev).add(performerName));
+        try {
+            const response = await fetch(`/api/folders/scan-before-upload-details?basePath=${encodeURIComponent(basePath)}&performerName=${encodeURIComponent(performerName)}`);
+            const data = await response.json();
+            if (data.success) {
+                setPerformers(prev => prev.map(p => (
+                    p.name === performerName
+                        ? { ...p, stats: data.stats, previewImages: data.previewImages }
+                        : p
+                )));
             }
+        } catch (err) {
+            console.error('Failed to fetch performer details', err);
+        } finally {
+            setLoadingDetails(prev => {
+                const next = new Set(prev);
+                next.delete(performerName);
+                return next;
+            });
         }
-    };
+    }, [basePath]);
+
+    /**
+     * Walk the folders a few at a time. Each call hits the disk to stat a whole
+     * directory and pull thumbnails, so firing all of them at once on a library
+     * with dozens of folders stalls the backend and the page arrives empty
+     * anyway. Three in flight keeps the strips filling in visibly from the top.
+     */
+    const loadAllDetails = useCallback(async (names) => {
+        const CONCURRENCY = 3;
+        const queue = [...names];
+        const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+            while (queue.length) {
+                const next = queue.shift();
+                if (next) await loadDetails(next);
+            }
+        });
+        await Promise.all(workers);
+    }, [loadDetails]);
 
     const openLightbox = (images, index, e) => {
         e.stopPropagation();
@@ -513,28 +572,39 @@ function LocalImportPage({ basePath }) {
     // Combine local uploading jobs with server queue
     const queuedJobs = [...uploadingJobs, ...serverQueue];
 
+    // This had already converged on what the Panel primitive does (surface +
+    // hairline + no shadow), so only the layout bits stay here and the surface
+    // treatment comes from Panel — one definition instead of two.
+    // NOTE: `elevation: 0` was an sx key, which does nothing. Elevation is a
+    // Paper prop, not a style property.
     const paperStyles = {
         p: 3,
         height: '100%',
-        borderRadius: 2,
         display: 'flex',
-        flexDirection: 'column',
-        bgcolor: '#1E1E1E',
-        border: '1px solid #333',
-        boxShadow: 'none',
-        elevation: 0
+        flexDirection: 'column'
     };
 
+    // Fixed-height page: the two columns scroll internally rather than growing
+    // the document. PageShell's default minHeight:100% would defeat that, so
+    // the height/overflow rules stay here and only the width + padding come
+    // from the shell.
     return (
-        <Box className="dp-page" sx={{ height: 'calc(100vh - 64px)', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Box sx={{ mb: 2 }}>
-                <Typography variant="h4" component="h1" className="dp-title">
-                    Local Import & Upload Queue
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#666' }}>
-                    Import local folders or view processing queue status.
-                </Typography>
-            </Box>
+        /* The fixed-height, internally-scrolling two-column layout only works
+           when there is room for two columns. On a phone it becomes a 360px
+           queue rail with nothing left for the folder cards, so below md the
+           page reverts to normal document flow and the columns stack. */
+        <PageShell sx={{
+            height: { xs: 'auto', md: 'calc(100vh - 64px)' },
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: { xs: 'visible', md: 'hidden' }
+        }}>
+            <PageHeader
+                title="Local Import & Upload Queue"
+                subtitle="Import local folders or view processing queue status."
+                sx={{ mb: 2, pb: 1.5 }}
+            />
 
             {error && (
                 <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
@@ -547,13 +617,25 @@ function LocalImportPage({ basePath }) {
                 </Alert>
             )}
 
-            <Box sx={{ display: 'flex', gap: 3, flex: 1, overflow: 'hidden', alignItems: 'flex-start' }}>
-                {/* Queue List (Left Side) */}
-                <Box sx={{ width: 360, minWidth: 360, flexShrink: 0, height: '100%', overflow: 'hidden' }}>
-                    <Paper
-                        elevation={0}
-                        sx={paperStyles}
-                    >
+            <Box sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: { xs: 2, md: 3 },
+                flex: 1,
+                overflow: { xs: 'visible', md: 'hidden' },
+                alignItems: 'flex-start'
+            }}>
+                {/* Queue — a rail beside the folders on desktop, a stacked
+                    section above them on a phone. The scan results are the
+                    reason you opened the page, so they must not be squeezed. */}
+                <Box sx={{
+                    width: { xs: '100%', md: 360 },
+                    minWidth: { xs: 0, md: 360 },
+                    flexShrink: 0,
+                    height: { xs: 'auto', md: '100%' },
+                    overflow: 'hidden'
+                }}>
+                    <Panel sx={paperStyles}>
                         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
                             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                                 <Typography variant="subtitle1" fontWeight="bold">Queue</Typography>
@@ -583,7 +665,7 @@ function LocalImportPage({ basePath }) {
 
                         <Box sx={{ flex: 1, overflow: 'auto', p: 0 }}>
                             {queuedJobs.length === 0 ? (
-                                <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                                     <QueuedIcon sx={{ fontSize: 60, mb: 2, opacity: 0.2 }} />
                                     <Typography variant="h6" color="text.disabled">Queue is empty</Typography>
                                     <Typography variant="body2" color="text.disabled">Import performers to see progress here</Typography>
@@ -678,19 +760,24 @@ function LocalImportPage({ basePath }) {
                                 </List>
                             )}
                         </Box>
-                    </Paper>
+                    </Panel>
                 </Box>
             
                 {/* Right Side */}
-                <Box sx={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{
+                    flex: 1, minWidth: 0, width: { xs: '100%', md: 'auto' },
+                    height: { xs: 'auto', md: '100%' },
+                    overflow: { xs: 'visible', md: 'hidden' },
+                    display: 'flex', flexDirection: 'column'
+                }}>
 
                     {/* Upload Folder Section */}
-                    <Paper elevation={0} sx={{ ...paperStyles, height: 'auto', mb: 2, p: 0 }}>
+                    <Panel sx={{ ...paperStyles, height: 'auto', mb: 2, p: 0 }}>
                         <Box
                             onClick={() => setShowUploadForm(!showUploadForm)}
-                            sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' } }}
+                            sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', '&:hover': { bgcolor: 'var(--raised)' } }}
                         >
-                            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: 'rgba(156,39,176,0.15)', color: '#ce93d8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: 'var(--accent-quiet)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <CloudUploadIcon />
                             </Box>
                             <Typography variant="h6" fontWeight="bold" sx={{ flex: 1 }}>
@@ -699,58 +786,55 @@ function LocalImportPage({ basePath }) {
                             {uploadingJobs.length > 0 && (
                                 <Chip label={`${uploadingJobs.length} uploading`} color="info" size="small" variant="outlined" />
                             )}
-                            <Typography variant="body2" sx={{ color: '#666' }}>{showUploadForm ? '▲' : '▼'}</Typography>
+                            <Typography variant="body2" sx={{ color: 'var(--muted)' }}>{showUploadForm ? '▲' : '▼'}</Typography>
                         </Box>
                         {showUploadForm && (
-                            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid #333' }}>
+                            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid var(--line)' }}>
                                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2, mt: 1 }}>
                                     Select a folder from your computer to upload files to the server.
                                 </Typography>
                                 <TextField
                                     fullWidth size="small" label="Performer Name" value={uploadPerformerName}
                                     onChange={(e) => setUploadPerformerName(e.target.value)}
-                                    sx={{ mb: 2, '& .MuiOutlinedInput-root': { '& fieldset': { borderColor: '#444' }, '&:hover fieldset': { borderColor: 'primary.main' } } }}
+                                    sx={{ mb: 2, '& .MuiOutlinedInput-root': { '& fieldset': { borderColor: 'var(--line-strong)' }, '&:hover fieldset': { borderColor: 'primary.main' } } }}
                                 />
                                 <input type="file" ref={fileInputRef} style={{ display: 'none' }}
                                     webkitdirectory="true" directory="true" multiple onChange={handleUploadFolderSelect}
                                 />
                                 <Button fullWidth variant="outlined" startIcon={<Folder />}
                                     onClick={() => fileInputRef.current?.click()}
-                                    sx={{ mb: 2, py: 1.5, borderColor: '#444', textTransform: 'none', justifyContent: 'flex-start', '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' } }}
+                                    sx={{ mb: 2, py: 1.5, borderColor: 'var(--line-strong)', textTransform: 'none', justifyContent: 'flex-start', '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' } }}
                                 >
                                     {uploadSelectedFiles.length > 0 ? `${uploadSelectedFiles.length} files selected` : 'Select Folder'}
                                 </Button>
                                 {uploadSelectedFiles.length > 0 && (
-                                    <Box sx={{ mb: 2, p: 1.5, bgcolor: '#252525', borderRadius: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                        <Chip icon={<ImageIcon sx={{ color: '#90caf9 !important' }} />} label={uploadFileStats.pics} size="small" sx={{ bgcolor: 'rgba(144, 202, 249, 0.1)', color: '#90caf9' }} />
-                                        <Chip icon={<MovieIcon sx={{ color: '#ce93d8 !important' }} />} label={uploadFileStats.vids} size="small" sx={{ bgcolor: 'rgba(206, 147, 216, 0.1)', color: '#ce93d8' }} />
+                                    <Box sx={{ mb: 2, p: 2, bgcolor: 'var(--surface)', borderRadius: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                        <Chip icon={<ImageIcon sx={{ color: '#90caf9 !important' }} />} label={uploadFileStats.pics} size="small" sx={{ bgcolor: 'var(--info-quiet)', color: 'var(--info)' }} />
+                                        <Chip icon={<MovieIcon sx={{ color: '#ce93d8 !important' }} />} label={uploadFileStats.vids} size="small" sx={{ bgcolor: 'rgba(206, 147, 216, 0.1)', color: 'var(--accent)' }} />
                                         {uploadFileStats.funscript > 0 && <Chip label={`${uploadFileStats.funscript} funscripts`} size="small" sx={{ bgcolor: 'rgba(255, 204, 128, 0.1)', color: '#ffcc80' }} />}
-                                        <Chip label={formatUploadFileSize(uploadFileStats.totalSize)} size="small" sx={{ bgcolor: '#1a1a1a', color: '#888' }} />
+                                        <Chip label={formatUploadFileSize(uploadFileStats.totalSize)} size="small" sx={{ bgcolor: 'var(--bg)', color: 'var(--dim)' }} />
                                     </Box>
                                 )}
                                 <Tooltip title="Automatically create perceptual hashes for duplicate detection" placement="right">
                                     <FormControlLabel
                                         control={<Switch checked={uploadCreateHashes} onChange={(e) => setUploadCreateHashes(e.target.checked)} size="small" color="primary" />}
-                                        label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><HashIcon fontSize="small" sx={{ color: '#888' }} /><Typography variant="body2" sx={{ color: '#888' }}>Create Hashes</Typography></Box>}
+                                        label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><HashIcon fontSize="small" sx={{ color: 'var(--dim)' }} /><Typography variant="body2" sx={{ color: 'var(--dim)' }}>Create Hashes</Typography></Box>}
                                         sx={{ mb: 2, ml: 0 }}
                                     />
                                 </Tooltip>
                                 <Button fullWidth variant="contained" startIcon={<AddIcon />}
                                     onClick={handleAddUploadToQueue}
                                     disabled={!uploadPerformerName.trim() || uploadSelectedFiles.length === 0}
-                                    sx={{ py: 1.5, fontWeight: 'bold', background: 'linear-gradient(135deg, #9c27b0 0%, #ce93d8 100%)' }}
+                                    sx={{ py: 1.5, fontWeight: 'bold', background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%)' }}
                                 >
                                     Add to Upload Queue
                                 </Button>
                             </Box>
                         )}
-                    </Paper>
+                    </Panel>
 
                     {/* Scan Panel */}
-                    <Paper
-                        elevation={0}
-                        sx={{ ...paperStyles, flex: 1 }}
-                    >
+                    <Panel sx={{ ...paperStyles, flex: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 2 }}>
                             <Box sx={{
                                 width: 40, height: 40, borderRadius: '50%',
@@ -785,150 +869,178 @@ function LocalImportPage({ basePath }) {
 
                         {scanning && <LinearProgress sx={{ mb: 2 }} />}
 
-                        {/* Performer list */}
+                        {/* Filters. Only worth showing once there is enough here
+                            to need narrowing down. */}
+                        {performers.length > 3 && (
+                            <LayoutToolbar sx={{ mb: 1.5 }}>
+                                <Chip
+                                    label={`All ${performers.length}`}
+                                    size="small"
+                                    onClick={() => setOnlySelected(false)}
+                                    sx={chipFilterSx(!onlySelected)}
+                                />
+                                <Chip
+                                    label={`Selected ${selectedPerformers.size}`}
+                                    size="small"
+                                    onClick={() => setOnlySelected(true)}
+                                    sx={chipFilterSx(onlySelected)}
+                                />
+                                <TextField
+                                    value={folderQuery}
+                                    onChange={e => setFolderQuery(e.target.value)}
+                                    placeholder="Search folders…"
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ flex: 1, minWidth: 140, '& .MuiInputBase-input': { fontSize: '0.8rem', py: 0.75 } }}
+                                />
+                            </LayoutToolbar>
+                        )}
+
+                        {/* Folder cards */}
                         <Box sx={{ flex: 1, overflow: 'auto', mb: 2 }}>
                             {performers.length === 0 && !scanning ? (
-                                <Box sx={{ p: 4, textAlign: 'center', color: 'text.disabled' }}>
+                                <Box sx={{ p: 3, textAlign: 'center', color: 'text.disabled' }}>
                                     <FolderOpen sx={{ fontSize: 48, opacity: 0.3, mb: 1 }} />
                                     <Typography variant="body2">No performer folders found</Typography>
                                 </Box>
+                            ) : visibleFolders.length === 0 ? (
+                                <Box sx={{ p: 3, textAlign: 'center', color: 'var(--muted)' }}>
+                                    <Typography variant="body2">
+                                        {onlySelected ? 'Nothing selected yet' : `No folder matches “${folderQuery}”`}
+                                    </Typography>
+                                </Box>
                             ) : (
-                                <List sx={{ p: 0 }}>
-                                    {performers.map((performer, index) => {
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    {visibleFolders.map((performer) => {
                                         const isSelected = selectedPerformers.has(performer.name);
-                                        const isExpanded = expandedPreview === performer.name;
                                         const previews = performer.previewImages || [];
+                                        const isLoading = loadingDetails.has(performer.name);
                                         return (
-                                            <React.Fragment key={performer.name}>
-                                                {index > 0 && <Divider sx={{ borderColor: 'divider' }} />}
-                                                <ListItem
-                                                    onClick={() => togglePerformer(performer.name)}
-                                                    sx={{
-                                                        py: 1.5,
-                                                        px: 1,
-                                                        cursor: 'pointer',
-                                                        bgcolor: isSelected ? (theme) => `${theme.palette.primary.main}14` : 'transparent',
-                                                        borderLeft: (theme) => isSelected ? `3px solid ${theme.palette.primary.main}` : '3px solid transparent',
-                                                        transition: 'all 0.15s',
-                                                        '&:hover': { bgcolor: 'action.hover' },
-                                                        flexDirection: 'column',
-                                                        alignItems: 'stretch'
-                                                    }}
-                                                >
-                                                    <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                                                        <Checkbox
-                                                            checked={isSelected}
-                                                            sx={{ mr: 1, color: 'text.disabled', '&.Mui-checked': { color: 'primary.main' } }}
-                                                            size="small"
-                                                        />
-                                                        <ListItemText
-                                                            primary={
-                                                                <TextField
-                                                                    value={nameOverrides[performer.name] ?? performer.name}
-                                                                    onChange={e => setNameOverrides(prev => ({ ...prev, [performer.name]: e.target.value }))}
-                                                                    onClick={e => e.stopPropagation()}
-                                                                    size="small"
-                                                                    variant="standard"
-                                                                    inputProps={{ style: { fontSize: '0.875rem', fontWeight: 500, padding: '2px 0' } }}
-                                                                    sx={{
-                                                                        width: '100%',
-                                                                        '& .MuiInput-underline:before': { borderBottomColor: 'divider' },
-                                                                        '& .MuiInput-underline:hover:before': { borderBottomColor: 'text.secondary' },
-                                                                        '& .MuiInput-underline:after': { borderBottomColor: 'primary.main' },
-                                                                    }}
-                                                                />
-                                                            }
-                                                            secondary={
-                                                                <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                                                                    {performer.stats ? (
-                                                                        <>
-                                                                            {performer.stats.pics_count > 0 && (
-                                                                                <Chip
-                                                                                    icon={<ImageIcon sx={{ color: 'info.main', fontSize: '14px !important' }} />}
-                                                                                    label={performer.stats.pics_count}
-                                                                                    size="small"
-                                                                                    sx={{ height: 20, fontSize: '0.7rem', bgcolor: (theme) => `${theme.palette.info.main}1A`, color: 'info.main' }}
-                                                                                />
-                                                                            )}
-                                                                            {performer.stats.vids_count > 0 && (
-                                                                                <Chip
-                                                                                    icon={<MovieIcon sx={{ color: 'secondary.main', fontSize: '14px !important' }} />}
-                                                                                    label={performer.stats.vids_count}
-                                                                                    size="small"
-                                                                                    sx={{ height: 20, fontSize: '0.7rem', bgcolor: (theme) => `${theme.palette.secondary.main}1A`, color: 'secondary.main' }}
-                                                                                />
-                                                                            )}
-                                                                            <Chip
-                                                                                label={formatFileSize(performer.stats.total_size_gb || 0)}
-                                                                                size="small"
-                                                                                sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'background.default', color: 'text.secondary' }}
-                                                                            />
-                                                                        </>
-                                                                    ) : (
-                                                                        <Typography variant="caption" sx={{ color: 'text.disabled', fontStyle: 'italic', mr: 1 }}>
-                                                                            Scan to view file count
-                                                                        </Typography>
-                                                                    )}
-                                                                    
-                                                                    <Chip
-                                                                        icon={loadingDetails.has(performer.name) ? <ProcessingIcon sx={{ fontSize: '14px !important', animation: 'spin 2s linear infinite' }} /> : <ScanIcon sx={{ fontSize: '14px !important' }} />}
-                                                                        label={isExpanded ? 'Hide' : 'Preview'}
-                                                                        size="small"
-                                                                        onClick={(e) => handleTogglePreview(performer.name, e)}
-                                                                        sx={{ height: 20, fontSize: '0.7rem', cursor: 'pointer', bgcolor: 'action.selected', color: 'text.primary', '&:hover': { bgcolor: 'primary.main', color: 'primary.contrastText' }, transition: 'all 0.2s ease' }}
-                                                                    />
-                                                                </Box>
-                                                            }
-                                                        />
+                                            <Panel
+                                                key={performer.name}
+                                                padded={false}
+                                                onClick={() => togglePerformer(performer.name)}
+                                                sx={{
+                                                    cursor: 'pointer',
+                                                    // See the note in FunpipePage: .App is a flex
+                                                    // column, so cards in a nested flex column
+                                                    // collapse without this. The parent here is
+                                                    // flex:1 + overflow:auto, the same shape.
+                                                    flexShrink: 0,
+                                                    borderColor: isSelected ? 'var(--accent)' : 'var(--line)',
+                                                    bgcolor: isSelected ? 'var(--accent-quiet)' : 'var(--surface)',
+                                                    '&:hover': { borderColor: isSelected ? 'var(--accent)' : 'var(--line-strong)' }
+                                                }}
+                                            >
+                                                {/* Card head: pick, identity, counts */}
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, pb: (previews.length > 1 || isLoading) ? 0.5 : 1 }}>
+                                                    <Checkbox
+                                                        checked={isSelected}
+                                                        size="small"
+                                                        sx={{ p: 0.5, color: 'var(--muted)', '&.Mui-checked': { color: 'var(--accent)' } }}
+                                                    />
+
+                                                    {/* Cover. The first preview doubles as the folder's face, so
+                                                        the card identifies itself before you read the name. */}
+                                                    <Box sx={{
+                                                        width: 52, height: 52, flexShrink: 0, borderRadius: 'var(--radius-sm, 4px)',
+                                                        overflow: 'hidden', bgcolor: 'var(--raised)',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                    }}>
+                                                        {previews[0] ? (
+                                                            <Box
+                                                                component="img"
+                                                                src={`/api/files/preview?path=${encodeURIComponent(previews[0])}`}
+                                                                alt=""
+                                                                sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                            />
+                                                        ) : (
+                                                            <FolderOpen sx={{ fontSize: 20, color: 'var(--faint)' }} />
+                                                        )}
                                                     </Box>
-                                                    {/* Preview images strip */}
-                                                    {isExpanded && (
-                                                        <Box
+
+                                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                        <TextField
+                                                            value={nameOverrides[performer.name] ?? performer.name}
+                                                            onChange={e => setNameOverrides(prev => ({ ...prev, [performer.name]: e.target.value }))}
                                                             onClick={e => e.stopPropagation()}
+                                                            size="small"
+                                                            variant="standard"
+                                                            inputProps={{ style: { fontSize: '0.875rem', fontWeight: 600, padding: '2px 0' } }}
                                                             sx={{
-                                                                display: 'flex', gap: 1, mt: 1.5, ml: 4,
-                                                                overflowX: 'auto', pb: 1, minHeight: 80, alignItems: 'center',
-                                                                width: 'calc(100% - 32px)',
-                                                                '&::-webkit-scrollbar': { height: 6 },
-                                                                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.main', borderRadius: 3, opacity: 0.5 },
-                                                                '&::-webkit-scrollbar-track': { bgcolor: 'background.default', borderRadius: 3 }
+                                                                width: '100%',
+                                                                '& .MuiInput-underline:before': { borderBottomColor: 'transparent' },
+                                                                '& .MuiInput-underline:hover:before': { borderBottomColor: 'var(--line-strong)' },
+                                                                '& .MuiInput-underline:after': { borderBottomColor: 'var(--accent)' }
                                                             }}
-                                                        >
-                                                            {loadingDetails.has(performer.name) ? (
-                                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 2 }}>
-                                                                    <ProcessingIcon color="primary" sx={{ animation: 'spin 2s linear infinite' }} />
-                                                                    <Typography variant="caption" color="text.secondary">Loading images...</Typography>
-                                                                </Box>
-                                                            ) : previews.length === 0 ? (
-                                                                <Typography variant="caption" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
-                                                                    No preview images found
-                                                                </Typography>
+                                                        />
+                                                        <Box sx={{ display: 'flex', gap: 1.25, mt: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                                            {performer.stats ? (
+                                                                <>
+                                                                    {performer.stats.pics_count > 0 && (
+                                                                        <MetaBit icon={<ImageIcon />} tone="var(--info)" value={performer.stats.pics_count} unit="pics" />
+                                                                    )}
+                                                                    {performer.stats.vids_count > 0 && (
+                                                                        <MetaBit icon={<MovieIcon />} tone="var(--accent)" value={performer.stats.vids_count} unit="vids" />
+                                                                    )}
+                                                                    <Typography sx={{ fontSize: '0.7rem', color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
+                                                                        {formatFileSize(performer.stats.total_size_gb || 0)}
+                                                                    </Typography>
+                                                                </>
                                                             ) : (
-                                                                previews.map((imgPath, i) => (
-                                                                    <Box
-                                                                        key={i}
-                                                                        component="img"
-                                                                        src={`/api/files/preview?path=${encodeURIComponent(imgPath)}`}
-                                                                        alt={`Preview ${i + 1}`}
-                                                                        onClick={(e) => openLightbox(previews, i, e)}
-                                                                        sx={{
-                                                                            height: 64, width: 64, objectFit: 'cover',
-                                                                            borderRadius: 2, border: '2px solid transparent',
-                                                                            flexShrink: 0, cursor: 'zoom-in',
-                                                                            transition: 'all 0.2s ease',
-                                                                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                                                                            '&:hover': { transform: 'scale(1.05) translateY(-2px)', borderColor: 'primary.main', boxShadow: '0 8px 20px rgba(0,0,0,0.3)', zIndex: 1 }
-                                                                        }}
-                                                                    />
-                                                                ))
+                                                                <Typography sx={{ fontSize: '0.7rem', color: 'var(--muted)' }}>
+                                                                    {isLoading ? 'Reading folder…' : 'Not scanned'}
+                                                                </Typography>
                                                             )}
                                                         </Box>
-                                                    )}
-                                                </ListItem>
-                                            </React.Fragment>
+                                                    </Box>
+                                                </Box>
+
+                                                {/* Preview strip. Visible by default — deciding whether to import
+                                                    a folder is a visual judgement, and one cover tells you who it
+                                                    is while six tell you whether the set is worth taking.
+                                                    Indented to line up with the name, not the checkbox. */}
+                                                {(previews.length > 1 || isLoading) && (
+                                                    <Box
+                                                        onClick={e => e.stopPropagation()}
+                                                        sx={{
+                                                            display: 'flex', gap: 0.5, px: 1, pb: 1, pl: '77px',
+                                                            overflowX: 'auto',
+                                                            '&::-webkit-scrollbar': { height: 5 },
+                                                            '&::-webkit-scrollbar-thumb': { bgcolor: 'var(--line-strong)', borderRadius: 3 }
+                                                        }}
+                                                    >
+                                                        {isLoading && previews.length === 0 ? (
+                                                            [0, 1, 2, 3, 4, 5].map(i => (
+                                                                <Box key={i} sx={{
+                                                                    width: 42, height: 42, flexShrink: 0,
+                                                                    borderRadius: 'var(--radius-sm, 4px)', bgcolor: 'var(--raised)'
+                                                                }} />
+                                                            ))
+                                                        ) : (
+                                                            previews.slice(1).map((imgPath, i) => (
+                                                                <Box
+                                                                    key={i}
+                                                                    component="img"
+                                                                    src={`/api/files/preview?path=${encodeURIComponent(imgPath)}`}
+                                                                    alt={`Preview ${i + 2}`}
+                                                                    onClick={(e) => openLightbox(previews, i + 1, e)}
+                                                                    sx={{
+                                                                        width: 42, height: 42, flexShrink: 0, objectFit: 'cover',
+                                                                        borderRadius: 'var(--radius-sm, 4px)', cursor: 'zoom-in',
+                                                                        border: '1px solid var(--line)',
+                                                                        transition: 'border-color .16s ease',
+                                                                        '&:hover': { borderColor: 'var(--accent)' }
+                                                                    }}
+                                                                />
+                                                            ))
+                                                        )}
+                                                    </Box>
+                                                )}
+                                            </Panel>
                                         );
                                     })}
-                                </List>
+                                </Box>
                             )}
                         </Box>
 
@@ -985,7 +1097,7 @@ function LocalImportPage({ basePath }) {
                                 </Button>
                             </Box>
                         )}
-                    </Paper>
+                    </Panel>
                 </Box>
 
                 </Box>
@@ -1005,14 +1117,14 @@ function LocalImportPage({ basePath }) {
             >
                 <Fade in={lightbox.open}>
                     <Box sx={{ outline: 'none', position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                        <IconButton onClick={closeLightbox} sx={{ position: 'absolute', top: 20, right: 20, color: 'white', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, zIndex: 10 }}>
+                        <IconButton onClick={closeLightbox} sx={{ position: 'absolute', top: 20, right: 20, color: 'var(--text)', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, zIndex: 10 }}>
                             <CloseIcon />
                         </IconButton>
                         
                         {lightbox.images.length > 0 && (
                             <>
                                 <Box onClick={closeLightbox} sx={{ position: 'relative', width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', p: {xs: 2, md: 5} }}>
-                                    <IconButton onClick={handlePrevImage} sx={{ position: 'absolute', left: {xs: 10, md: 40}, color: 'white', bgcolor: 'rgba(0,0,0,0.5)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, zIndex: 10 }}>
+                                    <IconButton onClick={handlePrevImage} sx={{ position: 'absolute', left: {xs: 10, md: 40}, color: 'var(--text)', bgcolor: 'rgba(0,0,0,0.5)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, zIndex: 10 }}>
                                         <ChevronLeftIcon fontSize="large" />
                                     </IconButton>
                                     
@@ -1030,11 +1142,11 @@ function LocalImportPage({ basePath }) {
                                         }} 
                                     />
                                     
-                                    <IconButton onClick={handleNextImage} sx={{ position: 'absolute', right: {xs: 10, md: 40}, color: 'white', bgcolor: 'rgba(0,0,0,0.5)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, zIndex: 10 }}>
+                                    <IconButton onClick={handleNextImage} sx={{ position: 'absolute', right: {xs: 10, md: 40}, color: 'var(--text)', bgcolor: 'rgba(0,0,0,0.5)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, zIndex: 10 }}>
                                         <ChevronRightIcon fontSize="large" />
                                     </IconButton>
                                 </Box>
-                                <Typography sx={{ position: 'absolute', bottom: 30, color: 'rgba(255,255,255,0.7)', bgcolor: 'rgba(0,0,0,0.5)', px: 2, py: 0.5, borderRadius: 4, pointerEvents: 'none' }}>
+                                <Typography sx={{ position: 'absolute', bottom: 30, color: 'var(--dim)', bgcolor: 'rgba(0,0,0,0.5)', px: 2, py: 0.5, borderRadius: 4, pointerEvents: 'none' }}>
                                     {lightbox.currentIndex + 1} / {lightbox.images.length}
                                 </Typography>
                             </>
@@ -1049,7 +1161,7 @@ function LocalImportPage({ basePath }) {
                     100% { transform: rotate(360deg); }
                 }
             `}</style>
-        </Box>
+        </PageShell>
     );
 }
 
