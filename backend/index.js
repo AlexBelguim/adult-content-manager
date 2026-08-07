@@ -115,6 +115,7 @@ const http = require('http');
 const https = require('https');
 const { execSync } = require('child_process');
 const os = require('os');
+const crypto = require('crypto');
 const { Server } = require("socket.io");
 
 // WebXR (VR mode) requires a SECURE CONTEXT — it won't run over plain HTTP except on
@@ -122,24 +123,70 @@ const { Server } = require("socket.io");
 // VR silently refuses to enter immersive mode. ENABLE_HTTPS=1 serves the app + API over HTTPS
 // with a self-signed cert (auto-generated on first run, or use TLS_CERT/TLS_KEY to supply your
 // own). HTTP-to-HTTPS redirect can be added via a reverse proxy if needed.
+// The names the cert has to cover. Detected interfaces are useless in a
+// container — they're the bridge address (172.x), never the NAS IP a phone or
+// headset actually dials — so TLS_SAN lets the operator name the host. Bare
+// values are classified: something that looks like an IPv4 becomes IP:, the
+// rest DNS:, because getting that backwards silently produces a cert the
+// browser rejects.
+function desiredSanEntries() {
+  const detected = Object.values(os.networkInterfaces()).flat()
+    .filter((n) => n && n.family === 'IPv4' && !n.internal)
+    .map((n) => `IP:${n.address}`);
+
+  const extra = (process.env.TLS_SAN || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      if (/^(IP|DNS):/i.test(s)) return s.replace(/^ip:/i, 'IP:').replace(/^dns:/i, 'DNS:');
+      return /^\d{1,3}(\.\d{1,3}){3}$/.test(s) ? `IP:${s}` : `DNS:${s}`;
+    });
+
+  return [...new Set(['DNS:localhost', 'IP:127.0.0.1', ...detected, ...extra])];
+}
+
+// Does an existing cert already cover everything we want? Node's X509Certificate
+// prints SANs as "DNS:foo, IP Address:1.2.3.4" — note IP entries use a different
+// label than the openssl -addext syntax we generate with.
+function certCovers(certPem, wanted) {
+  try {
+    const san = new crypto.X509Certificate(certPem).subjectAltName || '';
+    const present = san.split(',').map((s) => s.trim().replace(/^IP Address:/i, 'IP:'));
+    return wanted.every((w) => present.includes(w));
+  } catch (e) {
+    return false; // unparseable — treat as not covering, caller decides
+  }
+}
+
 function buildHttpsOptions() {
+  const userSupplied = !!(process.env.TLS_CERT || process.env.TLS_KEY);
   const certPath = process.env.TLS_CERT || path.join(__dirname, '..', 'data', 'tls-cert.pem');
   const keyPath = process.env.TLS_KEY || path.join(__dirname, '..', 'data', 'tls-key.pem');
-  // Reuse an existing cert if present (user-supplied or previously generated)
+  const wanted = desiredSanEntries();
+
   if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-    return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+    const cert = fs.readFileSync(certPath);
+    const covers = certCovers(cert, wanted);
+    // Never touch a cert the operator supplied — just say so if it won't match.
+    if (userSupplied || covers) {
+      if (!covers) {
+        console.warn(`[TLS] Supplied cert does not cover ${wanted.join(', ')} — browsers will reject it for those addresses.`);
+      }
+      return { cert, key: fs.readFileSync(keyPath) };
+    }
+    // Ours, and now missing a name (TLS_SAN changed, or the host moved).
+    // Reusing it would serve a cert the phone refuses, so roll a new one.
+    console.log('[TLS] Existing cert is missing a required name — regenerating.');
   }
-  // Otherwise self-sign one covering localhost + all LAN IPs so any of them works on the headset
+
   try {
     const openssl = process.env.OPENSSL_BIN || 'openssl';
-    const ips = Object.values(os.networkInterfaces()).flat()
-      .filter((n) => n && n.family === 'IPv4' && !n.internal)
-      .map((n) => `IP:${n.address}`);
-    const san = ['DNS:localhost', 'IP:127.0.0.1', ...ips].join(',');
-    const dataDir = path.dirname(certPath);
-    fs.ensureDirSync(dataDir);
+    const san = wanted.join(',');
+    fs.ensureDirSync(path.dirname(certPath));
     execSync(`"${openssl}" req -x509 -newkey rsa:2048 -keyout "${keyPath}" -out "${certPath}" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=${san}"`, { stdio: 'ignore' });
     console.log(`[TLS] Generated self-signed cert (${certPath})`);
+    console.log(`[TLS] Valid for: ${san}`);
     return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
   } catch (e) {
     console.error('[TLS] Could not generate a self-signed cert (openssl missing?). Set TLS_CERT/TLS_KEY or disable ENABLE_HTTPS.', e.message);

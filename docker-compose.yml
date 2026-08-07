@@ -9,11 +9,25 @@
 #   - ./data     → persistent database & config  (or a TrueNAS dataset)
 #   - /mnt/media → your media library on TrueNAS (adjust the host path)
 #
-# VR (WebXR) REQUIRES HTTPS — the Quest browser won't enter immersive VR over plain HTTP.
-# To enable it, set ENABLE_HTTPS=1 below. The container serves the repo's self-signed cert
-# (./data/tls-cert.pem, mounted read-only at /app/tls) which covers localhost + the host LAN IP.
-# Open https://<host-IP>:4069 on the headset and accept the cert warning once. If the container
-# runs on a different machine (e.g. a NAS), regenerate the cert with that machine's IP in the SAN.
+# HTTPS is REQUIRED for two things: WebXR (the Quest browser won't enter immersive
+# VR over plain HTTP) and installing the phone UI as a PWA (Chrome only registers a
+# service worker on a secure context).
+#
+# >>> SET TLS_SAN TO THIS MACHINE'S ADDRESS <<<
+#
+# The container self-signs a cert on first run into /app/data (persisted, so it
+# survives restarts and stays trusted on your phone). It can only detect its own
+# container-internal IP — 172.x on the docker bridge — which is NOT the address a
+# phone dials. TLS_SAN adds the real ones. Without it the cert won't match the NAS
+# IP and every browser will reject it.
+#
+# Change TLS_SAN later and the cert is regenerated automatically to cover it, which
+# means re-trusting it on the phone.
+#
+# On the phone: open https://<NAS-IP>:4069, install ./data/tls-cert.pem as a CA
+# (Android: Settings → Security → Encryption & credentials → Install a certificate →
+# CA certificate), then Chrome ⋮ → Install app. Trusting the cert is not optional —
+# an untrusted origin is not a secure context, so the PWA won't install.
 #
 # =============================================================================
 
@@ -32,23 +46,24 @@ services:
       - MEDIA_BASE_PATH=/media
       - CONTENT_BASE_PATH=/app/content
       - DATA_PATH=/app/data
-      # Set to 1 to serve over HTTPS (REQUIRED for VR/WebXR on a headset). See header note.
+      # Set to 1 to serve over HTTPS (REQUIRED for VR/WebXR and for PWA install).
       - ENABLE_HTTPS=1
-      # Use the repo's self-signed cert (data/tls-*.pem) instead of generating one in-container.
-      # A container-generated cert would only see container-internal IPs, so it wouldn't match
-      # the host/NAS IP the headset actually connects to.
-      - TLS_CERT=/app/tls/tls-cert.pem
-      - TLS_KEY=/app/tls/tls-key.pem
+      # EDIT THIS: every address you'll reach the app on. Comma-separated; bare
+      # IPv4 becomes an IP SAN, anything else a DNS SAN. Include the NAS's LAN IP,
+      # and its hostname if you use one.
+      - TLS_SAN=192.168.1.10,truenas.local
+      # Optional: point these at a real cert instead (e.g. from your own CA) and
+      # the container will use it as-is rather than self-signing.
+      # - TLS_CERT=/app/tls/fullchain.pem
+      # - TLS_KEY=/app/tls/privkey.pem
     volumes:
-      # Persistent data (database, settings)
+      # Persistent data (database, settings, and the generated tls-*.pem).
+      # The cert lives here so it survives restarts — a cert that changed on every
+      # boot would have to be re-trusted on the phone each time.
       - ../data:/app/data
 
       # Media library (one level up from the cloned repo)
       - ../media:/media
-
-      # TLS cert (read-only). SAN covers localhost + this host's LAN IP; regenerate with
-      # the NAS IP included if the container runs on a different machine.
-      - ./data:/app/tls:ro
 
     healthcheck:
       test: ["CMD", "node", "-e", "const https=require('https');const r=https.get('https://localhost:4069/health',{rejectUnauthorized:false},res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]

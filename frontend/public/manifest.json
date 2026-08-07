@@ -26,9 +26,10 @@
       "purpose": "maskable"
     }
   ],
-  "start_url": ".",
-  "display": "minimal-ui",
+  "start_url": "/",
+  "display": "standalone",
   "scope": "/",
+  "orientation": "any",
   "theme_color": "#0B0B0C",
   "background_color": "#0B0B0C",
   "description": "Media library, duplicate detection and funscript tooling."
