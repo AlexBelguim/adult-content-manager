@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Box, Typography, InputBase, IconButton, CircularProgress,
   Menu, MenuItem, Button
@@ -95,17 +95,32 @@ function MobileShell() {
         const res = await fetch(
           `/api/performers/filter?limit=1000&offset=0&sortBy=${encodeURIComponent(sort)}&searchTerm=`
         );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setPerformers(Array.isArray(data?.performers) ? data.performers : []);
       } else {
         // The gallery endpoint answers a bare array.
         const res = await fetch('/api/performers/gallery');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setPerformers(Array.isArray(data) ? data : []);
       }
     } catch (err) {
       console.error('MobileShell: failed to load performers', err);
-      setError('Could not load performers.');
+      // Worth distinguishing, because in the installed PWA the shell loads from
+      // the service worker cache and only the /api/ calls fail (they're
+      // NetworkOnly). The app looks healthy right up until this point, so
+      // "could not load" reads like a server bug when it's usually the tailnet
+      // being down.
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (offline) {
+        setError("You're offline — reconnect to load your library.");
+      } else if (err instanceof TypeError) {
+        // fetch() rejects with TypeError only when it never got a response.
+        setError("Can't reach the server. Check Tailscale is connected.");
+      } else {
+        setError(`Could not load performers (${err.message}).`);
+      }
       setPerformers([]);
     } finally {
       setLoading(false);
@@ -113,6 +128,18 @@ function MobileShell() {
   }, [mode, sort]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Coming back online after a failure should just work, rather than leaving
+  // the error on screen until it's tapped. Read the current error from a ref —
+  // putting the reload inside a state updater would fire it twice under
+  // StrictMode, and updaters must stay side-effect free.
+  const errorRef = useRef('');
+  useEffect(() => { errorRef.current = error; }, [error]);
+  useEffect(() => {
+    const onOnline = () => { if (errorRef.current) load(); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [load]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();

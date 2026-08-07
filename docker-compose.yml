@@ -9,25 +9,49 @@
 #   - ./data     → persistent database & config  (or a TrueNAS dataset)
 #   - /mnt/media → your media library on TrueNAS (adjust the host path)
 #
-# HTTPS is REQUIRED for two things: WebXR (the Quest browser won't enter immersive
-# VR over plain HTTP) and installing the phone UI as a PWA (Chrome only registers a
-# service worker on a secure context).
+# HTTPS is REQUIRED for two things: installing the phone UI as a PWA (Chrome only
+# registers a service worker on a secure context) and WebXR (the Quest browser
+# won't enter immersive VR over plain HTTP).
 #
-# >>> SET TLS_SAN TO THIS MACHINE'S ADDRESS <<<
+# -----------------------------------------------------------------------------
+# DEFAULT: TLS terminated by Tailscale  (ENABLE_HTTPS=0, as configured below)
+# -----------------------------------------------------------------------------
+# On the NAS, once:
 #
-# The container self-signs a cert on first run into /app/data (persisted, so it
-# survives restarts and stays trusted on your phone). It can only detect its own
-# container-internal IP — 172.x on the docker bridge — which is NOT the address a
-# phone dials. TLS_SAN adds the real ones. Without it the cert won't match the NAS
-# IP and every browser will reject it.
+#   tailscale set --hostname=darkroom     # optional, sets the URL
+#   tailscale serve --bg 4069
 #
-# Change TLS_SAN later and the cert is regenerated automatically to cover it, which
-# means re-trusting it on the phone.
+# That publishes the container at https://darkroom.<tailnet>.ts.net with a real
+# Let's Encrypt cert Tailscale provisions and renews. Nothing to install on the
+# phone, and nothing is exposed publicly — `serve` is tailnet-only. (`funnel` is
+# the public one. Don't.)
 #
-# On the phone: open https://<NAS-IP>:4069, install ./data/tls-cert.pem as a CA
-# (Android: Settings → Security → Encryption & credentials → Install a certificate →
-# CA certificate), then Chrome ⋮ → Install app. Trusting the cert is not optional —
-# an untrusted origin is not a secure context, so the PWA won't install.
+# Needs MagicDNS and HTTPS Certificates enabled in the Tailscale admin console.
+# Tailscale must be connected on the phone even on the same LAN — it's what
+# resolves the name — though it then connects directly over the LAN rather than
+# relaying, so there's no speed cost.
+#
+# Rename BEFORE installing the PWA: the hostname is the origin, so changing it
+# later orphans the installed app and re-issues the cert.
+#
+# -----------------------------------------------------------------------------
+# ALTERNATIVE: container terminates TLS itself  (needed for the Quest)
+# -----------------------------------------------------------------------------
+# A headset on the LAN can't reach a ts.net name unless it runs Tailscale too, so
+# for VR set ENABLE_HTTPS=1 and TLS_SAN below, then trust the cert on the headset.
+#
+# The container self-signs into /app/data (persisted, so it survives restarts and
+# stays trusted). It only sees its own bridge IP — 172.x — which is never the
+# address a client dials, so TLS_SAN must name the real ones. Change TLS_SAN later
+# and the cert regenerates to cover it, which means re-trusting it.
+#
+# To trust it: open https://<NAS-IP>:4069, install ./data/tls-cert.pem as a CA
+# (Android: Settings → Security → Encryption & credentials → Install a certificate
+# → CA certificate). An untrusted origin is not a secure context, so without this
+# the PWA won't install.
+#
+# Note the two routes are different ORIGINS — separate PWA installs, service
+# workers and caches. Pick one for the phone and stay on it.
 #
 # =============================================================================
 
@@ -46,14 +70,18 @@ services:
       - MEDIA_BASE_PATH=/media
       - CONTENT_BASE_PATH=/app/content
       - DATA_PATH=/app/data
-      # Set to 1 to serve over HTTPS (REQUIRED for VR/WebXR and for PWA install).
-      - ENABLE_HTTPS=1
-      # EDIT THIS: every address you'll reach the app on. Comma-separated; bare
-      # IPv4 becomes an IP SAN, anything else a DNS SAN. Include the NAS's LAN IP,
-      # and its hostname if you use one.
-      - TLS_SAN=192.168.1.10,truenas.local
-      # Optional: point these at a real cert instead (e.g. from your own CA) and
-      # the container will use it as-is rather than self-signing.
+      # 0 = plain HTTP on 4069, TLS handled by `tailscale serve` (the default —
+      # see the header). Set to 1 only if you need the container to do TLS
+      # itself, e.g. for a Quest on the LAN that isn't on the tailnet.
+      - ENABLE_HTTPS=0
+      # Only used when ENABLE_HTTPS=1. Every address you'll reach the app on,
+      # comma-separated; bare IPv4 becomes an IP SAN, anything else a DNS SAN.
+      # Uncomment and set to the NAS's real LAN IP (and hostname, if you use one).
+      # - TLS_SAN=192.168.1.10,truenas.local
+      # Or point these at a cert you already have and it's used as-is, never
+      # regenerated. `tailscale cert` output works here too, but those expire
+      # every 90 days and are only re-read on restart — `tailscale serve` renews
+      # itself, which is why it's the default.
       # - TLS_CERT=/app/tls/fullchain.pem
       # - TLS_KEY=/app/tls/privkey.pem
     volumes:
