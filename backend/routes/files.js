@@ -302,7 +302,8 @@ router.get('/video-thumbnail', async (req, res) => {
       const proc = spawn(ffmpegPath, [
         '-ss', String(seek), '-i', filePath,
         '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5',
-        '-y', tmp
+        // tmp ends in .tmp, so ffmpeg can't infer the muxer from the name.
+        '-f', 'image2', '-y', tmp
       ], { windowsHide: true });
       let stderr = '';
       proc.stderr.on('data', d => { stderr += d.toString().slice(0, 400); });

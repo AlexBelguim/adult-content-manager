@@ -1,18 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Box,
     Typography,
-    List,
-    ListItem,
-    ListItemText,
-    ListItemSecondaryAction,
     IconButton,
     LinearProgress,
     Chip,
     Button,
     Alert,
-    Divider,
-    Grid,
     Switch,
     FormControlLabel,
     Tooltip,
@@ -23,13 +18,7 @@ import {
     Backdrop
 } from '@mui/material';
 import {
-    Delete as DeleteIcon,
-    Refresh as RefreshIcon,
-    CheckCircle as CheckCircleIcon,
-    Error as ErrorIcon,
-    HourglassEmpty as QueuedIcon,
-    PlayCircle as ProcessingIcon,
-    CloudUpload as UploadingIcon,
+    OpenInNew as OpenInNewIcon,
     FolderOpen,
     Folder,
     Image as ImageIcon,
@@ -45,8 +34,6 @@ import {
     CloudUpload as CloudUploadIcon
 } from '@mui/icons-material';
 import { PageShell, PageHeader, Panel, Toolbar as LayoutToolbar, ICON } from '../components/layout';
-
-const QUEUE_CACHE_KEY = 'uploadQueueCache_v1';
 
 /**
  * One count on a folder card — "148 pics", "6 vids".
@@ -79,16 +66,15 @@ const chipFilterSx = (active) => ({
     '&:hover': { bgcolor: active ? 'var(--accent-hover)' : 'var(--raised)' }
 });
 
+/**
+ * The server-side import queue is no longer shown here: once a folder has
+ * been handed to POST /api/upload-queue (or /api/folders/local-import) it is
+ * an "Import" job on /jobs and in the toolbar indicator. What stays on this
+ * page is the part the server cannot see — a folder still being uploaded
+ * from this browser, batch by batch.
+ */
 function LocalImportPage({ basePath }) {
-    // Server queue state (reused from upload queue)
-    // Initialize from sessionStorage so revisiting the page shows the last-known queue instantly
-    const [serverQueue, setServerQueue] = useState(() => {
-        try {
-            const cached = sessionStorage.getItem(QUEUE_CACHE_KEY);
-            return cached ? JSON.parse(cached) : [];
-        } catch { return []; }
-    });
-    const [isProcessing, setIsProcessing] = useState(false);
+    const navigate = useNavigate();
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
@@ -158,29 +144,6 @@ function LocalImportPage({ basePath }) {
         const kb = mb * 1024;
         return `${kb.toFixed(0)} KB`;
     };
-
-    // Poll queue status
-    const fetchQueueStatus = useCallback(async () => {
-        try {
-            const response = await fetch('/api/upload-queue');
-            if (response.ok) {
-                const data = await response.json();
-                setServerQueue(data.queue);
-                setIsProcessing(data.isProcessing);
-                try {
-                    sessionStorage.setItem(QUEUE_CACHE_KEY, JSON.stringify(data.queue));
-                } catch {}
-            }
-        } catch (err) {
-            console.error('Failed to fetch queue status:', err);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchQueueStatus();
-        const interval = setInterval(fetchQueueStatus, 2000);
-        return () => clearInterval(interval);
-    }, [fetchQueueStatus]);
 
     // Scan the before upload folder
     const handleScan = async () => {
@@ -348,7 +311,7 @@ function LocalImportPage({ basePath }) {
             const data = await response.json();
 
             if (data.success) {
-                setSuccess(`${toImport.length} performer(s) queued for import! View progress in the queue.`);
+                setSuccess(`${toImport.length} performer(s) queued for import — progress is on the Jobs page.`);
                 // Remove imported performers from the list
                 setPerformers(prev => prev.filter(p => !selectedPerformers.has(p.name)));
                 setNameOverrides(prev => {
@@ -357,7 +320,6 @@ function LocalImportPage({ basePath }) {
                     return next;
                 });
                 setSelectedPerformers(new Set());
-                fetchQueueStatus();
             } else {
                 setError(data.error || 'Failed to queue import');
             }
@@ -486,8 +448,8 @@ function LocalImportPage({ basePath }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ performerName: nameToUpload, basePath, uploadId: jobId, totalFiles, createHashes: job.createHashes })
             });
+            // From here on the server owns it: it shows up as an Import job.
             setUploadingJobs(prev => prev.filter(j => j.id !== jobId));
-            fetchQueueStatus();
         } catch (error) {
             console.error('Upload failed:', error);
             setUploadingJobs(prev => prev.map(j =>
@@ -533,44 +495,18 @@ function LocalImportPage({ basePath }) {
         setShowUploadForm(false);
     };
 
-    const getStatusIcon = (status) => {
-        switch (status) {
-            case 'uploading': return <UploadingIcon color="info" />;
-            case 'queued': return <QueuedIcon sx={{ color: 'text.secondary' }} />;
-            case 'processing': return <ProcessingIcon color="primary" sx={{ animation: 'spin 2s linear infinite' }} />;
-            case 'completed': return <CheckCircleIcon color="success" />;
-            case 'error': return <ErrorIcon color="error" />;
-            default: return null;
-        }
+    // A pending or failed upload can be dropped; one mid-flight cannot — its
+    // XHR loop is already running and there is no abort wired through it.
+    const removeUploadJob = (jobId) => {
+        delete jobFilesRef.current[jobId];
+        setUploadingJobs(prev => prev.filter(j => j.id !== jobId));
     };
 
-    const getStatusColor = (status) => {
-        switch (status) {
-            case 'uploading': return 'info';
-            case 'queued': return 'default';
-            case 'processing': return 'primary';
-            case 'completed': return 'success';
-            case 'error': return 'error';
-            default: return 'default';
-        }
+    const uploadJobLine = (job) => {
+        if (job.status === 'error') return job.error || 'Upload failed';
+        if (job.status === 'pending') return `waiting · ${job.totalFiles} files`;
+        return `batch ${job.currentBatch || 1} of ${job.totalBatches} · ${job.totalFiles} files · ${job.progress}%`;
     };
-
-    const formatTime = (isoString) => {
-        if (!isoString) return '-';
-        return new Date(isoString).toLocaleTimeString();
-    };
-
-    const handleClearCompleted = async () => {
-        try {
-            await fetch('/api/upload-queue/clear-completed', { method: 'POST' });
-            fetchQueueStatus();
-        } catch (err) {
-            setError('Failed to clear completed jobs');
-        }
-    };
-
-    // Combine local uploading jobs with server queue
-    const queuedJobs = [...uploadingJobs, ...serverQueue];
 
     // This had already converged on what the Panel primitive does (surface +
     // hairline + no shadow), so only the layout bits stay here and the surface
@@ -584,15 +520,13 @@ function LocalImportPage({ basePath }) {
         flexDirection: 'column'
     };
 
-    // Fixed-height page: the two columns scroll internally rather than growing
+    // Fixed-height page: the folder list scrolls internally rather than growing
     // the document. PageShell's default minHeight:100% would defeat that, so
     // the height/overflow rules stay here and only the width + padding come
     // from the shell.
     return (
-        /* The fixed-height, internally-scrolling two-column layout only works
-           when there is room for two columns. On a phone it becomes a 360px
-           queue rail with nothing left for the folder cards, so below md the
-           page reverts to normal document flow and the columns stack. */
+        /* The fixed-height, internally-scrolling layout only works when there
+           is room for it; below md the page reverts to normal document flow. */
         <PageShell sx={{
             height: { xs: 'auto', md: 'calc(100vh - 64px)' },
             minHeight: 0,
@@ -601,9 +535,20 @@ function LocalImportPage({ basePath }) {
             overflow: { xs: 'visible', md: 'hidden' }
         }}>
             <PageHeader
-                title="Local Import & Upload Queue"
-                subtitle="Import local folders or view processing queue status."
+                title="Local Import"
+                subtitle="Import folders from the server's before-upload folder, or upload one from this computer."
                 sx={{ mb: 2, pb: 1.5 }}
+                actions={(
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        endIcon={<OpenInNewIcon sx={{ fontSize: '14px !important' }} />}
+                        onClick={() => navigate('/jobs')}
+                        sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+                    >
+                        View queue in Jobs
+                    </Button>
+                )}
             />
 
             {error && (
@@ -618,158 +563,10 @@ function LocalImportPage({ basePath }) {
             )}
 
             <Box sx={{
-                display: 'flex',
-                flexDirection: { xs: 'column', md: 'row' },
-                gap: { xs: 2, md: 3 },
-                flex: 1,
+                flex: 1, minWidth: 0, width: '100%',
                 overflow: { xs: 'visible', md: 'hidden' },
-                alignItems: 'flex-start'
+                display: 'flex', flexDirection: 'column'
             }}>
-                {/* Queue — a rail beside the folders on desktop, a stacked
-                    section above them on a phone. The scan results are the
-                    reason you opened the page, so they must not be squeezed. */}
-                <Box sx={{
-                    width: { xs: '100%', md: 360 },
-                    minWidth: { xs: 0, md: 360 },
-                    flexShrink: 0,
-                    height: { xs: 'auto', md: '100%' },
-                    overflow: 'hidden'
-                }}>
-                    <Panel sx={paperStyles}>
-                        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
-                            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                                <Typography variant="subtitle1" fontWeight="bold">Queue</Typography>
-                                {isProcessing && (
-                                    <Chip
-                                        icon={<ProcessingIcon sx={{ animation: 'spin 2s linear infinite' }} />}
-                                        label="Processing"
-                                        color="primary"
-                                        variant="outlined"
-                                        size="small"
-                                    />
-                                )}
-                            </Box>
-                            <Box sx={{ display: 'flex', gap: 1 }}>
-                                <Button
-                                    size="small"
-                                    onClick={handleClearCompleted}
-                                    sx={{ color: 'text.secondary', '&:hover': { bgcolor: 'background.default' } }}
-                                >
-                                    Clear Completed
-                                </Button>
-                                <IconButton size="small" onClick={fetchQueueStatus} sx={{ color: 'text.secondary' }}>
-                                    <RefreshIcon />
-                                </IconButton>
-                            </Box>
-                        </Box>
-
-                        <Box sx={{ flex: 1, overflow: 'auto', p: 0 }}>
-                            {queuedJobs.length === 0 ? (
-                                <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                                    <QueuedIcon sx={{ fontSize: 60, mb: 2, opacity: 0.2 }} />
-                                    <Typography variant="h6" color="text.disabled">Queue is empty</Typography>
-                                    <Typography variant="body2" color="text.disabled">Import performers to see progress here</Typography>
-                                </Box>
-                            ) : (
-                                <List sx={{ p: 0 }}>
-                                    {queuedJobs.map((job, index) => (
-                                        <React.Fragment key={job.id}>
-                                            {index > 0 && <Divider sx={{ borderColor: 'divider' }} />}
-                                            <ListItem
-                                                sx={{
-                                                    py: 2.5,
-                                                    px: 2,
-                                                    transition: 'background-color 0.2s',
-                                                    '&:hover': { bgcolor: 'action.hover' }
-                                                }}
-                                            >
-                                                <Box sx={{ mr: 1.5, minWidth: 36, display: 'flex', justifyContent: 'center' }}>
-                                                    {getStatusIcon(job.status)}
-                                                </Box>
-                                                <ListItemText
-                                                    primary={
-                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
-                                                            <Typography variant="subtitle1" fontWeight="500">{job.performerName}</Typography>
-                                                            <Chip
-                                                                label={job.status}
-                                                                color={getStatusColor(job.status)}
-                                                                size="small"
-                                                                sx={{ height: 20, fontSize: '0.7rem' }}
-                                                            />
-                                                            {job.isLocalImport && (
-                                                                <Chip
-                                                                    label="local"
-                                                                    size="small"
-                                                                    sx={{ height: 18, fontSize: '0.65rem', bgcolor: (theme) => `${theme.palette.success.main}26`, color: 'success.main' }}
-                                                                />
-                                                            )}
-                                                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                                                • {job.totalFiles} files
-                                                            </Typography>
-                                                        </Box>
-                                                    }
-                                                    secondary={
-                                                        <Box sx={{ mt: 1, width: '100%', maxWidth: 500 }}>
-                                                            {job.status === 'processing' && (
-                                                                <Box>
-                                                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                                        <Typography variant="caption" color="text.secondary">{job.currentFile || 'Processing...'}</Typography>
-                                                                        <Typography variant="caption" color="text.secondary">{job.progress}%</Typography>
-                                                                    </Box>
-                                                                    <LinearProgress
-                                                                        variant="determinate"
-                                                                        value={job.progress || 0}
-                                                                        sx={{ height: 6, borderRadius: 3 }}
-                                                                    />
-                                                                </Box>
-                                                            )}
-                                                            {job.status === 'error' && (
-                                                                <Typography variant="caption" color="error.main">
-                                                                    {job.error}
-                                                                </Typography>
-                                                            )}
-                                                            {job.status === 'completed' && (
-                                                                <Typography variant="caption" color="success.main">
-                                                                    Completed at {formatTime(job.completedAt)}
-                                                                </Typography>
-                                                            )}
-                                                        </Box>
-                                                    }
-                                                />
-                                                <ListItemSecondaryAction>
-                                                    {job.status !== 'processing' && (
-                                                        <IconButton
-                                                            edge="end"
-                                                            onClick={async () => {
-                                                                try {
-                                                                    await fetch(`/api/upload-queue/${job.id}`, { method: 'DELETE' });
-                                                                    fetchQueueStatus();
-                                                                } catch (err) {
-                                                                    console.error('Failed to remove job:', err);
-                                                                }
-                                                            }}
-                                                            sx={{ color: 'text.disabled', '&:hover': { color: 'error.main' } }}
-                                                        >
-                                                            <DeleteIcon />
-                                                        </IconButton>
-                                                    )}
-                                                </ListItemSecondaryAction>
-                                            </ListItem>
-                                        </React.Fragment>
-                                    ))}
-                                </List>
-                            )}
-                        </Box>
-                    </Panel>
-                </Box>
-            
-                {/* Right Side */}
-                <Box sx={{
-                    flex: 1, minWidth: 0, width: { xs: '100%', md: 'auto' },
-                    height: { xs: 'auto', md: '100%' },
-                    overflow: { xs: 'visible', md: 'hidden' },
-                    display: 'flex', flexDirection: 'column'
-                }}>
 
                     {/* Upload Folder Section */}
                     <Panel sx={{ ...paperStyles, height: 'auto', mb: 2, p: 0 }}>
@@ -788,6 +585,59 @@ function LocalImportPage({ basePath }) {
                             )}
                             <Typography variant="body2" sx={{ color: 'var(--muted)' }}>{showUploadForm ? '▲' : '▼'}</Typography>
                         </Box>
+
+                        {/* Browser-side upload progress. The server only learns about a
+                            folder once its batches arrive, so until then this is the only
+                            place that can show it. It leaves this list — and appears on
+                            /jobs — the moment the last batch is in. */}
+                        {uploadingJobs.length > 0 && (
+                            <Box sx={{ px: 2, pb: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                {uploadingJobs.map(job => (
+                                    <Box key={job.id} sx={{
+                                        display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '2px 8px', alignItems: 'center',
+                                        p: '8px 10px', bgcolor: 'var(--bg)', border: '1px solid',
+                                        borderColor: job.status === 'error' ? 'var(--bad)' : 'var(--line)',
+                                        borderRadius: 'var(--radius, 6px)'
+                                    }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                                            <Typography
+                                                title={job.performerName}
+                                                sx={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                            >
+                                                {job.performerName}
+                                            </Typography>
+                                            <Typography sx={{
+                                                fontSize: '0.72rem', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+                                                color: job.status === 'error' ? 'var(--bad)' : 'var(--dim)'
+                                            }}>
+                                                {job.status === 'uploading' ? 'uploading' : job.status === 'error' ? 'failed' : 'waiting'} · {uploadJobLine(job)}
+                                            </Typography>
+                                        </Box>
+                                        <Tooltip title={job.status === 'uploading' ? 'An upload in flight cannot be stopped' : 'Remove'}>
+                                            <span>
+                                                <IconButton
+                                                    size="small"
+                                                    disabled={job.status === 'uploading'}
+                                                    onClick={() => removeUploadJob(job.id)}
+                                                    sx={{ color: 'var(--muted)', p: 0.25, '& svg': { fontSize: ICON.inline } }}
+                                                >
+                                                    <CloseIcon />
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
+                                        <LinearProgress
+                                            variant={job.status === 'uploading' && !job.progress ? 'indeterminate' : 'determinate'}
+                                            value={job.status === 'error' ? 100 : (job.progress || 0)}
+                                            sx={{
+                                                gridColumn: '1 / -1', height: 4, borderRadius: 2, bgcolor: 'var(--line-strong)',
+                                                '& .MuiLinearProgress-bar': { bgcolor: job.status === 'error' ? 'var(--bad)' : 'var(--accent)', borderRadius: 2 }
+                                            }}
+                                        />
+                                    </Box>
+                                ))}
+                            </Box>
+                        )}
+
                         {showUploadForm && (
                             <Box sx={{ p: 2, pt: 0, borderTop: '1px solid var(--line)' }}>
                                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2, mt: 1 }}>
@@ -1098,9 +948,8 @@ function LocalImportPage({ basePath }) {
                             </Box>
                         )}
                     </Panel>
-                </Box>
+            </Box>
 
-                </Box>
             {/* Fullscreen Lightbox */}
             <Modal 
                 open={lightbox.open} 
@@ -1154,13 +1003,6 @@ function LocalImportPage({ basePath }) {
                     </Box>
                 </Fade>
             </Modal>
-
-            <style>{`
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            `}</style>
         </PageShell>
     );
 }

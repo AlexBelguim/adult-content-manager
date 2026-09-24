@@ -1,0 +1,62 @@
+/* Player page — direction 3 "Three columns". Colours from styles/tokens.js only. */
+
+.pp { height: 100vh; height: 100dvh; min-height: 560px; display: grid; grid-template-columns: 330px minmax(0, 1fr) 310px; background: var(--bg); color: var(--text); font-size: 14px; }
+.pp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); }
+.pp-grow { flex: 1 1 0; min-width: 0; }
+
+/* left: tools */
+.pp-left { min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid var(--line); }
+.pp-left > * { flex: none; }
+.pp-backrow { display: flex; gap: 10px; align-items: flex-start; }
+.pp-head h2 { margin: 0; font-size: 1.05rem; font-weight: 640; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.pp-title { color: var(--dim); font-size: .78rem; overflow-wrap: anywhere; }
+.pp-sub { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.pp-sheet-x, .pp-arail, .pp-sheet-scrim { display: none; }
+
+/* centre: media */
+.pp-sw { height: 100%; min-width: 0; }
+.pp-ud { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); z-index: 2; display: flex; flex-direction: column; gap: 10px; }
+.pp-ud button { width: 48px; height: 48px; padding: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: var(--scrim-strong); color: var(--text); border: 1px solid var(--line-strong); }
+.pp-ud button:hover { background: var(--accent); color: var(--on-accent); }
+.pp-ud button:disabled { opacity: .25; cursor: default; background: var(--scrim-strong); color: var(--text); }
+.pl-toast.pp-toast { position: absolute; bottom: 16px; z-index: 4; }
+
+/* right: up next */
+.pp-right { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); padding: 12px 8px 0 12px; }
+.pp-railhead { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; flex-wrap: wrap; font-size: .86rem; }
+.pp-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--dim); cursor: pointer; }
+.pp-toggle input { accent-color: var(--accent); }
+.pp-qlist { overflow-y: auto; min-height: 0; position: relative; }
+.pp-qgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 4px 12px 0; }
+.pp-th { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: var(--raised); color: var(--text); cursor: pointer; }
+.pp-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pp-th.is-cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pp-th span, .pp-th em { position: absolute; font-style: normal; font-size: 10px; font-weight: 650; background: var(--scrim-strong); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.pp-th span { right: 3px; bottom: 3px; }
+.pp-th em { left: 3px; top: 3px; color: var(--warn); }
+
+@media (max-width: 1100px) {
+  .pp { grid-template-columns: 300px minmax(0, 1fr); }
+  .pp-right { display: none; }
+}
+
+/* phone: swipe feed, tools in a bottom sheet, queue below */
+@media (max-width: 760px) {
+  .pp { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+  .pp-sw { height: 92vh; height: 92dvh; }
+  /* vertical drags on the media are prev / next, not page scroll */
+  .pp-stage { touch-action: pinch-zoom; }
+  .pp-right { display: flex; border: 0; padding: 12px; }
+  .pp-qlist { overflow: visible; }
+  .pp-qgrid { grid-template-columns: repeat(3, 1fr); padding-right: 0; }
+
+  .pp-left { position: fixed; left: 0; right: 0; bottom: 0; max-height: 72vh; z-index: 30; background: var(--bg); border: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0; transform: translateY(105%); visibility: hidden; transition: transform .2s, visibility 0s .2s; }
+  .pp-left.is-open { transform: none; visibility: visible; transition: transform .2s; }
+  .pp-sheet-x { display: inline-flex; align-self: flex-end; }
+  .pp-sheet-scrim { display: block; position: fixed; inset: 0; z-index: 29; border: 0; padding: 0; background: var(--scrim); }
+
+  .pp-arail { position: absolute; left: 10px; bottom: 12px; z-index: 2; display: flex; flex-direction: column; gap: 8px; }
+  .pp-arail button { width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--scrim-strong); color: var(--text); border: 1px solid var(--line-strong); font-size: 1.05rem; cursor: pointer; }
+  .pl-sw:fullscreen .pp-arail { display: none; }
+  .pp-ud { right: 8px; }
+}

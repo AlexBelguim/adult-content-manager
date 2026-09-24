@@ -832,6 +832,8 @@ function resetHashVerified(performerId) {
 module.exports = {
   createHashDB,
   getJobStatus,
+  // Read-only snapshot for GET /api/jobs
+  listJobs: () => Array.from(activeJobs.values()),
   checkDuplicates,
   getRunResults,
   hammingDistance,

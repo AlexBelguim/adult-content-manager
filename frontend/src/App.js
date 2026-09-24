@@ -17,7 +17,6 @@ import store from './redux/store';
 import { HandyIntegration } from './utils/HandyIntegration';
 import SceneManagerWrapper from './utils/SceneManagerWrapper';
 import SceneManagerPage from './pages/SceneManagerPage';
-import HashCreationQueue from './components/HashCreationQueue';
 // Pairwise Labeler (integrated from vision-llm-pairwise)
 import PairwisePage from './pages/PairwisePage';
 import './App.css';
@@ -27,8 +26,6 @@ import './App.css';
 // are still on disk but no longer imported — delete them once you're happy.
 import './styles/components.css';
 import './styles/darkPanel.css';
-import BatchQueuePage from './pages/BatchQueuePage';
-import UploadQueuePage from './pages/UploadQueuePage';
 import LocalImportPage from './pages/LocalImportPage';
 import TinderSortingPage from './pages/TinderSortingPage';
 import PairwiseMobilePage from './pages/PairwiseMobilePage';
@@ -43,6 +40,8 @@ import PairwiseRankPage from './pages/PairwiseRankPage';
 import TrainingHubPage from './pages/TrainingHubPage';
 import FunpipePage from './pages/FunpipePage';
 import VRPage from './pages/VRPage';
+import PlayerPage from './pages/PlayerPage';
+import JobsPage from './pages/JobsPage';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
@@ -500,7 +499,8 @@ function AppContent({ onThemeChange, currentThemeId }) {
     handyCode, handyConnected,
     basePath, onFolderDeleted: handleFolderDeleted,
     onScanPerformers, isScanning,
-    onThemeChange, currentThemeId
+    onThemeChange, currentThemeId,
+    hashQueue
   };
   // Plain function, not a component — returning JSX inline keeps the element
   // identity React already had. A nested component defined here would remount
@@ -579,6 +579,16 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/pairwise-rank" element={<PairwiseRankPage />} />
             <Route path="/training-hub" element={shell(<TrainingHubPage />)} />
             <Route path="/funpipe" element={shell(<FunpipePage />)} />
+            <Route path="/jobs" element={shell(<JobsPage hashQueue={hashQueue} setHashQueue={setHashQueue} />)} />
+            {/* Chrome-free: replaces the fullscreen modal the gallery used to
+                open, so like the modal it takes the whole viewport. */}
+            <Route path="/player" element={
+              <PlayerPage
+                handyIntegration={handyIntegration}
+                handyCode={handyCode}
+                handyConnected={handyConnected}
+              />
+            } />
             <Route path="/vr" element={
               <VRPage />
             } />

@@ -1,0 +1,147 @@
+/* Filter view — filter-redesign-mockup.html on the shared player.
+   Colours come from styles/tokens.js only; buttons, cards, lists and key/value
+   grids reuse the .pl-* classes of components/player/player.css. */
+
+.fv {
+  --fv-top: 0px; /* height of the sticky app bar, measured in PerformerFilterView */
+  margin: 0;
+  height: calc(100vh - var(--fv-top));
+  height: calc(100dvh - var(--fv-top));
+  min-height: 560px;
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr) 300px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  color-scheme: dark;
+}
+.fv button, .fv select, .fv input { font: inherit; color: inherit; }
+.fv h2 { margin: 0; font-size: 1.05rem; font-weight: 640; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.fv-grow { flex: 1 1 0; min-width: 0; }
+.fv-sub { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.fv-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.fv kbd { font: 600 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 0 5px; color: var(--text); white-space: nowrap; }
+.pl-btn.fv-go { background: var(--ok); border-color: var(--ok); color: var(--bg); font-weight: 650; }
+.pl-btn.fv-go:hover { background: var(--ok); filter: brightness(1.1); }
+.pl-btn.is-on { border-color: var(--accent); color: var(--accent); }
+.fv-select { background: var(--bg); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 4px 6px; font-size: .82rem; }
+.fv-select option { background: var(--surface); color: var(--text); }
+
+/* ── left column ── */
+.fv-left { min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid var(--line); }
+.fv-left > * { flex: none; }
+.fv-navrow { display: flex; gap: 8px; align-items: center; }
+.fv-sheet-x, .fv-sheet-scrim, .fv-mtop { display: none; }
+.fv-title .fv-sub { display: block; }
+
+.fv-tabrow { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 7px 8px; cursor: pointer; color: var(--text); }
+.fv-tabrow:hover { background: var(--raised); }
+.fv-tabrow.is-on { border-color: var(--accent); background: var(--accent-quiet); }
+.fv-tabrow b { font-weight: 600; }
+.fv-tabrow span { color: var(--dim); font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fv-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line-strong); overflow: hidden; }
+.fv-bar i { display: block; height: 100%; background: var(--ok); transition: width .25s; }
+
+.fv-opt { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+.fv-opt > span { flex: 1 1 0; color: var(--dim); }
+.fv-opt input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.fv-opt .fv-nomodel { color: var(--bad); font-size: .74rem; }
+
+.fv-name { font-weight: 600; overflow-wrap: anywhere; }
+.fv-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.fv-badge { display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .04em; border-radius: 99px; padding: 1px 8px; border: 1px solid currentColor; line-height: 1.5; }
+.fv-badge.keep { color: var(--ok); background: var(--ok-quiet); }
+.fv-badge.delete { color: var(--bad); background: var(--bad-quiet); }
+.fv-badge.move_to_funscript { color: var(--info); background: var(--info-quiet); }
+.fv-card-kv { margin-top: 6px; }
+.fv-card-row { margin-top: 8px; }
+
+.fv-keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; color: var(--dim); font-size: .78rem; align-items: center; }
+.fv-keys kbd { justify-self: start; }
+
+.fv-rename { display: flex; gap: 6px; flex: 1 1 100%; }
+.fv-rename input { flex: 1 1 0; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: var(--radius); padding: 3px 8px; font-size: .8rem; }
+.fv-rename input:focus { outline: none; }
+.fv-lastfs { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--warn); border-radius: var(--radius); background: var(--warn-quiet); }
+.fv-lastfs p { margin: 0 0 8px; }
+.pl-li.fv-fsrow { flex-wrap: wrap; gap: 6px; }
+.pl-li.fv-fsrow .pl-nm { flex: 1 1 100%; }
+
+/* ── centre ── */
+.fv-mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); container-type: inline-size; }
+/* narrow centre column (small window, wide side panels): keep the labels, drop the key hints */
+@container (max-width: 640px) { .fv-act kbd { display: none; } }
+.fv-sw { flex: 1 1 0; min-height: 0; }
+.fv-stage { touch-action: pan-y; }
+.fv-verdict { position: absolute; top: 22px; z-index: 3; font-size: 1.6rem; font-weight: 800; letter-spacing: .06em; padding: 4px 16px; border: 3px solid currentColor; border-radius: var(--radius-lg); background: var(--scrim); opacity: 0; pointer-events: none; }
+.fv-verdict.k { left: 22px; color: var(--ok); transform: rotate(-10deg); }
+.fv-verdict.d { right: 22px; color: var(--bad); transform: rotate(10deg); }
+.fv-ghost { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: center / contain no-repeat; will-change: transform, opacity; }
+.fv-ghost .fv-verdict { opacity: 1; }
+.fv-flash { position: absolute; inset: 0; z-index: 4; pointer-events: none; animation: fv-flash .45s ease-out forwards; }
+.fv-flash.keep { box-shadow: inset 0 0 0 4px var(--ok), inset 0 0 90px var(--ok); }
+.fv-flash.delete { box-shadow: inset 0 0 0 4px var(--bad), inset 0 0 90px var(--bad); }
+.fv-flash.move_to_funscript { box-shadow: inset 0 0 0 4px var(--info), inset 0 0 90px var(--info); }
+@keyframes fv-flash { from { opacity: .6; } to { opacity: 0; } }
+.fv-state { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; text-align: center; padding: 24px; background: var(--bg); }
+.fv-state h2 { font-size: 1.2rem; }
+.fv-state p { margin: 6px 0 0; }
+.fv-state .fv-row { justify-content: center; margin-top: 14px; }
+
+/* the bar that never moves */
+.fv-acts { display: grid; grid-template-columns: 1fr 1.6fr 1fr 1.3fr 1.6fr 1fr; gap: 8px; }
+.fv-act { display: flex; align-items: center; justify-content: center; gap: 8px; height: 54px; min-width: 0; padding: 0 6px; overflow: hidden; border-radius: var(--radius-lg); border: 1px solid var(--line-strong); background: var(--raised); color: var(--text); cursor: pointer; font-weight: 650; font-size: .92rem; white-space: nowrap; }
+.fv-act kbd { border-color: currentColor; color: inherit; opacity: .7; }
+.fv-act:hover { filter: brightness(1.2); }
+.fv-act:disabled { opacity: .28; cursor: default; filter: none; }
+.fv-act.del { background: var(--bad-quiet); border-color: var(--bad); color: var(--bad); }
+.fv-act.keep { background: var(--ok-quiet); border-color: var(--ok); color: var(--ok); }
+.fv-act.move { background: var(--info-quiet); border-color: var(--info); color: var(--info); }
+
+/* ── right column ── */
+.fv-right { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); padding: 12px 8px 0 12px; gap: 10px; }
+.fv-right > * { flex: none; }
+.fv-hist { display: flex; align-items: center; gap: 8px; font-size: .78rem; padding: 3px 0; color: var(--dim); }
+.fv-hist .fv-nm { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fv-qhead { font-size: .86rem; font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
+.fv-right .fv-qlist { flex: 1 1 0; overflow-y: auto; min-height: 0; }
+.fv-qgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 4px 12px 0; }
+.fv-th { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: var(--raised); color: var(--text); cursor: pointer; }
+.fv-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fv-th.is-cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fv-th span { position: absolute; right: 3px; bottom: 3px; font-size: 10px; font-weight: 650; background: var(--scrim-strong); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.fv-th em { position: absolute; left: 3px; top: 3px; font-style: normal; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 0 5px; line-height: 15px; background: var(--ok); color: var(--bg); }
+
+@media (max-width: 1100px) {
+  .fv { grid-template-columns: 300px minmax(0, 1fr); }
+  .fv-right { display: none; }
+}
+
+/* ── phone: one column, media full height, round buttons, sheet, queue below ── */
+/* MainPage wraps the desktop view in .main-content, which pads 20px (10px on
+   phones); take that back so the media fills the viewport under the app bar.
+   The phone shell has no such wrapper, so this is scoped to it. */
+.main-content .fv { margin: -20px; }
+@media (max-width: 768px) {
+  .main-content .fv { margin: -10px; }
+}
+@media (max-width: 760px) {
+  .fv { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+  .fv-mid { height: calc(100vh - var(--fv-top)); height: calc(100dvh - var(--fv-top)); }
+  .fv-mtop { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: .82rem; flex: none; }
+  .fv-chip { border: 1px solid var(--ok); color: var(--ok); border-radius: 99px; padding: 0 8px; font-size: .74rem; font-variant-numeric: tabular-nums; }
+
+  .fv-left { position: fixed; left: 0; right: 0; bottom: 0; max-height: 76vh; z-index: 30; background: var(--bg); border: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0; transform: translateY(105%); visibility: hidden; transition: transform .2s, visibility 0s .2s; }
+  .fv-left.is-open { transform: none; visibility: visible; transition: transform .2s; }
+  .fv-sheet-x { display: inline-flex; align-self: flex-end; }
+  .fv-sheet-scrim { display: block; position: fixed; inset: 0; z-index: 29; border: 0; padding: 0; background: var(--scrim); }
+
+  .fv-acts { grid-template-columns: repeat(6, 1fr); gap: 6px; align-items: center; justify-items: center; padding: 2px 0 6px; }
+  .fv-act { width: 46px; height: 46px; border-radius: 50%; padding: 0; }
+  .fv-act.keep, .fv-act.del { width: 62px; height: 62px; }
+  .fv-act b, .fv-act kbd { display: none; }
+
+  .fv-right { display: flex; border: 0; padding: 12px; }
+  .fv-right .fv-qlist { overflow: visible; flex: none; }
+  .fv-qgrid { grid-template-columns: repeat(3, 1fr); padding-right: 0; }
+}

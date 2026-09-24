@@ -1,12 +1,54 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Box, Typography, Button, Select, MenuItem, Chip, Paper, TextField, Grid } from '@mui/material';
-import '../utils/FunscriptPlayer.js'; // Import to register custom elements
-import { ensureFlag } from '../utils/countryFlags';
-import FlagEmoji from './FlagEmoji';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
+import { savePlayerContext, playerUrl } from '../utils/playerContext';
+import GalleryHero from './gallery/GalleryHero';
+import GalleryToolbar from './gallery/GalleryToolbar';
+import ActiveFilters from './gallery/ActiveFilters';
+import FilterDrawer from './gallery/FilterDrawer';
+import MasonryGrid from './gallery/MasonryGrid';
+import './gallery/gallery.css';
+
+// Tiles rendered at first, and added each time the user nears the bottom.
+const RENDER_BATCH = 120;
+const SIZE_KEY = 'unifiedGallerySize';
+const SIZE_MIN = 90;
+const SIZE_MAX = 480;
+const TAB_KEYS = ['pics', 'vids', 'funscriptVids'];
+const TAB_ITEM_TYPES = { pics: 'image', vids: 'video', funscriptVids: 'funscript_video' };
+
+const readStoredSize = () => {
+  try {
+    const stored = Number(localStorage.getItem(SIZE_KEY));
+    if (stored >= SIZE_MIN && stored <= SIZE_MAX) return stored;
+  } catch (e) {
+    // storage unavailable — fall through to the default
+  }
+  return window.innerWidth < 600 ? 150 : 220;
+};
+
+// The fields the player contract (docs/redesign/SPEC.md) defines for a MediaItem.
+const toMediaItem = (item) => ({
+  path: item.path,
+  name: item.name,
+  type: item.type,
+  url: item.url,
+  thumbnail: item.thumbnail,
+  size: item.size,
+  sizeFormatted: item.sizeFormatted,
+  modified: item.modified,
+  duration: item.duration,
+  width: item.width,
+  height: item.height,
+  videoRating: item.videoRating,
+  funscriptRating: item.funscriptRating,
+  funscriptCount: item.funscriptCount,
+  tags: item.tags,
+});
 
 const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [currentContent, setCurrentContent] = useState(null);
   const [allContent, setAllContent] = useState(null); // holds all (physical + tagged) files
   const [currentTab, setCurrentTab] = useState(0);
@@ -31,6 +73,10 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const pendingTagStatesRef = useRef(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [tileSize, setTileSize] = useState(readStoredSize);
+  const [renderCount, setRenderCount] = useState(RENDER_BATCH);
+  const pendingRestoreRef = useRef(null); // { scrollY, count } saved when a tile was opened
+  const rootRef = useRef(null);
   const [pairwiseScores, setPairwiseScores] = useState(null); // Map of path -> score
   const preferencesKey = useMemo(() => {
     if (!galleryType || !galleryName || !basePath) return null;
@@ -113,52 +159,32 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     + (scoreFilterActivity.video ? 1 : 0)
     + (scoreFilterActivity.funscript ? 1 : 0);
 
-  useEffect(() => {
-    if (activeFilters.tagActiveCount > 0) {
-      console.log('[UnifiedGallery] Active tag filters:', activeFilters);
-    }
-  }, [activeFilters]);
-
-  // Debug props
-  useEffect(() => {
-    console.log('🔍 UnifiedGallery props:', {
-      handyConnected,
-      handyCode,
-      handyIntegration: !!handyIntegration
-    });
-  }, [handyConnected, handyCode, handyIntegration]);
-
   // Check localStorage for persisted connection state
   useEffect(() => {
     const storedConnected = localStorage.getItem('handyConnected') === 'true';
     const storedCode = localStorage.getItem('handyCode') || '';
-
-    console.log('💾 Stored connection state:', { storedConnected, storedCode });
 
     // Use stored state if props don't indicate connection
     const effectiveConnected = handyConnected || storedConnected;
     const effectiveCode = handyCode || storedCode;
 
     window.appHandyConnected = effectiveConnected;
-    console.log('🌐 UnifiedGallery: Set global Handy connection state:', effectiveConnected);
 
     // Try to restore connection if we have a code but aren't connected
     if (effectiveCode && !effectiveConnected && window.Handy) {
-      console.log('🔄 Attempting to restore Handy connection from localStorage...');
       initializeAndConnect(effectiveCode);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handyConnected, handyCode, handyIntegration]);
 
   const initializeAndConnect = async (connectionCode) => {
     try {
       // Use the HandyIntegration instance instead of direct SDK
       if (handyIntegration) {
-        console.log('🔄 Using HandyIntegration for connection restoration...');
         const success = await handyIntegration.connect(connectionCode);
         if (success) {
           window.appHandyConnected = true;
           localStorage.setItem('handyConnected', 'true');
-          console.log('✅ Handy connection restored via HandyIntegration');
         } else {
           console.warn('❌ Failed to restore Handy connection via HandyIntegration');
         }
@@ -166,7 +192,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
         // Fallback to direct SDK if HandyIntegration not available
         if (!window.handyInstance && window.Handy) {
           window.handyInstance = window.Handy.init();
-          console.log('✅ Handy SDK initialized in UnifiedGallery');
         }
 
         if (window.handyInstance) {
@@ -174,7 +199,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
           if (result === window.Handy.ConnectResult.CONNECTED) {
             window.appHandyConnected = true;
             localStorage.setItem('handyConnected', 'true');
-            console.log('✅ Handy connection restored in UnifiedGallery');
           } else {
             console.warn('❌ Failed to restore Handy connection in UnifiedGallery');
           }
@@ -362,15 +386,29 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       });
     }
 
+    // Coming back from the player: reopen the tab the user left and remember
+    // where they were; the position is applied once the content is there.
+    try {
+      const returnKey = `unifiedGalleryReturn:${preferencesKey}`;
+      const rawReturn = sessionStorage.getItem(returnKey);
+      if (rawReturn) {
+        sessionStorage.removeItem(returnKey);
+        const saved = JSON.parse(rawReturn);
+        if (saved && typeof saved === 'object') {
+          if ([0, 1, 2].includes(saved.tab)) setCurrentTab(saved.tab);
+          pendingRestoreRef.current = {
+            scrollY: Number(saved.scrollY) || 0,
+            count: Number(saved.count) || RENDER_BATCH,
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to read gallery return position:', error);
+    }
+
     hasLoadedPrefsRef.current = true;
     setPrefsLoaded(true);
   }, [preferencesKey]);
-
-  useEffect(() => {
-    if (totalActiveFilters > 0) {
-      setShowFilterPanel(true);
-    }
-  }, [totalActiveFilters]);
 
   useEffect(() => {
     if (!preferencesKey || !hasLoadedPrefsRef.current) return;
@@ -488,6 +526,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       window.removeEventListener('ratings-updated', handleRatingsUpdated);
       clearTimeout(refreshTimeout);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [galleryType, galleryName, basePath]);
 
   // Track if we need to refetch for duration sorting
@@ -562,8 +601,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     try {
       if (galleryType === 'performer' && performerData?.id) {
         // FAST PATH: Use specialized endpoints
-        console.log('[UnifiedGallery] Using Fast API for Performer:', performerData.name);
-
         const [imagesParams, videosParams] = await Promise.all([
           fetch(`/api/performers/${performerData.id}/gallery/images`),
           fetch(`/api/performers/${performerData.id}/gallery/videos`)
@@ -620,7 +657,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
         // Always fetch all (physical + tagged) for genre
         apiUrl = `/api/gallery/genre/${encodeURIComponent(galleryName)}?basePath=${encodeURIComponent(basePath)}&${cacheBust}&${sortParams}`;
       }
-      console.log('[UnifiedGallery] Fetching ALL (Legacy/Genre):', apiUrl);
       const response = await fetch(apiUrl);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -640,7 +676,19 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       // Mark physical vs virtual for filtering
       const genrePath = galleryType === 'genre' ? `/content/${galleryName}` : null;
       ['pics', 'vids', 'funscriptVids'].forEach(type => {
-        data[type] = data[type].map(item => {
+        data[type] = data[type].map(rawItem => {
+          // The tiles and the player need path / type / url / thumbnail on every
+          // item; this endpoint does not always send all four.
+          const itemPath = rawItem.path || rawItem.filePath;
+          const encodedPath = encodeURIComponent(itemPath || '');
+          const item = {
+            ...rawItem,
+            path: itemPath,
+            type: TAB_ITEM_TYPES[type],
+            url: rawItem.url || `/api/files/raw?path=${encodedPath}`,
+            thumbnail: rawItem.thumbnail
+              || `/api/files/${type === 'pics' ? 'preview' : 'video-thumbnail'}?path=${encodedPath}`,
+          };
           // If item.virtual is true, it's tagged-only; else, physical
           if (item.virtual) return { ...item, _isVirtual: true };
           // For physical, check if path starts with genrePath (for genre galleries)
@@ -654,12 +702,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       });
       setAllContent(data);
       setCurrentContent(filterContent(data, showTaggedMode, activeFilters));
-      const debugSample = (data.vids || []).slice(0, 5).map(item => ({
-        name: item.name,
-        tags: item.tags,
-        normalized: extractTagStrings(item.tags).map(tag => tag.toLowerCase()),
-      }));
-      console.log('[UnifiedGallery] Sample video tags:', debugSample);
       setLoading(false);
     } catch (error) {
       setError('Error loading content');
@@ -680,15 +722,8 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     const includeNormalized = includeTags.map(normalizeTag).filter(Boolean);
     const excludeNormalized = excludeTags.map(normalizeTag).filter(Boolean);
 
-    if (includeNormalized.length > 0 && excludeNormalized.length > 0) {
-      return {
-        ...data,
-        pics: [],
-        vids: [],
-        funscriptVids: [],
-      };
-    }
-
+    // include = must carry every included tag, exclude = must carry none of
+    // the excluded ones; both apply together.
     const tagFn = (item) => {
       const normalizedItemTags = extractTagStrings(item.tags).map(normalizeTag);
 
@@ -814,12 +849,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     }));
   };
 
-  const isScoreFilterActive = (type) => {
-    const range = scoreFilters[type];
-    if (!range) return false;
-    return range.min !== null && range.min !== undefined || range.max !== null && range.max !== undefined;
-  };
-
   // Sort content in memory
   function sortContent(data, sortBy, sortOrder) {
     if (!data) return null;
@@ -879,10 +908,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     };
   }
 
-  const switchTab = (tabIndex) => {
-    setCurrentTab(tabIndex);
-  };
-
   useEffect(() => {
     const allowedSorts = new Set(['name', 'size', 'date']);
     // Pairwise ELO sort is always available on the Pics tab
@@ -902,7 +927,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       setSortBy('name');
       setSortOrder('asc');
     }
-  }, [currentTab, sortBy]);
+  }, [currentTab, sortBy, galleryType]);
 
   const handleSortChange = (event) => {
     const value = event.target.value;
@@ -913,632 +938,251 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     setSortOrder(order);
   };
 
-  const formatRating = (rating) => {
-    if (rating === null || rating === undefined) return '–';
-    const formatted = Number(rating).toFixed(1);
-    return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
+  const sortOptions = useMemo(() => {
+    const options = [
+      ['name', 'Name (A-Z)'],
+      ['name-desc', 'Name (Z-A)'],
+      ['size', 'Size (Small-Large)'],
+      ['size-desc', 'Size (Large-Small)'],
+      ['date', 'Date (Old-New)'],
+      ['date-desc', 'Date (New-Old)'],
+    ];
+    if (currentTab !== 0) {
+      options.push(
+        ['duration', 'Duration (Short-Long)'],
+        ['duration-desc', 'Duration (Long-Short)'],
+        ['video_rating', 'Video Score (Low-High)'],
+        ['video_rating-desc', 'Video Score (High-Low)'],
+      );
+    }
+    if (currentTab === 0 && galleryType === 'performer') {
+      options.push(
+        ['pairwise_score', 'ELO Score (Low-High)'],
+        ['pairwise_score-desc', 'ELO Score (High-Low)'],
+      );
+    }
+    if (currentTab === 2) {
+      options.push(
+        ['funscript_rating', 'Funscript Score (Low-High)'],
+        ['funscript_rating-desc', 'Funscript Score (High-Low)'],
+        ['funscript_count', 'Funscript Count (Low-High)'],
+        ['funscript_count-desc', 'Funscript Count (High-Low)'],
+      );
+    }
+    return options;
+  }, [currentTab, galleryType]);
+
+  const handleRemoveTagFilter = useCallback((tag) => {
+    setTagStates(prev => ({ ...prev, [tag]: 'neutral' }));
+  }, []);
+
+  const handleSizeChange = useCallback((nextSize) => {
+    setTileSize(nextSize);
+    try {
+      localStorage.setItem(SIZE_KEY, String(nextSize));
+    } catch (error) {
+      console.warn('Failed to persist thumbnail size:', error);
+    }
+  }, []);
+
+  const closeFilters = useCallback(() => setShowFilterPanel(false), []);
+
+  const handleRank = () => {
+    const params = new URLSearchParams({
+      performerId: performerData.id,
+      performerName: performerData.name || galleryName,
+      basePath: basePath || ''
+    });
+    window.open(`/pairwise-rank?${params.toString()}`, '_blank');
   };
 
-  const renderContent = () => {
-    if (!currentContent) return null;
+  // Items of the current tab, already filtered + sorted.
+  const tabItems = useMemo(
+    () => (currentContent ? currentContent[TAB_KEYS[currentTab]] || [] : []),
+    [currentContent, currentTab]
+  );
 
-    let items = [];
-    if (currentTab === 0) {
-      items = currentContent.pics;
-    } else if (currentTab === 1) {
-      items = currentContent.vids;
-    } else if (currentTab === 2) {
-      items = currentContent.funscriptVids;
+  // Incremental rendering: start over with one batch whenever the view
+  // (tab / sort / filters) changes; MasonryGrid asks for more near the bottom.
+  const viewKey = [
+    currentTab, sortBy, sortOrder, showTaggedMode,
+    JSON.stringify([activeFilters.includeTags, activeFilters.excludeTags, scoreFilters]),
+  ].join('|');
+  const lastViewKeyRef = useRef(viewKey);
+  useEffect(() => {
+    if (lastViewKeyRef.current === viewKey) return;
+    lastViewKeyRef.current = viewKey;
+    setRenderCount(RENDER_BATCH);
+  }, [viewKey]);
+
+  const handleNeedMore = useCallback(() => {
+    setRenderCount(prev => prev + RENDER_BATCH);
+  }, []);
+
+  // Back from the player: render as many tiles as before, then scroll to where
+  // the user was. The document grows over a few frames (grid measures itself
+  // first), so wait until it is tall enough.
+  useEffect(() => {
+    const pending = pendingRestoreRef.current;
+    if (!pending || loading || !currentContent) return;
+    pendingRestoreRef.current = null;
+    setRenderCount(prev => Math.max(prev, pending.count));
+    let tries = 0;
+    const tick = () => {
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      if (maxScroll >= pending.scrollY || tries >= 30) {
+        window.scrollTo(0, pending.scrollY);
+        return;
+      }
+      tries += 1;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [loading, currentContent]);
+
+  // Everything openItem needs, read at click time so the callback stays stable
+  // and the memoised tiles don't re-render when unrelated state changes.
+  const openStateRef = useRef(null);
+  openStateRef.current = {
+    items: tabItems,
+    tab: currentTab,
+    count: renderCount,
+    title: galleryName,
+    backUrl: `${location.pathname}${location.search}`,
+    preferencesKey,
+  };
+
+  const openItem = useCallback((index) => {
+    const state = openStateRef.current;
+    const item = state.items[index];
+    if (!item) return;
+
+    try {
+      sessionStorage.setItem(`unifiedGalleryReturn:${state.preferencesKey}`, JSON.stringify({
+        scrollY: window.scrollY,
+        count: state.count,
+        tab: state.tab,
+      }));
+    } catch (error) {
+      console.warn('Failed to save gallery position:', error);
     }
 
-    return items.map((item, index) => (
-      <Box 
-        key={index} 
-        sx={{
-          width: '100%',
-          maxWidth: 320,
-          height: 480,
-          borderRadius: 2,
-          overflow: 'hidden',
-          bgcolor: 'var(--scrim)',
-          boxShadow: 3,
-          position: 'relative',
-          transition: 'all 0.3s ease',
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: 6,
-          },
-          '& funscript-player, & funscript-image': {
-            width: '100%',
-            height: '100%',
-            display: 'block'
-          }
-        }}
-      >
-        {currentTab === 0 ? (
-          // Pictures - use funscript-image with tagassign
-          <>
-            <funscript-image
-              src={item.url}
-              mode="modal"
-              view="contain"
-              tagassign="true"
-            ></funscript-image>
-            <Box sx={{
-              position: 'absolute',
-              bottom: 0, left: 0, right: 0,
-              height: 120,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
-              zIndex: 1
-            }} />
-            <Box sx={{
-              position: 'absolute',
-              bottom: 0, left: 0, right: 0,
-              p: 2,
-              zIndex: 2,
-              color: 'var(--text)'
-            }}>
-              <Typography sx={{
-                fontSize: '1.1rem',
-                fontWeight: 'bold',
-                mb: 1,
-                color: 'var(--text)',
-                textShadow: '0 1px 1px rgba(0,0,0,0.3)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {item.name}
-              </Typography>
-              <Box sx={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 1,
-                color: 'var(--text)'
-              }}>
-                <Typography variant="caption" sx={{ opacity: 0.7 }}>{item.sizeFormatted}</Typography>
-              </Box>
-            </Box>
-          </>
-        ) : (
-          // Videos (tab 1) and Funscript Videos (tab 2) - use funscript-player with tagassign and scenemanager
-          <>
-            <funscript-player
-              src={item.url}
-              type="video"
-              mode="modal"
-              view="contain"
-              funscriptmode="true"
-              filtermode="true"
-              loopmode="true"
-              tagassign="true"
-              scenemanager="true"
-            ></funscript-player>
-            <Box sx={{
-              position: 'absolute',
-              bottom: 0, left: 0, right: 0,
-              height: 120,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
-              zIndex: 1
-            }} />
-            <Box sx={{
-              position: 'absolute',
-              bottom: 0, left: 0, right: 0,
-              p: 2,
-              zIndex: 2,
-              color: 'var(--text)'
-            }}>
-              <Typography sx={{
-                fontSize: '1.1rem',
-                fontWeight: 'bold',
-                mb: 1,
-                color: 'var(--text)',
-                textShadow: '0 1px 1px rgba(0,0,0,0.3)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {item.name}
-              </Typography>
-              <Box sx={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 1,
-                color: 'var(--text)'
-              }}>
-                <Typography variant="caption" sx={{ opacity: 0.7 }}>{item.sizeFormatted}</Typography>
-                {item.funscriptCount !== undefined && (
-                  <Chip
-                    size="small"
-                    label={`${item.funscriptCount} funscripts`}
-                    sx={{
-                      bgcolor: item.missingFunscripts || item.funscriptCount === 0 ? 'error.main' : 'success.main',
-                      color: 'var(--text)',
-                      fontWeight: 'bold',
-                      height: 20,
-                      fontSize: '0.7rem'
-                    }}
-                  />
-                )}
-              </Box>
-              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                <Chip
-                  size="small"
-                  label={`⭐ ${formatRating(item.videoRating)}`}
-                  sx={{
-                    bgcolor: 'rgba(255, 215, 0, 0.15)',
-                    color: '#ffd700',
-                    border: '1px solid rgba(255, 215, 0, 0.35)',
-                    height: 20,
-                    fontSize: '0.7rem',
-                    fontWeight: 'bold',
-                    opacity: item.videoRating == null ? 0.55 : 1
-                  }}
-                />
-                {currentTab === 2 && (
-                  <Chip
-                    size="small"
-                    label={`🎵 ${formatRating(item.funscriptRating)}`}
-                    sx={{
-                      bgcolor: 'var(--accent-quiet)',
-                      color: '#f8bbd0',
-                      border: '1px solid rgba(248, 187, 208, 0.4)',
-                      height: 20,
-                      fontSize: '0.7rem',
-                      fontWeight: 'bold',
-                      opacity: item.funscriptRating == null ? 0.55 : 1
-                    }}
-                  />
-                )}
-              </Box>
-            </Box>
-          </>
-        )}
-      </Box>
-    ));
+    let target;
+    try {
+      const contextId = savePlayerContext({
+        title: state.title,
+        backUrl: state.backUrl,
+        items: state.items.map(toMediaItem),
+      });
+      target = playerUrl(contextId, index);
+    } catch (error) {
+      // e.g. sessionStorage quota on a huge list — still open the file itself.
+      console.warn('Failed to save player context, opening the single file:', error);
+      target = `/player?path=${encodeURIComponent(item.path)}`;
+    }
+    navigate(target);
+  }, [navigate]);
+
+  // The app bar above is sticky and wraps on narrow screens; keep the gallery
+  // toolbar glued to its bottom edge whatever height it has.
+  useEffect(() => {
+    const root = rootRef.current;
+    const appBar = document.querySelector('.MuiAppBar-root');
+    if (!root || !appBar) return undefined;
+    const update = () => {
+      const position = window.getComputedStyle(appBar).position;
+      const pinned = position === 'sticky' || position === 'fixed';
+      root.style.setProperty('--ug-top', pinned ? `${Math.round(appBar.getBoundingClientRect().height)}px` : '0px');
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(appBar);
+    return () => observer.disconnect();
+  }, []);
+
+  const isPerformer = galleryType === 'performer';
+  const counts = {
+    pics: currentContent?.pics?.length || 0,
+    vids: currentContent?.vids?.length || 0,
+    funscripts: currentContent?.funscriptVids?.length || 0,
   };
 
+  let body;
   if (loading) {
-    return (
-      <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <Typography variant="h6" color="text.secondary">Loading...</Typography>
-      </Box>
-    );
-  }
-
-  if (error) {
-    return (
-      <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <Typography variant="h6" color="error">{error}</Typography>
-      </Box>
+    body = <div className="ug-state">Loading...</div>;
+  } else if (error) {
+    body = <div className="ug-state bad">{error}</div>;
+  } else {
+    body = (
+      <>
+        <GalleryHero
+          name={galleryName}
+          isPerformer={isPerformer}
+          performer={performerData}
+          age={performerData ? calculateCurrentAge(performerData.age, performerData.scraped_at) : null}
+          counts={counts}
+        />
+        <GalleryToolbar
+          tab={currentTab}
+          onTabChange={setCurrentTab}
+          tabCounts={[counts.pics, counts.vids, counts.funscripts]}
+          showTaggedMode={galleryType === 'genre'}
+          taggedMode={showTaggedMode}
+          onTaggedModeChange={setShowTaggedMode}
+          sortValue={`${sortBy}${sortOrder === 'desc' ? '-desc' : ''}`}
+          sortOptions={sortOptions}
+          onSortChange={handleSortChange}
+          filterCount={totalActiveFilters}
+          filtersOpen={showFilterPanel}
+          onOpenFilters={() => setShowFilterPanel(true)}
+          showRank={isPerformer}
+          rankEnabled={currentTab === 0 && Boolean(performerData?.id)}
+          onRank={handleRank}
+          size={tileSize}
+          minSize={SIZE_MIN}
+          maxSize={SIZE_MAX}
+          onSizeChange={handleSizeChange}
+        />
+        <ActiveFilters
+          includeTags={activeFilters.includeTags}
+          excludeTags={activeFilters.excludeTags}
+          scoreFilters={scoreFilters}
+          scoreActive={scoreFilterActivity}
+          onRemoveTag={handleRemoveTagFilter}
+          onClearScore={handleClearScoreFilter}
+        />
+        <MasonryGrid
+          items={tabItems}
+          tab={currentTab}
+          size={tileSize}
+          count={renderCount}
+          showElo={sortBy === 'pairwise_score'}
+          onNeedMore={handleNeedMore}
+          onOpen={openItem}
+          emptyText={totalActiveFilters > 0 ? 'Nothing matches these filters.' : 'Nothing here yet.'}
+        />
+        <FilterDrawer
+          open={showFilterPanel}
+          onClose={closeFilters}
+          availableTags={availableTags}
+          tagStates={tagStates}
+          tagActiveCount={activeFilters.tagActiveCount}
+          onToggleTag={handleTagToggle}
+          onClearTags={handleClearTags}
+          onReverseTags={handleReverseTags}
+          scoreFilters={scoreFilters}
+          scoreActive={scoreFilterActivity}
+          onScoreChange={handleScoreFilterChange}
+          onClearScore={handleClearScoreFilter}
+        />
+      </>
     );
   }
 
   return (
-    <Box sx={{ p: { xs: 1, md: 3 }, bgcolor: 'background.default', minHeight: '100vh' }}>
-      {/* elevation={3} was a floating drop-shadow card; this identity uses a
-          flat surface with a hairline, matching Panel. maxWidth aligned to
-          CONTENT_MAX (1600) so the gallery doesn't sit narrower than every
-          other page. */}
-      <Paper elevation={0} sx={{ maxWidth: 1600, mx: 'auto', p: { xs: 2, md: 3 }, borderRadius: 'var(--radius-lg, 10px)', bgcolor: 'var(--surface)', border: '1px solid var(--line)' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, pb: 2, borderBottom: '1px solid var(--line)' }}>
-          <Typography variant="h5" sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)', m: 0 }}>{galleryName}</Typography>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Chip color="primary" variant="outlined" label={`${currentContent?.pics?.length || 0} pics`} />
-            <Chip color="primary" variant="outlined" label={`${currentContent?.vids?.length || 0} videos`} />
-            <Chip color="primary" variant="outlined" label={`${currentContent?.funscriptVids?.length || 0} funscripts`} />
-          </Box>
-        </Box>
-
-        {/* Performer Info Section */}
-        {galleryType === 'performer' && performerData && (performerData.age || performerData.born || performerData.birthplace || performerData.orientation || performerData.height || performerData.weight || performerData.measurements || performerData.body_type || performerData.hair_color || performerData.eye_color || performerData.ethnicity) && (
-          <Box sx={{
-            bgcolor: 'background.default',
-            border: 1,
-            borderColor: 'divider',
-            borderRadius: 2,
-            p: 3,
-            mb: 3,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: 2
-          }}>
-            {/* Personal Info */}
-            {(performerData.age || performerData.born || performerData.birthplace || performerData.orientation) && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'primary.main', borderBottom: 2, borderColor: 'primary.main', pb: 0.5 }}>Personal Info</Typography>
-                {performerData.age && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Age:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{calculateCurrentAge(performerData.age, performerData.scraped_at)} years old</Typography>
-                  </Box>
-                )}
-                {performerData.born && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Born:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.born}</Typography>
-                  </Box>
-                )}
-                {performerData.birthplace && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="body2" color="text.secondary">Birthplace:</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.primary', fontWeight: 'bold' }}>
-                      {ensureFlag(performerData.country_flag) && (
-                        <FlagEmoji
-                          countryCode={ensureFlag(performerData.country_flag)}
-                          size="1.5rem"
-                        />
-                      )}
-                      <Typography variant="body2">{performerData.birthplace}</Typography>
-                    </Box>
-                  </Box>
-                )}
-                {performerData.orientation && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Sexuality:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.orientation}</Typography>
-                  </Box>
-                )}
-              </Box>
-            )}
-
-            {/* Physical Attributes */}
-            {(performerData.height || performerData.weight || performerData.measurements || performerData.measurements_cup || performerData.body_type || performerData.pubic_hair) && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'success.main', borderBottom: 2, borderColor: 'success.main', pb: 0.5 }}>Physical Attributes</Typography>
-                {performerData.height && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Height:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.height}</Typography>
-                  </Box>
-                )}
-                {performerData.weight && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Weight:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.weight}</Typography>
-                  </Box>
-                )}
-                {performerData.measurements && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Measurements:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.measurements}</Typography>
-                  </Box>
-                )}
-                {performerData.measurements_cup && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Cup Size:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.measurements_cup}</Typography>
-                  </Box>
-                )}
-                {performerData.body_type && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Body Type:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.body_type}</Typography>
-                  </Box>
-                )}
-                {performerData.pubic_hair && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Grooming:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.pubic_hair}</Typography>
-                  </Box>
-                )}
-              </Box>
-            )}
-
-            {/* Appearance */}
-            {(performerData.hair_color || performerData.eye_color || performerData.ethnicity || performerData.tattoos || performerData.piercings) && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'warning.main', borderBottom: 2, borderColor: 'warning.main', pb: 0.5 }}>Appearance</Typography>
-                {performerData.hair_color && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Hair:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.hair_color}</Typography>
-                  </Box>
-                )}
-                {performerData.eye_color && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Eyes:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.eye_color}</Typography>
-                  </Box>
-                )}
-                {performerData.ethnicity && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Ethnicity:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.ethnicity}</Typography>
-                  </Box>
-                )}
-                {performerData.tattoos && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Tattoos:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.tattoos}</Typography>
-                  </Box>
-                )}
-                {performerData.piercings && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Piercings:</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 'bold' }}>{performerData.piercings}</Typography>
-                  </Box>
-                )}
-              </Box>
-            )}
-
-            {/* Tags */}
-            {performerData.scraped_tags && (() => {
-              try {
-                const tags = JSON.parse(performerData.scraped_tags);
-                if (Array.isArray(tags) && tags.length > 0) {
-                  return (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, gridColumn: '1 / -1' }}>
-                      <Typography variant="h6" sx={{ m: 0, mb: 1, color: 'secondary.main', borderBottom: 2, borderColor: 'secondary.main', pb: 0.5 }}>Tags</Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                        {tags.map((tag, index) => (
-                          <Chip 
-                            key={index}
-                            label={tag}
-                            color="secondary"
-                            variant="outlined"
-                            size="small"
-                            sx={{ fontWeight: 'bold' }}
-                          />
-                        ))}
-                      </Box>
-                    </Box>
-                  );
-                }
-              } catch (e) { }
-              return null;
-            })()}
-          </Box>
-        )}
-
-        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, gap: 2, mb: 3, p: 2, bgcolor: 'background.default', borderRadius: 2 }}>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Button
-              variant={currentTab === 0 ? 'contained' : 'outlined'}
-              onClick={() => switchTab(0)}
-              sx={{ borderRadius: 5 }}
-            >
-              Pictures ({currentContent?.pics?.length || 0})
-            </Button>
-            <Button
-              variant={currentTab === 1 ? 'contained' : 'outlined'}
-              onClick={() => switchTab(1)}
-              sx={{ borderRadius: 5 }}
-            >
-              Videos ({currentContent?.vids?.length || 0})
-            </Button>
-            <Button
-              variant={currentTab === 2 ? 'contained' : 'outlined'}
-              onClick={() => switchTab(2)}
-              sx={{ borderRadius: 5 }}
-            >
-              Funscripts ({currentContent?.funscriptVids?.length || 0})
-            </Button>
-            {galleryType === 'genre' && (
-              <Button
-                variant="contained"
-                sx={{
-                  ml: { xs: 0, md: 1 },
-                  bgcolor: showTaggedMode === 0 ? 'var(--accent)' : showTaggedMode === 1 ? 'var(--ok)' : 'var(--warn)',
-                  // All three fills are mid-tone, so ink reads better on every
-                  // one of them than white did.
-                  color: 'var(--bg)',
-                  fontWeight: 700,
-                  border: '1px solid',
-                  borderColor: 'transparent',
-                  '&:hover': {
-                    bgcolor: showTaggedMode === 0 ? 'primary.dark' : showTaggedMode === 1 ? 'success.dark' : 'warning.dark',
-                  }
-                }}
-                onClick={() => setShowTaggedMode((showTaggedMode + 1) % 3)}
-                title={
-                  showTaggedMode === 0 ? 'Show all files (physical and tagged)' :
-                    showTaggedMode === 1 ? 'Show only files physically in this folder' :
-                      'Show only files with this tag (not physically in folder)'
-                }
-              >
-                {showTaggedMode === 0 && 'All'}
-                {showTaggedMode === 1 && 'Folder'}
-                {showTaggedMode === 2 && 'Tag'}
-              </Button>
-            )}
-          </Box>
-
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" color="text.secondary">Sort by:</Typography>
-              <Select
-                size="small"
-                value={`${sortBy}${sortOrder === 'desc' ? '-desc' : ''}`}
-                onChange={handleSortChange}
-                sx={{ minWidth: 150, bgcolor: 'background.paper' }}
-              >
-                <MenuItem value="name">Name (A-Z)</MenuItem>
-                <MenuItem value="name-desc">Name (Z-A)</MenuItem>
-                <MenuItem value="size">Size (Small-Large)</MenuItem>
-                <MenuItem value="size-desc">Size (Large-Small)</MenuItem>
-                <MenuItem value="date">Date (Old-New)</MenuItem>
-                <MenuItem value="date-desc">Date (New-Old)</MenuItem>
-                {currentTab !== 0 && [
-                  <MenuItem key="d1" value="duration">Duration (Short-Long)</MenuItem>,
-                  <MenuItem key="d2" value="duration-desc">Duration (Long-Short)</MenuItem>,
-                  <MenuItem key="v1" value="video_rating">Video Score (Low-High)</MenuItem>,
-                  <MenuItem key="v2" value="video_rating-desc">Video Score (High-Low)</MenuItem>
-                ]}
-                {currentTab === 0 && galleryType === 'performer' && [
-                  <MenuItem key="elo1" value="pairwise_score">ELO Score (Low-High)</MenuItem>,
-                  <MenuItem key="elo2" value="pairwise_score-desc">ELO Score (High-Low)</MenuItem>
-                ]}
-                {currentTab === 2 && [
-                  <MenuItem key="f1" value="funscript_rating">Funscript Score (Low-High)</MenuItem>,
-                  <MenuItem key="f2" value="funscript_rating-desc">Funscript Score (High-Low)</MenuItem>,
-                  <MenuItem key="fc1" value="funscript_count">Funscript Count (Low-High)</MenuItem>,
-                  <MenuItem key="fc2" value="funscript_count-desc">Funscript Count (High-Low)</MenuItem>
-                ]}
-              </Select>
-            </Box>
-            <Button
-              variant={showFilterPanel ? 'contained' : 'outlined'}
-              color={totalActiveFilters ? 'warning' : 'primary'}
-              onClick={() => setShowFilterPanel(prev => !prev)}
-            >
-              Filters{totalActiveFilters ? ` (${totalActiveFilters})` : ''}
-            </Button>
-            {currentTab === 0 && galleryType === 'performer' && performerData?.id && (
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={() => {
-                  const params = new URLSearchParams({
-                    performerId: performerData.id,
-                    performerName: performerData.name || galleryName,
-                    basePath: basePath || ''
-                  });
-                  window.open(`/pairwise-rank?${params.toString()}`, '_blank');
-                }}
-                sx={{ ml: 0.5 }}
-              >
-                🏆 Rank Images
-              </Button>
-            )}
-          </Box>
-        </Box>
-
-        {showFilterPanel && (
-          <Paper elevation={1} sx={{ mb: 3, p: 2, bgcolor: 'background.default', border: 1, borderColor: 'divider' }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="subtitle2" color="text.secondary">Filter tags:</Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={handleClearTags}
-                    disabled={activeFilters.tagActiveCount === 0}
-                  >
-                    Clear
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={handleReverseTags}
-                    disabled={activeFilters.tagActiveCount === 0}
-                  >
-                    Reverse
-                  </Button>
-                </Box>
-              </Box>
-              <Box sx={{ 
-                display: 'flex', 
-                flexWrap: 'wrap', 
-                gap: 1, 
-                maxHeight: 160, 
-                overflowY: 'auto', 
-                p: 1, 
-                bgcolor: 'background.paper', 
-                borderRadius: 1, 
-                border: 1, 
-                borderColor: 'divider' 
-              }}>
-                {availableTags.length === 0 && (
-                  <Typography variant="body2" color="text.disabled" sx={{ p: 1, fontStyle: 'italic' }}>No tags available</Typography>
-                )}
-                {availableTags.map(tag => {
-                  const state = tagStates[tag] || 'neutral';
-                  return (
-                    <Chip
-                      key={tag}
-                      label={`${state === 'include' ? '✓ ' : state === 'exclude' ? '✕ ' : ''}${tag}`}
-                      onClick={() => handleTagToggle(tag)}
-                      color={state === 'include' ? 'success' : state === 'exclude' ? 'error' : 'default'}
-                      variant={state === 'neutral' ? 'outlined' : 'filled'}
-                      size="small"
-                      sx={{ fontWeight: 'bold' }}
-                    />
-                  );
-                })}
-              </Box>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                  <Typography variant="subtitle2" sx={{ minWidth: 120 }}>Video score</Typography>
-                  <TextField
-                    size="small"
-                    type="number"
-                    inputProps={{ min: 0, max: 10, step: 0.1 }}
-                    placeholder="Min"
-                    value={scoreFilters.video.min ?? ''}
-                    onChange={(e) => handleScoreFilterChange('video', 'min', e.target.value)}
-                    sx={{ width: 80 }}
-                  />
-                  <Typography variant="body2" color="text.secondary">to</Typography>
-                  <TextField
-                    size="small"
-                    type="number"
-                    inputProps={{ min: 0, max: 10, step: 0.1 }}
-                    placeholder="Max"
-                    value={scoreFilters.video.max ?? ''}
-                    onChange={(e) => handleScoreFilterChange('video', 'max', e.target.value)}
-                    sx={{ width: 80 }}
-                  />
-                  <Button
-                    size="small"
-                    onClick={() => handleClearScoreFilter('video')}
-                    disabled={!isScoreFilterActive('video')}
-                    sx={{ ml: 'auto' }}
-                  >
-                    Clear
-                  </Button>
-                </Box>
-
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                  <Typography variant="subtitle2" sx={{ minWidth: 120 }}>Funscript score</Typography>
-                  <TextField
-                    size="small"
-                    type="number"
-                    inputProps={{ min: 0, max: 10, step: 0.1 }}
-                    placeholder="Min"
-                    value={scoreFilters.funscript.min ?? ''}
-                    onChange={(e) => handleScoreFilterChange('funscript', 'min', e.target.value)}
-                    sx={{ width: 80 }}
-                  />
-                  <Typography variant="body2" color="text.secondary">to</Typography>
-                  <TextField
-                    size="small"
-                    type="number"
-                    inputProps={{ min: 0, max: 10, step: 0.1 }}
-                    placeholder="Max"
-                    value={scoreFilters.funscript.max ?? ''}
-                    onChange={(e) => handleScoreFilterChange('funscript', 'max', e.target.value)}
-                    sx={{ width: 80 }}
-                  />
-                  <Button
-                    size="small"
-                    onClick={() => handleClearScoreFilter('funscript')}
-                    disabled={!isScoreFilterActive('funscript')}
-                    sx={{ ml: 'auto' }}
-                  >
-                    Clear
-                  </Button>
-                </Box>
-              </Box>
-            </Box>
-          </Paper>
-        )}
-
-        <Box sx={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
-          gap: 3, 
-          mt: 3 
-        }}>
-          {renderContent()}
-        </Box>
-      </Paper>
-    </Box>
-
+    <div className="ug" ref={rootRef}>
+      <div className="ug-inner">{body}</div>
+    </div>
   );
 };
 

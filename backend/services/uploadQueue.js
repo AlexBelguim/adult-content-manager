@@ -197,6 +197,10 @@ function getQueueStatus() {
             progress: job.progress,
             currentFile: job.currentFile,
             isLocalImport: job.isLocalImport,
+            // Read by the Jobs page: the chip, and what a local-import retry needs
+            createHashes: job.createHashes,
+            folderName: job.folderName,
+            basePath: job.basePath,
             createdAt: job.createdAt,
             startedAt: job.startedAt,
             completedAt: job.completedAt,

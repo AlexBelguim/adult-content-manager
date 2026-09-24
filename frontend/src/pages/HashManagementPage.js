@@ -1,14 +1,12 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
   Paper,
   CircularProgress,
   Alert,
-  Grid,
   TextField,
-  MenuItem,
   Button,
   Chip,
   IconButton,
@@ -20,7 +18,6 @@ import {
   TableHead,
   TableRow,
   TableSortLabel,
-  LinearProgress,
 } from '@mui/material';
 import {
   Storage as StorageIcon,
@@ -33,13 +30,13 @@ import {
   Search as SearchIcon,
   ViewModule as ViewModuleIcon,
   ViewList as ViewListIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { Avatar, InputAdornment } from '@mui/material';
 
 import DuplicatePerformersSection from '../components/hash/DuplicatePerformersSection';
 import CheckHashModal from '../components/CheckHashModal';
 import HashResultsModal from '../components/HashResultsModal';
-import HashCreationQueue from '../components/HashCreationQueue';
 import MediaOptimizationPanel from '../components/MediaOptimizationPanel';
 import { usePerformerData } from '../hooks/usePerformerData';
 import {
@@ -106,14 +103,13 @@ const hashChipSx = (active) => ({
 const hashThumbUrl = (performer) =>
   (performer?.thumbnail ? `/api/files/preview?path=${encodeURIComponent(performer.thumbnail)}` : undefined);
 
-function HashManagementPage({
-  basePath,
-  hashQueue,
-  setHashQueue,
-  currentJobRef,
-  pollingIntervalRef,
-  setShowGlobalQueue
-}) {
+/**
+ * App.js still passes currentJobRef / pollingIntervalRef / setShowGlobalQueue;
+ * they only fed the floating queue widget, which the Jobs page replaced. The
+ * hash loop itself lives in App.js and runs whether or not this page is open.
+ */
+function HashManagementPage({ basePath, hashQueue, setHashQueue }) {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [currentPerformerSearch, setCurrentPerformerSearch] = useState(searchParams.get('performer') || '');
   const [orderBy, setOrderBy] = useState('canonical_name');
@@ -148,26 +144,7 @@ function HashManagementPage({
 
   const loadPerformers = refreshPerformers;
 
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-      if (currentJobRef.current) cancelJob(currentJobRef.current);
-    };
-  }, []);
-
-  const cancelJob = async (queueJobId) => {
-    const job = hashQueue.find(j => j.id === queueJobId);
-    if (!job) return;
-    if (job.status === 'processing') {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-      currentJobRef.current = null;
-    }
-    setHashQueue(prev => prev.filter(j => j.id !== queueJobId));
-    await loadPerformers();
-  };
+  const activeHashJobs = hashQueue.filter(j => j.status === 'queued' || j.status === 'processing').length;
 
   const isPerformerInQueue = (performerId) => {
     return hashQueue.some(job => job.performerId === performerId && (job.status === 'queued' || job.status === 'processing'));
@@ -550,6 +527,18 @@ function HashManagementPage({
               </IconButton>
             </Tooltip>
 
+            {/* Create / Recreate only queues the job; the Jobs page (and the
+                toolbar indicator) is where its progress lives now. */}
+            <Button
+              size="small"
+              variant="outlined"
+              endIcon={<OpenInNewIcon sx={{ fontSize: '14px !important' }} />}
+              onClick={() => navigate('/jobs')}
+              sx={{ textTransform: 'none', whiteSpace: 'nowrap', fontSize: '0.75rem', py: 0.5 }}
+            >
+              {activeHashJobs > 0 ? `${activeHashJobs} in Jobs` : 'View progress in Jobs'}
+            </Button>
+
             {/* Same toggle as Performer Management. The table sorts by file
                 count and last-updated, which the cards deliberately don't. */}
             <Box role="group" aria-label="View" sx={{
@@ -669,25 +658,6 @@ function HashManagementPage({
             </Paper>
           )}
         </>
-      )}
-
-      {/* Background Task Queue */}
-      {hashQueue.length > 0 && (
-        <HashCreationQueue
-          title="Background Tasks"
-          queue={[...hashQueue]}
-          onClose={() => setHashQueue(prev => prev.filter(j => j.status === 'processing' || j.status === 'queued'))}
-          onCancel={(jobId) => {
-            setHashQueue(prev => prev.filter(j => j.id !== jobId));
-            if (currentJobRef.current === jobId) {
-              currentJobRef.current = null;
-              if (pollingIntervalRef.current) {
-                clearInterval(pollingIntervalRef.current);
-                pollingIntervalRef.current = null;
-              }
-            }
-          }}
-        />
       )}
 
       {/* Modals */}

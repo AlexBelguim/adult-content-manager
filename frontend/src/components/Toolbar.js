@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider } from '@mui/material';
 import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
+import JobsIndicator from './JobsIndicator';
 import Logo from './Logo';
 
 // NOTE: ./Toolbar.css was imported here but every one of its 14 classes
@@ -99,7 +100,8 @@ function Toolbar({
   onUploadFolder = null,
   isScanning = false,
   onThemeChange = null,
-  currentThemeId = 'default'
+  currentThemeId = 'default',
+  hashQueue = null
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -268,6 +270,12 @@ function Toolbar({
               ))}
             </React.Fragment>
           ))}
+
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 1.25, borderColor: 'var(--line)' }} />
+
+          {/* Background work is visible from every page; the floating queue
+              boxes this replaces only showed on the page that started them. */}
+          <JobsIndicator hashQueue={hashQueue} />
 
           <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 1.25, borderColor: 'var(--line)' }} />
 

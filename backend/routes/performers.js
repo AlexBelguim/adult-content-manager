@@ -8,6 +8,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const axios = require('axios');
 const { findPerformerByNameOrAlias, findFuzzyMatches } = require('../utils/performerMatcher');
+const mediaDimensions = require('../utils/mediaDimensions');
 
 const AI_SERVER_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
 
@@ -917,6 +918,61 @@ router.get('/:id/random-pics', async (req, res) => {
   }
 });
 
+// State a vote is about to overwrite, so /compare/undo can put it back exactly.
+function snapshotRatingState(id) {
+  const perf = db.prepare('SELECT performer_rating FROM performers WHERE id = ?').get(id);
+  const row = db.prepare('SELECT manual_star, confidence, is_flagged, comparison_count FROM ratings WHERE performer_id = ?').get(id);
+  return { id, performer_rating: perf ? perf.performer_rating : null, rating_row: row || null };
+}
+
+// Undo one /compare or /compare-batch vote. Body: { undo } — the `undo` object
+// that vote returned. Refuses (409) when a rating changed since, so it can only
+// ever reverse the latest vote on those performers.
+router.post('/compare/undo', (req, res) => {
+  const token = req.body && req.body.undo;
+  if (!token || !Array.isArray(token.performers) || token.performers.length < 2) {
+    return res.status(400).send({ error: 'undo token from the vote response is required' });
+  }
+
+  try {
+    const conflict = token.performers.find(p => {
+      const cur = db.prepare('SELECT manual_star FROM ratings WHERE performer_id = ?').get(p.id);
+      return !cur || cur.manual_star === null || Math.abs(cur.manual_star - p.expect) > 0.0001;
+    });
+    if (conflict) {
+      return res.status(409).send({ error: 'Ratings changed since this vote; cannot undo it' });
+    }
+
+    db.transaction(() => {
+      for (const p of token.performers) {
+        db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?').run(p.performer_rating, p.id);
+        if (p.rating_row) {
+          db.prepare('UPDATE ratings SET manual_star = ?, confidence = ?, is_flagged = ?, comparison_count = ? WHERE performer_id = ?')
+            .run(p.rating_row.manual_star, p.rating_row.confidence, p.rating_row.is_flagged, p.rating_row.comparison_count, p.id);
+        } else {
+          db.prepare('DELETE FROM ratings WHERE performer_id = ?').run(p.id);
+        }
+      }
+      const ids = new Set(token.performers.map(p => p.id));
+      for (const cid of (token.comparisonIds || [])) {
+        const row = db.prepare('SELECT winner_id, loser_id FROM performer_comparisons WHERE id = ?').get(cid);
+        if (row && ids.has(row.winner_id) && ids.has(row.loser_id)) {
+          db.prepare('DELETE FROM performer_comparisons WHERE id = ?').run(cid);
+        }
+      }
+    })();
+
+    const io = req.app.get('io');
+    if (io) io.emit('performers_updated', { type: 'batch_rating_updated' });
+    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
+
+    res.send({ success: true, restored: token.performers.map(p => p.id) });
+  } catch (err) {
+    console.error('Error in compare/undo:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
 // Compare performers and auto-adjust ratings (Elo-like)
 router.post('/compare', async (req, res) => {
   const { winnerId, loserId, draw = false } = req.body;
@@ -926,6 +982,8 @@ router.post('/compare', async (req, res) => {
   }
 
   try {
+    const undoBefore = [snapshotRatingState(winnerId), snapshotRatingState(loserId)];
+    const comparisonIds = [];
     // Join with ratings to get the new manual_star
     const winner = db.prepare(`
       SELECT p.id, r.manual_star as performer_rating 
@@ -992,13 +1050,18 @@ router.post('/compare', async (req, res) => {
     updatePerformer.run(newRB, loserId);
     updateRating.run(loserId, newRB);
 
-    // Save comparison pair for Siamese model training
+    // Save comparison pair for Siamese model training. A draw has no winner,
+    // and training reads every row here as "winner beat loser" — so a draw
+    // only moves the ratings and is not stored as a pair.
     try {
-      db.prepare(`
-        INSERT INTO performer_comparisons
-          (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
-        VALUES (?, ?, 'performer_rank', ?, ?, ?, ?, 'group_rate')
-      `).run(winnerId, loserId, rA, rB, newRA, newRB);
+      if (!draw) {
+        const info = db.prepare(`
+          INSERT INTO performer_comparisons
+            (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
+          VALUES (?, ?, 'performer_rank', ?, ?, ?, ?, 'group_rate')
+        `).run(winnerId, loserId, rA, rB, newRA, newRB);
+        comparisonIds.push(Number(info.lastInsertRowid));
+      }
     } catch (compErr) {
       console.error('Error saving performer comparison:', compErr.message);
     }
@@ -1017,7 +1080,14 @@ router.post('/compare', async (req, res) => {
       results: [
         { id: winnerId, oldRating: rA, newRating: newRA },
         { id: loserId, oldRating: rB, newRating: newRB }
-      ]
+      ],
+      undo: {
+        comparisonIds,
+        performers: [
+          { ...undoBefore[0], expect: newRA },
+          { ...undoBefore[1], expect: newRB }
+        ]
+      }
     });
   } catch (err) {
     console.error('Error in compare:', err);
@@ -1108,9 +1178,12 @@ router.post('/compare-batch', async (req, res) => {
       VALUES (?, ?, 'performer_rank_batch', ?, ?, ?, ?, 'smart_compare')
     `);
 
+    const undoBefore = orderedIds.map(id => snapshotRatingState(id));
+    const comparisonIds = [];
+    const newRatings = {};
+
     const transaction = db.transaction(() => {
       // Compute new ratings first
-      const newRatings = {};
       for (const id of orderedIds) {
         const oldRating = perfMap[id].rating;
         let newRating = oldRating + deltas[id];
@@ -1129,11 +1202,12 @@ router.post('/compare-batch', async (req, res) => {
           for (let j = i + 1; j < orderedIds.length; j++) {
             const wId = orderedIds[i];
             const lId = orderedIds[j];
-            insertComparison.run(
+            const info = insertComparison.run(
               wId, lId,
               perfMap[wId].rating, perfMap[lId].rating,
               newRatings[wId], newRatings[lId]
             );
+            comparisonIds.push(Number(info.lastInsertRowid));
           }
         }
       } catch (compErr) {
@@ -1151,7 +1225,14 @@ router.post('/compare-batch', async (req, res) => {
     // Trigger recalibration once
     triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
 
-    res.send({ success: true, results });
+    res.send({
+      success: true,
+      results,
+      undo: {
+        comparisonIds,
+        performers: undoBefore.map(s => ({ ...s, expect: newRatings[s.id] }))
+      }
+    });
   } catch (err) {
     console.error('Error in compare-batch:', err);
     res.status(500).send({ error: err.message });
@@ -2001,12 +2082,25 @@ router.delete('/:id/trash-permanent', async (req, res) => {
 // Clean up trash folders when exiting performer filter view
 router.post('/:id/cleanup-trash-on-exit', async (req, res) => {
   const { id } = req.params;
+  // Synchronous for its caller, but tracked like the async cleanup so it is
+  // visible as a Cleanup job on /jobs and in the toolbar indicator.
+  const jobId = `cleanup-exit-${id}-${Date.now()}`;
 
   try {
     const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
+
+    backgroundTasks.set(jobId, {
+      id: jobId,
+      type: 'trash-cleanup',
+      performerId: id,
+      performerName: performer.name,
+      status: 'processing',
+      startTime: Date.now(),
+      progress: 0,
+    });
 
     const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(performer.folder_id);
     const performerPath = path.join(folder.path, 'before filter performer', performer.name);
@@ -2019,6 +2113,7 @@ router.post('/:id/cleanup-trash-on-exit', async (req, res) => {
       { path: path.join(performerPath, 'vids', 'funscript', '.trash'), type: 'funscript' }
     ];
 
+    let processed = 0;
     for (const trashFolder of trashFolders) {
       const result = await handleTrashFolder(trashFolder.path, performer.name, folder.path, trashFolder.type);
 
@@ -2026,6 +2121,12 @@ router.post('/:id/cleanup-trash-on-exit', async (req, res) => {
         savedForTrainingCount += result.count;
       }
       deletedCount += result.count;
+
+      processed++;
+      backgroundTasks.set(jobId, {
+        ...backgroundTasks.get(jobId),
+        progress: (processed / trashFolders.length) * 50,
+      });
     }
 
     // Recalculate performer stats after trash cleanup since file counts may have changed
@@ -2049,8 +2150,17 @@ router.post('/:id/cleanup-trash-on-exit', async (req, res) => {
 
     console.log(`Updated performer stats after trash cleanup:`, updatedStats);
 
+    backgroundTasks.set(jobId, {
+      ...backgroundTasks.get(jobId),
+      status: 'completed',
+      progress: 100,
+      endTime: Date.now(),
+      result: { deletedCount, savedForTrainingCount, updatedStats },
+    });
+
     res.send({
       success: true,
+      jobId,
       message: savedForTrainingCount > 0
         ? `Moved ${savedForTrainingCount} files to training folder and updated stats`
         : `Cleaned up ${deletedCount} trash files and updated stats`,
@@ -2060,6 +2170,14 @@ router.post('/:id/cleanup-trash-on-exit', async (req, res) => {
     });
   } catch (err) {
     console.error('Error cleaning up trash on exit:', err);
+    if (backgroundTasks.has(jobId)) {
+      backgroundTasks.set(jobId, {
+        ...backgroundTasks.get(jobId),
+        status: 'error',
+        error: err.message,
+        endTime: Date.now(),
+      });
+    }
     res.status(500).send({ error: err.message });
   }
 });
@@ -2455,6 +2573,9 @@ router.get('/background-task/:jobId', (req, res) => {
   res.send({ success: true, task });
 });
 
+// Read-only snapshot for GET /api/jobs (routes/jobs.js)
+router.getBackgroundTasks = () => Array.from(backgroundTasks.values());
+
 // Start async stats refresh (returns job ID immediately)
 router.post('/:id/refresh-stats-async', async (req, res) => {
   const { id } = req.params;
@@ -2529,8 +2650,11 @@ router.post('/:id/refresh-stats-async', async (req, res) => {
 
         await scanDirRecursive(performerPath);
 
-        const pics = allScannedFiles.filter(f => imageExtensions.has(path.extname(f.name).toLowerCase()));
-        const vids = allScannedFiles.filter(f => videoExtensions.has(path.extname(f.name).toLowerCase()));
+        // Keep already-probed width/height/duration for files that are still there
+        const pics = mediaDimensions.carryOverDimensions(db, id, 'pics',
+          allScannedFiles.filter(f => imageExtensions.has(path.extname(f.name).toLowerCase())));
+        const vids = mediaDimensions.carryOverDimensions(db, id, 'vids',
+          allScannedFiles.filter(f => videoExtensions.has(path.extname(f.name).toLowerCase())));
 
         backgroundTasks.set(jobId, {
           ...backgroundTasks.get(jobId),
@@ -2710,8 +2834,11 @@ router.post('/:id/rescan-files', async (req, res) => {
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
     const videoExtensions = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'];
 
-    const pics = allFiles.filter(f => imageExtensions.includes(path.extname(f.name).toLowerCase()));
-    const vids = allFiles.filter(f => videoExtensions.includes(path.extname(f.name).toLowerCase()));
+    // Keep already-probed width/height/duration for files that are still there
+    const pics = mediaDimensions.carryOverDimensions(db, id, 'pics',
+      allFiles.filter(f => imageExtensions.includes(path.extname(f.name).toLowerCase())));
+    const vids = mediaDimensions.carryOverDimensions(db, id, 'vids',
+      allFiles.filter(f => videoExtensions.includes(path.extname(f.name).toLowerCase())));
 
     // Transaction to update DB
     const updateCache = db.transaction(() => {
@@ -2739,6 +2866,9 @@ router.post('/:id/rescan-files', async (req, res) => {
   }
 });
 
+// On a cache miss, how long the images request may spend on stat + header reads before responding
+const GALLERY_IMAGE_PROBE_BUDGET_MS = 3000;
+
 // Specialized endpoint for gallery images (fast cache-first)
 router.get('/:id/gallery/images', async (req, res) => {
   const { id } = req.params;
@@ -2755,8 +2885,11 @@ router.get('/:id/gallery/images', async (req, res) => {
       const files = JSON.parse(cached.data);
       console.log(`[gallery/images] JSON parse took ${Date.now() - parseStart}ms for ${files.length} files`);
       console.log(`[gallery/images] Total time (cached): ${Date.now() - startTime}ms`);
-      // Add HTTP cache headers - cache for 5 minutes on client side
-      res.set('Cache-Control', 'private, max-age=300');
+      // Entries without size/dimensions are served as-is and probed in the background for the next load
+      const backfilling = mediaDimensions.needsEnrichment(files);
+      if (backfilling) mediaDimensions.backfillCacheInBackground(db, id, 'pics', files);
+      // Add HTTP cache headers - cache for 5 minutes on client side (not while the row is still being completed)
+      res.set('Cache-Control', backfilling ? 'no-store' : 'private, max-age=300');
       return res.send({ pics: files, count: files.length, fromCache: true });
     }
 
@@ -2861,8 +2994,14 @@ router.get('/:id/gallery/images', async (req, res) => {
     }
     console.log(`[gallery/images] Directory scan took ${Date.now() - scanStart}ms for ${allFiles.length} files`);
 
+    // Size/date + pixel dimensions, within a time budget; the rest is finished in the background
+    const probeStart = Date.now();
+    const probed = await mediaDimensions.enrichEntries(allFiles, 'image', { budgetMs: GALLERY_IMAGE_PROBE_BUDGET_MS });
+    console.log(`[gallery/images] Dimension probe took ${Date.now() - probeStart}ms for ${probed} files`);
+
     // Cache it
     db.prepare('INSERT OR REPLACE INTO performer_file_cache (performer_id, type, data) VALUES (?, ?, ?)').run(id, 'pics', JSON.stringify(allFiles));
+    mediaDimensions.backfillCacheInBackground(db, id, 'pics', allFiles);
     console.log(`[gallery/images] Total time (uncached): ${Date.now() - startTime}ms`);
 
     res.send({ pics: allFiles, count: allFiles.length });
@@ -2883,6 +3022,8 @@ router.get('/:id/gallery/videos', async (req, res) => {
     const cached = db.prepare('SELECT data FROM performer_file_cache WHERE performer_id = ? AND type = ?').get(id, 'vids');
     if (cached) {
       const files = JSON.parse(cached.data);
+      // Entries without size/dimensions/duration are served as-is and probed in the background for the next load
+      mediaDimensions.backfillCacheInBackground(db, id, 'vids', files);
       return res.send({ vids: files, count: files.length, fromCache: true });
     }
 
@@ -2983,6 +3124,8 @@ router.get('/:id/gallery/videos', async (req, res) => {
 
     // Cache it
     db.prepare('INSERT OR REPLACE INTO performer_file_cache (performer_id, type, data) VALUES (?, ?, ?)').run(id, 'vids', JSON.stringify(allFiles));
+    // ffprobe is too slow to wait for: respond now, dimensions/duration land in the cache row afterwards
+    mediaDimensions.backfillCacheInBackground(db, id, 'vids', allFiles);
 
     res.send({ vids: allFiles, count: allFiles.length });
 

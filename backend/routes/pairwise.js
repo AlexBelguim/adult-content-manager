@@ -196,11 +196,15 @@ router.get('/next-pair', (req, res) => {
     : candidates[Math.floor(Math.random() * Math.min(5, candidates.length))];
 
   const swapped = Math.random() < 0.5;
+  const leftPath = swapped ? pick.path2 : pick.path1;
+  const rightPath = swapped ? pick.path1 : pick.path2;
 
   res.json({
     id: uuidv4(),
-    left: swapped ? pick.path2 : pick.path1,
-    right: swapped ? pick.path1 : pick.path2,
+    left: leftPath,
+    right: rightPath,
+    leftScore: getImageScore(parseInt(performer_id), leftPath),
+    rightScore: getImageScore(parseInt(performer_id), rightPath),
     performer_id: parseInt(performer_id),
     performer_name: info.performer.name,
     uncertainty: pick.uncertainty,
@@ -299,7 +303,10 @@ router.post('/undo', (req, res) => {
 
     if (winner.comparisons > 0) {
       const wDelta = Math.max(5, 20 / winner.comparisons);
-      queries.upsertScore.run(pid, lastPair.winner, winner.score - wDelta, winner.comparisons - 1);
+      // A 'both_bad' row lowered BOTH images (the "winner" column is just the
+      // left one), so undoing it has to raise both.
+      const wRestored = lastPair.type === 'both_bad' ? winner.score + wDelta : winner.score - wDelta;
+      queries.upsertScore.run(pid, lastPair.winner, Math.max(0, Math.min(100, wRestored)), winner.comparisons - 1);
     }
     if (loser.comparisons > 0) {
       const lDelta = Math.max(5, 20 / loser.comparisons);
@@ -335,6 +342,13 @@ router.get('/image-rankings', (req, res) => {
   const scores = queries.getScoresByPerformer.all(parseInt(performer_id));
   const pairCount = queries.getPairCountByPerformer.get(parseInt(performer_id))?.count || 0;
 
+  const bothBad = new Set();
+  const badRows = db.prepare(`SELECT winner, loser FROM pairwise_pairs WHERE performer_id = ? AND type = 'both_bad'`).all(parseInt(performer_id));
+  for (const row of badRows) {
+    bothBad.add(row.winner);
+    bothBad.add(row.loser);
+  }
+
   res.json({
     performer_id: parseInt(performer_id),
     totalComparisons: pairCount,
@@ -342,7 +356,8 @@ router.get('/image-rankings', (req, res) => {
     images: scores.map(s => ({
       path: s.path,
       score: s.score,
-      comparisons: s.comparisons
+      comparisons: s.comparisons,
+      bothBad: bothBad.has(s.path)
     }))
   });
 });
@@ -422,11 +437,22 @@ router.get('/stats', (req, res) => {
   const totalScores = db.prepare('SELECT COUNT(*) as count FROM pairwise_image_scores').get()?.count || 0;
   const performersWithScores = db.prepare('SELECT COUNT(DISTINCT performer_id) as count FROM pairwise_image_scores').get()?.count || 0;
 
-  res.json({
+  const out = {
     totalPairs,
     totalScoredImages: totalScores,
     performersWithScores
-  });
+  };
+
+  // Optional per-performer numbers; the global fields above never change.
+  const pid = parseInt(req.query.performer_id);
+  if (!isNaN(pid)) {
+    out.performer_id = pid;
+    out.performerPairs = queries.getPairCountByPerformer.get(pid)?.count || 0;
+    out.performerImages = db.prepare('SELECT COUNT(*) as count FROM pairwise_image_scores WHERE performer_id = ?').get(pid)?.count || 0;
+    out.performerScoredImages = db.prepare('SELECT COUNT(*) as count FROM pairwise_image_scores WHERE performer_id = ? AND comparisons > 0').get(pid)?.count || 0;
+  }
+
+  res.json(out);
 });
 
 // ═══════════════════════════════════════════════════════════════

@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PerformerCard from './PerformerCard';
 import ContentCard from './ContentCard';
 import PerformerSettingsModal from './PerformerSettingsModal';
-import BackgroundTaskQueue from './BackgroundTaskQueue';
 import FullscreenGalleryDialog from './fullscreenModes/FullscreenGalleryDialog';
 import { smartOpen } from '../utils/pwaNavigation';
 import {
@@ -47,8 +46,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
   const [performerSearchTerm, setPerformerSearchTerm] = useState('');
   const [contentSearchTerm, setContentSearchTerm] = useState('');
   const [settingsModal, setSettingsModal] = useState({ open: false, performer: null });
-  const [backgroundTasks, setBackgroundTasks] = useState([]);
-  const pollingIntervalsRef = useRef(new Map());
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [fullscreenMode, setFullscreenMode] = useState(false);
   const [filters, setFilters] = useState({
@@ -110,14 +107,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
   useEffect(() => {
     localStorage.setItem('galleryContentSortBy', contentSortBy);
   }, [contentSortBy]);
-
-  // Cleanup polling intervals on unmount
-  useEffect(() => {
-    return () => {
-      pollingIntervalsRef.current.forEach(interval => clearInterval(interval));
-      pollingIntervalsRef.current.clear();
-    };
-  }, []);
 
   const fetchPerformers = () => {
     setLoadingPerformers(true);
@@ -973,47 +962,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
           onClose={handleSettingsClose}
           onUpdate={handleSettingsUpdate}
           basePath={basePath}
-          onAddBackgroundTask={(task) => {
-            setBackgroundTasks(prev => [...prev, task]);
-
-            const pollInterval = setInterval(async () => {
-              try {
-                const statusResp = await fetch(`/api/performers/background-task/${task.id}`);
-                if (statusResp.ok) {
-                  const statusData = await statusResp.json();
-                  const taskData = statusData.task;
-
-                  setBackgroundTasks(prev =>
-                    prev.map(t => t.id === task.id ? {
-                      ...t,
-                      status: taskData.status,
-                      progress: taskData.progress || 0,
-                      progressText: taskData.progressText,
-                      error: taskData.error,
-                      result: taskData.result ? (
-                        taskData.type === 'move-to-after'
-                          ? taskData.result
-                          : `Refreshed: ${taskData.result.stats.pics_count} pics, ${taskData.result.stats.vids_count} vids`
-                      ) : null,
-                    } : t)
-                  );
-
-                  if (taskData.status === 'completed' || taskData.status === 'error') {
-                    clearInterval(pollInterval);
-                    pollingIntervalsRef.current.delete(task.id);
-                    if (taskData.status === 'completed') {
-                      // Refresh performers data on completion
-                      fetchPerformers();
-                    }
-                  }
-                }
-              } catch (err) {
-                console.error('Error polling task:', err);
-              }
-            }, 500);
-
-            pollingIntervalsRef.current.set(task.id, pollInterval);
-          }}
         />
       )}
 
@@ -1395,15 +1343,6 @@ function GalleryView({ subMode, basePath, cachedPerformers, onPerformersUpdate, 
         }}
       />
 
-      {/* Background Task Queue */}
-      {backgroundTasks.length > 0 && (
-        <BackgroundTaskQueue
-          tasks={backgroundTasks}
-          onClose={() => {
-            setBackgroundTasks(prev => prev.filter(t => t.status === 'processing' || t.status === 'queued'));
-          }}
-        />
-      )}
     </Container>
   );
 }

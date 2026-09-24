@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import PerformerCard from './PerformerCard';
 import PerformerFilterView from './PerformerFilterView';
 import PerformerSettingsModal from './PerformerSettingsModal';
-import BackgroundTaskQueue from './BackgroundTaskQueue';
 import { smartOpen } from '../utils/pwaNavigation';
 import {
   Box,
@@ -110,8 +109,6 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
   const [settingsModal, setSettingsModal] = useState({ open: false, performer: null });
   const [containerWidth, setContainerWidth] = useState(0);
   const cardRowRef = useRef(null);
-  const [backgroundTasks, setBackgroundTasks] = useState([]);
-  const pollingIntervalsRef = useRef(new Map());
   const prevSortRef = useRef(sort);
 
   // Track initial tab when opening performer
@@ -229,14 +226,6 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     return () => ro.disconnect();
   }, []);
 
-  // Cleanup polling intervals on unmount
-  useEffect(() => {
-    return () => {
-      pollingIntervalsRef.current.forEach(interval => clearInterval(interval));
-      pollingIntervalsRef.current.clear();
-    };
-  }, []);
-
   // Client-side filtering by search term
   const sorted = allPerformers.filter(performer => {
     if (!searchTerm) return true;
@@ -246,7 +235,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
   const handlePerformerClick = (performer) => {
     // If performer is in "after filter performer" folder (moved_to_after = 1), open gallery
     if (performer.moved_to_after) {
-      const performerUrl = `/performer-gallery.html?performer=${encodeURIComponent(performer.name)}&basePath=${encodeURIComponent(basePath)}`;
+      const performerUrl = `/unified-gallery?performer=${encodeURIComponent(performer.name)}&basePath=${encodeURIComponent(basePath)}`;
       smartOpen(performerUrl);
     } else {
       // Open filtering interface for this performer
@@ -309,7 +298,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
         setSelectedPerformer(result.nextPerformer);
       } else {
         // No more performers to filter
-        await exitPerformerView(selectedPerformer);
+        await exitPerformerView(selectedPerformer, null, { cleanup: true });
       }
     }
   };
@@ -347,51 +336,23 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     fetchAllPerformers(); // Refresh the list
   };
 
-  // Helper function to exit performer filter view with trash cleanup as background task
-  const exitPerformerView = (currentPerformer, nextPerformer = null) => {
-    if (currentPerformer?.id) {
-      // Create background task for trash cleanup
-      const taskId = `trash-cleanup-${currentPerformer.id}-${Date.now()}`;
-      const newTask = {
-        id: taskId,
-        type: 'trash-cleanup',
-        title: `Cleaning trash for ${currentPerformer.name}`,
-        description: 'Removing deleted files from performer folder',
-        status: 'processing',
-        progress: 0
-      };
-
-      setBackgroundTasks(prev => [...prev, newTask]);
-
-      // Start cleanup in background
+  // Exit the performer filter view. PerformerFilterView already starts the
+  // trash cleanup on its own Back / Next (it has to: the phone shell mounts it
+  // without this parent), so only the "complete performer" path asks for one
+  // here — otherwise every Back showed two "Cleaning up trash" jobs.
+  const exitPerformerView = (currentPerformer, nextPerformer = null, { cleanup = false } = {}) => {
+    if (cleanup && currentPerformer?.id) {
       fetch(`/api/performers/${currentPerformer.id}/cleanup-trash-on-exit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
         .then(response => response.json())
-        .then(result => {
-          console.log(`Cleaned up trash on exit: ${result.deletedCount} files`);
-          setBackgroundTasks(prev =>
-            prev.map(t => t.id === taskId ? {
-              ...t,
-              status: 'completed',
-              progress: 100,
-              description: `Removed ${result.deletedCount} files`
-            } : t)
-          );
-          // Refresh performers data after cleanup
+        .then(() => {
+          // File counts changed — refresh the cards once the cleanup is done
           fetchAllPerformers();
         })
         .catch(error => {
           console.error('Error cleaning up trash on exit:', error);
-          setBackgroundTasks(prev =>
-            prev.map(t => t.id === taskId ? {
-              ...t,
-              status: 'error',
-              progress: 0,
-              description: `Error: ${error.message}`
-            } : t)
-          );
         });
     }
 
@@ -445,9 +406,11 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
             console.log('onBack called, going back to list');
             // Reset initial tab when going back to list
             setInitialTab(null);
-            // Go back to list without rescanning - just cleanup and return
             exitPerformerView(selectedPerformer);
-            // Don't call fetchPerformersData() - use cached data
+            // Counts moved: the view's cleanup runs on the server, so refresh
+            // the cards now and once more when it has most likely finished.
+            fetchAllPerformers();
+            setTimeout(fetchAllPerformers, 5000);
           }
         }}
         onNext={handleNextPerformer}
@@ -666,61 +629,15 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
         </Box>
       )}
 
-      {/* Background Task Queue */}
-      {backgroundTasks.length > 0 && (
-        <BackgroundTaskQueue
-          tasks={backgroundTasks}
-          onClose={() => {
-            setBackgroundTasks(prev => prev.filter(t => t.status === 'processing' || t.status === 'queued'));
-          }}
-        />
-      )}
-
-      {/* Performer Settings Modal */}
+      {/* Performer Settings Modal. Move-to-after / refresh-stats are server
+          tasks: the modal polls /api/performers/background-task/:id itself and
+          calls onUpdate when they finish, and the Jobs page shows their progress. */}
       <PerformerSettingsModal
         open={settingsModal.open}
         performer={settingsModal.performer}
         onClose={handleSettingsModalClose}
         basePath={basePath}
         onUpdate={fetchAllPerformers}
-        onAddBackgroundTask={(task) => {
-          setBackgroundTasks(prev => [...prev, task]);
-
-          const pollInterval = setInterval(async () => {
-            try {
-              const statusResp = await fetch(`/api/performers/background-task/${task.id}`);
-              if (statusResp.ok) {
-                const statusData = await statusResp.json();
-                const taskData = statusData.task;
-
-                setBackgroundTasks(prev =>
-                  prev.map(t => t.id === task.id ? {
-                    ...t,
-                    status: taskData.status,
-                    progress: taskData.progress || 0,
-                    progressText: taskData.progressText,
-                    error: taskData.error,
-                    result: taskData.result ? (
-                      taskData.type === 'move-to-after'
-                        ? taskData.result
-                        : `Refreshed: ${taskData.result.stats.pics_count} pics, ${taskData.result.stats.vids_count} vids`
-                    ) : null,
-                  } : t)
-                );
-
-                if (taskData.status === 'completed' || taskData.status === 'error') {
-                  clearInterval(pollInterval);
-                  pollingIntervalsRef.current.delete(task.id);
-                  if (taskData.status === 'completed') fetchAllPerformers();
-                }
-              }
-            } catch (err) {
-              console.error('Error polling task:', err);
-            }
-          }, 500);
-
-          pollingIntervalsRef.current.set(task.id, pollInterval);
-        }}
       />
     </Container>
   );

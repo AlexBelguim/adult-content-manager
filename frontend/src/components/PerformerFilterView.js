@@ -1,1479 +1,690 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { loadShortcuts } from '../utils/settings';
-import BackgroundTaskQueue from './BackgroundTaskQueue';
-import MobilePicSwiper from './MobilePicSwiper';
-import '../utils/FunscriptPlayer.js'; // Register custom element
-import './FunscriptPlayerEmbed.css';
-import {
-  Container,
-  Typography,
-  Box,
-  Button,
-  CardMedia,
-  LinearProgress,
-  IconButton,
-  FormControl,
-  Select,
-  MenuItem,
-  InputLabel,
-  Switch,
-  FormControlLabel,
-  Snackbar,
-  Alert
-} from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  Image as ImageIcon,
-  Movie as MovieIcon,
-  SportsEsports as GameIcon,
-  KeyboardArrowLeft as PrevIcon,
-  KeyboardArrowRight as NextIcon,
-  Upload as UploadIcon,
-  Swipe as SwipeIcon
-} from '@mui/icons-material';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Snackbar, useMediaQuery } from '@mui/material';
+import { DEFAULT_SHORTCUTS, loadShortcuts } from '../utils/settings';
+import { MediaStage, ScenesPanel, TagPanel, isVideoItem, useScenes } from './player';
+import DecisionBar from './filter/DecisionBar';
+import FileCard from './filter/FileCard';
+import FilterSidebar from './filter/FilterSidebar';
+import FunscriptCard from './filter/FunscriptCard';
+import Icon from './filter/Icon';
+import QueueRail from './filter/QueueRail';
+import useSwipeStage from './filter/useSwipeStage';
+import { ACTION_LABEL, TABS, TAB_LABEL, errorMessage, matchesKey, mediaItemFor, tabProgress } from './filter/filterUtils';
+import './filter/filter.css';
 
-function PerformerFilterView({ performer, onBack, onNext, onComplete, handyIntegration, handyConnected, initialTab }) {
-  const [currentTab, setCurrentTab] = useState(initialTab || 'pics'); // 'pics', 'vids', 'funscript_vids'
+const FLASH_MS = 450;
+const PRELOAD = 5;
+const HISTORY_MAX = 20;
+const ZERO_DELTA = { pics: { done: 0, total: 0 }, vids: { done: 0, total: 0 }, funscript_vids: { done: 0, total: 0 } };
+const ZERO_TALLY = { pics: { keep: 0, delete: 0 }, vids: { keep: 0, delete: 0 }, funscript_vids: { keep: 0, delete: 0 } };
+const TYPING = /^(INPUT|SELECT|TEXTAREA)$/;
+
+/** HandyIntegration.uploadAndSetScript writes progress into a button; hand it an inert one. */
+const progressSink = () => ({ textContent: '', disabled: false, setAttribute() {}, removeAttribute() {} });
+
+const bump = (obj, tab, key, by) => ({ ...obj, [tab]: { ...obj[tab], [key]: obj[tab][key] + by } });
+
+const listOf = (data) => (Array.isArray(data) ? data : data?.files || []);
+
+/**
+ * Keep / delete / move for one performer, on the shared player
+ * (docs/redesign/SPEC.md, filter-redesign-mockup.html). Mounted by FilterView.
+ */
+function PerformerFilterView({ performer, onBack, onNext, handyIntegration, handyConnected, initialTab }) {
+  const [currentTab, setCurrentTab] = useState(initialTab || 'pics');
   const [files, setFiles] = useState([]);
   const [totalFiles, setTotalFiles] = useState(0);
-  const [hasMoreFiles, setHasMoreFiles] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [sortBy, setSortBy] = useState(() => localStorage.getItem('performerFilterSortBy') || 'name'); // can be 'name', 'funscript_count', etc.
-  const [shortcuts, setShortcuts] = useState({});
-  const [sortOrder, setSortOrder] = useState(() => localStorage.getItem('performerFilterSortOrder') || 'asc');
-  const [progress, setProgress] = useState(0);
-  const [hideKeptFiles, setHideKeptFiles] = useState(true);
   const [loadingFiles, setLoadingFiles] = useState(false);
-  const [loadingMoreFiles, setLoadingMoreFiles] = useState(false);
-  const [abortController, setAbortController] = useState(null);
-  const [isGoingBack, setIsGoingBack] = useState(false);
-  const [filesLoaded, setFilesLoaded] = useState(0);
-  const [backgroundTasks, setBackgroundTasks] = useState([]);
-  const [funpipeToast, setFunpipeToast] = useState(null); // { severity, msg } after move_to_funscript
-  const pollingIntervalRef = useRef(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [sortBy, setSortBy] = useState(() => localStorage.getItem('performerFilterSortBy') || 'name');
+  const [sortOrder, setSortOrder] = useState(() => localStorage.getItem('performerFilterSortOrder') || 'asc');
+  const [hideKeptFiles, setHideKeptFiles] = useState(true);
+  const [mlEnabled, setMlEnabled] = useState(false); // the prediction side was never written: shows "(no model)"
+  const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
+  const [stats, setStats] = useState(null);
+  const [delta, setDelta] = useState(ZERO_DELTA); // decisions the (cached) stats don't show yet
+  const [tally, setTally] = useState(ZERO_TALLY); // this session's kept / deleted per tab
+  const [history, setHistory] = useState([]); // newest first
+  const [undoBusy, setUndoBusy] = useState(false);
+  const [fsBusy, setFsBusy] = useState(false);
+  const [uploading, setUploading] = useState(null);
+  const [lastScriptPrompt, setLastScriptPrompt] = useState(null); // { folderName, path }
+  const [backBusy, setBackBusy] = useState(false);
+  const [snack, setSnack] = useState(null); // { severity, msg }
+  const [flash, setFlash] = useState(null); // { kind, n }
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [scenesOpen, setScenesOpen] = useState(false);
+  const [loop, setLoop] = useState(false);
+  const [mediaInfo, setMediaInfo] = useState(null);
 
-  // Missing ML variables definition (added to fix runtime errors)
-  const [mlEnabled, setMlEnabled] = useState(false);
-  const [loadingPredictions, setLoadingPredictions] = useState(false);
-  const [predictions, setPredictions] = useState({});
-  const [activeModel, setActiveModel] = useState(null);
-  // Detect mobile / touch device
-  const isMobile = typeof window !== 'undefined' && (
-    ('ontouchstart' in window) ||
-    (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
-    (window.matchMedia && window.matchMedia('(hover: none)').matches)
-  );
+  const rootRef = useRef(null);
+  const videoRef = useRef(null);
+  const stageApi = useRef(null);
+  const abortRef = useRef(null);
+  const loadRef = useRef({ offset: 0 }); // where the background loader is in the server's list
+  const inflight = useRef(new Set());
+  const serverStats = useRef(null);
+  const flashTimer = useRef(null);
+  const historyId = useRef(0);
 
-  // On a phone, opening a performer drops you straight into the fullscreen
-  // sorting mode rather than the desktop filter chrome behind a button.
-  // Closing it leaves you on the normal view, and the Swipe Mode button is
-  // still there to go back in.
-  const [showMobileSwiper, setShowMobileSwiper] = useState(isMobile);
+  const phone = useMediaQuery('(max-width:760px)');
+  const file = files[currentIndex] || null;
+  const item = useMemo(() => (file ? mediaItemFor(file, currentTab) : null), [file, currentTab]);
+  const isVideo = isVideoItem(item);
+  const scenes = useScenes(isVideo ? item.path : null);
+  const info = mediaInfo && item && mediaInfo.path === item.path ? mediaInfo : null;
 
+  const notify = useCallback((severity, msg) => setSnack({ severity, msg }), []);
 
-
-  // Update currentTab when initialTab prop changes
+  /* ── the sticky app bar above us ── */
   useEffect(() => {
-    if (initialTab && initialTab !== currentTab) {
-      setCurrentTab(initialTab);
-    }
+    const root = rootRef.current;
+    const appBar = document.querySelector('.MuiAppBar-root');
+    if (!root || !appBar) return undefined;
+    const update = () => {
+      const position = window.getComputedStyle(appBar).position;
+      const pinned = position === 'sticky' || position === 'fixed';
+      root.style.setProperty('--fv-top', pinned ? `${Math.round(appBar.getBoundingClientRect().height)}px` : '0px');
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(appBar);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (initialTab) setCurrentTab(initialTab);
   }, [initialTab]);
 
-  // Load files for current tab with progressive loading
+  // FilterView reuses this instance for the next performer: session state starts over.
   useEffect(() => {
-    // Cancel any previous loading
-    if (abortController) {
-      abortController.abort();
-    }
+    setHistory([]);
+    setTally(ZERO_TALLY);
+    setDelta(ZERO_DELTA);
+    setStats(null);
+    serverStats.current = null;
+    setMediaInfo(null);
+  }, [performer.id]);
 
+  useEffect(() => localStorage.setItem('performerFilterSortBy', sortBy), [sortBy]);
+  useEffect(() => localStorage.setItem('performerFilterSortOrder', sortOrder), [sortOrder]);
+
+  useEffect(() => () => clearTimeout(flashTimer.current), []);
+
+  /* ── shortcuts: once on mount and when the tab becomes visible again ── */
+  useEffect(() => {
+    const load = () => loadShortcuts().then(setShortcuts);
+    load();
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
+  /* ── files: the first one fast, the rest in the background ── */
+  const filesUrl = useCallback(
+    (extra = '') => `/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}${extra}`,
+    [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]
+  );
+
+  useEffect(() => {
+    if (!performer?.id) return undefined;
+    abortRef.current?.abort();
     const controller = new AbortController();
-    setAbortController(controller);
+    abortRef.current = controller;
+    const aborted = () => controller.signal.aborted;
 
-    const loadFiles = async () => {
-      setLoadingFiles(true);
-      setFiles([]);
-      setTotalFiles(0);
-      setHasMoreFiles(false);
-      setFilesLoaded(0);
+    setLoadingFiles(true);
+    setLoadingMore(false);
+    setFiles([]);
+    setTotalFiles(0);
+    setCurrentIndex(0);
+    setLastScriptPrompt(null);
+    loadRef.current = { offset: 0 };
 
+    const page = async (limit, offset) => {
+      const res = await fetch(filesUrl(`&limit=${limit}&offset=${offset}`), { signal: controller.signal });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      return res.json();
+    };
+
+    const run = async () => {
       try {
-        // Load FIRST file only (limit=1) to start filtering immediately
-        const response = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}&limit=1&offset=0`, {
-          signal: controller.signal
-        });
-        if (response.ok) {
-          const data = await response.json();
-
-          // Check if we were aborted
-          if (controller.signal.aborted) return;
-
-          // Check if response is paginated or legacy format
-          if (data.files && data.total !== undefined) {
-            // New paginated format
-            let filesList = data.files;
-
-            // If sorting by funscript count, sort client-side if not supported by backend
-            if (sortBy === 'funscript_count') {
-              filesList = [...filesList].sort((a, b) => {
-                return sortOrder === 'asc'
-                  ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                  : (b.funscript_count || 0) - (a.funscript_count || 0);
-              });
-            }
-
-            setFiles(filesList);
-            setTotalFiles(data.total);
-            setHasMoreFiles(data.hasMore);
-            setCurrentIndex(0);
-            setFilesLoaded(1);
-
-            // Continue loading more files in background ONE AT A TIME
-            if (data.hasMore && !controller.signal.aborted) {
-              loadMoreFilesInBackground(1, controller);
-            }
-          } else {
-            // Legacy format - all files returned at once
-            let filesList = data;
-            if (sortBy === 'funscript_count') {
-              filesList = [...filesList].sort((a, b) => {
-                return sortOrder === 'asc'
-                  ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                  : (b.funscript_count || 0) - (a.funscript_count || 0);
-              });
-            }
-            setFiles(filesList);
-            setTotalFiles(filesList.length);
-            setHasMoreFiles(false);
-            setCurrentIndex(0);
-            setFilesLoaded(filesList.length);
-          }
-        }
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          console.error('Error loading files:', err);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingFiles(false);
-        }
-      }
-    };
-
-    if (performer?.id) {
-      loadFiles();
-    }
-
-    // Cleanup: abort on unmount or when dependencies change
-    return () => {
-      controller.abort();
-    };
-  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles]);
-
-
-
-  // Load more files in background with smart batching
-  const loadMoreFilesInBackground = async (currentOffset, controller) => {
-    console.log(`[${currentTab}] loadMoreFilesInBackground called - offset: ${currentOffset}, filesLoaded: ${filesLoaded}`);
-
-    if (controller.signal.aborted) {
-      console.log(`[${currentTab}] Skipping - aborted: ${controller.signal.aborted}`);
-      return;
-    }
-
-    setLoadingMoreFiles(true);
-    try {
-      // Determine batch size based on progress
-      // First 5 files: load one at a time
-      // After that: batch load (40 for pics, keep 1 for videos/funscripts)
-      let batchSize = 1;
-      if (filesLoaded >= 5) {
-        if (currentTab === 'pics') {
-          batchSize = 40;
-        }
-        // For videos and funscripts, keep loading one at a time (batchSize stays 1)
-      }
-
-      console.log(`[${currentTab}] Fetching with batchSize: ${batchSize}, offset: ${currentOffset}`);
-
-      const response = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}&limit=${batchSize}&offset=${currentOffset}`, {
-        signal: controller.signal
-      });
-      if (response.ok) {
-        const data = await response.json();
-
-        console.log(`[${currentTab}] Received ${data.files?.length || 0} files, hasMore: ${data.hasMore}`);
-
-        // Check if we were aborted
-        if (controller.signal.aborted) return;
-
-        if (data.files && data.files.length > 0) {
-          let newFiles = data.files;
-
-          // If sorting by funscript count, sort client-side
-          if (sortBy === 'funscript_count') {
-            newFiles = [...newFiles].sort((a, b) => {
-              return sortOrder === 'asc'
-                ? (a.funscript_count || 0) - (b.funscript_count || 0)
-                : (b.funscript_count || 0) - (a.funscript_count || 0);
+        const first = await page(1, 0);
+        if (aborted()) return;
+        const paginated = first && first.files && first.total !== undefined;
+        const list = paginated ? first.files : listOf(first);
+        let more = paginated ? !!first.hasMore : false;
+        setFiles(list);
+        setTotalFiles(paginated ? first.total : list.length);
+        setLoadingFiles(false);
+        loadRef.current.offset = list.length;
+        let loaded = list.length;
+        if (more) setLoadingMore(true);
+        // One at a time for the first five and for videos; pictures then come 40 a go.
+        while (more && !aborted()) {
+          await new Promise((r) => setTimeout(r, 10));
+          if (aborted()) return;
+          const batch = loaded >= 5 && currentTab === 'pics' ? 40 : 1;
+          const data = await page(batch, loadRef.current.offset);
+          if (aborted()) return;
+          const got = data.files || [];
+          if (got.length > 0) {
+            setFiles((prev) => {
+              const seen = new Set(prev.map((f) => f.path));
+              return [...prev, ...got.filter((f) => !seen.has(f.path))];
             });
           }
-
-          setFiles(prevFiles => [...prevFiles, ...newFiles]);
-          setFilesLoaded(prev => prev + newFiles.length);
-          setHasMoreFiles(data.hasMore);
-
-          // Continue loading if there are more files and not aborted
-          if (data.hasMore && !controller.signal.aborted) {
-            console.log(`[${currentTab}] Scheduling next batch in 10ms`);
-            setTimeout(() => loadMoreFilesInBackground(currentOffset + batchSize, controller), 10);
-          } else {
-            console.log(`[${currentTab}] No more files to load`);
-          }
+          loaded += got.length;
+          loadRef.current.offset += batch;
+          if (data.total !== undefined) setTotalFiles(data.total);
+          more = !!data.hasMore && got.length > 0;
         }
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error(`[${currentTab}] Error loading more files:`, err);
-      }
-    } finally {
-      console.log(`[${currentTab}] Finished loading batch`);
-      setLoadingMoreFiles(false);
-    }
-  };
-
-  // Save sort states to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('performerFilterSortBy', sortBy);
-  }, [sortBy]);
-
-  useEffect(() => {
-    localStorage.setItem('performerFilterSortOrder', sortOrder);
-  }, [sortOrder]);
-
-  // Load filter progress
-  useEffect(() => {
-    const loadProgress = async () => {
-      try {
-        const response = await fetch(`/api/filter/stats/${performer.id}`);
-        if (response.ok) {
-          const stats = await response.json();
-
-          // Calculate progress based on current tab
-          let tabProgress = 0;
-          if (currentTab === 'pics') {
-            tabProgress = stats.picsCompletion || 0;
-          } else if (currentTab === 'vids') {
-            tabProgress = stats.vidsCompletion || 0;
-          } else if (currentTab === 'funscript_vids') {
-            tabProgress = stats.funscriptCompletion || 0;
-          }
-
-          setProgress(tabProgress);
-
-          console.log('Progress update:', {
-            currentTab,
-            tabProgress,
-            fullStats: stats
-          });
-        }
+        if (!aborted()) setLoadingMore(false);
       } catch (err) {
-        console.error('Error loading progress:', err);
+        if (err.name === 'AbortError' || aborted()) return;
+        setLoadingFiles(false);
+        setLoadingMore(false);
+        notify('error', `Could not load files: ${err.message}`);
       }
     };
+    run();
+    return () => controller.abort();
+  }, [performer.id, currentTab, filesUrl, notify]);
 
-    if (performer?.id) {
-      loadProgress();
+  /** Full reload of the current tab (after undo / funscript changes), as the old view did. */
+  const reloadAll = useCallback(async () => {
+    abortRef.current?.abort();
+    const res = await fetch(filesUrl());
+    if (!res.ok) throw new Error(await errorMessage(res));
+    const list = listOf(await res.json());
+    setFiles(list);
+    setTotalFiles(list.length);
+    setLoadingMore(false);
+    return list;
+  }, [filesUrl]);
+
+  /* ── progress ── */
+  const refreshStats = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/filter/stats/${performer.id}`);
+      if (!res.ok) return;
+      const fresh = await res.json();
+      const prev = serverStats.current;
+      serverStats.current = fresh;
+      setStats(fresh);
+      // The backend caches stats for a minute. When the numbers move, the
+      // server has caught up with this session's decisions: drop the local delta.
+      if (prev && JSON.stringify(prev) !== JSON.stringify(fresh)) setDelta(ZERO_DELTA);
+    } catch (e) {
+      // progress is decoration; the next action refreshes it again
     }
-  }, [performer.id, files, currentTab]);
+  }, [performer.id]);
 
-  const handleFilterAction = useCallback(async (action) => {
-    if (!files[currentIndex]) return;
+  useEffect(() => {
+    refreshStats();
+  }, [refreshStats, currentTab]);
 
-    console.log('Filter action:', action, 'for file:', files[currentIndex].path);
+  const refreshStatsSoon = useCallback(() => setTimeout(refreshStats, 100), [refreshStats]);
 
-    // Check if media is currently in fullscreen or modal
-    let isCurrentlyFullscreen = document.fullscreenElement !== null;
+  const progress = useMemo(() => Object.fromEntries(TABS.map((t) => [t, tabProgress(stats, delta, t)])), [stats, delta]);
+  const nextTab = useMemo(() => {
+    const from = TABS.indexOf(currentTab);
+    return TABS.map((_, i) => TABS[(from + 1 + i) % TABS.length]).find((t) => t !== currentTab && progress[t].left > 0) || null;
+  }, [currentTab, progress]);
 
-    // Check custom funscript-player fullscreen
-    if (!isCurrentlyFullscreen && mediaContainerRef.current) {
-      const funscriptPlayer = mediaContainerRef.current.querySelector('funscript-player');
-      if (funscriptPlayer && funscriptPlayer.classList.contains('fullscreen')) {
-        isCurrentlyFullscreen = true;
-      }
+  /* ── preload what comes next so a decision never shows an empty frame ── */
+  useEffect(() => {
+    files.slice(currentIndex + 1, currentIndex + 1 + PRELOAD).forEach((f) => {
+      const it = mediaItemFor(f, currentTab);
+      new Image().src = it.thumbnail;
+      if (currentTab === 'pics') new Image().src = it.url;
+    });
+  }, [files, currentIndex, currentTab]);
+
+  /* ── navigation ── */
+  const switchTab = useCallback((tab) => {
+    if (tab === currentTab) return;
+    if (tab !== 'funscript_vids' && sortBy === 'funscript_count') setSortBy('name');
+    setCurrentTab(tab);
+    setSheetOpen(false);
+  }, [currentTab, sortBy]);
+
+  const goTo = useCallback((n) => {
+    if (n >= 0 && n < files.length) setCurrentIndex(n);
+  }, [files.length]);
+  const goPrev = useCallback(() => goTo(currentIndex - 1), [goTo, currentIndex]);
+  const goNext = useCallback(() => goTo(currentIndex + 1), [goTo, currentIndex]);
+
+  /* ── decisions ── */
+  const getStage = useCallback(() => stageApi.current?.root?.querySelector('.pl-stage') || null, []);
+  const decideRef = useRef(null);
+  const onSwipe = useCallback((action, fromX) => decideRef.current?.(action, fromX), []);
+  const { stageProps, overlay: swipeStamps, flyOut } = useSwipeStage({ getStage, mouse: phone, onDecide: onSwipe });
+
+  const decide = useCallback(async (action, fromX = 0) => {
+    const target = files[currentIndex];
+    if (!target || inflight.current.has(target.path)) return;
+    if (action === 'move_to_funscript' && currentTab !== 'vids') return;
+    inflight.current.add(target.path);
+
+    const tab = currentTab;
+    const index = currentIndex;
+    const removes = action === 'delete' || hideKeptFiles;
+    const entry = { id: ++historyId.current, file: target, action, tab };
+
+    // Applied at once: the next file is on screen before the request goes out.
+    if (removes) {
+      setFiles((prev) => prev.filter((f) => f.path !== target.path));
+      setCurrentIndex(Math.min(index, Math.max(0, files.length - 2)));
+    } else {
+      setFiles((prev) => prev.map((f) => (f.path === target.path ? { ...f, filtered: action } : f)));
+      if (index < files.length - 1) setCurrentIndex(index + 1);
     }
-
-    // More robust modal detection for pics tab.
-    //
-    // Skipped entirely while the swiper is open. The heuristic below treats any
-    // element with z-index > 1000 as an open modal, and the swiper's own
-    // container is 9999 — so every swipe decided "a modal was open" and the
-    // restoration effect clicked the image behind it, dropping the fullscreen
-    // image modal on top of the swiper. That is why swiping looked dead.
-    let isCurrentlyModal = false;
-    if (currentTab === 'pics' && !showMobileSwiper) {
-      // Check for common modal indicators
-      const modalElements = document.querySelectorAll('.modal, .modal-open, [data-modal="true"], .MuiDialog-root, .modal-backdrop, .overlay, .lightbox');
-      isCurrentlyModal = modalElements.length > 0;
-
-      // Alternative: check if any element has modal-related styles
-      if (!isCurrentlyModal) {
-        const bodyClasses = document.body.className;
-        isCurrentlyModal = bodyClasses.includes('modal-open') || bodyClasses.includes('no-scroll') || bodyClasses.includes('overlay-open');
-      }
-
-      // Another approach: check for elements with high z-index that might be modals
-      if (!isCurrentlyModal) {
-        const highZElements = Array.from(document.querySelectorAll('*')).filter(el => {
-          const zIndex = window.getComputedStyle(el).zIndex;
-          return zIndex !== 'auto' && parseInt(zIndex) > 1000;
-        });
-        isCurrentlyModal = highZElements.length > 0;
-      }
-    }
-
-    let fullscreenElement = null;
-    if (isCurrentlyFullscreen) {
-      fullscreenElement = document.fullscreenElement;
-      console.log('Media is currently in fullscreen, will restore after action');
-    }
-
-    if (isCurrentlyModal) {
-      console.log('Image is currently in modal, will restore after action');
-    }
+    setHistory((h) => [entry, ...h].slice(0, HISTORY_MAX));
+    setDelta((d) => {
+      let next = bump(d, tab, 'done', 1);
+      if (action === 'move_to_funscript') next = bump(next, 'vids', 'total', -1);
+      return next;
+    });
+    if (action !== 'move_to_funscript') setTally((t) => bump(t, tab, action, 1));
+    setFlash({ kind: action, n: entry.id });
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
+    const media = mediaItemFor(target, tab);
+    flyOut(action, tab === 'pics' ? media.url : media.thumbnail, fromX);
 
     try {
-      let response;
-
-      if (currentTab === 'funscript') {
-        // For funscript filtering, we're working with videos that have funscript files
-        response = await fetch('/api/filter/action', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            performerId: performer.id,
-            filePath: files[currentIndex].path,
-            action
-          })
-        });
-      } else {
-        // For regular filtering
-        response = await fetch('/api/filter/action', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            performerId: performer.id,
-            filePath: files[currentIndex].path,
-            action
-          })
-        });
-      }
-
-      console.log('Response status:', response.status);
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log('Filter action result:', result);
-
-        // Moving to a funscript folder hands the video to funpipe for script
-        // generation — report whether that actually took.
-        if (action === 'move_to_funscript' && result.funpipe) {
-          const fp = result.funpipe;
-          if (fp.queued) {
-            setFunpipeToast({ severity: 'success', msg: 'Queued with funpipe for funscript generation' });
-          } else if (fp.skipped) {
-            setFunpipeToast({ severity: 'info', msg: `Not queued — ${fp.skipped}` });
-          } else if (fp.error) {
-            setFunpipeToast({ severity: 'warning', msg: `Moved, but funpipe didn't take it: ${fp.error}` });
-          }
-        }
-
-        // Store the fullscreen and modal states before updating
-        const wasFullscreen = isCurrentlyFullscreen;
-        const wasModal = isCurrentlyModal;
-
-        // Optimized: Update local state immediately instead of reloading all files
-        const updatedFiles = [...files];
-
-        if (hideKeptFiles && (action === 'keep' || action === 'move_to_funscript')) {
-          // Remove the file from the array since it will be hidden
-          updatedFiles.splice(currentIndex, 1);
-          setFiles(updatedFiles);
-
-          // Stay at the same index (which now shows the next file)
-          if (currentIndex >= updatedFiles.length) {
-            // If we're at the end, go to the last available file or start over
-            setCurrentIndex(updatedFiles.length > 0 ? updatedFiles.length - 1 : 0);
-          }
-        } else if (action === 'delete') {
-          // Remove the file from the array since it's deleted
-          updatedFiles.splice(currentIndex, 1);
-          setFiles(updatedFiles);
-
-          // Stay at the same index (which now shows the next file)
-          if (currentIndex >= updatedFiles.length) {
-            // If we're at the end, go to the last available file or start over
-            setCurrentIndex(updatedFiles.length > 0 ? updatedFiles.length - 1 : 0);
-          }
-        } else {
-          // Update the file's filtered status in place
-          if (updatedFiles[currentIndex]) {
-            updatedFiles[currentIndex].filtered = action;
-          }
-          setFiles(updatedFiles);
-
-          // Normal navigation - move to next file if possible
-          if (currentIndex < updatedFiles.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-          } else if (updatedFiles.length > 0) {
-            setCurrentIndex(0);
-          }
-        }
-
-        // Force re-render with fullscreen/modal restoration
-        if (wasFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids')) {
-          console.log('Setting shouldRestoreFullscreen to true');
-          setShouldRestoreFullscreen(true);
-        }
-
-        if (wasModal && currentTab === 'pics') {
-          console.log('Setting shouldRestoreModal to true');
-          setShouldRestoreModal(true);
-        }
-
-        // Update progress statistics less frequently (async, non-blocking)
-        setTimeout(async () => {
-          try {
-            const progressResponse = await fetch(`/api/filter/stats/${performer.id}`);
-            if (progressResponse.ok) {
-              const stats = await progressResponse.json();
-
-              // Calculate progress based on current tab
-              let tabProgress = 0;
-              if (currentTab === 'pics') {
-                tabProgress = stats.picsCompletion || 0;
-              } else if (currentTab === 'vids') {
-                tabProgress = stats.vidsCompletion || 0;
-              } else if (currentTab === 'funscript_vids') {
-                tabProgress = stats.funscriptCompletion || 0;
-              }
-
-              setProgress(tabProgress);
-            }
-          } catch (err) {
-            console.error('Error updating progress:', err);
-          }
-        }, 100); // Small delay to not block the UI
-      } else {
-        const errorText = await response.text();
-        console.error('Filter action failed:', response.status, errorText);
-      }
-    } catch (err) {
-      console.error('Error performing filter action:', err);
-    }
-  }, [files, currentIndex, performer.id, currentTab, sortBy, sortOrder, hideKeptFiles, showMobileSwiper]);
-
-  const handleUndo = useCallback(async () => {
-    try {
-      const response = await fetch('/api/filter/undo', {
-        method: 'POST'
-      });
-
-      if (response.ok) {
-        // Reload files after undo (undo is less frequent, so full reload is acceptable)
-        const updatedResponse = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}`);
-        if (updatedResponse.ok) {
-          const updatedFiles = await updatedResponse.json();
-          setFiles(updatedFiles);
-          if (currentIndex > 0) {
-            setCurrentIndex(currentIndex - 1);
-          }
-        }
-
-        // Update progress statistics (async, non-blocking)
-        setTimeout(async () => {
-          try {
-            const progressResponse = await fetch(`/api/filter/stats/${performer.id}`);
-            if (progressResponse.ok) {
-              const stats = await progressResponse.json();
-
-              // Calculate progress based on current tab
-              let tabProgress = 0;
-              if (currentTab === 'pics') {
-                tabProgress = stats.picsCompletion || 0;
-              } else if (currentTab === 'vids') {
-                tabProgress = stats.vidsCompletion || 0;
-              } else if (currentTab === 'funscript_vids') {
-                tabProgress = stats.funscriptCompletion || 0;
-              }
-
-              setProgress(tabProgress);
-            }
-          } catch (err) {
-            console.error('Error updating progress after undo:', err);
-          }
-        }, 100);
-      }
-    } catch (err) {
-      console.error('Error undoing action:', err);
-    }
-  }, [performer.id, currentTab, sortBy, sortOrder, hideKeptFiles, currentIndex]);
-
-  const handleFunscriptAction = useCallback(async (action, funscriptFile) => {
-    if (!files[currentIndex] || currentTab !== 'funscript_vids') return;
-
-    try {
-      const response = await fetch('/api/filter/funscript', {
+      const res = await fetch('/api/filter/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          performerId: performer.id,
-          videoFolder: files[currentIndex].folderName,
-          action,
-          funscriptFile
-        })
+        body: JSON.stringify({ performerId: performer.id, filePath: target.path, action })
       });
-
-      if (response.ok) {
-        // Reload files to get updated funscript list
-        const updatedResponse = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}`);
-        if (updatedResponse.ok) {
-          const updatedFiles = await updatedResponse.json();
-          setFiles(updatedFiles);
-        }
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const result = await res.json();
+      // The server's list just lost this file: keep the background loader aligned.
+      if (removes) loadRef.current.offset = Math.max(0, loadRef.current.offset - 1);
+      // Moving to a funscript folder hands the video to funpipe for script
+      // generation — report whether that actually took.
+      if (action === 'move_to_funscript' && result.funpipe) {
+        const fp = result.funpipe;
+        if (fp.queued) notify('success', 'Queued with funpipe for funscript generation');
+        else if (fp.skipped) notify('info', `Not queued — ${fp.skipped}`);
+        else if (fp.error) notify('warning', `Moved, but funpipe didn't take it: ${fp.error}`);
       }
+      refreshStatsSoon();
     } catch (err) {
-      console.error('Error performing funscript action:', err);
-    }
-  }, [performer.id, files, currentIndex, currentTab, sortBy, sortOrder, hideKeptFiles]);
-
-  const handleFunscriptRename = useCallback(async (funscriptFile) => {
-    if (!files[currentIndex] || currentTab !== 'funscript_vids') return;
-
-    const newName = prompt('Enter new name for funscript file:', funscriptFile);
-    if (newName && newName !== funscriptFile) {
-      try {
-        const response = await fetch('/api/filter/funscript', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            performerId: performer.id,
-            videoFolder: files[currentIndex].folderName,
-            action: 'rename',
-            funscriptFile,
-            options: { newName }
-          })
+      // Put the file back where it was.
+      notify('error', `${ACTION_LABEL[action]} failed: ${err.message}`);
+      setHistory((h) => h.filter((x) => x.id !== entry.id));
+      setDelta((d) => {
+        let next = bump(d, tab, 'done', -1);
+        if (action === 'move_to_funscript') next = bump(next, 'vids', 'total', 1);
+        return next;
+      });
+      if (action !== 'move_to_funscript') setTally((t) => bump(t, tab, action, -1));
+      if (removes) {
+        setFiles((prev) => {
+          if (prev.some((f) => f.path === target.path)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(index, next.length), 0, target);
+          return next;
         });
-
-        if (response.ok) {
-          // Reload files to get updated funscript list
-          const updatedResponse = await fetch(`/api/filter/files/${performer.id}?type=${currentTab}&sortBy=${sortBy}&sortOrder=${sortOrder}&hideKept=${hideKeptFiles}`);
-          if (updatedResponse.ok) {
-            const updatedFiles = await updatedResponse.json();
-            setFiles(updatedFiles);
-          }
-        }
-      } catch (err) {
-        console.error('Error renaming funscript file:', err);
+        setCurrentIndex(index);
+      } else {
+        setFiles((prev) => prev.map((f) => (f.path === target.path ? { ...f, filtered: target.filtered } : f)));
       }
+    } finally {
+      inflight.current.delete(target.path);
     }
-  }, [performer.id, files, currentIndex, currentTab, sortBy, sortOrder, hideKeptFiles]);
+  }, [files, currentIndex, currentTab, hideKeptFiles, performer.id, flyOut, notify, refreshStatsSoon]);
+  decideRef.current = decide;
 
-  const handleFunscriptUpload = useCallback(async (funscriptFile) => {
-    if (!files[currentIndex] || currentTab !== 'funscript_vids') return;
+  const undo = useCallback(async () => {
+    if (undoBusy) return;
+    setUndoBusy(true);
+    try {
+      const res = await fetch('/api/filter/undo', { method: 'POST' });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const entry = history[0] || null;
+      if (entry) {
+        setHistory((h) => h.slice(1));
+        setDelta((d) => bump(d, entry.tab, 'done', -1));
+        if (entry.action !== 'move_to_funscript') setTally((t) => bump(t, entry.tab, entry.action, -1));
+      }
+      if (entry && entry.tab !== currentTab) {
+        switchTab(entry.tab);
+      } else {
+        const list = await reloadAll();
+        const i = entry ? list.findIndex((f) => f.path === entry.file.path) : -1;
+        setCurrentIndex(i >= 0 ? i : Math.max(0, Math.min(currentIndex - 1, list.length - 1)));
+      }
+      refreshStatsSoon();
+    } catch (err) {
+      notify('error', `Undo failed: ${err.message}`);
+    } finally {
+      setUndoBusy(false);
+    }
+  }, [undoBusy, history, currentTab, currentIndex, switchTab, reloadAll, refreshStatsSoon, notify]);
 
+  /* ── funscript tab ── */
+  const funscriptAction = useCallback(async (action, script, options) => {
+    const target = files[currentIndex];
+    if (!target || currentTab !== 'funscript_vids' || fsBusy) return;
+    setFsBusy(true);
+    try {
+      const res = await fetch('/api/filter/funscript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performerId: performer.id, videoFolder: target.folderName, action, funscriptFile: script, ...(options ? { options } : {}) })
+      });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const result = await res.json();
+      if (result.lastFunscript) {
+        // The folder now holds only the video; a reload would drop it from the
+        // list before the user has said what to do with it.
+        setFiles((prev) => prev.map((f) => (f.path === target.path
+          ? { ...f, funscripts: (f.funscripts || []).filter((s) => s !== script), funscriptCount: Math.max(0, (f.funscriptCount || 1) - 1) }
+          : f)));
+        setLastScriptPrompt({ folderName: target.folderName, path: target.path });
+      } else {
+        const list = await reloadAll();
+        const i = list.findIndex((f) => f.path === target.path);
+        setCurrentIndex(i >= 0 ? i : Math.max(0, Math.min(currentIndex, list.length - 1)));
+      }
+      if (result.message) notify('success', result.message);
+    } catch (err) {
+      notify('error', `Funscript ${action} failed: ${err.message}`);
+    } finally {
+      setFsBusy(false);
+    }
+  }, [files, currentIndex, currentTab, fsBusy, performer.id, reloadAll, notify]);
+
+  const videoAfterFunscript = useCallback(async (keepVideo) => {
+    if (!lastScriptPrompt || fsBusy) return;
+    setFsBusy(true);
+    try {
+      const res = await fetch('/api/filter/video-after-funscript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performerId: performer.id, videoFolder: lastScriptPrompt.folderName, keepVideo })
+      });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const result = await res.json();
+      setLastScriptPrompt(null);
+      notify('success', result.message || (keepVideo ? 'Video moved to Videos' : 'Video deleted'));
+      setDelta((d) => {
+        let next = bump(d, 'funscript_vids', 'total', -1);
+        if (keepVideo) next = bump(next, 'vids', 'total', 1);
+        return next;
+      });
+      const list = await reloadAll();
+      setCurrentIndex(Math.max(0, Math.min(currentIndex, list.length - 1)));
+      refreshStatsSoon();
+    } catch (err) {
+      notify('error', `Could not ${keepVideo ? 'keep' : 'delete'} the video: ${err.message}`);
+    } finally {
+      setFsBusy(false);
+    }
+  }, [lastScriptPrompt, fsBusy, performer.id, currentIndex, reloadAll, refreshStatsSoon, notify]);
+
+  const uploadToHandy = useCallback(async (script) => {
+    const target = files[currentIndex];
+    if (!target || currentTab !== 'funscript_vids' || uploading) return;
     if (!handyIntegration || !handyConnected) {
-      alert('Handy not connected. Please connect your Handy device first.');
+      notify('warning', 'Handy not connected. Connect your Handy device first.');
       return;
     }
-
+    setUploading(script);
     try {
-      // Get the full path to the funscript file
-      const folderPath = files[currentIndex].path.substring(0, files[currentIndex].path.lastIndexOf('\\'));
-      const funscriptPath = `${folderPath}\\${funscriptFile}`;
-
-      console.log('Loading funscript from:', funscriptPath);
-
-      // Load the funscript content
-      const response = await fetch(`/api/files/raw?path=${encodeURIComponent(funscriptPath)}`);
-
-      if (!response.ok) {
-        throw new Error(`Failed to load funscript: ${response.status}`);
-      }
-
-      const funscriptContent = await response.json();
-
-      const scriptData = {
-        content: funscriptContent,
-        fileName: funscriptFile
-      };
-
-      // Find the video element if it exists
-      const videoElement = document.querySelector('video');
-
-      // Create a temporary button for progress feedback
-      const tempButton = {
-        textContent: 'Uploading...',
-        setAttribute: () => { },
-        removeAttribute: () => { },
-        disabled: false
-      };
-
-      // Upload and set the script
-      await handyIntegration.uploadAndSetScript(videoElement, scriptData, tempButton);
-
-      alert(`Funscript uploaded to Handy: ${funscriptFile}`);
-
+      const sep = target.path.includes('\\') ? '\\' : '/';
+      const folderPath = target.path.substring(0, target.path.lastIndexOf(sep));
+      const res = await fetch(`/api/files/raw?path=${encodeURIComponent(`${folderPath}${sep}${script}`)}`);
+      if (!res.ok) throw new Error(`Failed to load funscript: ${res.status}`);
+      const content = await res.json();
+      const video = videoRef.current;
+      await handyIntegration.uploadAndSetScript(video, { content, fileName: script }, progressSink());
+      if (video) video.style.minHeight = ''; // uploadAndSetScript pins a pixel min-height; the stage sizes it
+      notify('success', `Funscript uploaded to Handy: ${script}`);
     } catch (err) {
-      console.error('Error uploading funscript to Handy:', err);
-      alert('Error uploading funscript to Handy: ' + err.message);
+      notify('error', `Error uploading funscript to Handy: ${err.message}`);
+    } finally {
+      setUploading(null);
     }
-  }, [files, currentIndex, currentTab, handyIntegration, handyConnected]);
+  }, [files, currentIndex, currentTab, uploading, handyIntegration, handyConnected, notify]);
 
-  const currentFile = files[currentIndex];
-  const [shouldRestoreFullscreen, setShouldRestoreFullscreen] = useState(false);
-  const [shouldRestoreModal, setShouldRestoreModal] = useState(false);
-  const mediaContainerRef = React.useRef(null);
-
-  // Simple fullscreen restoration - use native video fullscreen directly
-  useEffect(() => {
-    if (shouldRestoreFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids') && mediaContainerRef.current) {
-      console.log('Starting fullscreen restoration...');
-
-      // Already in fullscreen? Done.
-      if (document.fullscreenElement) {
-        console.log('Already in fullscreen');
-        setShouldRestoreFullscreen(false);
-        return;
-      }
-
-      let retryCount = 0;
-      const maxRetries = 10;
-      let timeoutId = null;
-
-      const attemptFullscreen = () => {
-        const container = mediaContainerRef.current;
-        if (!container) {
-          setShouldRestoreFullscreen(false);
-          return;
-        }
-
-        // Find video element (may be in shadow DOM)
-        const funscriptPlayer = container.querySelector('funscript-player');
-        const video = container.querySelector('video') ||
-          (funscriptPlayer?.shadowRoot?.querySelector('video'));
-
-        console.log(`Fullscreen attempt ${retryCount + 1}/${maxRetries}:`, { video: !!video });
-
-        if (video) {
-          // Use native video fullscreen directly
-          video.requestFullscreen()
-            .then(() => {
-              console.log('Video fullscreen successful');
-              // Also try to autoplay
-              video.play().catch(() => {});
-              setShouldRestoreFullscreen(false);
-            })
-            .catch(err => {
-              console.log('Video fullscreen failed:', err.message);
-              retryCount++;
-              if (retryCount < maxRetries) {
-                timeoutId = setTimeout(attemptFullscreen, 300);
-              } else {
-                setShouldRestoreFullscreen(false);
-              }
-            });
-        } else {
-          retryCount++;
-          if (retryCount < maxRetries) {
-            timeoutId = setTimeout(attemptFullscreen, 200);
-          } else {
-            setShouldRestoreFullscreen(false);
-          }
-        }
-      };
-
-      const initialTimeout = setTimeout(attemptFullscreen, 200);
-
-      return () => {
-        clearTimeout(initialTimeout);
-        if (timeoutId) clearTimeout(timeoutId);
-      };
-    }
-  }, [shouldRestoreFullscreen, currentTab, currentFile]);
-
-  // Modal restoration for pictures
-  useEffect(() => {
-    if (shouldRestoreModal && currentTab === 'pics' && !showMobileSwiper && mediaContainerRef.current) {
-      console.log('Starting modal restoration for image...');
-
-      // Wait a bit for the new funscript-player to render
-      const timeout = setTimeout(() => {
-        const container = mediaContainerRef.current;
-        if (container) {
-          const funscriptPlayer = container.querySelector('funscript-player');
-
-          console.log('Looking for funscript-player element...', { funscriptPlayer });
-
-          if (funscriptPlayer) {
-            // Try to trigger the modal by simulating a click on the image
-            const image = funscriptPlayer.querySelector('img') ||
-              (funscriptPlayer.shadowRoot ? funscriptPlayer.shadowRoot.querySelector('img') : null);
-
-            console.log('Looking for image element...', { image });
-
-            if (image) {
-              console.log('Found image, clicking to open modal');
-              image.click();
-              setShouldRestoreModal(false);
-            } else {
-              console.log('Image element not ready, trying again...');
-              // Try one more time with a longer delay
-              setTimeout(() => {
-                const image2 = funscriptPlayer.querySelector('img') ||
-                  (funscriptPlayer.shadowRoot ? funscriptPlayer.shadowRoot.querySelector('img') : null);
-                if (image2) {
-                  console.log('Found image on retry, clicking to open modal');
-                  image2.click();
-                }
-                setShouldRestoreModal(false);
-              }, 500);
-            }
-          } else {
-            console.log('Funscript player not found, giving up on modal restore');
-            setShouldRestoreModal(false);
-          }
-        }
-      }, 300); // Slightly longer delay for modal
-
-      return () => clearTimeout(timeout);
-    }
-  }, [shouldRestoreModal, currentTab, currentFile, showMobileSwiper]);
-
-  // Helper function to navigate while preserving fullscreen/modal state
-  const navigateWithFullscreen = useCallback((newIndex) => {
-    let isCurrentlyFullscreen = document.fullscreenElement !== null;
-
-    // Check custom funscript-player fullscreen
-    if (!isCurrentlyFullscreen && mediaContainerRef.current) {
-      const funscriptPlayer = mediaContainerRef.current.querySelector('funscript-player');
-      if (funscriptPlayer && funscriptPlayer.classList.contains('fullscreen')) {
-        isCurrentlyFullscreen = true;
-      }
-    }
-
-    // More robust modal detection for pics tab.
-    //
-    // Skipped entirely while the swiper is open. The heuristic below treats any
-    // element with z-index > 1000 as an open modal, and the swiper's own
-    // container is 9999 — so every swipe decided "a modal was open" and the
-    // restoration effect clicked the image behind it, dropping the fullscreen
-    // image modal on top of the swiper. That is why swiping looked dead.
-    let isCurrentlyModal = false;
-    if (currentTab === 'pics' && !showMobileSwiper) {
-      // Check for common modal indicators
-      const modalElements = document.querySelectorAll('.modal, .modal-open, [data-modal="true"], .MuiDialog-root, .modal-backdrop, .overlay, .lightbox');
-      isCurrentlyModal = modalElements.length > 0;
-
-      // Alternative: check if any element has modal-related styles
-      if (!isCurrentlyModal) {
-        const bodyClasses = document.body.className;
-        isCurrentlyModal = bodyClasses.includes('modal-open') || bodyClasses.includes('no-scroll') || bodyClasses.includes('overlay-open');
-      }
-
-      // Another approach: check for elements with high z-index that might be modals
-      if (!isCurrentlyModal) {
-        const highZElements = Array.from(document.querySelectorAll('*')).filter(el => {
-          const zIndex = window.getComputedStyle(el).zIndex;
-          return zIndex !== 'auto' && parseInt(zIndex) > 1000;
-        });
-        isCurrentlyModal = highZElements.length > 0;
-      }
-    }
-
-    console.log('Navigation - currently in fullscreen:', isCurrentlyFullscreen, 'currently in modal:', isCurrentlyModal, 'tab:', currentTab);
-
-    setCurrentIndex(newIndex);
-
-    // If video was in fullscreen, set flag to restore fullscreen when new video loads
-    if (isCurrentlyFullscreen && (currentTab === 'vids' || currentTab === 'funscript_vids')) {
-      console.log('Navigation: Setting shouldRestoreFullscreen to true');
-      setShouldRestoreFullscreen(true);
-    }
-
-    // If image was in modal, set flag to restore modal when new image loads
-    if (isCurrentlyModal && currentTab === 'pics') {
-      console.log('Navigation: Setting shouldRestoreModal to true');
-      setShouldRestoreModal(true);
-    }
-  }, [currentTab, showMobileSwiper]);
-
-  // Load shortcuts on component mount and check for updates
-  useEffect(() => {
-    const loadShortcutsData = () => {
-      loadShortcuts().then(setShortcuts);
-    };
-
-    // Load shortcuts initially
-    loadShortcutsData();
-
-    // Check for shortcut updates every 2 seconds when component is active
-    const interval = setInterval(() => {
-      loadShortcutsData();
-    }, 2000);
-
-    // Also reload when page becomes visible again
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        loadShortcutsData();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.key === shortcuts.keep) handleFilterAction('keep');
-      if (e.key === shortcuts.delete) handleFilterAction('delete');
-      if (e.key === shortcuts.move_to_funscript && currentTab === 'vids') handleFilterAction('move_to_funscript');
-      if (e.key === shortcuts.undo) handleUndo();
-      if (e.key === shortcuts.prev && currentIndex > 0) navigateWithFullscreen(currentIndex - 1);
-      if (e.key === shortcuts.next && currentIndex < files.length - 1) navigateWithFullscreen(currentIndex + 1);
-    };
-
-    // Only add listener if shortcuts are loaded
-    if (Object.keys(shortcuts).length > 0) {
-      window.addEventListener('keydown', handleKeyPress);
-      return () => window.removeEventListener('keydown', handleKeyPress);
-    }
-  }, [currentIndex, files.length, currentTab, handleFilterAction, handleUndo, shortcuts, navigateWithFullscreen]);
-
-  // Cleanup polling interval on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // Cleanup trash when going back
-  const handleBack = async () => {
-    if (isGoingBack) return; // Prevent double clicks
-
-    // Abort any ongoing file loading
-    if (abortController) {
-      console.log('Aborting file loading...');
-      abortController.abort();
-    }
-
+  /* ── leaving ── */
+  const handleBack = useCallback(async () => {
+    if (backBusy) return;
+    setBackBusy(true);
+    abortRef.current?.abort();
     try {
-      // Start async trash cleanup
-      const cleanupResponse = await fetch(`/api/performers/${performer.id}/cleanup-trash-async`, {
-        method: 'POST'
-      });
-
-      if (cleanupResponse.ok) {
-        const result = await cleanupResponse.json();
-        const jobId = result.jobId;
-
-        // Add task to queue
-        const newTask = {
-          id: jobId,
-          title: 'Cleaning up trash',
-          description: `${performer.name}`,
-          status: 'processing',
-          progress: 0,
-        };
-
-        setBackgroundTasks(prev => [...prev, newTask]);
-
-        // Start polling for progress
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusResp = await fetch(`/api/performers/background-task/${jobId}`);
-            if (statusResp.ok) {
-              const statusData = await statusResp.json();
-              const task = statusData.task;
-
-              setBackgroundTasks(prev =>
-                prev.map(t => t.id === jobId ? {
-                  ...t,
-                  status: task.status,
-                  progress: task.progress || 0,
-                  error: task.error,
-                  result: task.result ? `Deleted ${task.result.deletedCount} files` : null,
-                } : t)
-              );
-
-              if (task.status === 'completed' || task.status === 'error') {
-                clearInterval(pollInterval);
-              }
-            }
-          } catch (err) {
-            console.error('Error polling task status:', err);
-          }
-        }, 500);
-
-        pollingIntervalRef.current = pollInterval;
-      }
+      // Fire and forget: it is a server task, so the toolbar indicator and the
+      // Jobs page show its progress and its "Deleted N files" result.
+      const cleanupResponse = await fetch(`/api/performers/${performer.id}/cleanup-trash-async`, { method: 'POST' });
+      if (!cleanupResponse.ok) throw new Error(`HTTP ${cleanupResponse.status}`);
     } catch (error) {
-      console.error('Error starting async cleanup:', error);
+      notify('warning', `Trash cleanup could not be started: ${error.message}`);
     }
-
-    // Navigate back immediately without blocking
     onBack();
-  };
+  }, [backBusy, performer.id, onBack, notify]);
 
-  // Handle next performer with cleanup (no completion)
-  const handleNext = async () => {
-    console.log('handleNext called - starting next performer flow');
-    console.log('Current performer ID:', performer.id, 'Name:', performer.name);
-
+  const handleNextPerformer = useCallback(async () => {
     try {
-      // First cleanup trash
-      const response = await fetch(`/api/performers/${performer.id}/cleanup-trash`, {
-        method: 'POST'
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log(`Cleanup: ${result.deletedCount} files permanently deleted`);
-      }
-
-      // Use the onNext callback to handle next performer in sorted order
+      await fetch(`/api/performers/${performer.id}/cleanup-trash`, { method: 'POST' });
       onNext(performer.id);
-
     } catch (error) {
-      console.error('Error in handleNext:', error);
-      onBack(); // Fallback to going back to list
+      onBack();
+    }
+  }, [performer.id, onNext, onBack]);
+
+  /* ── keys ── */
+  const keyActions = useRef({});
+  keyActions.current = {
+    decide,
+    undo,
+    goPrev,
+    goNext,
+    canMove: !!file && currentTab === 'vids',
+    togglePlay: () => stageApi.current?.togglePlay(),
+    closeOverlays: () => {
+      if (sheetOpen) {
+        setSheetOpen(false);
+        return true;
+      }
+      return false;
     }
   };
+  const shortcutsRef = useRef(shortcuts);
+  shortcutsRef.current = shortcuts;
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const t = e.target;
+      if ((t && (TYPING.test(t.tagName) || t.isContentEditable)) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const s = shortcutsRef.current;
+      const a = keyActions.current;
+      if (matchesKey(e, s.keep)) a.decide('keep');
+      else if (matchesKey(e, s.delete)) a.decide('delete');
+      else if (matchesKey(e, s.move_to_funscript)) {
+        if (!a.canMove) return;
+        a.decide('move_to_funscript');
+      } else if (matchesKey(e, s.undo)) a.undo();
+      else if (matchesKey(e, s.prev)) a.goPrev();
+      else if (matchesKey(e, s.next)) a.goNext();
+      else if (e.key === ' ') {
+        if (t && t.tagName === 'BUTTON') t.blur(); // a focused button would also "click"
+        a.togglePlay();
+      } else if (e.key === 'Escape') {
+        if (!a.closeOverlays()) return;
+      } else return;
+      e.preventDefault();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  /* ── render ── */
+  const tabLabel = TAB_LABEL[currentTab];
+  const p = progress[currentTab];
+  const counter = file
+    ? `${currentIndex + 1} / ${files.length}${totalFiles > files.length ? ` (${totalFiles} total)` : ''}${loadingMore ? ' · loading…' : ''}`
+    : '';
+
+  let stateNode = null;
+  if (!file) {
+    if (loadingFiles) {
+      stateNode = <div className="fv-state"><p className="fv-sub">Loading the first file…</p></div>;
+    } else {
+      const t = tally[currentTab];
+      let heading = `No ${tabLabel.toLowerCase()} for this performer`;
+      if (p.total > 0) {
+        heading = `${tabLabel} done — ${t.keep || t.delete ? `${t.keep} kept, ${t.delete} deleted` : `all ${p.total} files filtered`}`;
+      }
+      stateNode = (
+        <div className="fv-state">
+          <div>
+            <h2>{heading}</h2>
+            {hideKeptFiles && p.total > 0 && <p className="fv-sub">Turn off "Hide kept files" to review what you kept.</p>}
+            <div className="fv-row">
+              {nextTab && (
+                <button type="button" className="pl-btn" onClick={() => switchTab(nextTab)}>
+                  Continue with {TAB_LABEL[nextTab]} <Icon name="right" size={14} />
+                </button>
+              )}
+              <button type="button" className="pl-btn fv-go" onClick={handleNextPerformer}>
+                Next performer <Icon name="right" size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+  }
 
   return (
-    <Container maxWidth="xl" sx={{ py: 3, position: 'relative' }}>
-      {/* Background Task Queue */}
-      {backgroundTasks.length > 0 && (
-        <BackgroundTaskQueue
-          tasks={backgroundTasks}
-          onClose={() => {
-            // Clear completed/error tasks
-            setBackgroundTasks(prev => prev.filter(t => t.status === 'processing' || t.status === 'queued'));
-          }}
-        />
-      )}
+    <div className="fv" ref={rootRef}>
+      <FilterSidebar
+        performer={performer}
+        currentTab={currentTab}
+        progress={progress}
+        onTab={switchTab}
+        onBack={handleBack}
+        backBusy={backBusy}
+        onNextPerformer={handleNextPerformer}
+        sortBy={sortBy}
+        sortOrder={sortOrder}
+        hideKept={hideKeptFiles}
+        mlEnabled={mlEnabled}
+        onSortBy={setSortBy}
+        onSortOrder={setSortOrder}
+        onHideKept={setHideKeptFiles}
+        onMlEnabled={setMlEnabled}
+        shortcuts={shortcuts}
+        sheetOpen={sheetOpen}
+        onCloseSheet={() => setSheetOpen(false)}
+      >
+        {item && (
+          <FileCard
+            item={item}
+            file={file}
+            info={info}
+            isVideo={isVideo}
+            tagsOpen={tagsOpen}
+            scenesOpen={scenesOpen}
+            onToggleTags={() => setTagsOpen((v) => !v)}
+            onToggleScenes={() => setScenesOpen((v) => !v)}
+          />
+        )}
+        {item && tagsOpen && <TagPanel item={item} />}
+        {item && isVideo && scenesOpen && <ScenesPanel item={item} scenes={scenes} videoRef={videoRef} />}
+        {item && currentTab === 'funscript_vids' && (
+          <FunscriptCard
+            file={file}
+            onAction={funscriptAction}
+            onRename={(script, newName) => funscriptAction('rename', script, { newName })}
+            onUpload={uploadToHandy}
+            uploading={uploading}
+            busy={fsBusy}
+            lastPrompt={lastScriptPrompt && lastScriptPrompt.path === file.path ? lastScriptPrompt : null}
+            onVideoAfter={videoAfterFunscript}
+          />
+        )}
+      </FilterSidebar>
+      {sheetOpen && <button type="button" className="fv-sheet-scrim" aria-label="Close panel" onClick={() => setSheetOpen(false)} />}
 
-      {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-        <IconButton
-          onClick={handleBack}
-          sx={{ mr: 2 }}
-        >
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h4" sx={{ flexGrow: 1 }}>
-          Filtering: {performer.name}
-        </Typography>
-        <Typography variant="body1" sx={{ mr: 2 }}>
-          {currentTab === 'pics' ? 'Pics' : currentTab === 'vids' ? 'Videos' : 'Funscripts'} Progress: {progress}%
-        </Typography>
-        <Button
-          variant="contained"
-          onClick={handleNext}
-          sx={{
-            backgroundColor: 'var(--ok)',
-            '&:hover': { backgroundColor: '#45a049' },
-            mr: 1
-          }}
-        >
-          Next
-        </Button>
-      </Box>
-
-      {/* Progress Bar */}
-      <LinearProgress variant="determinate" value={progress} sx={{ mb: 3, height: 8, borderRadius: 4 }} />
-
-      {/* Tab Selection */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Button
-          variant={currentTab === 'pics' ? 'contained' : 'outlined'}
-          startIcon={<ImageIcon />}
-          onClick={() => setCurrentTab('pics')}
-          disabled={loadingFiles}
-          sx={{ backgroundColor: currentTab === 'pics' ? 'var(--ok)' : 'transparent' }}
-        >
-          Pictures
-        </Button>
-        <Button
-          variant={currentTab === 'vids' ? 'contained' : 'outlined'}
-          startIcon={<MovieIcon />}
-          onClick={() => setCurrentTab('vids')}
-          disabled={loadingFiles}
-          sx={{ backgroundColor: currentTab === 'vids' ? 'var(--info)' : 'transparent' }}
-        >
-          Videos
-        </Button>
-        <Button
-          variant={currentTab === 'funscript_vids' ? 'contained' : 'outlined'}
-          startIcon={<GameIcon />}
-          onClick={() => setCurrentTab('funscript_vids')}
-          disabled={loadingFiles}
-          sx={{ backgroundColor: currentTab === 'funscript_vids' ? 'var(--bad)' : 'transparent' }}
-        >
-          Funscript Videos
-        </Button>
-      </Box>
-
-      {/* Controls */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>Sort By</InputLabel>
-          <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-            <MenuItem value="name">Name</MenuItem>
-            <MenuItem value="size">Size (Biggest First)</MenuItem>
-            <MenuItem value="date">Date Modified</MenuItem>
-            {currentTab === 'funscript_vids' && (
-              <MenuItem value="funscript_count">Funscript Count</MenuItem>
-            )}
-          </Select>
-        </FormControl>
-
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>Order</InputLabel>
-          <Select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
-            <MenuItem value="asc">Ascending</MenuItem>
-            <MenuItem value="desc">Descending</MenuItem>
-          </Select>
-        </FormControl>
-
-        <Button
-          variant="outlined"
-          onClick={handleUndo}
-          sx={{ ml: 1 }}
-        >
-          Undo Last (U)
-        </Button>
-
-        <FormControlLabel
-          control={
-            <Switch
-              checked={hideKeptFiles}
-              onChange={(e) => setHideKeptFiles(e.target.checked)}
-              size="small"
-              disabled={loadingFiles}
+      <section className="fv-mid">
+        <div className="fv-mtop">
+          <button type="button" className="pl-ib" onClick={handleBack} disabled={backBusy} aria-label="Back to performers"><Icon name="back" size={18} /></button>
+          <span className="fv-grow">
+            {file ? `${currentIndex + 1} / ${files.length}` : loadingFiles ? 'Loading…' : 'Done'} <span className="fv-sub">({totalFiles || files.length} total)</span>
+          </span>
+          <span className="fv-chip">{p.pct}%</span>
+          <button type="button" className="pl-ib" onClick={() => setSheetOpen(true)} aria-label="Progress, file details and options"><Icon name="menu" size={18} /></button>
+        </div>
+        <MediaStage
+          className="fv-sw"
+          item={item}
+          scenes={scenes}
+          videoRef={videoRef}
+          apiRef={stageApi}
+          autoPlay
+          muted
+          loop={loop}
+          onLoopChange={setLoop}
+          onMediaInfo={setMediaInfo}
+          counterText={counter}
+          stageProps={stageProps}
+          overlay={(
+            <>
+              {swipeStamps}
+              {flash && <div key={flash.n} className={`fv-flash ${flash.kind}`} aria-hidden="true" />}
+              {stateNode}
+            </>
+          )}
+          actionBar={(
+            <DecisionBar
+              shortcuts={shortcuts}
+              hasItem={!!file}
+              canPrev={currentIndex > 0}
+              canNext={currentIndex < files.length - 1}
+              canMove={!!file && currentTab === 'vids'}
+              canUndo={!undoBusy}
+              onPrev={goPrev}
+              onNext={goNext}
+              onDecide={decide}
+              onUndo={undo}
             />
-          }
-          label="Hide Kept Files"
-          sx={{ ml: 2 }}
+          )}
         />
+      </section>
 
-        <FormControlLabel
-          control={
-            <Switch
-              checked={mlEnabled}
-              onChange={(e) => setMlEnabled(e.target.checked)}
-              size="small"
-              disabled={loadingFiles || loadingPredictions}
-            />
-          }
-          label={
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              🤖 ML Predictions
-              {loadingPredictions && <Typography variant="caption" color="text.secondary">(loading...)</Typography>}
-              {mlEnabled && !activeModel && !loadingPredictions && (
-                <Typography variant="caption" color="error">(no model)</Typography>
-              )}
-            </Box>
-          }
-          sx={{ ml: 2 }}
-        />
+      <QueueRail
+        history={history}
+        onUndo={undo}
+        undoBusy={undoBusy}
+        files={files}
+        currentTab={currentTab}
+        currentIndex={currentIndex}
+        onPick={goTo}
+      />
 
-        {/* Mobile Swipe Mode button - only on mobile and pics tab */}
-        {isMobile && currentTab === 'pics' && files.length > 0 && (
-          <Button
-            variant="contained"
-            startIcon={<SwipeIcon />}
-            onClick={() => setShowMobileSwiper(true)}
-            sx={{
-              ml: 2,
-              bgcolor: '#e91e63',
-              '&:hover': { bgcolor: '#c2185b' },
-              textTransform: 'none',
-              fontWeight: 'bold',
-              whiteSpace: 'nowrap',
-              py: 1.5,
-              px: 3
-            }}
-          >
-            Swipe Mode
-          </Button>
-        )}
-
-        <Typography variant="body2" sx={{ ml: 'auto' }}>
-          {currentIndex + 1} of {files.length}
-          {totalFiles > files.length && ` (${totalFiles} total)`}
-          {loadingMoreFiles && ' - Loading...'}
-        </Typography>
-      </Box>
-
-      {/* Main Content: wrap in fragment to avoid adjacent JSX error */}
-      <>
-        {currentFile && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {/* Loading indicator for initial load */}
-            {loadingFiles && files.length === 0 && (
-              <Box sx={{ textAlign: 'center', py: 2 }}>
-                <Typography variant="body1" color="text.secondary" gutterBottom>
-                  Loading first files...
-                </Typography>
-                <LinearProgress sx={{ maxWidth: 400, mx: 'auto' }} />
-              </Box>
-            )}
-
-            {/* File Info */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="h6">{currentFile.name}</Typography>
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                {/* ML Prediction Indicator */}
-                {mlEnabled && currentFile.hash_id && predictions[currentFile.hash_id] && (
-                  <Box sx={{
-                    padding: '4px 12px',
-                    borderRadius: '16px',
-                    fontSize: '0.75rem',
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    backgroundColor: (() => {
-                      const pred = predictions[currentFile.hash_id];
-                      if (pred.confidence > 0.8) {
-                        return pred.prediction === 1 ? 'var(--bad-quiet)' : 'var(--ok-quiet)';
-                      }
-                      return 'var(--warn-quiet)';
-                    })(),
-                    color: (() => {
-                      const pred = predictions[currentFile.hash_id];
-                      if (pred.confidence > 0.8) {
-                        return pred.prediction === 1 ? 'var(--bad)' : 'var(--ok)';
-                      }
-                      return '#e65100';
-                    })(),
-                    border: '2px solid',
-                    borderColor: (() => {
-                      const pred = predictions[currentFile.hash_id];
-                      if (pred.confidence > 0.8) {
-                        return pred.prediction === 1 ? 'var(--bad)' : 'var(--ok)';
-                      }
-                      return 'var(--warn)';
-                    })()
-                  }}>
-                    <span style={{ fontSize: '16px' }}>
-                      {(() => {
-                        const pred = predictions[currentFile.hash_id];
-                        if (pred.confidence > 0.8) {
-                          return pred.prediction === 1 ? '🔴' : '🟢';
-                        }
-                        return '🟡';
-                      })()}
-                    </span>
-                    ML: {predictions[currentFile.hash_id].prediction === 1 ? 'DELETE' : 'KEEP'}
-                    {' '}
-                    ({(predictions[currentFile.hash_id].confidence * 100).toFixed(0)}%)
-                  </Box>
-                )}
-
-                {/* Filter Status */}
-                {currentFile.filtered && (
-                  <Box sx={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    fontSize: '0.75rem',
-                    fontWeight: 'bold',
-                    backgroundColor: currentFile.filtered === 'keep' ? 'var(--ok)' :
-                      currentFile.filtered === 'delete' ? 'var(--bad)' : 'var(--warn)',
-                    color: 'var(--text)'
-                  }}>
-                    {currentFile.filtered === 'keep' ? 'KEPT' :
-                      currentFile.filtered === 'delete' ? 'DELETED' :
-                        currentFile.filtered.toUpperCase()}
-                  </Box>
-                )}
-                <Typography variant="body2">Size: {Math.round(currentFile.size / 1024 / 1024 * 100) / 100} MB</Typography>
-              </Box>
-            </Box>
-
-            {/* Media Display - reduced height, maintain aspect ratio */}
-            <Box
-              ref={mediaContainerRef}
-              sx={{
-                height: '60vh',
-                width: '100%',
-                backgroundColor: 'var(--bg)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 0,
-                overflow: 'hidden',
-              }}
-            >
-              {currentTab === 'pics' && (
-                <funscript-player
-                  key="pic-player"
-                  src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                  type="image"
-                  performer-id={performer.id}
-                  performer-name={performer.name}
-                  handy-connected={handyConnected ? 'true' : 'false'}
-                  mode="modal"
-                  tagassign="true"
-                  className="funscript-player-embed"
-                ></funscript-player>
-              )}
-              {currentTab === 'vids' && (
-                <funscript-player
-                  key="vid-player"
-                  src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                  type="video"
-                  performer-id={performer.id}
-                  performer-name={performer.name}
-                  handy-connected={handyConnected ? 'true' : 'false'}
-                  mode="standalone"
-                  tagassign="true"
-                  scenemanager="true"
-                  autoplay="true"
-                  className="funscript-player-embed"
-                ></funscript-player>
-              )}
-              {currentTab === 'funscript_vids' && (
-                <funscript-player
-                  key="fvid-player"
-                  src={`/api/files/raw?path=${encodeURIComponent(currentFile.path)}`}
-                  type="video"
-                  performer-id={performer.id}
-                  performer-name={performer.name}
-                  handy-connected={handyConnected ? 'true' : 'false'}
-                  funscriptmode="true"
-                  filtermode="true"
-                  mode="standalone"
-                  scenemanager="true"
-                  autoplay="true"
-                  funscripts={JSON.stringify(Array.isArray(currentFile.funscripts) ? currentFile.funscripts : [])}
-                  data-debug-funscripts={JSON.stringify(Array.isArray(currentFile.funscripts) ? currentFile.funscripts : [])}
-                  data-debug-performer={performer.name}
-                  className="funscript-player-embed"
-                ></funscript-player>
-              )}
-            </Box>
-
-            {/* Funscript Files Management - only show for funscript_vids tab */}
-            {currentTab === 'funscript_vids' && currentFile.funscripts && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="h6" gutterBottom>
-                  Funscript Files ({currentFile.funscripts.length})
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {currentFile.funscripts.map((funscript, index) => (
-                    <Box key={index} sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      p: 2,
-                      border: '1px solid #ddd',
-                      borderRadius: 1,
-                      bgcolor: 'background.paper',
-                      minHeight: 48
-                    }}>
-                      <Typography
-                        variant="body1"
-                        sx={{
-                          flex: 1,
-                          mr: 2,
-                          fontWeight: 500,
-                          color: 'text.primary',
-                          wordBreak: 'break-all'
-                        }}
-                      >
-                        {funscript}
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="primary"
-                          onClick={() => handleFunscriptAction('keep', funscript)}
-                        >
-                          Keep
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="error"
-                          onClick={() => handleFunscriptAction('delete', funscript)}
-                        >
-                          Delete
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleFunscriptRename(funscript)}
-                        >
-                          Rename
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="contained"
-                          color="secondary"
-                          startIcon={<UploadIcon />}
-                          onClick={() => handleFunscriptUpload(funscript)}
-                          sx={{
-                            backgroundColor: 'var(--accent)',
-                            '&:hover': { backgroundColor: '#7b1fa2' }
-                          }}
-                        >
-                          Upload to Handy
-                        </Button>
-                      </Box>
-                    </Box>
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {/* Navigation and Action Buttons - Always below media */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {/* Navigation */}
-              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<PrevIcon />}
-                  onClick={() => navigateWithFullscreen(Math.max(0, currentIndex - 1))}
-                  disabled={currentIndex === 0}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outlined"
-                  endIcon={<NextIcon />}
-                  onClick={() => navigateWithFullscreen(Math.min(files.length - 1, currentIndex + 1))}
-                  disabled={currentIndex === files.length - 1}
-                >
-                  Next
-                </Button>
-              </Box>
-
-              {/* Action Buttons */}
-              {currentTab === 'funscript' ? (
-                <>
-                  <Button
-                    variant="contained"
-                    color="success"
-                    onClick={() => handleFilterAction('keep')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Keep Video ({shortcuts.keep?.toUpperCase() || 'K'})
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="error"
-                    onClick={() => handleFilterAction('delete')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Delete Video ({shortcuts.delete?.toUpperCase() || 'D'})
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleUndo}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="contained"
-                    color="success"
-                    onClick={() => handleFilterAction('keep')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Keep ({shortcuts.keep?.toUpperCase() || 'K'})
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="error"
-                    onClick={() => handleFilterAction('delete')}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Delete ({shortcuts.delete?.toUpperCase() || 'D'})
-                  </Button>
-                  {currentTab === 'vids' && (
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      onClick={() => handleFilterAction('move_to_funscript')}
-                      sx={{ px: 4, py: 2, minWidth: 160 }}
-                    >
-                      Move to Funscript ({shortcuts.move_to_funscript?.toUpperCase() || 'F'})
-                    </Button>
-                  )}
-                  <Button
-                    variant="outlined"
-                    onClick={handleUndo}
-                    sx={{ px: 4, py: 2, minWidth: 120 }}
-                  >
-                    Undo Last ({shortcuts.undo?.toUpperCase() || 'U'})
-                  </Button>
-                </>
-              )}
-            </Box>
-          </Box>
-        )}
-        {files.length === 0 && !loadingFiles && (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <Typography variant="h6" color="text.secondary">
-              No files to filter in {currentTab.replace('_', ' ')}
-            </Typography>
-          </Box>
-        )}
-        <Snackbar
-          open={!!funpipeToast}
-          autoHideDuration={4000}
-          onClose={() => setFunpipeToast(null)}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        >
-          {funpipeToast ? (
-            <Alert severity={funpipeToast.severity} variant="filled" onClose={() => setFunpipeToast(null)}>
-              {funpipeToast.msg}
-            </Alert>
-          ) : undefined}
-        </Snackbar>
-      </>
-
-      {/* Mobile Pic Swiper — fullscreen Tinder-like mode for pics on mobile.
-          This and its Swipe Mode button were dropped by 090a408, the funpipe
-          commit, which swept in unrelated in-progress work on this file. */}
-      {showMobileSwiper && currentTab === 'pics' && currentFile && (
-        <MobilePicSwiper
-          files={files}
-          currentIndex={currentIndex}
-          onAction={(action) => handleFilterAction(action)}
-          onUndo={handleUndo}
-          onNavigate={(newIndex) => navigateWithFullscreen(newIndex)}
-          onClose={() => setShowMobileSwiper(false)}
-          onBack={handleBack}
-          currentFile={currentFile}
-          progress={progress}
-          shortcuts={shortcuts}
-          totalFiles={totalFiles}
-        />
-      )}
-    </Container>
+      <Snackbar
+        open={!!snack}
+        autoHideDuration={4000}
+        onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        {snack ? (
+          <Alert severity={snack.severity} variant="filled" onClose={() => setSnack(null)}>
+            {snack.msg}
+          </Alert>
+        ) : undefined}
+      </Snackbar>
+    </div>
   );
 }
 

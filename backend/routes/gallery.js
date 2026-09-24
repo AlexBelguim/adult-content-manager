@@ -4,6 +4,16 @@ const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
 const { getVideoDuration, formatDuration } = require('../utils/videoDuration');
+const { attachKnownDimensions } = require('../utils/mediaDimensions');
+
+// width/height(/duration) from the in-memory probe cache; unknown files are probed in the
+// background after the response, so they show up on the next request. Never blocks.
+function attachGalleryDimensions(galleryData) {
+  const mediaPath = (item) => item.filePath || (item.video ? path.join(item.path, item.video) : item.path);
+  attachKnownDimensions(galleryData.pics, 'image', mediaPath);
+  attachKnownDimensions(galleryData.vids, 'video', mediaPath);
+  attachKnownDimensions(galleryData.funscriptVids, 'video', mediaPath);
+}
 
 const ratingLookupStmt = db.prepare(`
   SELECT video_rating AS videoRating, funscript_rating AS funscriptRating
@@ -418,6 +428,8 @@ router.get('/genre/:name', async (req, res) => {
       }
     }
 
+    attachGalleryDimensions(galleryData);
+
     res.send({
       genre: name,
       ...galleryData,
@@ -463,6 +475,7 @@ async function getPerformerGalleryData(performerPath, section = 'all', sortBy = 
     }
   }
   
+  attachGalleryDimensions(data);
   return data;
 }
 

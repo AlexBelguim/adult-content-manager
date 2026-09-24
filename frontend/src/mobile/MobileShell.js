@@ -5,7 +5,9 @@ import {
 } from '@mui/material';
 import { Search, Sort, Refresh } from '@mui/icons-material';
 import MobilePerformerList from './MobilePerformerList';
-import MobileSorter from './MobileSorter';
+// The shared filter view carries its own phone layout (swipe, round buttons,
+// bottom sheet), so the phone shell no longer needs a separate sorter.
+import PerformerFilterView from '../components/PerformerFilterView';
 import MobileGallery from './MobileGallery';
 
 /**
@@ -176,8 +178,24 @@ function MobileShell() {
     load(); // counts and progress will have moved
   }, [load]);
 
+  // "Next performer" follows the list as the user sees it sorted.
+  const handleSorterNext = useCallback((currentId) => {
+    const i = visible.findIndex((p) => p.id === currentId);
+    const next = i >= 0 ? visible[i + 1] : null;
+    if (next) setSorting(next); else setSorting(null);
+    load();
+  }, [visible, load]);
+
   if (sorting) {
-    return <MobileSorter performer={sorting} onExit={handleSorterExit} />;
+    return (
+      <PerformerFilterView
+        performer={sorting}
+        onBack={handleSorterExit}
+        onNext={handleSorterNext}
+        handyIntegration={window.appHandyIntegration || null}
+        handyConnected={!!window.appHandyConnected}
+      />
+    );
   }
 
   if (viewing) {

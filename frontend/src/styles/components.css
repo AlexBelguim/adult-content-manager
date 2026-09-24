@@ -166,17 +166,35 @@ a[href].MuiBox-root:hover {
 }
 
 /* ─── Scrollbars ──────────────────────────────────────────────── */
+/* Both token sets are dark. Without this, anything the rules below don't
+   reach (native selects, number spinners, the page scrollbar before the
+   stylesheet loads) falls back to the light system look. */
+:root {
+  color-scheme: dark;
+}
+
+/* Firefox has no ::-webkit-scrollbar. Scoped with @supports because Chrome
+   121+ lets scrollbar-color override the pseudo-elements below. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--surface);
+  background: transparent;
 }
 
+/* --raised on --surface was two near-identical greys: the thumb was there
+   but you could not see it. */
 ::-webkit-scrollbar-thumb {
-  background: var(--raised);
+  background: var(--faint);
   border-radius: var(--radius-sm, 4px);
 }
 

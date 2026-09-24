@@ -2,19 +2,14 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, IconButton, Chip, Alert,
-  LinearProgress, Stack, Collapse, Tooltip, Divider,
+  LinearProgress, Stack, Tooltip,
   TextField, Checkbox, Snackbar
 } from '@mui/material';
-import { PageShell, PageHeader, Panel, StatRow, SPACE, ICON, iconBtnSx } from '../components/layout';
+import { PageShell, Panel, StatRow, SPACE, iconBtnSx } from '../components/layout';
+import useJobs, { isActive } from '../hooks/useJobs';
 import MovieIcon from '@mui/icons-material/Movie';
-import DeleteIcon from '@mui/icons-material/Delete';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import StopIcon from '@mui/icons-material/Stop';
 import QueueIcon from '@mui/icons-material/Queue';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -100,20 +95,17 @@ function fmtBytes(b) {
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(b / 1024 ** 2).toFixed(0)} MB`;
 }
 
-function fmtElapsed(s) {
-  if (!s) return '';
-  const m = Math.floor(s / 60);
-  return m > 0 ? `${m}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`;
-}
-
+/**
+ * Funpipe — the funscript library and the review editor. The queue itself
+ * (job list, Start / Stop / Clear done, log tail, worker state) lives on /jobs
+ * under the Funscripts filter; this page only adds videos to it.
+ */
 export default function FunpipePage() {
   const navigate = useNavigate();
   const [config, setConfig] = useState({ url: '', aiServerUrl: '' });
 
-  const [queue, setQueue] = useState({ running: false, jobs: [], ok: true });
   const [library, setLibrary] = useState({ videos: [], counts: {}, total: 0 });
   const [libraryLoading, setLibraryLoading] = useState(true);
-  const [expandedJob, setExpandedJob] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [statusFilter, setStatusFilter] = useState(null);
   const [query, setQuery] = useState('');
@@ -121,7 +113,9 @@ export default function FunpipePage() {
   const [editor, setEditor] = useState({ running: false, url: null });
   const [editorBusy, setEditorBusy] = useState(false);
 
-  const pollRef = useRef(null);
+  // Slow poll: it only has to notice when the queue drains (to rescan the
+  // library) and keep the Online / Offline chip and GPU banner honest.
+  const { jobs, services, refresh: refreshJobs } = useJobs({ activeMs: 5000, idleMs: 20000, withServices: true });
 
   // ── config ────────────────────────────────────────────────
   useEffect(() => {
@@ -129,15 +123,6 @@ export default function FunpipePage() {
   }, []);
 
   // ── data loading ──────────────────────────────────────────
-  const loadQueue = useCallback(async () => {
-    try {
-      const res = await fetch('/api/funpipe/queue');
-      setQueue(await res.json());
-    } catch (err) {
-      setQueue({ running: false, jobs: [], ok: false, error: err.message });
-    }
-  }, []);
-
   const loadLibrary = useCallback(async (refresh = false) => {
     setLibraryLoading(true);
     try {
@@ -158,16 +143,7 @@ export default function FunpipePage() {
     } catch { /* AI server offline — the banner already says so */ }
   }, []);
 
-  const [gpuWarning, setGpuWarning] = useState(null);
-  const loadGpu = useCallback(async () => {
-    try {
-      const g = await (await fetch('/api/funpipe/health')).json();
-      setGpuWarning(g.gpu_warning || null);
-    } catch { setGpuWarning(null); }
-  }, []);
-
-  useEffect(() => { loadQueue(); loadLibrary(); loadEditor(); loadGpu(); },
-    [loadQueue, loadLibrary, loadEditor, loadGpu]);
+  useEffect(() => { loadLibrary(); loadEditor(); }, [loadLibrary, loadEditor]);
 
   // The editor is a child process of the AI server; it can exit on its own.
   const toggleEditor = async () => {
@@ -184,21 +160,13 @@ export default function FunpipePage() {
     }
   };
 
-  // Poll fast while something is actually running, slowly otherwise.
-  useEffect(() => {
-    const active = queue.jobs?.some(j => j.status === 'running' || j.status === 'queued');
-    const interval = active ? 3000 : 10000;
-    pollRef.current = setInterval(loadQueue, interval);
-    return () => clearInterval(pollRef.current);
-  }, [queue.jobs, loadQueue]);
-
-  // When the last job finishes, the on-disk state changed — re-read the library.
+  // When the last funpipe job finishes, the on-disk state changed — re-read the library.
+  const funpipeActive = jobs.some(j => j.type === 'funpipe' && isActive(j));
   const prevActive = useRef(false);
   useEffect(() => {
-    const active = !!queue.jobs?.some(j => j.status === 'running' || j.status === 'queued');
-    if (prevActive.current && !active) loadLibrary(true);
-    prevActive.current = active;
-  }, [queue.jobs, loadLibrary]);
+    if (prevActive.current && !funpipeActive) loadLibrary(true);
+    prevActive.current = funpipeActive;
+  }, [funpipeActive, loadLibrary]);
 
   // ── queue controls ────────────────────────────────────────
   const post = async (path, body) => {
@@ -220,7 +188,7 @@ export default function FunpipePage() {
     } else {
       setToast({ severity: 'warning', msg: result.error || 'funpipe accepted nothing — already processed?' });
     }
-    loadQueue();
+    refreshJobs();
     loadLibrary(true);
   };
 
@@ -238,7 +206,10 @@ export default function FunpipePage() {
 
   const selectableInView = filtered.filter(v => QUEUEABLE.includes(v.status));
   const allInViewSelected = selectableInView.length > 0 && selectableInView.every(v => selected.has(v.path));
-  const online = queue.ok !== false;
+  // Optimistic until the first services poll answers, as the old queue poll was.
+  const online = services ? services.funpipe.online : true;
+  const gpuWarning = services?.gpu.warning || null;
+  const funpipeCount = jobs.filter(j => j.type === 'funpipe' && isActive(j)).length;
 
   const toggle = (path) => setSelected(s => {
     const next = new Set(s);
@@ -254,8 +225,7 @@ export default function FunpipePage() {
     <PageShell>
       {/* No title block and no back arrow: the toolbar logo is the way home,
           and "Funpipe" was stating what the Funscript library panel below
-          already says. The GPU explanation moved to the queue panel, where it
-          is about something you can actually see. Just the controls. */}
+          already says. Just the controls. */}
       <Box
         sx={{
           display: 'flex', alignItems: 'center', gap: SPACE.sm,
@@ -271,6 +241,15 @@ export default function FunpipePage() {
             color: online ? 'var(--ok)' : 'var(--bad)'
           }}
         />
+        <Button
+          size="small"
+          variant="outlined"
+          endIcon={<OpenInNewIcon sx={{ fontSize: '14px !important' }} />}
+          onClick={() => navigate('/jobs')}
+          sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+        >
+          {funpipeCount > 0 ? `${funpipeCount} in queue — view in Jobs` : 'View queue in Jobs'}
+        </Button>
         <Tooltip title={editor.running
           ? 'Shut the review editor down when you\'re done — it holds the video files open'
           : 'Start the funscript review editor on the GPU machine'}>
@@ -317,92 +296,6 @@ export default function FunpipePage() {
           card rather than waiting — but expect both to be slower.
         </Alert>
       )}
-
-      {/* ── queue ── */}
-      <Panel sx={{ mb: SPACE.lg }}>
-        <Box>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: SPACE.sm, flexWrap: 'wrap' }}>
-            <QueueIcon sx={{ width: ICON.action, height: ICON.action, color: 'var(--dim)' }} />
-            <Typography variant="subtitle1" sx={{ fontWeight: 620, color: 'var(--text)' }}>Queue</Typography>
-            <Chip
-              size="small"
-              variant="outlined"
-              label={queue.running ? 'Worker running' : 'Idle'}
-              sx={{
-                borderColor: queue.running ? 'var(--accent)' : 'var(--line-strong)',
-                color: queue.running ? 'var(--accent)' : 'var(--muted)'
-              }}
-            />
-            <Box sx={{ flex: 1 }} />
-            <Button size="small" startIcon={<PlayArrowIcon />} disabled={!online || queue.running}
-                    onClick={() => post('/api/funpipe/queue/start').then(loadQueue)}>Start</Button>
-            <Button size="small" startIcon={<StopIcon />} disabled={!online || !queue.running}
-                    onClick={() => post('/api/funpipe/queue/stop').then(loadQueue)}>Stop</Button>
-            <Button size="small" startIcon={<CleaningServicesIcon />} disabled={!online}
-                    onClick={() => post('/api/funpipe/queue/clear-done').then(loadQueue)}>Clear done</Button>
-          </Stack>
-
-          {(!queue.jobs || queue.jobs.length === 0) && (
-            <Typography variant="body2" sx={{ color: 'var(--muted)' }}>
-              Nothing queued. Videos moved to a funscript folder land here automatically —
-              generation shares the AI Inference App's GPU, so it won't compete with image
-              inference or training.
-            </Typography>
-          )}
-
-          <Stack divider={<Divider />}>
-            {(queue.jobs || []).map(job => (
-              <Box key={job.id} sx={{ py: 1 }}>
-                <Stack direction="row" alignItems="center" spacing={1}>
-                  <Typography variant="body2" sx={{ flex: 1, wordBreak: 'break-all' }}>{job.name}</Typography>
-                  {job.stage && <Chip size="small" label={job.stage} />}
-                  <Chip size="small" label={job.status}
-                        color={job.status === 'running' ? 'info'
-                             : job.status === 'done' ? 'success'
-                             : job.status === 'failed' ? 'error' : 'default'} />
-                  {job.elapsed > 0 && (
-                    <Typography variant="caption" color="text.secondary">{fmtElapsed(job.elapsed)}</Typography>
-                  )}
-                  <IconButton size="small" onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}>
-                    {expandedJob === job.id ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                  </IconButton>
-                  <IconButton size="small" disabled={job.status === 'running'}
-                              onClick={() => post('/api/funpipe/queue/remove', { id: job.id }).then(loadQueue)}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Stack>
-
-                {job.status === 'running' && (
-                  <LinearProgress
-                    sx={{ mt: 0.5 }}
-                    variant={job.progress != null ? 'determinate' : 'indeterminate'}
-                    value={job.progress != null ? job.progress * 100 : undefined}
-                  />
-                )}
-                {job.total_windows > 0 && job.status === 'running' && (
-                  <Typography variant="caption" color="text.secondary">
-                    window {job.windows_done || 0} / {job.total_windows}
-                  </Typography>
-                )}
-
-                <Collapse in={expandedJob === job.id}>
-                  <Box component="pre" sx={{
-                    mt: 1, p: SPACE.sm,
-                    bgcolor: 'var(--bg)',
-                    border: '1px solid var(--line)',
-                    borderRadius: 'var(--radius-sm, 4px)',
-                    color: 'var(--dim)',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                    fontSize: '0.75rem', overflowX: 'auto', maxHeight: 200
-                  }}>
-                    {(job.log_tail || []).join('\n') || 'no output yet'}
-                  </Box>
-                </Collapse>
-              </Box>
-            ))}
-          </Stack>
-        </Box>
-      </Panel>
 
       {/* ── library ── */}
       {/* Status counts double as the filter. "What needs doing" is the only
@@ -574,7 +467,7 @@ export default function FunpipePage() {
                               setToast(r.queued
                                 ? { severity: 'success', msg: `Queued ${v.name}` }
                                 : { severity: 'warning', msg: r.error || 'funpipe accepted nothing' });
-                              loadQueue();
+                              refreshJobs();
                             }}>
                               <QueueIcon />
                             </IconButton>
