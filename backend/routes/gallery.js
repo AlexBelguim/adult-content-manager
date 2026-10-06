@@ -910,6 +910,7 @@ async function getFunscriptVideosRecursive(dirPath, sortBy = 'name', sortOrder =
             videos.push({
               name: videoBaseName,
               path: currentPath,
+              filePath: videoPath,
               url: `/api/files/raw?path=${encodeURIComponent(videoPath)}`,
               thumbnail: `/api/files/video-thumbnail?path=${encodeURIComponent(videoPath)}`,
               type: 'funscript_video',

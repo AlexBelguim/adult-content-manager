@@ -16,6 +16,14 @@ const SIZE_MAX = 480;
 const TAB_KEYS = ['pics', 'vids', 'funscriptVids'];
 const TAB_ITEM_TYPES = { pics: 'image', vids: 'video', funscriptVids: 'funscript_video' };
 
+function resolveFilePath(rawItem) {
+  if (rawItem.filePath) return rawItem.filePath;
+  const { path: p, video } = rawItem;
+  if (!p || !video || p.endsWith(video)) return p;
+  const sep = p.includes('/') && !p.includes('\\') ? '/' : '\\';
+  return p.replace(/[\\/]+$/, '') + sep + video;
+}
+
 const readStoredSize = () => {
   try {
     const stored = Number(localStorage.getItem(SIZE_KEY));
@@ -678,8 +686,11 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       ['pics', 'vids', 'funscriptVids'].forEach(type => {
         data[type] = data[type].map(rawItem => {
           // The tiles and the player need path / type / url / thumbnail on every
-          // item; this endpoint does not always send all four.
-          const itemPath = rawItem.path || rawItem.filePath;
+          // item; this endpoint does not always send all four. For genre
+          // funscript videos `path` is the video's FOLDER, with the file name in
+          // `video` (and sometimes the full file in `filePath`); the player looks
+          // up scripts, ratings and tags by path, so resolve it to the file.
+          const itemPath = resolveFilePath(rawItem);
           const encodedPath = encodeURIComponent(itemPath || '');
           const item = {
             ...rawItem,
