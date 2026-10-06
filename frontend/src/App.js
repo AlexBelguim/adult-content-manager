@@ -133,6 +133,25 @@ function LicenseModal({ open, onSubmit, onCancel, defaultKey, verifying, error }
   );
 }
 
+const PHONE_LANDSCAPE = '(max-height:500px) and (orientation: landscape)';
+
+// Like MUI's useMediaQuery, but also re-checks on window resize: a rotation
+// always fires the media-query change event, some embedded webviews do not.
+function usePhoneLandscape() {
+  const [matches, setMatches] = useState(() => window.matchMedia(PHONE_LANDSCAPE).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE_LANDSCAPE);
+    const update = () => setMatches(mq.matches);
+    mq.addEventListener('change', update);
+    window.addEventListener('resize', update);
+    return () => {
+      mq.removeEventListener('change', update);
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+  return matches;
+}
+
 // Component that uses the theme
 function AppContent({ onThemeChange, currentThemeId }) {
   const [mode, setMode] = useState('gallery'); // 'gallery' or 'filter'
@@ -492,6 +511,10 @@ function AppContent({ onThemeChange, currentThemeId }) {
   // prop meant editing five call sites and missing one failed silently. One
   // object, one helper — and adding chrome to a route is now a one-line change.
   const isPhone = useIsPhone();
+  // A phone held sideways has ~390px of height; the app bar wraps to two rows
+  // there and leaves the duel almost no room, so Smart Compare drops the
+  // chrome in that case (its own Back button still leads out).
+  const phoneLandscape = usePhoneLandscape();
   const toolbarProps = {
     mode, subMode,
     onModeChange: handleModeChange, onSubModeChange: handleSubModeChange,
@@ -569,7 +592,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
               <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
             )} />
             <Route path="/group-rate" element={shell(<GroupRatePage />)} />
-            <Route path="/smart-compare" element={shell(<SmartComparePage />)} />
+            <Route path="/smart-compare" element={phoneLandscape ? <SmartComparePage /> : shell(<SmartComparePage />)} />
             <Route path="/smart-filter/:performerId" element={shell(<SmartFilterPage />)} />
             <Route path="/taste-dashboard" element={shell(<TasteDashboardPage />)} />
             {/* Chrome-free: a full-bleed comparison tool opened in its own tab
