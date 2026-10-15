@@ -158,6 +158,19 @@ function AppContent({ onThemeChange, currentThemeId }) {
   const [subMode, setSubMode] = useState('performer'); // 'performer' or 'content'
   const [handyCode, setHandyCode] = useState('');
   const [handyConnected, setHandyConnected] = useState(false);
+  // The connection only lives in this component's state, so a fresh document
+  // (the player opened in a new tab, a reload on /player) came up "not
+  // connected" while the main page still was. Read what the last session
+  // left in localStorage before the persist effect below overwrites it with
+  // `false`, and reconnect with it once the SDK is up.
+  const [restoreHandyCode] = useState(() => {
+    try {
+      if (localStorage.getItem('handyConnected') !== 'true') return '';
+      return localStorage.getItem('handyCode') || localStorage.getItem('handyConnectionCode') || '';
+    } catch {
+      return '';
+    }
+  });
   const [basePath, setBasePath] = useState(null);
   const [handyIntegration, setHandyIntegration] = useState(null);
   // License check disabled
@@ -260,6 +273,20 @@ function AppContent({ onThemeChange, currentThemeId }) {
         const success = await integration.initialize();
         if (success) {
           setHandyIntegration(integration);
+          if (restoreHandyCode) {
+            try {
+              const reconnected = await integration.connect(restoreHandyCode);
+              if (reconnected) {
+                setHandyCode(restoreHandyCode);
+                setHandyConnected(true);
+                console.log('🔄 Restored Handy connection from the previous page');
+              } else {
+                console.warn('⚠️ Could not restore the Handy connection; connect again from the toolbar');
+              }
+            } catch (error) {
+              console.warn('⚠️ Could not restore the Handy connection:', error);
+            }
+          }
         }
         return success;
       }
@@ -287,7 +314,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
         }, 10000);
       }
     });
-  }, []);
+  }, [restoreHandyCode]);
 
   useEffect(() => {
     // Check if folders exist on startup

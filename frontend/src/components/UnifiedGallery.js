@@ -167,55 +167,11 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     + (scoreFilterActivity.video ? 1 : 0)
     + (scoreFilterActivity.funscript ? 1 : 0);
 
-  // Check localStorage for persisted connection state
-  useEffect(() => {
-    const storedConnected = localStorage.getItem('handyConnected') === 'true';
-    const storedCode = localStorage.getItem('handyCode') || '';
-
-    // Use stored state if props don't indicate connection
-    const effectiveConnected = handyConnected || storedConnected;
-    const effectiveCode = handyCode || storedCode;
-
-    window.appHandyConnected = effectiveConnected;
-
-    // Try to restore connection if we have a code but aren't connected
-    if (effectiveCode && !effectiveConnected && window.Handy) {
-      initializeAndConnect(effectiveCode);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handyConnected, handyCode, handyIntegration]);
-
-  const initializeAndConnect = async (connectionCode) => {
-    try {
-      // Use the HandyIntegration instance instead of direct SDK
-      if (handyIntegration) {
-        const success = await handyIntegration.connect(connectionCode);
-        if (success) {
-          window.appHandyConnected = true;
-          localStorage.setItem('handyConnected', 'true');
-        } else {
-          console.warn('❌ Failed to restore Handy connection via HandyIntegration');
-        }
-      } else {
-        // Fallback to direct SDK if HandyIntegration not available
-        if (!window.handyInstance && window.Handy) {
-          window.handyInstance = window.Handy.init();
-        }
-
-        if (window.handyInstance) {
-          const result = await window.handyInstance.connect(connectionCode);
-          if (result === window.Handy.ConnectResult.CONNECTED) {
-            window.appHandyConnected = true;
-            localStorage.setItem('handyConnected', 'true');
-          } else {
-            console.warn('❌ Failed to restore Handy connection in UnifiedGallery');
-          }
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error restoring Handy connection:', error);
-    }
-  };
+  // This page opens in a new tab, so it used to restore the Handy connection
+  // itself from localStorage. That only set window.appHandyConnected, which
+  // FunscriptPanel ignores whenever the `handyConnected` prop is defined, so
+  // the panel still said "not connected". App now restores the connection on
+  // startup and passes the real state down; nothing to do here.
 
   useEffect(() => {
     // Parse URL parameters using React Router
