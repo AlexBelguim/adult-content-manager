@@ -295,7 +295,7 @@ router.post('/undo', (req, res) => {
 
   const pid = parseInt(performer_id);
   try {
-    const lastPair = db.prepare('SELECT * FROM pairwise_pairs WHERE performer_id = ? ORDER BY id DESC LIMIT 1').get(pid);
+    const lastPair = db.prepare('SELECT * FROM pairwise_pairs WHERE performer_id = ? AND source IS NULL ORDER BY id DESC LIMIT 1').get(pid);
     if (!lastPair) return res.status(400).json({ error: 'No vote to undo' });
 
     const winner = getImageScore(pid, lastPair.winner);

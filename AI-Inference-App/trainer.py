@@ -1,6 +1,6 @@
 """
 Training module for AI Inference App.
-Supports: binary, pairwise, CLIP siamese, performer ranker and rank-conditioned binary.
+Supports: binary, pairwise, CLIP siamese, CLIP taste, performer ranker and rank-conditioned binary.
 Runs in a background thread so the server stays responsive.
 """
 import os, sys, time, random, json, threading, torch, torch.nn as nn
@@ -89,6 +89,26 @@ def performer_from_path(path):
     if perf == 'pics':
         perf = p.parent.parent.name
     return perf
+
+def load_labeller_pairs():
+    """(winner, loser, winner performer, loser performer) pairs from the old labeller (Jan 2026 export of
+    extra/vision-llm-pairwise), kept on this PC in training_data/labeller_pairs.json. Its pictures are
+    local copies that can't be matched to NAS files. CLIP Siamese (1st order) uses the same-performer
+    pairs, CLIP Taste (2nd order) the cross-performer ones too."""
+    path = Path(__file__).parent / 'training_data' / 'labeller_pairs.json'
+    if not path.exists(): return []
+    pairs = json.loads(path.read_text(encoding='utf-8'))['pairs']
+    return [(p['winner'], p['loser'], p['winner_performer'], p['loser_performer']) for p in pairs]
+
+# Hand-pair sources. Rank images pairs have no source in pairwise_pairs; the other two are legacy
+# and are used only while the training page's "Use legacy pairs" is on (config['use_legacy']).
+PAIR_SOURCES = {'rank': 'Rank images', 'pairwise_db': 'pairwise.db import', 'labeller': 'old labeller file'}
+
+def log_pair_sources(totals, used):
+    """One log line per source. totals: {source: pairs given}; used: (source, held_out) per pair with both pictures."""
+    for src, total in totals.items():
+        held = [h for s, h in used if s == src]
+        tlog(f"  🤝 {PAIR_SOURCES[src]}: {len(held)}/{total} pairs with both pictures → {held.count(False)} train, {held.count(True)} val")
 
 def split_performers(performer_names, val_frac=0.15, seed=42):
     """Hold out a fraction of performers entirely. Returns (train, val)
@@ -935,13 +955,36 @@ def train_ranked_binary(config):
     return {'model': str(out_path.name), 'best_val_acc': best_acc}
 
 
+def embed_clip(backbone, paths, device):
+    """Embed every picture once with the frozen CLIP. Returns (model, {path: row}, features);
+    pictures that can't be opened are skipped."""
+    processor = AutoImageProcessor.from_pretrained(backbone)
+    model = ClipPreferenceModel(backbone).to(device).eval()
+    training_state['phase'] = 'embedding'
+    training_state['total_batches'] = (len(paths) + 31) // 32
+    idx, feats = {}, []
+    with torch.no_grad(), torch.autocast(device.type, enabled=device.type == 'cuda'):
+        for bi, i in enumerate(range(0, len(paths), 32), 1):
+            imgs = []
+            for p in paths[i:i + 32]:
+                try: imgs.append(Image.open(p).convert('RGB'))
+                except Exception: continue
+                idx[p] = len(idx)
+            if imgs:
+                feats.append(model.features(processor(images=imgs, return_tensors='pt')['pixel_values'].to(device)).float())
+            training_state['batch'] = bi
+    tlog(f"  🖼️ Embedded {len(idx)} pictures")
+    return model, idx, torch.cat(feats)
+
+
 def train_clip_siamese(config):
     """Train the CLIP picture ranker (ported from extra/vision-llm-pairwise/train_pairwise.py).
     CLIP stays frozen, so every picture is embedded once and only the score head trains,
     with RankNet on two kinds of winner > loser pairs:
       - kept beats deleted, within one performer (train performers, resampled every epoch);
-      - the hand-made pairs from Rank images (pairwise_pairs).
-    Val: kept > deleted pairs of held-out performers, plus hand pairs whose winner is one of them.
+      - hand-made same-performer pairs: Rank images and the pairs imported from the old pairwise.db
+        (both in pairwise_pairs, told apart by `source`), plus the old labeller's local file.
+    Val: kept > deleted pairs of held-out performers, plus hand pairs of held-out performers.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     backbone = 'openai/clip-vit-large-patch14-336'
@@ -959,31 +1002,18 @@ def train_clip_siamese(config):
         raise ValueError("No performers have both keep and delete images.")
     train_performers, val_performers = split_performers(both, val_frac=0.15)
     val_set = set(val_performers)
-    hand = [(resolve_path(p['winner']), resolve_path(p['loser'])) for p in config.get('pairs', [])]
-    hand = [(w, l) for w, l in hand if w and l]
-    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout) | "
-         f"hand pairs with both pictures found: {len(hand)}/{len(config.get('pairs', []))}")
+    use_legacy = config.get('use_legacy', True)
+    tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout) | legacy pairs {'on' if use_legacy else 'off'}")
+    sent = [p for p in config.get('pairs', []) if use_legacy or not p.get('source')]
+    labeller = [(w, l, wp) for w, l, wp, lp in load_labeller_pairs() if wp == lp] if use_legacy else []
+    hand = [(resolve_path(p['winner']), resolve_path(p['loser']), p.get('source') or 'rank') for p in sent]
+    hand = [(w, l, src, performer_from_path(w)) for w, l, src in hand if w and l]
+    hand += [(w, l, 'labeller', perf) for w, l, perf in labeller]
     config['_keep_count'] = sum(len(v) for v in keep_map.values())
     config['_delete_count'] = sum(len(v) for v in delete_map.values())
 
-    paths = sorted({p for perf in both for p in keep_map[perf] + delete_map[perf]} | {p for pair in hand for p in pair})
-    processor = AutoImageProcessor.from_pretrained(backbone)
-    model = ClipPreferenceModel(backbone).to(device).eval()
-    training_state['phase'] = 'embedding'
-    training_state['total_batches'] = (len(paths) + 31) // 32
-    idx, feats = {}, []
-    with torch.no_grad(), torch.autocast(device.type, enabled=device.type == 'cuda'):
-        for bi, i in enumerate(range(0, len(paths), 32), 1):
-            imgs = []
-            for p in paths[i:i + 32]:
-                try: imgs.append(Image.open(p).convert('RGB'))
-                except Exception: continue
-                idx[p] = len(idx)
-            if imgs:
-                feats.append(model.features(processor(images=imgs, return_tensors='pt')['pixel_values'].to(device)).float())
-            training_state['batch'] = bi
-    feats = torch.cat(feats)
-    tlog(f"  🖼️ Embedded {len(idx)} pictures")
+    paths = sorted({p for perf in both for p in keep_map[perf] + delete_map[perf]} | {p for w, l, _, _ in hand for p in (w, l)})
+    model, idx, feats = embed_clip(backbone, paths, device)
 
     def kept_beats_deleted(performers, n):
         out = []
@@ -994,9 +1024,13 @@ def train_clip_siamese(config):
                 out += [(random.choice(k), random.choice(d)) for _ in range(min(n, len(k) * len(d)))]
         return out
 
-    hand_idx = [(idx[w], idx[l], performer_from_path(w) in val_set) for w, l in hand if w in idx and l in idx]
-    hand_train = [(w, l) for w, l, held_out in hand_idx if not held_out]
-    val_pairs = kept_beats_deleted(val_performers, 200) + [(w, l) for w, l, held_out in hand_idx if held_out]
+    hand_idx = [(idx[w], idx[l], src, perf in val_set) for w, l, src, perf in hand if w in idx and l in idx]
+    totals = {'rank': sum(not p.get('source') for p in sent)}
+    if use_legacy:
+        totals.update(pairwise_db=sum(p.get('source') == 'pairwise_db' for p in sent), labeller=len(labeller))
+    log_pair_sources(totals, [(s, h) for _, _, s, h in hand_idx])
+    hand_train = [(w, l) for w, l, _, held_out in hand_idx if not held_out]
+    val_pairs = kept_beats_deleted(val_performers, 200) + [(w, l) for w, l, _, held_out in hand_idx if held_out]
     tlog(f"  🧪 Val pair set: {len(val_pairs)} pairs from held-out performers")
     val_winners = torch.tensor([w for w, _ in val_pairs], device=device)
     val_losers = torch.tensor([l for _, l in val_pairs], device=device)
@@ -1061,10 +1095,191 @@ def train_clip_siamese(config):
     return {'model': f'clip_siamese/{out_path.name}', 'best_val_acc': best_acc}
 
 
+def auc(pos, neg):
+    """Share of (pos, neg) score pairs where pos is higher; ties count half."""
+    d = pos[:, None] - neg[None, :]
+    return ((d > 0).float().mean() + 0.5 * (d == 0).float().mean()).item()
+
+
+def train_clip_taste(config):
+    """CLIP Taste (2nd order): a keep % for any picture, with a fixed 50% line.
+    CLIP stays frozen, so every picture is embedded once and the score head trains on two losses:
+      - BCE keep/delete: kept pictures 1; deleted pictures of kept performers and every picture of a
+        delete-only performer (disliked, or blacklisted per config['blacklisted_performers']) 0;
+      - RankNet on winner > loser pairs, resampled every epoch: kept > deleted within a performer; kept > a picture
+        of a disliked or blacklisted performer; disliked > blacklisted (half weight); kept > a deleted picture of a
+        performer rated 2+ stars lower; plus the hand pairs, across performers too. Stars only pick pairs:
+        kept-vs-kept pairs from stars would teach who, not what.
+    15% of the performers of every level are held out. Kept performers with deletes are split exactly like
+    CLIP Siamese, so both models test on the same held-out performers.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = 'openai/clip-vit-large-patch14-336'
+    config['backbone'] = backbone  # the DINO backbone picker on the page does not apply
+    epochs = config.get('epochs', 8)
+    bs = config.get('batch_size', 16)
+    per_perf = config.get('synthetic_pairs_per_epoch') or 500
+    use_legacy = config.get('use_legacy', True)
+    base_path = config.get('base_path', '')
+    stars = config.get('performer_ratings') or {}
+    blacklisted = set(config.get('blacklisted_performers') or [])
+
+    tlog(f"📋 CLIP Taste Training | {epochs} epochs | {per_perf} pairs of each kind per performer per epoch | legacy pairs {'on' if use_legacy else 'off'}")
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+    if not keep_map or not delete_map:
+        raise ValueError("Need both keep and delete images.")
+    both = sorted(set(keep_map) & set(delete_map))
+    rejected = set(delete_map) - set(keep_map)  # a blacklisted performer with a keep folder counts as kept
+    levels = {'kept': sorted(keep_map), 'disliked': sorted(rejected - blacklisted), 'blacklisted': sorted(rejected & blacklisted)}
+    val = set(split_performers(both)[1])
+    for group in ([p for p in keep_map if p not in delete_map], levels['disliked'], levels['blacklisted']):
+        val |= set(split_performers(group)[1])
+    for lvl, perfs in levels.items():
+        n = sum(len((keep_map if lvl == 'kept' else delete_map)[p]) for p in perfs)
+        tlog(f"  🎭 {lvl}: {len(perfs)} performers, {n} pictures, {sum(p in val for p in perfs)} performers held out")
+    tlog(f"  🎭 deleted pictures of kept performers: {sum(len(delete_map[p]) for p in both)} ({len(both)} performers)")
+
+    sent = [p for p in config.get('pairs', []) if use_legacy or not p.get('source')]
+    labeller = load_labeller_pairs() if use_legacy else []
+    hand = [(resolve_path(p['winner']), resolve_path(p['loser']), p.get('source') or 'rank') for p in sent]
+    hand = [(w, l, src, performer_from_path(w), performer_from_path(l)) for w, l, src in hand if w and l]
+    hand += [(w, l, 'labeller', wp, lp) for w, l, wp, lp in labeller]
+    config['_keep_count'] = sum(len(v) for v in keep_map.values())
+    config['_delete_count'] = sum(len(v) for v in delete_map.values())
+
+    paths = sorted({p for v in [*keep_map.values(), *delete_map.values()] for p in v} | {p for h in hand for p in h[:2]})
+    model, idx, feats = embed_clip(backbone, paths, device)
+
+    K = {p: [idx[x] for x in v if x in idx] for p, v in keep_map.items()}
+    D = {p: [idx[x] for x in v if x in idx] for p, v in delete_map.items()}
+    kept_tr = [p for p in levels['kept'] if p not in val and K[p]]
+    dis_tr = [p for p in levels['disliked'] if p not in val and D[p]]
+    blk_tr = [p for p in levels['blacklisted'] if p not in val and D[p]]
+    star_winners = {b: [a for a in kept_tr if a in stars and stars[a] - stars[b] >= 2] for b in kept_tr if b in stars and D.get(b)}
+    star_winners = {b: w for b, w in star_winners.items() if w}
+
+    hand_idx = [(idx[w], idx[l], src, wp in val or lp in val) for w, l, src, wp, lp in hand if w in idx and l in idx]
+    totals = {'rank': sum(not p.get('source') for p in sent)}
+    if use_legacy:
+        totals.update(pairwise_db=sum(p.get('source') == 'pairwise_db' for p in sent), labeller=len(labeller))
+    log_pair_sources(totals, [(s, h) for _, _, s, h in hand_idx])
+    hand_train = [(w, l, 1.0) for w, l, _, held_out in hand_idx if not held_out]
+
+    def auto_pairs():
+        r = random.choice
+        within, cross, dis_blk, star = [], [], [], []
+        for p in kept_tr:
+            if D.get(p):
+                within += [(r(K[p]), r(D[p]), 1.0) for _ in range(min(per_perf, len(K[p]) * len(D[p])))]
+            if dis_tr or blk_tr:
+                cross += [(r(K[p]), r(D[r(dis_tr + blk_tr)]), 1.0) for _ in range(per_perf)]
+        if dis_tr:
+            for b in blk_tr:
+                dis_blk += [(r(D[r(dis_tr)]), r(D[b]), 0.5) for _ in range(per_perf)]
+        for b, winners in star_winners.items():
+            star += [(r(K[r(winners)]), r(D[b]), 1.0) for _ in range(per_perf)]
+        return within, cross, dis_blk, star
+
+    # Held-out pictures: kept against rejected (deleted pictures of kept performers, disliked, blacklisted)
+    t = lambda ix: torch.tensor(ix, dtype=torch.long, device=device)
+    val_pos = t([i for p in levels['kept'] if p in val for i in K[p]])
+    val_neg = {lvl: t([i for p in perfs if p in val for i in D[p]]) for lvl, perfs in
+               (('deleted', both), ('disliked', levels['disliked']), ('blacklisted', levels['blacklisted']))}
+    all_neg = torch.cat(list(val_neg.values()))
+    within_perfs = [p for p in both if p in val and len(K[p]) >= 5 and len(D[p]) >= 5]  # as in the 2026-10-16 test
+
+    def evaluate(scores):
+        below = lambda ix: round((scores[ix] < 0).float().mean().item(), 4) if len(ix) else None
+        return {
+            'auc': round(auc(scores[val_pos], scores[all_neg]), 4),
+            'acc50': round(((scores[val_pos] >= 0).sum() + (scores[all_neg] < 0).sum()).item() / (len(val_pos) + len(all_neg)), 4),
+            'within_auc': round(sum(auc(scores[t(K[p])], scores[t(D[p])]) for p in within_perfs) / len(within_perfs), 4) if within_perfs else None,
+            'kept_above': round((scores[val_pos] >= 0).float().mean().item(), 4),
+            **{f'{lvl}_below': below(ix) for lvl, ix in val_neg.items()},
+        }
+
+    train_pics = [(i, 1.0) for p in kept_tr for i in K[p]] + [(i, 0.0) for p in kept_tr + dis_tr + blk_tr for i in D.get(p, [])]
+    pic_idx = t([i for i, _ in train_pics])
+    pic_y = torch.tensor([y for _, y in train_pics], device=device)
+    tlog(f"  🧪 Held out: {len(val)} performers, {len(val_pos)} kept + {len(all_neg)} rejected pictures | train pictures: {len(train_pics)}")
+
+    head = model.score_head
+    head.train()
+    optimizer = torch.optim.AdamW(head.parameters(), lr=1e-4, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+    criterion = nn.BCEWithLogitsLoss(reduction='none')  # RankNet on score differences, and the keep/delete label
+    best_auc = 0.0
+    out_path = Path(__file__).parent / 'models' / 'clip_taste' / f'clip_taste_{time.strftime("%Y%m%d_%H%M%S")}.pt'
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    for epoch in range(1, epochs + 1):
+        training_state['epoch'] = epoch
+        training_state['phase'] = 'train'
+        within, cross, dis_blk, star = auto_pairs()
+        if epoch == 1:
+            tlog(f"  🔗 Pairs per epoch: within performer {len(within)} · kept > disliked/blacklisted {len(cross)} · "
+                 f"disliked > blacklisted {len(dis_blk)} · stars 2+ apart {len(star)} · hand {len(hand_train)}")
+        pairs = within + cross + dis_blk + star + hand_train
+        random.shuffle(pairs)
+        winners, losers = t([w for w, _, _ in pairs]), t([l for _, l, _ in pairs])
+        weights = torch.tensor([x for _, _, x in pairs], device=device)
+        num_batches = (len(pairs) + bs - 1) // bs
+        pic_batches = torch.randperm(len(train_pics), device=device).tensor_split(num_batches)  # every train picture once per epoch
+        training_state['total_batches'] = num_batches
+        total_loss = pair_correct = pic_correct = pics_seen = 0
+        for bi, pb in enumerate(pic_batches):
+            w, l, x = winners[bi * bs:(bi + 1) * bs], losers[bi * bs:(bi + 1) * bs], weights[bi * bs:(bi + 1) * bs]
+            out = head(feats[torch.cat([w, l, pic_idx[pb]])])
+            diff = out[:len(w)] - out[len(w):2 * len(w)]
+            logits = out[2 * len(w):]
+            loss = (criterion(diff, torch.ones_like(diff)) * x).mean() + criterion(logits, pic_y[pb]).mean()
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total_loss += loss.item()
+            pair_correct += (diff > 0).sum().item()
+            pic_correct += ((logits >= 0) == (pic_y[pb] > 0.5)).sum().item()
+            pics_seen += len(pb)
+            training_state['batch'] = bi + 1
+            training_state['train_loss'] = total_loss / (bi + 1)
+            training_state['train_acc'] = pic_correct / pics_seen
+        scheduler.step()
+
+        head.eval()
+        with torch.no_grad():
+            m = evaluate(head(feats))
+        head.train()
+        train_acc = pic_correct / len(train_pics)
+        training_state['val_acc'] = m['auc']
+        training_state['epoch_history'].append({
+            'epoch': epoch, 'train_loss': total_loss / num_batches, 'train_acc': round(train_acc, 4),
+            'val_acc': m['auc'], 'pairs': len(pairs), **m
+        })
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total_loss/num_batches:.4f} | Train: keep/delete {train_acc:.1%}, pairs {pair_correct/len(pairs):.1%} | "
+             f"Held-out: AUC {m['auc']:.3f}, {m['acc50']:.1%} right at 50%, within {m['within_auc']} | below 50%: "
+             f"deleted {m['deleted_below']}, disliked {m['disliked_below']}, blacklisted {m['blacklisted_below']}")
+
+        if m['auc'] > best_auc:
+            best_auc = m['auc']
+            training_state['best_val_acc'] = best_auc
+            torch.save({
+                # CLIP is frozen, so only the head is saved; the backbone comes from the pretrained weights
+                'model_state_dict': {k: v for k, v in model.state_dict().items() if k.startswith('score_head.')},
+                'val_acc': m['auc'], 'val_metrics': m, 'backbone': backbone, 'model_type': 'clip_taste',
+                'holdout_performers': sorted(val),
+                'samples': len(pairs) + len(train_pics),  # pairs and pictures in the saved epoch
+                'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs, 'use_legacy': use_legacy},
+                'created_at': time.time()
+            }, out_path)
+            tlog(f"  ⭐ Saved → {out_path.name} (AUC {m['auc']:.3f})")
+
+    return {'model': f'clip_taste/{out_path.name}', 'best_val_acc': best_auc}
+
+
 TRAIN_FNS = {
     'binary': train_binary,
     'pairwise': train_pairwise,
     'clip_siamese': train_clip_siamese,
+    'clip_taste': train_clip_taste,
     'performer_ranker': train_performer_ranker,
     'ranked_binary': train_ranked_binary,
 }

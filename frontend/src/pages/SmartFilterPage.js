@@ -21,6 +21,10 @@ import {
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 
+// Types whose score is a keep probability: a fixed 50% line. Pairwise and CLIP Siamese only order
+// pictures, so the server picks their threshold per batch.
+const FIXED_LINE_TYPES = ['binary', 'ranked_binary', 'clip_taste'];
+
 const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePath: propBasePath }) => {
   const { performerId } = useParams();
   const navigate = useNavigate();
@@ -36,12 +40,13 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [batchCount, setBatchCount] = useState(0);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'clip_siamese' or 'ranked_binary'
+  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'clip_siamese', 'clip_taste' or 'ranked_binary'
   const [batchSize, setBatchSize] = useState(100);
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
   const [preferredRankedBinaryModel, setPreferredRankedBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
   const [preferredClipSiameseModel, setPreferredClipSiameseModel] = useState('');
+  const [preferredClipTasteModel, setPreferredClipTasteModel] = useState('');
   const [preferredRankerModel, setPreferredRankerModel] = useState('');
   // Loading state: which model type is currently loading (null when idle)
   const [loadingModelType, setLoadingModelType] = useState(null);
@@ -127,10 +132,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     abortControllerRef.current = new AbortController();
 
     try {
-      // Binary classifiers (regular + rank-conditioned) output calibrated probabilities,
+      // Binary classifiers (regular, rank-conditioned, CLIP taste) output calibrated probabilities,
       // so use the trained-in 50% threshold. Pairwise/siamese output relative ranking
       // scores and need dynamic calibration (-1 → server picks, then reused).
-      const isBinaryClassifier = modelType === 'binary' || modelType === 'ranked_binary';
+      const isBinaryClassifier = FIXED_LINE_TYPES.includes(modelType);
       const targetThreshold = isBinaryClassifier ? 50 : (overrideThreshold !== null ? overrideThreshold : ((!firstBatchDone && !isPrefetch) ? -1 : threshold));
       const queryParams = new URLSearchParams({
         threshold: targetThreshold,
@@ -206,7 +211,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         isPrefetchUrgentRef.current = false;
         // Binary classifiers skip dynamic-threshold prefetch — mark first-batch done so the
         // normal next-batch flow kicks in
-        if (modelType === 'binary' || modelType === 'ranked_binary') setFirstBatchDone(true);
+        if (isBinaryClassifier) setFirstBatchDone(true);
         
         // If this was an upgraded prefetch, we should probably start a NEW prefetch now
         if (isPrefetch) {
@@ -250,11 +255,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
     const fetchPrefs = async () => {
       try {
-        const [binPref, rankBinPref, pairPref, clipPref, rankerPref] = await Promise.all([
+        const [binPref, rankBinPref, pairPref, clipPref, tastePref, rankerPref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
           fetch('/api/settings/preferred_ranked_binary_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_pairwise_model').then(r => r.json()),
           fetch('/api/settings/preferred_clip_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
+          fetch('/api/settings/preferred_clip_taste_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_ranker_model').then(r => r.json()).catch(() => ({ value: '' }))
         ]);
 
@@ -262,6 +268,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         const pRankBin = rankBinPref.value || 'ranked_binary.pt';
         const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
         const pClip = clipPref.value || 'clip_siamese/clip_siamese_20251207.pt';
+        let pTaste = tastePref.value || '';
         let pRanker = rankerPref.value || '';
 
         try {
@@ -270,9 +277,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           if (data.success) {
             const models = data.models || [];
             setAvailableModels(models);
-            // A preferred ranker whose file was archived falls back to the newest ranker (list is newest first)
+            // A preferred ranker or CLIP taste model whose file was archived (or none set) falls back to the newest one (list is newest first)
             if (!models.some(m => m.filename === pRanker)) {
               pRanker = (models.find(m => m.type === 'performer_ranker') || {}).filename || '';
+            }
+            if (!models.some(m => m.filename === pTaste)) {
+              pTaste = (models.find(m => m.type === 'clip_taste') || {}).filename || '';
             }
           }
         } catch (_) {}
@@ -281,6 +291,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         setPreferredRankedBinaryModel(pRankBin);
         setPreferredPairwiseModel(pPair);
         setPreferredClipSiameseModel(pClip);
+        setPreferredClipTasteModel(pTaste);
         setPreferredRankerModel(pRanker);
 
         // Pre-select target model name (visible in UI), but don't load it yet
@@ -288,6 +299,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         if (modelType === 'ranked_binary') targetModel = pRankBin;
         else if (modelType === 'pairwise') targetModel = pPair;
         else if (modelType === 'clip_siamese') targetModel = pClip;
+        else if (modelType === 'clip_taste') targetModel = pTaste;
         setSelectedModel(targetModel);
       } catch (err) {
         console.error('Error fetching prefs:', err);
@@ -305,9 +317,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
     if (type === 'binary') return preferredBinaryModel;
     if (type === 'pairwise') return preferredPairwiseModel;
     if (type === 'clip_siamese') return preferredClipSiameseModel;
+    if (type === 'clip_taste') return preferredClipTasteModel;
     if (type === 'ranked_binary') return preferredRankedBinaryModel;
     return null;
-  }, [preferredBinaryModel, preferredPairwiseModel, preferredClipSiameseModel, preferredRankedBinaryModel]);
+  }, [preferredBinaryModel, preferredPairwiseModel, preferredClipSiameseModel, preferredClipTasteModel, preferredRankedBinaryModel]);
 
   // Load a classifier model. For ranked modes the ranker must have already run.
   const loadClassifier = useCallback(async (type) => {
@@ -602,7 +615,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               {[
                 { type: 'binary', label: 'Binary', icon: <FilterAlt />, color: 'var(--accent)' },
                 { type: 'pairwise', label: 'Pairwise', icon: <Compare />, color: 'var(--accent)' },
-                { type: 'clip_siamese', label: 'CLIP Siamese', icon: <MagicIcon />, color: 'var(--accent)' }
+                { type: 'clip_siamese', label: 'CLIP Siamese', icon: <MagicIcon />, color: 'var(--accent)' },
+                { type: 'clip_taste', label: 'CLIP Taste', icon: <MagicIcon />, color: 'var(--accent)' }
               ].map(m => {
                 const isActive = activeModelType === m.type;
                 const isLoading = loadingModelType === m.type;
@@ -791,6 +805,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const keepCount = results.filter(r => r.decision === 'keep').length;
   const deleteCount = results.filter(r => r.decision === 'delete').length;
   const uncertainCount = results.filter(r => r.decision === 'uncertain').length;
+  const fixedLine = FIXED_LINE_TYPES.includes(modelType);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'var(--bg)', color: 'var(--text)', display: 'flex', flexDirection: 'column' }}>
@@ -851,6 +866,9 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               <ToggleButton value="clip_siamese" sx={{ gap: 1 }}>
                 <MagicIcon sx={{ fontSize: 16 }} /> CLIP
               </ToggleButton>
+              <ToggleButton value="clip_taste" sx={{ gap: 1 }}>
+                <MagicIcon sx={{ fontSize: 16, color: 'var(--accent)' }} /> Taste
+              </ToggleButton>
             </ToggleButtonGroup>
 
             <IconButton color="inherit" onClick={() => setShowSettings(true)}>
@@ -859,18 +877,18 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
             
             <Box sx={{ width: 120 }}>
               <Typography variant="caption" sx={{ color: 'var(--dim)', display: 'block', lineHeight: 1, textTransform: 'uppercase', fontWeight: 'bold' }}>
-                {modelType}: {(modelType === 'binary' || modelType === 'ranked_binary') ? 'Fixed 50%' : `${threshold}%`}
+                {modelType}: {fixedLine ? 'Fixed 50%' : `${threshold}%`}
               </Typography>
               <Slider
-                value={(modelType === 'binary' || modelType === 'ranked_binary') ? 50 : threshold}
+                value={fixedLine ? 50 : threshold}
                 onChange={(e, v) => setThreshold(v)}
                 onChangeCommitted={() => fetchBatch()}
                 size="small"
-                disabled={modelType === 'binary' || modelType === 'ranked_binary'}
+                disabled={fixedLine}
                 sx={{
-                  color: (modelType === 'binary' || modelType === 'ranked_binary') ? 'rgba(255,255,255,0.2)' : 'var(--accent)',
+                  color: fixedLine ? 'rgba(255,255,255,0.2)' : 'var(--accent)',
                   py: 1,
-                  '& .MuiSlider-thumb': { display: (modelType === 'binary' || modelType === 'ranked_binary') ? 'none' : 'block' }
+                  '& .MuiSlider-thumb': { display: fixedLine ? 'none' : 'block' }
                 }} 
               />
             </Box>

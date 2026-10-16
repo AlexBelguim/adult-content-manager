@@ -37,50 +37,47 @@ router.get('/data-summary', (req, res) => {
         COUNT(DISTINCT performer_id) as performers,
         SUM(CASE WHEN type = 'intra' THEN 1 ELSE 0 END) as intra_pairs,
         SUM(CASE WHEN type = 'inter' THEN 1 ELSE 0 END) as inter_pairs,
-        SUM(CASE WHEN type = 'both_bad' THEN 1 ELSE 0 END) as both_bad
+        SUM(CASE WHEN type = 'both_bad' THEN 1 ELSE 0 END) as both_bad,
+        SUM(CASE WHEN source IS NULL THEN 1 ELSE 0 END) as rank_pairs,
+        SUM(CASE WHEN source = 'pairwise_db' THEN 1 ELSE 0 END) as imported_pairs,
+        SUM(CASE WHEN source = 'pairwise_db' AND type = 'intra' THEN 1 ELSE 0 END) as imported_intra
       FROM pairwise_pairs
     `).get();
 
-    // Binary data: count files in training folder
+    // Binary data: count files in the keep (after filter) and delete (training) folders, per performer too.
+    // CLIP taste levels: kept performers with their deleted pictures, and delete-only performers, which
+    // are disliked or blacklisted. No names: the page only counts them.
     let binaryData = { keep: 0, delete: 0, performers: 0 };
+    let tastePerformers = [];
     try {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (folder) {
-        const trainingPath = path.join(folder.path, 'deleted keep for training');
-        const afterPath = path.join(folder.path, 'after filter performer');
-
-        // Count delete images from training folder
-        if (fs.existsSync(trainingPath)) {
-          const dirs = fs.readdirSync(trainingPath, { withFileTypes: true })
-            .filter(d => d.isDirectory() && !d.name.startsWith('.'));
-          let deleteCount = 0;
-          for (const dir of dirs) {
-            const picsDir = path.join(trainingPath, dir.name, 'pics');
-            if (fs.existsSync(picsDir)) {
-              deleteCount += fs.readdirSync(picsDir).filter(f =>
-                ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-              ).length;
-            }
+        // {performer folder: pictures in its pics/}
+        const countPics = (baseDir) => {
+          const counts = {};
+          if (!fs.existsSync(baseDir)) return counts;
+          for (const dir of fs.readdirSync(baseDir, { withFileTypes: true })) {
+            if (!dir.isDirectory() || dir.name.startsWith('.')) continue;
+            const picsDir = path.join(baseDir, dir.name, 'pics');
+            counts[dir.name] = fs.existsSync(picsDir) ? fs.readdirSync(picsDir).filter(f =>
+              ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
+            ).length : 0;
           }
-          binaryData.delete = deleteCount;
-          binaryData.performers = dirs.length;
-        }
+          return counts;
+        };
+        const deleted = countPics(path.join(folder.path, 'deleted keep for training'));
+        const kept = countPics(path.join(folder.path, 'after filter performer'));
+        const sum = counts => Object.values(counts).reduce((a, b) => a + b, 0);
+        binaryData = { keep: sum(kept), delete: sum(deleted), performers: Object.keys(deleted).length };
 
-        // Count keep images from after filter folder
-        if (fs.existsSync(afterPath)) {
-          const dirs = fs.readdirSync(afterPath, { withFileTypes: true })
-            .filter(d => d.isDirectory() && !d.name.startsWith('.'));
-          let keepCount = 0;
-          for (const dir of dirs) {
-            const picsDir = path.join(afterPath, dir.name, 'pics');
-            if (fs.existsSync(picsDir)) {
-              keepCount += fs.readdirSync(picsDir).filter(f =>
-                ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-              ).length;
-            }
-          }
-          binaryData.keep = keepCount;
-        }
+        const blacklisted = new Set(db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name));
+        const stars = collectPerformerRatings();
+        tastePerformers = [
+          ...Object.entries(kept).filter(([, n]) => n)
+            .map(([name, n]) => ({ level: 'kept', keep: n, delete: deleted[name] || 0, stars: stars[name] ?? null })),
+          ...Object.entries(deleted).filter(([name, n]) => n && !kept[name])
+            .map(([name, n]) => ({ level: blacklisted.has(name) ? 'blacklisted' : 'disliked', keep: 0, delete: n, stars: null }))
+        ];
       }
     } catch (_) { /* non-critical */ }
 
@@ -107,9 +104,13 @@ router.get('/data-summary', (req, res) => {
         intraPairs: pairwise.intra_pairs,
         interPairs: pairwise.inter_pairs,
         bothBad: pairwise.both_bad,
+        rankPairs: pairwise.rank_pairs,
+        importedPairs: pairwise.imported_pairs,
+        importedIntra: pairwise.imported_intra,
         scoredImages
       },
       binary: binaryData,
+      taste: { performers: tastePerformers },
       ranking: {
         rankedImages,
       },
@@ -380,7 +381,7 @@ router.post('/export-binary', async (req, res) => {
 // ── POST /api/training/start ─────────────────────────────────
 // Trigger training on the AI Inference App
 router.post('/start', async (req, res) => {
-  const { type = 'pairwise', epochs = 10, batch_size = 16, backbone = 'facebook/dinov2-large', learning_rate, ai_server_url } = req.body;
+  const { type = 'pairwise', epochs = 10, batch_size = 16, backbone = 'facebook/dinov2-large', learning_rate, ai_server_url, use_legacy = true } = req.body;
   const aiUrl = ai_server_url || getAiServerUrl();
 
   try {
@@ -393,8 +394,9 @@ router.post('/start', async (req, res) => {
     // Collect training data
     let trainingPayload;
     if (type === 'pairwise') {
+      // "Use legacy pairs" off: only pairs made with Rank images, not the pairwise.db import
       const pairs = db.prepare(`
-        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad'
+        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad' ${use_legacy ? '' : 'AND source IS NULL'}
       `).all();
       trainingPayload = { type: 'pairwise', pairs, epochs, batch_size, backbone, learning_rate };
       
@@ -405,7 +407,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (['binary', 'clip_siamese', 'performer_ranker', 'ranked_binary'].includes(type)) {
+    } else if (['binary', 'clip_siamese', 'clip_taste', 'performer_ranker', 'ranked_binary'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -425,9 +427,19 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-      // CLIP siamese (1st order) also learns from the same-performer pairs made with Rank images
+      // CLIP siamese (1st order) also learns from the same-performer hand pairs: Rank images and the pairwise.db import.
+      // The trainer drops the legacy sources (this import and its own old labeller file) when use_legacy is off.
       if (type === 'clip_siamese') {
-        trainingPayload.pairs = db.prepare(`SELECT winner, loser FROM pairwise_pairs WHERE type = 'intra'`).all();
+        trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type = 'intra'`).all();
+        trainingPayload.use_legacy = use_legacy;
+      }
+
+      // CLIP taste (2nd order) takes the hand pairs across performers too, and splits the delete-only
+      // performers into disliked and blacklisted
+      if (type === 'clip_taste') {
+        trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type != 'both_bad'`).all();
+        trainingPayload.blacklisted_performers = db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name);
+        trainingPayload.use_legacy = use_legacy;
       }
 
     } else {
@@ -441,7 +453,7 @@ router.post('/start', async (req, res) => {
     trainingPayload.deduplicate = req.body.deduplicate;
     trainingPayload.finetune_start_epoch = req.body.finetune_start_epoch;
 
-    // Kept > deleted pairs per performer per epoch for CLIP siamese training
+    // Automatic pairs per performer per epoch for the CLIP models
     if (req.body.synthetic_pairs_per_epoch) {
       trainingPayload.synthetic_pairs_per_epoch = req.body.synthetic_pairs_per_epoch;
     }

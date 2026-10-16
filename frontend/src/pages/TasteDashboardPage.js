@@ -19,9 +19,12 @@ import { useNavigate } from 'react-router-dom';
 import { PageShell, PageHeader, Panel, LoadingState } from '../components/layout';
 
 const MODEL_TYPES = [
-  { id: 'clip_siamese', name: 'CLIP Siamese (1st order)', icon: <AutoAwesome />, desc: 'Scores pictures so kept beats deleted and your Rank images winners beat their losers, inside one performer. Best model so far.',
-    color: 'var(--accent)', requirements: 'Needs keep + delete folders pushed to the AI server; also uses your same-performer Rank images pairs. The first run downloads CLIP ViT-L/14-336 (~1.7 GB) from Hugging Face.',
+  { id: 'clip_siamese', name: 'CLIP Siamese (1st order)', icon: <AutoAwesome />, desc: 'Scores pictures so kept beats deleted and your hand-picked winners beat their losers, inside one performer. Best model so far.',
+    color: 'var(--accent)', requirements: 'Needs keep + delete folders pushed to the AI server; also uses your same-performer hand pairs: Rank images, the legacy pairwise.db import and the legacy old labeller file on the AI PC. The first run downloads CLIP ViT-L/14-336 (~1.7 GB) from Hugging Face.',
     pros: ['Best on new performers', 'Fast: CLIP stays frozen'], cons: ['Scores are an order, not a %'] },
+  { id: 'clip_taste', name: 'CLIP Taste (2nd order)', icon: <Psychology />, desc: 'A keep % for any picture with a fixed 50% line. Learns kept vs deleted inside a performer and across performers: your disliked and blacklisted performers, and your stars.',
+    color: 'var(--chart-5)', requirements: 'Needs keep + delete folders pushed to the AI server. Performers with only deleted pictures count as disliked, or as blacklisted when blacklisted in the app; stars only pick pairs (2+ stars apart), they are no input. Uses every hand pair, across performers too. 15% of the performers of every level are held out.',
+    pros: ['Keep % with a 50% line', 'Knows disliked performers'], cons: ['Only 11 blacklisted performers'] },
   { id: 'binary', name: 'Simple Binary', icon: <FilterAlt />, desc: 'DINOv2 keep vs delete classifier.',
     color: 'var(--ok)', requirements: 'Needs keep + delete image folders',
     pros: ['Direct keep %'], cons: ['One global keep look'] },
@@ -40,15 +43,22 @@ const MODEL_TYPES = [
 // 38 performers added after the May training set, and Rank images pairs made after each model was trained.
 const MODEL_NOTES = [
   {
+    name: 'CLIP Taste — 2nd order (keep %)', status: 'New', tone: 'warn', where: 'Train here',
+    result: 'Not trained yet: results on held-out performers come after the first GPU run',
+    data: 'Kept pictures (keep) against deleted pictures of kept performers and every picture of disliked (delete-only) and blacklisted performers; on 2026-10-17: 68 kept performers (6,891 pictures, 47 with 3,979 deletes), 49 disliked (2,925), 11 blacklisted (400). Pairs: kept > deleted, kept > disliked/blacklisted, disliked > blacklisted, stars 2+ apart, and every hand pair (legacy ones optional).',
+    how: 'The CLIP Siamese network (frozen CLIP ViT-L/14-336 + score head) with two losses: keep/delete (a real keep %, so SmartFilter cuts at a fixed 50%) and RankNet on the pairs. Stars only pick pairs, never kept vs kept: those would teach who, not what. 15% of the performers of every level are held out.',
+    better: ['Only 11 blacklisted performers have pictures (another 49 are blacklisted without any)', 'More hand pairs across performers'],
+  },
+  {
     name: 'CLIP Siamese — 1st order (within performer)', status: 'Best', tone: 'ok', where: 'Train here',
     result: 'Keep vs delete AUC 0.82 on 38 new performers · 0.73 inside one performer · picks your winner in 66% of 1,091 later Rank images pairs',
     data: '1,969 hand-made pairs from the old labeller (Dec 2025): 1,781 same performer, 188 across performers. 3 epochs. File: clip_siamese/clip_siamese_20251207.pt',
     how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so SmartFilter picks the threshold per batch.',
     better: [
-      'Retrain here: adds kept > deleted pairs of every performer plus your Rank images pairs, and holds performers out for an honest score',
-      'Older labels are not in the app yet: 3,461 pairs in the Jan 2026 labeller export, 788 in backend-pairwise/pairwise.db',
+      'Retrain here: adds kept > deleted pairs of every performer plus your same-performer hand pairs, and holds performers out for an honest score',
+      'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from backend-pairwise/pairwise.db (785 of its 788, 764 of them same performer); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
       'A keep cut-off per performer, stricter for performers with fewer stars',
-      '2nd order (across performers) only from hand-made cross pairs; pairs made from stars teach the model who, not what',
+      '2nd order (across performers) only from hand-made cross pairs (698 in the labeller file, 21 from pairwise.db); pairs made from stars teach the model who, not what',
     ],
   },
   {
@@ -113,6 +123,7 @@ const PREFERRED_KEYS = {
   ranked_binary: 'preferred_ranked_binary_model',
   pairwise: 'preferred_pairwise_model',
   clip_siamese: 'preferred_clip_siamese_model',
+  clip_taste: 'preferred_clip_taste_model',
   performer_ranker: 'preferred_ranker_model',
 };
 
@@ -128,6 +139,7 @@ function TasteDashboardPage() {
 
   // Training Hub state
   const [selectedType, setSelectedType] = useState('clip_siamese');
+  const isClip = selectedType === 'clip_siamese' || selectedType === 'clip_taste';
   const [epochs, setEpochs] = useState(8);
   const [batchSize, setBatchSize] = useState(16);
   const [backbone, setBackbone] = useState('facebook/dinov2-large');
@@ -146,6 +158,7 @@ function TasteDashboardPage() {
   const [enableMining, setEnableMining] = useState(false);
   const [miningMultiplier, setMiningMultiplier] = useState(4);
   const [deduplicate, setDeduplicate] = useState(true);
+  const [useLegacy, setUseLegacy] = useState(true); // pairwise.db import + old labeller file
   const [syntheticPairsPerEpoch, setSyntheticPairsPerEpoch] = useState(500);
   const [useQuantization, setUseQuantization] = useState(false);
   const [finetuneStart, setFinetuneStart] = useState(3);
@@ -277,7 +290,8 @@ function TasteDashboardPage() {
           deduplicate: deduplicate,
           quantize: useQuantization,
           finetune_start_epoch: finetuneStart,
-          synthetic_pairs_per_epoch: selectedType === 'clip_siamese' ? syntheticPairsPerEpoch : 0
+          use_legacy: useLegacy,
+          synthetic_pairs_per_epoch: isClip ? syntheticPairsPerEpoch : 0
         })
       });
       const result = await res.json();
@@ -420,6 +434,54 @@ function TasteDashboardPage() {
   const ai = health?.aiServer || {};
   const issues = health?.issues || [];
   const ratings = health?.ratings || {};
+  // Hand-pair sources: Rank images (source NULL), the pairwise.db import, and the old labeller's file on the AI PC.
+  // Legacy sources count, and train, only while "Use legacy pairs" is on. all = every pair that trains, across
+  // performers too (CLIP 2nd order, DINO Pairwise; "both bad" votes order nothing), same = same performer (CLIP 1st order).
+  const tp = training?.pairwise || {};
+  const labellerPairs = aiTrainingData?.labeller_pairs;
+  const pairSources = [
+    { id: 'rank', label: 'Rank images', all: (tp.rankPairs || 0) - (tp.bothBad || 0), same: (tp.intraPairs || 0) - (tp.importedIntra || 0) },
+    { id: 'pairwise_db', label: 'pairwise.db import', legacy: true, all: tp.importedPairs || 0, same: tp.importedIntra || 0,
+      note: `${tp.importedIntra || 0} same performer` },
+    { id: 'labeller', label: 'old labeller file', legacy: true, all: labellerPairs == null ? null : labellerPairs + aiTrainingData.labeller_cross_pairs,
+      same: labellerPairs, note: labellerPairs == null ? 'AI server offline' : `${labellerPairs} same performer, on the AI PC` },
+  ];
+  const usedSources = pairSources.filter(s => useLegacy || !s.legacy);
+  const sumPairs = (sources, key) => sources.reduce((n, s) => n + (s[key] || 0), 0);
+  const dinoPairs = sumPairs(usedSources.filter(s => s.id !== 'labeller'), 'all');  // DINO Pairwise reads only the app DB
+  const legacyBox = { '&.dp-stat-box': { border: '1px dashed var(--line-strong)', backgroundColor: 'transparent' } };
+
+  // CLIP taste levels (from the NAS folders), and the automatic pairs per epoch at the slider's setting,
+  // before 15% of the performers are held out
+  const tasteLevels = training?.taste?.performers || [];
+  const level = l => tasteLevels.filter(t => t.level === l);
+  const [kept, disliked, blacklisted] = ['kept', 'disliked', 'blacklisted'].map(level);
+  const keptWithDeletes = kept.filter(t => t.delete);
+  const rated = kept.filter(t => t.stars != null);
+  const sumOf = (perfs, key) => perfs.reduce((n, t) => n + t[key], 0);
+  const perPerf = syntheticPairsPerEpoch;
+  const withinPairs = keptWithDeletes.reduce((n, t) => n + Math.min(perPerf, t.keep * t.delete), 0);
+  const starLosers = rated.filter(b => b.delete && rated.some(a => a.stars - b.stars >= 2)).length;
+  const crossPairs = (disliked.length + blacklisted.length ? kept.length * perPerf : 0)
+    + (disliked.length ? blacklisted.length * perPerf : 0) + starLosers * perPerf;
+  // What each trainable type reads, for the "trains on" panel
+  const picRow = (label, perfs, key) => ({ label, value: `${sumOf(perfs, key).toLocaleString()} pictures · ${perfs.length} performer${perfs.length === 1 ? '' : 's'}` });
+  const handRows = (key, sources = pairSources) => sources.map(s => ({ label: `${s.legacy ? 'Legacy · ' : ''}${s.label} pairs`,
+    value: s[key] == null ? 'AI server offline' : s[key].toLocaleString(), legacy: s.legacy }));
+  const deletedRow = picRow('Deleted pictures of kept performers', keptWithDeletes, 'delete');
+  const withinRow = { label: 'Auto, within performer: kept > deleted', value: `≈${withinPairs.toLocaleString()} / epoch` };
+  const binaryRows = [picRow('Keep: kept pictures', kept, 'keep'), picRow('Delete: deleted, disliked and blacklisted pictures', [...keptWithDeletes, ...disliked, ...blacklisted], 'delete')];
+  const TRAINS_ON = {
+    clip_taste: [picRow('Kept pictures (keep)', kept, 'keep'), deletedRow, picRow('Disliked performers (delete)', disliked, 'delete'),
+      picRow('Blacklisted performers (delete)', blacklisted, 'delete'), withinRow,
+      { label: 'Auto, across performers: kept > disliked/blacklisted, disliked > blacklisted (half weight), stars 2+ apart', value: `≈${crossPairs.toLocaleString()} / epoch` },
+      ...handRows('all')],
+    clip_siamese: [picRow('Kept pictures of performers with deletes', keptWithDeletes, 'keep'), deletedRow, withinRow, ...handRows('same')],
+    binary: binaryRows,
+    ranked_binary: [...binaryRows, { label: 'Star ratings (an input)', value: `${rated.length} rated performers` }],
+    pairwise: handRows('all', pairSources.filter(s => s.id !== 'labeller')),
+    performer_ranker: [{ label: 'Pictures of rated performers, labelled with their stars', value: `${(sumOf(rated, 'keep') + sumOf(rated, 'delete')).toLocaleString()} pictures · ${rated.length} performers` }],
+  };
 
   // Calculate suggestions
   const suggestions = [];
@@ -580,13 +642,18 @@ function TasteDashboardPage() {
           </CollapsibleSection>
 
           {/* Pairwise Labeling */}
-          <CollapsibleSection title="Pairwise Labeling"count={`${pw.totalPairs || 0} pairs`} defaultOpen>
+          <CollapsibleSection title="Pairwise Labeling"count={`${sumPairs(usedSources, 'all')} pairs${useLegacy ? ' incl. legacy' : ' (legacy off)'}`} defaultOpen>
             <Box sx={{ p: 2 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 1.5 }}>
-                <Box className="dp-stat-box">
-                  <Typography variant="h6" sx={{ color: 'var(--info)', fontWeight: 'bold' }}>{pw.totalPairs || 0}</Typography>
-                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Total Comparisons</Typography>
-                </Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr 1fr' }, gap: 1.5, mb: 1.5 }}>
+                {pairSources.map(s => (
+                  <Box key={s.id} className="dp-stat-box" sx={{ ...(s.legacy && legacyBox), opacity: s.legacy && !useLegacy ? 0.45 : 1 }}>
+                    <Typography variant="h6" sx={{ color: s.legacy ? 'var(--dim)' : 'var(--info)', fontWeight: 'bold' }}>{s.all ?? '–'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block' }}>{s.legacy ? `Legacy · ${s.label}` : `${s.label} pairs`}</Typography>
+                    {s.note && <Typography variant="caption" sx={{ color: 'var(--muted)' }}>{useLegacy ? s.note : 'not used: legacy pairs off'}</Typography>}
+                  </Box>
+                ))}
+              </Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5 }}>
                 <Box className="dp-stat-box">
                   <Typography variant="h6" sx={{ color: 'var(--ok)', fontWeight: 'bold' }}>{pw.performersLabeled || 0} / {p.total}</Typography>
                   <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Performers Labeled</Typography>
@@ -613,7 +680,7 @@ function TasteDashboardPage() {
           {/* Training Data */}
           <CollapsibleSection title="Training Data"count={training?.readyForTraining?.binary ? 'Ready': 'Not Ready'} defaultOpen>
             <Box sx={{ p: 2 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 1.5 }}>
                 <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, borderLeft: '4px solid var(--ok)' }}>
                   <Typography variant="subtitle2" sx={{ color: 'var(--ok)', mb: 1 }}>Binary Classification</Typography>
                   <Box sx={{ display: 'flex', gap: 3 }}>
@@ -636,12 +703,25 @@ function TasteDashboardPage() {
                 <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, borderLeft: '4px solid var(--info)' }}>
                   <Typography variant="subtitle2" sx={{ color: 'var(--info)', mb: 1 }}>Pairwise Preference</Typography>
                   <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                    {pw.totalPairs || 0} labeled pairs from {pw.performersLabeled || 0} performers
+                    {dinoPairs} labeled pairs from {pw.performersLabeled || 0} performers
                     {training?.hardExamples?.pairwise > 0 && <Typography component="span" variant="caption" sx={{ ml: 0.5, color: 'var(--accent)' }}>({training.hardExamples.pairwise} corr)</Typography>}
                   </Typography>
-                  <Chip label={pw.totalPairs >= 50 ? 'Ready' : `Need ${50 - (pw.totalPairs || 0)}+ pairs`}
+                  <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block' }}>
+                    Rank images {tp.rankPairs || 0} · legacy pairwise.db {useLegacy ? tp.importedPairs || 0 : 'off'}
+                  </Typography>
+                  <Chip label={dinoPairs >= 50 ? 'Ready' : `Need ${50 - dinoPairs}+ pairs`}
                     size="small" sx={{ mt: 1 }}
-                    color={pw.totalPairs >= 50 ? 'success' : 'warning'} variant="outlined" />
+                    color={dinoPairs >= 50 ? 'success' : 'warning'} variant="outlined" />
+                </Box>
+                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, borderLeft: '4px solid var(--accent)' }}>
+                  <Typography variant="subtitle2" sx={{ color: 'var(--accent)', mb: 1 }}>CLIP Siamese hand pairs</Typography>
+                  <Typography variant="body2" sx={{ color: 'var(--dim)' }}>{sumPairs(usedSources, 'same')} same-performer pairs, on top of kept &gt; deleted:</Typography>
+                  {pairSources.map(s => (
+                    <Typography key={s.id} variant="body2" sx={{ color: s.legacy ? 'var(--dim)' : 'var(--text)', fontStyle: s.legacy ? 'italic' : 'normal',
+                      textDecoration: s.legacy && !useLegacy ? 'line-through' : 'none' }}>
+                      {s.legacy ? 'Legacy ' : ''}{s.label} {s.same ?? '– (AI server offline)'}
+                    </Typography>
+                  ))}
                 </Box>
               </Box>
               <Box sx={{ mt: 2 }}>
@@ -716,6 +796,23 @@ function TasteDashboardPage() {
                   </Card>
                 ))}
               </Box>
+              {/* What the selected type trains on; legacy rows follow "Use legacy pairs" below */}
+              <Box sx={{ mb: 2, p: 1.5, bgcolor: 'var(--surface)', borderRadius: 1.5, border: '1px solid var(--line)' }}>
+                <Typography variant="caption" sx={{ color: 'var(--accent)', fontWeight: 800, display: 'block', mb: 1 }}>
+                  {selectedModel?.name} trains on
+                </Typography>
+                {TRAINS_ON[selectedType].map(r => (
+                  <Box key={r.label} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, py: 0.25,
+                    opacity: r.legacy && !useLegacy ? 0.45 : 1, textDecoration: r.legacy && !useLegacy ? 'line-through' : 'none' }}>
+                    <Typography variant="caption" sx={{ color: 'var(--dim)', fontStyle: r.legacy ? 'italic' : 'normal' }}>{r.label}</Typography>
+                    <Typography variant="caption" sx={{ color: 'var(--text)', fontWeight: 700, whiteSpace: 'nowrap' }}>{r.value}</Typography>
+                  </Box>
+                ))}
+                <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block', mt: 1 }}>
+                  Pictures as on the NAS now; training reads what was last pushed to the AI server.
+                  {TRAINS_ON[selectedType].some(r => r.legacy) && !useLegacy && ' Legacy pairs are off: struck-through rows are left out.'}
+                </Typography>
+              </Box>
               <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end', mb: 2, flexWrap: 'wrap' }}>
                 <TextField label="Epochs" type="number" value={epochs} onChange={e => setEpochs(parseInt(e.target.value) || 1)}
                   InputProps={{ inputProps: { min: 1, max: 50 } }} size="small"
@@ -723,7 +820,7 @@ function TasteDashboardPage() {
                 <TextField label="Batch Size" type="number" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 1)}
                   InputProps={{ inputProps: { min: 1, max: 64 } }} size="small"
                   sx={{ width: 100, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'var(--line-strong)' } }, '& .MuiInputLabel-root': { color: 'var(--muted)' } }} />
-                {selectedType !== 'clip_siamese' && <FormControl size="small" sx={{ minWidth: 200 }}>
+                {!isClip && <FormControl size="small" sx={{ minWidth: 200 }}>
                   <InputLabel sx={{ color: 'var(--muted)' }}>Backbone</InputLabel>
                   <Select
                     value={backbone}
@@ -844,17 +941,33 @@ function TasteDashboardPage() {
                       {deduplicate ? "ON" : "OFF"}
                     </Button>
                   </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Box>
+                      <Typography variant="body2" sx={{ color: 'var(--dim)', fontSize: '0.85rem' }}>Use Legacy Pairs</Typography>
+                      <Typography variant="caption" sx={{ color: 'var(--muted)' }}>pairwise.db import + old labeller file (CLIP Taste, CLIP Siamese, Pairwise)</Typography>
+                    </Box>
+                    <Button
+                      size="small"
+                      variant={useLegacy ? "contained" : "outlined"}
+                      onClick={() => setUseLegacy(!useLegacy)}
+                      sx={{ minWidth: 80, height: 24, fontSize: '0.7rem', textTransform: 'none' }}
+                    >
+                      {useLegacy ? "ON" : "OFF"}
+                    </Button>
+                  </Box>
                   
-                  {selectedType === 'clip_siamese' && (
+                  {isClip && (
                     <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid var(--accent-quiet)' }}>
                       <Typography variant="body2" sx={{ color: 'var(--text)', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
-                        Kept &gt; Deleted Pairs
+                        {selectedType === 'clip_taste' ? 'Automatic Pairs' : 'Kept > Deleted Pairs'}
                         <Typography component="span" sx={{ color: 'var(--accent)', fontWeight: 800 }}>
                           {syntheticPairsPerEpoch} / performer / epoch
                         </Typography>
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'var(--dim)', display: 'block', mb: 1 }}>
-                        Each performer with both kept and deleted pictures adds up to {syntheticPairsPerEpoch} random (kept, deleted) pairs every epoch, on top of your Rank images pairs
+                        {selectedType === 'clip_taste'
+                          ? `Each kind of automatic pair (kept > deleted, kept > disliked/blacklisted, disliked > blacklisted, stars 2+ apart) adds up to ${syntheticPairsPerEpoch} random pairs per performer every epoch, on top of your hand pairs`
+                          : `Each performer with both kept and deleted pictures adds up to ${syntheticPairsPerEpoch} random (kept, deleted) pairs every epoch, on top of your hand pairs`}
                       </Typography>
                       <Slider
                         value={syntheticPairsPerEpoch}
@@ -1104,13 +1217,14 @@ function ModelArsenal({
   const [quantizeLoad, setQuantizeLoad] = useState(false);
   const typeLabels = {
     clip_siamese: { label: 'CLIP Siamese', color: 'var(--accent)', icon: ''},
+    clip_taste: { label: 'CLIP Taste', color: 'var(--chart-5)', icon: ''},
     binary: { label: 'Binary', color: 'var(--ok)', icon: ''},
     ranked_binary: { label: 'Ranked Binary', color: 'var(--chart-3)', icon: ''},
     pairwise: { label: 'Pairwise', color: 'var(--info)', icon: ''},
     performer_ranker: { label: 'Performer Ranker', color: 'var(--chart-1)', icon: ''},
     unknown: { label: 'Unknown', color: 'var(--muted)', icon: ''},
   };
-  const typeIcons = { clip_siamese: <AutoAwesome />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
+  const typeIcons = { clip_siamese: <AutoAwesome />, clip_taste: <Psychology />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
   const grouped = {};
   models.forEach(m => { const t = m.type || 'unknown'; if (!grouped[t]) grouped[t] = []; grouped[t].push(m); });
   const handleTest = async (model) => {
@@ -1188,7 +1302,7 @@ function ModelArsenal({
                 </Box>
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                   {m.backbone && <Chip label={m.backbone.split('/').pop()} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--surface)', color: 'var(--dim)' }} />}
-                   {m.val_acc != null && <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
+                   {m.val_acc != null && <Chip label={`${m.type === 'clip_taste' ? 'AUC' : 'Val'}: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
                   {m.val_mae != null && <Chip label={`MAE: ${m.val_mae.toFixed(3)}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,111,0,0.1)', color: 'var(--chart-1)' }} />}
                   {m.rank_conditioned && <Chip label="Rank-Conditioned" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(0,191,165,0.1)', color: 'var(--chart-3)', fontWeight: 700 }} />}
                   {m.samples && <Chip label={`${m.samples} samples`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }} />}

@@ -189,7 +189,7 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                 elif model_type == 'binary':
                     from trainer import BinaryClassifier
                     MODEL = BinaryClassifier(MODEL_NAME, quantize=quantize)
-                elif model_type == 'clip_siamese':
+                elif model_type in ('clip_siamese', 'clip_taste'):
                     MODEL = ClipPreferenceModel(MODEL_NAME)
                 else:
                     MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True, quantize=quantize)
@@ -505,7 +505,7 @@ def api_test_model():
             elif model_type == 'pairwise':
                 test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
-            elif model_type == 'clip_siamese':
+            elif model_type in ('clip_siamese', 'clip_taste'):
                 test_model = ClipPreferenceModel(model_name)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             elif model_type == 'performer_ranker':
@@ -570,7 +570,7 @@ def api_test_model():
                     if model_type == 'binary' and rank_conditioned:
                         r = torch.tensor([get_rank(performer)], dtype=torch.float32, device=DEVICE)
                         return torch.sigmoid(test_model(inp['pixel_values'], r)).item()
-                    if model_type in ('pairwise', 'clip_siamese'):
+                    if model_type in ('pairwise', 'clip_siamese', 'clip_taste'):
                         return torch.sigmoid(test_model.forward_single(inp['pixel_values'])).item()
                     if model_type == 'performer_ranker':
                         return test_model.predict_rank(inp['pixel_values']).item()
@@ -1274,7 +1274,7 @@ def score_images():
     return jsonify({'success': True, 'results': results, 'duration': duration})
 
 # ── Training Endpoints ────────────────────────────────────────────────────────
-from trainer import training_state, start_training
+from trainer import training_state, start_training, load_labeller_pairs
 import zipfile, shutil, json as json_module
 
 TRAINING_DATA_DIR = Path(__file__).parent / 'training_data'
@@ -1353,6 +1353,7 @@ def api_training_data_status():
     # List performers
     keep_performers = sorted([d.name for d in keep_dir.iterdir() if d.is_dir()]) if keep_dir.exists() else []
     delete_performers = sorted([d.name for d in delete_dir.iterdir() if d.is_dir()]) if delete_dir.exists() else []
+    labeller = load_labeller_pairs()
 
     return jsonify({
         'has_data': keep_count > 0 or delete_count > 0,
@@ -1360,7 +1361,10 @@ def api_training_data_status():
         'delete': delete_count,
         'keep_performers': keep_performers,
         'delete_performers': delete_performers,
-        'manifest': manifest
+        'manifest': manifest,
+        # Old labeller pairs: same performer (both CLIP models), across performers (CLIP taste only)
+        'labeller_pairs': sum(wp == lp for _, _, wp, lp in labeller),
+        'labeller_cross_pairs': sum(wp != lp for _, _, wp, lp in labeller)
     })
 
 
