@@ -40,7 +40,6 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('performerFilterSortBy') || 'name');
   const [sortOrder, setSortOrder] = useState(() => localStorage.getItem('performerFilterSortOrder') || 'asc');
   const [hideKeptFiles, setHideKeptFiles] = useState(true);
-  const [mlEnabled, setMlEnabled] = useState(false); // the prediction side was never written: shows "(no model)"
   const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
   const [stats, setStats] = useState(null);
   const [delta, setDelta] = useState(ZERO_DELTA); // decisions the (cached) stats don't show yet
@@ -578,11 +577,9 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
         sortBy={sortBy}
         sortOrder={sortOrder}
         hideKept={hideKeptFiles}
-        mlEnabled={mlEnabled}
         onSortBy={setSortBy}
         onSortOrder={setSortOrder}
         onHideKept={setHideKeptFiles}
-        onMlEnabled={setMlEnabled}
         shortcuts={shortcuts}
         sheetOpen={sheetOpen}
         onCloseSheet={() => setSheetOpen(false)}

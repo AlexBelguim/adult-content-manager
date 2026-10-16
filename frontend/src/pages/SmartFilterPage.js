@@ -36,15 +36,12 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const [batchCount, setBatchCount] = useState(0);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'siamese', 'ranked_binary', or 'ranked_siamese_binary'
+  const [modelType, setModelType] = useState('binary'); // 'binary', 'pairwise', 'clip_siamese' or 'ranked_binary'
   const [batchSize, setBatchSize] = useState(100);
   const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
   const [preferredRankedBinaryModel, setPreferredRankedBinaryModel] = useState('');
   const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
-  const [preferredContextModel, setPreferredContextModel] = useState('');
-  const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
-  const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
-  const [preferredRankedSiameseModel, setPreferredRankedSiameseModel] = useState('');
+  const [preferredClipSiameseModel, setPreferredClipSiameseModel] = useState('');
   const [preferredRankerModel, setPreferredRankerModel] = useState('');
   // Loading state: which model type is currently loading (null when idle)
   const [loadingModelType, setLoadingModelType] = useState(null);
@@ -145,7 +142,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       });
       // For ranked modes, pass the pre-computed performer rank so the AI server
       // doesn't need RANKER_MODEL loaded during classification
-      if (performerRank !== null && ['ranked_binary', 'ranked_siamese_binary'].includes(modelType)) {
+      if (performerRank !== null && modelType === 'ranked_binary') {
         queryParams.set('performer_rank', performerRank);
       }
       console.log(`[SmartFilter] Fetching /api/filter/smart-batch/${performer.id}?${queryParams}`);
@@ -173,8 +170,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
         console.log(`[SmartFilter] Starting pre-fetch with fresh threshold: ${newThreshold}`);
         fetchBatch(true, newThreshold);
         
-        // Siamese/Rank-Aware: apply zone logic to just-received results
-        if (['siamese', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(modelType) && data.results) {
+        // Siamese: apply zone logic to just-received results
+        if (modelType === 'clip_siamese' && data.results) {
           const zoned = data.results.map(r => ({
             ...r,
             originalDecision: r.decision,
@@ -195,8 +192,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
           originalDecision: r.decision
         }));
         
-        // Siamese modes: re-classify into keep / uncertain / delete zones
-        const finalResults = ['siamese', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(modelType) 
+        // Siamese: re-classify into keep / uncertain / delete zones
+        const finalResults = modelType === 'clip_siamese'
           ? resultsWithOriginal.map(r => ({
               ...r,
               decision: r.score >= 60 ? 'keep' : r.score <= 40 ? 'delete' : 'uncertain'
@@ -253,49 +250,44 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
     const fetchPrefs = async () => {
       try {
-        const [binPref, rankBinPref, pairPref, contextPref, siamesePref, rankSiamesePref, rankedSiamesePref, rankerPref] = await Promise.all([
+        const [binPref, rankBinPref, pairPref, clipPref, rankerPref] = await Promise.all([
           fetch('/api/settings/preferred_binary_model').then(r => r.json()),
           fetch('/api/settings/preferred_ranked_binary_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_pairwise_model').then(r => r.json()),
-          fetch('/api/settings/preferred_context_model').then(r => r.json()).catch(() => ({ value: '' })),
-          fetch('/api/settings/preferred_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
-          fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
-          fetch('/api/settings/preferred_ranked_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
+          fetch('/api/settings/preferred_clip_siamese_model').then(r => r.json()).catch(() => ({ value: '' })),
           fetch('/api/settings/preferred_ranker_model').then(r => r.json()).catch(() => ({ value: '' }))
         ]);
 
         const pBin = binPref.value || 'binary_filtering.pt';
         const pRankBin = rankBinPref.value || 'ranked_binary.pt';
         const pPair = pairPref.value || 'pairwise/pairwise_rating.pt';
-        const pContext = contextPref.value || 'context_binary.pt';
-        const pSiamese = siamesePref.value || 'siamese_binary.pt';
-        const pRankSiamese = rankSiamesePref.value || 'rank_siamese.pt';
-        const pRankedSiamese = rankedSiamesePref.value || 'ranked_siamese.pt';
-        const pRanker = rankerPref.value || '';
-
-        setPreferredBinaryModel(pBin);
-        setPreferredRankedBinaryModel(pRankBin);
-        setPreferredPairwiseModel(pPair);
-        setPreferredContextModel(pContext);
-        setPreferredSiameseModel(pSiamese);
-        setPreferredRankSiameseModel(pRankSiamese);
-        setPreferredRankedSiameseModel(pRankedSiamese);
-        setPreferredRankerModel(pRanker);
+        const pClip = clipPref.value || 'clip_siamese/clip_siamese_20251207.pt';
+        let pRanker = rankerPref.value || '';
 
         try {
           const response = await fetch(`/api/filter/models?ai_server_url=${encodeURIComponent(inferenceUrl)}`);
           const data = await response.json();
-          if (data.success) setAvailableModels(data.models || []);
+          if (data.success) {
+            const models = data.models || [];
+            setAvailableModels(models);
+            // A preferred ranker whose file was archived falls back to the newest ranker (list is newest first)
+            if (!models.some(m => m.filename === pRanker)) {
+              pRanker = (models.find(m => m.type === 'performer_ranker') || {}).filename || '';
+            }
+          }
         } catch (_) {}
+
+        setPreferredBinaryModel(pBin);
+        setPreferredRankedBinaryModel(pRankBin);
+        setPreferredPairwiseModel(pPair);
+        setPreferredClipSiameseModel(pClip);
+        setPreferredRankerModel(pRanker);
 
         // Pre-select target model name (visible in UI), but don't load it yet
         let targetModel = pBin;
         if (modelType === 'ranked_binary') targetModel = pRankBin;
         else if (modelType === 'pairwise') targetModel = pPair;
-        else if (modelType === 'context_binary') targetModel = pContext;
-        else if (modelType === 'siamese') targetModel = pSiamese;
-        else if (modelType === 'rank_aware_siamese') targetModel = pRankSiamese;
-        else if (modelType === 'ranked_siamese_binary') targetModel = pRankedSiamese;
+        else if (modelType === 'clip_siamese') targetModel = pClip;
         setSelectedModel(targetModel);
       } catch (err) {
         console.error('Error fetching prefs:', err);
@@ -312,11 +304,10 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const getPreferredFor = useCallback((type) => {
     if (type === 'binary') return preferredBinaryModel;
     if (type === 'pairwise') return preferredPairwiseModel;
-    if (type === 'siamese') return preferredSiameseModel;
+    if (type === 'clip_siamese') return preferredClipSiameseModel;
     if (type === 'ranked_binary') return preferredRankedBinaryModel;
-    if (type === 'ranked_siamese_binary') return preferredRankedSiameseModel;
     return null;
-  }, [preferredBinaryModel, preferredPairwiseModel, preferredSiameseModel, preferredRankedBinaryModel, preferredRankedSiameseModel]);
+  }, [preferredBinaryModel, preferredPairwiseModel, preferredClipSiameseModel, preferredRankedBinaryModel]);
 
   // Load a classifier model. For ranked modes the ranker must have already run.
   const loadClassifier = useCallback(async (type) => {
@@ -326,7 +317,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
       alert(`No default model set for ${type}.\nSet one in Taste Dashboard → Model Arsenal.`);
       return;
     }
-    if (['ranked_binary', 'ranked_siamese_binary'].includes(type) && performerRank === null) {
+    if (type === 'ranked_binary' && performerRank === null) {
       alert('Run the Performer Ranker first (Step 1) so the model can be calibrated for this performer.');
       return;
     }
@@ -397,7 +388,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
 
       setPerformerRank(rankRes.rank);
       setRankerStatus('done');
-      alert(`Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nYou can now load Ranked Binary or Ranked Siamese.`);
+      alert(`Performer rank: ${rankRes.rank.toFixed(2)} / 5.0\n(based on ${rankRes.images_used} images)\n\nYou can now load Ranked Binary.`);
     } catch (err) {
       console.error('Ranker pipeline failed:', err);
       setRankerStatus('error');
@@ -471,7 +462,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
   const handleSaveBatch = async () => {
     if (results.length === 0) return;
     // For siamese modes, only save decided items (skip uncertain ones)
-    const isSiamese = ['siamese', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(modelType);
+    const isSiamese = modelType === 'clip_siamese';
     const toSave = isSiamese ? results.filter(r => r.decision !== 'uncertain') : results;
     if (toSave.length === 0) {
       alert('No decided images to save. All are in the uncertain zone — please manually classify them first.');
@@ -611,7 +602,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               {[
                 { type: 'binary', label: 'Binary', icon: <FilterAlt />, color: 'var(--accent)' },
                 { type: 'pairwise', label: 'Pairwise', icon: <Compare />, color: 'var(--accent)' },
-                { type: 'siamese', label: 'Siamese', icon: <MagicIcon />, color: 'var(--accent)' }
+                { type: 'clip_siamese', label: 'CLIP Siamese', icon: <MagicIcon />, color: 'var(--accent)' }
               ].map(m => {
                 const isActive = activeModelType === m.type;
                 const isLoading = loadingModelType === m.type;
@@ -677,8 +668,7 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               </Typography>
               <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                 {[
-                  { type: 'ranked_binary', label: 'Ranked Binary', icon: <FilterAlt /> },
-                  { type: 'ranked_siamese_binary', label: 'Ranked Siamese', icon: <MagicIcon /> }
+                  { type: 'ranked_binary', label: 'Ranked Binary', icon: <FilterAlt /> }
                 ].map(m => {
                   const isActive = activeModelType === m.type;
                   const isLoading = loadingModelType === m.type;
@@ -858,11 +848,8 @@ const SmartFilterPage = ({ performer: propPerformer, onBack: propOnBack, basePat
               <ToggleButton value="pairwise" sx={{ gap: 1 }}>
                 <Compare sx={{ fontSize: 16 }} /> Pairwise
               </ToggleButton>
-              <ToggleButton value="siamese" sx={{ gap: 1 }}>
-                <MagicIcon sx={{ fontSize: 16 }} /> Siamese
-              </ToggleButton>
-              <ToggleButton value="ranked_siamese_binary" sx={{ gap: 1 }}>
-                <MagicIcon sx={{ fontSize: 16, color: 'var(--accent)' }} /> Rank Smn
+              <ToggleButton value="clip_siamese" sx={{ gap: 1 }}>
+                <MagicIcon sx={{ fontSize: 16 }} /> CLIP
               </ToggleButton>
             </ToggleButtonGroup>
 

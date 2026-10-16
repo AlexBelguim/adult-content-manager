@@ -104,3 +104,6 @@ demo/page-text.txt
 # funpipe runtime state (queue + review editor log), regenerated at run time
 AI-Inference-App/funpipe_queue.json
 AI-Inference-App/funpipe_ui.log
+
+# Moved-out models and code waiting for deletion
+_archive/

@@ -48,10 +48,7 @@ except Exception as e:
     traceback.print_exc()
 
 # ── Module Imports ────────────────────────────────────────────────────────────
-from model_dinov2 import (
-    DinoV2PreferenceModel, PerformerRankerModel, PerformerAttentionRanker,
-    RankedBinaryClassifier, RankedSiameseModel
-)
+from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel
 
 
 # Initialize Calibration Engine
@@ -160,8 +157,7 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             
             # Auto-detect from filename if model_type is missing
             if model_id and (model_type == 'unknown' or not model_type):
-                if 'context' in model_id.lower(): model_type = 'context_binary'
-                elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): model_type = 'binary'
+                if 'binary' in model_id.lower() or 'filtering' in model_id.lower(): model_type = 'binary'
                 elif 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): model_type = 'pairwise'
             
             log(f"🦕 Architecture: {MODEL_NAME} | Type: {model_type} (Device: {DEVICE})")
@@ -170,31 +166,11 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             
             # Initialize the correct model class based on type + rank flag
             try:
-                if model_type in ('performer_ranker', 'performer_attention_ranker'):
-                    # Ranker (per-image, pairwise siamese, or gallery-level attention)
-                    # — all load into the RANKER_MODEL slot. Three variants:
-                    #   - performer_attention_ranker:           PerformerAttentionRanker
-                    #   - performer_ranker, arch='regression':  PerformerRankerModel (MSE on stars)
-                    #   - performer_ranker, arch='pairwise':    PerformerPairwiseRankerModel (siamese duels)
-                    # All expose predict_rank() so downstream models don't care which.
+                if model_type == 'performer_ranker':
+                    # The ranker loads into the RANKER_MODEL slot, next to the keep/delete model.
                     global RANKER_MODEL, RANKER_PROCESSOR, RANKER_MODEL_ID
-                    ranker_arch = checkpoint.get('ranker_arch', 'regression')
-                    if model_type == 'performer_attention_ranker':
-                        ranker = PerformerAttentionRanker(MODEL_NAME, quantize=quantize)
-                    elif ranker_arch == 'pairwise':
-                        from model_dinov2 import PerformerPairwiseRankerModel
-                        ranker = PerformerPairwiseRankerModel(MODEL_NAME, quantize=quantize)
-                    else:
-                        ranker = PerformerRankerModel(MODEL_NAME, quantize=quantize)
+                    ranker = PerformerRankerModel(MODEL_NAME, quantize=quantize)
                     ranker.load_state_dict(checkpoint['model_state_dict'], strict=False)
-                    # Calibration buffers may have been saved as plain floats — re-apply
-                    # so predict_rank produces sensible stars even on older state_dicts.
-                    cal_a = checkpoint.get('cal_a', 1.0)
-                    cal_b = checkpoint.get('cal_b', 2.5)
-                    if model_type == 'performer_ranker' and ranker_arch == 'pairwise':
-                        try: ranker.set_calibration(cal_a, cal_b)
-                        except Exception: pass
-                        log(f"  Pairwise ranker calibration: stars ≈ {cal_a:.3f}·raw + {cal_b:.3f}")
                     ranker.to(DEVICE)
                     ranker.eval()
                     RANKER_MODEL = ranker
@@ -202,19 +178,10 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                     RANKER_MODEL_ID = model_id
                     val_mae = checkpoint.get('val_mae')
                     if val_mae: log(f"  Ranker MAE at save: {val_mae:.3f}")
-                    val_acc = checkpoint.get('val_acc')
-                    if model_type == 'performer_ranker' and ranker_arch == 'pairwise' and val_acc:
-                        log(f"  Pair ranking acc at save: {val_acc:.3f}")
                     del checkpoint
                     import gc; gc.collect()
                     if torch.cuda.is_available(): torch.cuda.empty_cache()
-                    if model_type == 'performer_attention_ranker':
-                        label = "Attention Ranker"
-                    elif ranker_arch == 'pairwise':
-                        label = "Performer Ranker (Pairwise)"
-                    else:
-                        label = "Performer Ranker (Regression)"
-                    log(f"✅ {label} loaded on {DEVICE}")
+                    log(f"✅ Performer Ranker loaded on {DEVICE}")
                     LOADED_MODEL_ID = model_id  # Track for UI
                     return True, "Ranker loaded"
                 elif model_type == 'binary' and rank_conditioned:
@@ -222,14 +189,8 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                 elif model_type == 'binary':
                     from trainer import BinaryClassifier
                     MODEL = BinaryClassifier(MODEL_NAME, quantize=quantize)
-                elif model_type in ('siamese_binary', 'pairwise_siamese_binary') and rank_conditioned:
-                    MODEL = RankedSiameseModel(model_name=MODEL_NAME, quantize=quantize)
-                elif model_type == 'context_binary':
-                    from trainer import ContextBinaryClassifier
-                    MODEL = ContextBinaryClassifier(MODEL_NAME, quantize=quantize)
-                elif model_type == 'rank_aware_siamese':
-                    from model_dinov2 import RankAwareSiameseModel
-                    MODEL = RankAwareSiameseModel(MODEL_NAME, quantize=quantize)
+                elif model_type == 'clip_siamese':
+                    MODEL = ClipPreferenceModel(MODEL_NAME)
                 else:
                     MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True, quantize=quantize)
             except ImportError as ie:
@@ -254,10 +215,7 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
             
             val_acc = checkpoint.get('val_acc')
             if val_acc: log(f"  Val accuracy at save: {val_acc*100:.1f}%")
-            if model_type == 'context_binary':
-                mae = checkpoint.get('val_star_mae')
-                if mae: log(f"  Star prediction MAE: {mae:.2f}")
-            
+
             # Explicit cleanup of the checkpoint object
             del checkpoint
             import gc
@@ -405,39 +363,24 @@ def api_list_models():
             ckpt = torch.load(m, map_location='cpu', weights_only=False)
             m_type = ckpt.get('model_type', 'unknown')
             
-            # Auto-detect type if unknown.
-            # Order matters — check the most specific filename fragments first:
-            #   'attention_ranker' is more specific than 'ranker'
-            #   'ranker' is more specific than 'pairwise' (e.g. 'performer_pairwise_ranker')
+            # Auto-detect type if unknown ('ranker' before 'pairwise').
             if m_type == 'unknown':
                 name_low = m.name.lower()
-                if 'attention_ranker' in name_low: m_type = 'performer_attention_ranker'
-                elif 'ranker' in name_low: m_type = 'performer_ranker'
+                if 'ranker' in name_low: m_type = 'performer_ranker'
                 elif 'pairwise' in name_low or 'preference' in name_low: m_type = 'pairwise'
-                elif 'context' in name_low: m_type = 'context_binary'
-                elif 'siamese' in name_low: m_type = 'siamese_binary'
                 elif 'binary' in name_low or 'filtering' in name_low: m_type = 'binary'
-                
+
                 sd = ckpt.get('model_state_dict', {})
-                if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
-                elif any('head' in k for k in sd.keys()) and m_type == 'unknown': m_type = 'pairwise'
-            
+                if any('head' in k for k in sd.keys()) and m_type == 'unknown': m_type = 'pairwise'
+
             rank_conditioned = ckpt.get('rank_conditioned', False)
             # Normalise type so rank-conditioned models have distinct identifiers
-            if rank_conditioned:
-                if m_type == 'binary': m_type = 'ranked_binary'
-                elif m_type in ('siamese_binary', 'pairwise_siamese_binary'): m_type = 'ranked_siamese_binary'
+            if rank_conditioned and m_type == 'binary': m_type = 'ranked_binary'
             info['type'] = m_type
             info['backbone'] = ckpt.get('backbone') or ckpt.get('config', {}).get('model_name')
             info['val_acc'] = ckpt.get('val_acc')
             info['val_mae'] = ckpt.get('val_mae')  # For performer_ranker (regression)
             info['rank_conditioned'] = rank_conditioned
-            # Sub-architecture for performer_ranker: 'regression' vs 'pairwise'.
-            # Defaults to 'regression' for legacy checkpoints that pre-date the field.
-            if m_type == 'performer_ranker':
-                info['ranker_arch'] = ckpt.get('ranker_arch', 'regression')
-                info['cal_a'] = ckpt.get('cal_a')
-                info['cal_b'] = ckpt.get('cal_b')
             info['samples'] = ckpt.get('samples')
             info['created_at'] = ckpt.get('created_at')
             info['epoch_history'] = ckpt.get('epoch_history')
@@ -538,10 +481,7 @@ def api_test_model():
             m_type = checkpoint_cpu.get('model_type', 'unknown')
             if m_type == 'unknown':
                 if 'pairwise' in model_id.lower() or 'preference' in model_id.lower(): m_type = 'pairwise'
-                elif 'context' in model_id.lower(): m_type = 'context_binary'
                 elif 'binary' in model_id.lower() or 'filtering' in model_id.lower(): m_type = 'binary'
-                sd = checkpoint_cpu.get('model_state_dict', {})
-                if any('performer_embed' in k for k in sd.keys()): m_type = 'agent_of_taste'
 
             config = checkpoint_cpu.get('config', {})
             model_name = config.get('model_name') or checkpoint_cpu.get('backbone') or 'facebook/dinov2-large'
@@ -565,30 +505,11 @@ def api_test_model():
             elif model_type == 'pairwise':
                 test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
-            elif model_type in ('siamese_binary', 'pairwise_siamese_binary') and not rank_conditioned:
-                test_model = DinoV2PreferenceModel(model_name=model_name, freeze_backbone=True)
-                test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
-            elif model_type in ('siamese_binary', 'pairwise_siamese_binary') and rank_conditioned:
-                from model_dinov2 import RankedSiameseModel
-                test_model = RankedSiameseModel(model_name=model_name, freeze_backbone=True)
+            elif model_type == 'clip_siamese':
+                test_model = ClipPreferenceModel(model_name)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             elif model_type == 'performer_ranker':
-                ranker_arch = checkpoint_cpu.get('ranker_arch', 'regression')
-                if ranker_arch == 'pairwise':
-                    from model_dinov2 import PerformerPairwiseRankerModel
-                    test_model = PerformerPairwiseRankerModel(model_name, freeze_backbone=True)
-                    test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
-                    cal_a = checkpoint_cpu.get('cal_a', 1.0)
-                    cal_b = checkpoint_cpu.get('cal_b', 2.5)
-                    try: test_model.set_calibration(cal_a, cal_b)
-                    except Exception: pass
-                else:
-                    from model_dinov2 import PerformerRankerModel
-                    test_model = PerformerRankerModel(model_name, freeze_backbone=True)
-                    test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
-            elif model_type == 'context_binary':
-                from trainer import ContextBinaryClassifier
-                test_model = ContextBinaryClassifier(model_name)
+                test_model = PerformerRankerModel(model_name, freeze_backbone=True)
                 test_model.load_state_dict(checkpoint_cpu['model_state_dict'], strict=False)
             else:
                 return jsonify({'success': False, 'error': f'Testing not supported for type: {model_type}'}), 400
@@ -649,16 +570,9 @@ def api_test_model():
                     if model_type == 'binary' and rank_conditioned:
                         r = torch.tensor([get_rank(performer)], dtype=torch.float32, device=DEVICE)
                         return torch.sigmoid(test_model(inp['pixel_values'], r)).item()
-                    if model_type == 'pairwise':
+                    if model_type in ('pairwise', 'clip_siamese'):
                         return torch.sigmoid(test_model.forward_single(inp['pixel_values'])).item()
-                    if model_type in ('siamese_binary', 'pairwise_siamese_binary') and not rank_conditioned:
-                        return torch.sigmoid(test_model.forward_single(inp['pixel_values'])).item()
-                    if model_type in ('siamese_binary', 'pairwise_siamese_binary') and rank_conditioned:
-                        r = torch.tensor([get_rank(performer)], dtype=torch.float32, device=DEVICE)
-                        return torch.sigmoid(test_model.forward_single(inp['pixel_values'], r)).item()
                     if model_type == 'performer_ranker':
-                        # predict_rank() returns calibrated stars for both
-                        # regression and pairwise sub-architectures.
                         return test_model.predict_rank(inp['pixel_values']).item()
                 return 0.0
 
@@ -715,44 +629,6 @@ def api_test_model():
                     # Compat fields so existing UI handlers don't crash
                     'accuracy': round(within_pct, 4),
                     'correct': within_half,
-                }
-            elif model_type == 'context_binary':
-                # Legacy path — per-image accuracy on context-aware binary.
-                saved_contexts = checkpoint_cpu.get('contexts', {})
-                hs = test_model.backbone.config.hidden_size
-                zero_ctx = torch.zeros(1, hs).to(DEVICE)
-                correct = total = 0
-                keep_scores, delete_scores = [], []
-                with torch.no_grad():
-                    for sample in test_samples:
-                        try:
-                            perf = sample.get('_performer')
-                            ctx = saved_contexts.get(perf, zero_ctx.squeeze(0)).unsqueeze(0).to(DEVICE) if perf else zero_ctx
-                            img = load_img(sample); label = sample['label']
-                            inp = processor(images=img, return_tensors='pt').to(DEVICE)
-                            logit = test_model(inp['pixel_values'], ctx)
-                            prob = torch.sigmoid(logit).item()
-                            pred = 1 if prob > 0.5 else 0
-                            if pred == label: correct += 1
-                            total += 1
-                            (keep_scores if label == 1 else delete_scores).append(prob)
-                            if torch.cuda.is_available(): torch.cuda.synchronize()
-                            time.sleep(0.005)
-                        except: continue
-                accuracy = correct / max(total, 1)
-                avg_keep = sum(keep_scores) / max(len(keep_scores), 1)
-                avg_delete = sum(delete_scores) / max(len(delete_scores), 1)
-                result = {
-                    'accuracy': round(accuracy, 4),
-                    'total_tested': total, 'correct': correct,
-                    'avg_keep_score': round(avg_keep, 4),
-                    'avg_delete_score': round(avg_delete, 4),
-                    'separation': round(avg_keep - avg_delete, 4),
-                    'metric_type': 'per_image',
-                    'model_type': model_type,
-                    'in_distribution': in_distribution,
-                    'holdout_performers_count': len(holdout_set),
-                    'contexts_used': len(saved_contexts),
                 }
             else:
                 # Unified pair-ranking metric for all keep/delete models.
@@ -1019,7 +895,7 @@ def classify_batch():
     # 2. PRE-COMPUTE PERFORMER RANKS (Outside lock — avoids holding MODEL_LOCK during heavy I/O)
     # If a rank-conditioned model is loaded and RANKER_MODEL is available, compute every
     # unique performer's rank now so classify_batch only needs a fast cache lookup inside the lock.
-    if RANKER_MODEL is not None and isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
+    if RANKER_MODEL is not None and isinstance(MODEL, RankedBinaryClassifier):
         performers_to_rank = {}
         for p, _ in loaded_data:
             perf = _get_performer_name(p)
@@ -1056,110 +932,8 @@ def classify_batch():
             return jsonify({'error': 'Model not loaded'}), 500
             
         try:
-            # ── Context-Aware: Two-pass inference ──────────────────────────
-            if LOADED_MODEL_TYPE == 'context_binary':
-                # Group loaded images by performer
-                performer_data = {} # name -> [(path, img)]
-                for p, img in loaded_data:
-                    perf = _get_performer_name(p)
-                    performer_data.setdefault(perf, []).append((p, img))
-                
-                # Pass 1: Predict star rating per performer (sample up to 20 images)
-                for perf, items in performer_data.items():
-                    if perf in CONTEXT_STAR_CACHE: continue
-                    
-                    sample_items = items[:20] # Reduced from 100 to 20 for speed/stability
-                    star_preds = []
-                    for i in range(0, len(sample_items), 4):
-                        batch = sample_items[i:i+4]
-                        imgs = [it[1] for it in batch]
-                        with torch.no_grad():
-                            inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                            pv = inputs['pixel_values'].to(DEVICE)
-                            stars = MODEL.predict_stars(pv)
-                            star_preds.extend(stars.cpu().tolist())
-                        # Breather for the system
-                        if torch.cuda.is_available(): torch.cuda.synchronize()
-                        time.sleep(0.005)
-                    
-                    avg_stars = sum(star_preds) / max(len(star_preds), 1) if star_preds else 2.5
-                    CONTEXT_STAR_CACHE[perf] = avg_stars
-                    log(f"  ⭐ {perf}: predicted {avg_stars:.2f} stars")
-
-                # Pass 2: Keep/Delete classification
-                for i in range(0, len(loaded_data), 4):
-                    batch = loaded_data[i:i+4]
-                    imgs = [it[1] for it in batch]
-                    paths = [it[0] for it in batch]
-                    stars = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
-                    
-                    with torch.no_grad():
-                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                        pv = inputs['pixel_values'].to(DEVICE)
-                        star_t = torch.tensor(stars, dtype=torch.float32).to(DEVICE)
-                        logits = MODEL.classify_with_stars(pv, star_t)
-                        logits = torch.nan_to_num(logits, nan=0.0)
-                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
-                        for p, s, star in zip(paths, scores, stars):
-                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
-                            results.append({
-                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
-                                'predicted_stars': round(star, 2), 'performer': _get_performer_name(p)
-                            })
-                    if torch.cuda.is_available(): torch.cuda.synchronize()
-                    time.sleep(0.005)
-
-            # ── Rank-Aware Siamese: Two-pass inference ──────────────────────
-            elif LOADED_MODEL_TYPE == 'rank_aware_siamese':
-                performer_data = {}
-                for p, img in loaded_data:
-                    perf = _get_performer_name(p)
-                    performer_data.setdefault(perf, []).append((p, img))
-                
-                # Pass 1: Predict rank
-                for perf, items in performer_data.items():
-                    if perf in CONTEXT_STAR_CACHE: continue
-                    sample_items = items[:20]
-                    rank_preds = []
-                    for i in range(0, len(sample_items), 4):
-                        batch = sample_items[i:i+4]
-                        imgs = [it[1] for it in batch]
-                        with torch.no_grad():
-                            inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                            pv = inputs['pixel_values'].to(DEVICE)
-                            ranks = MODEL.predict_rank(pv)
-                            rank_preds.extend(ranks.cpu().tolist())
-                        if torch.cuda.is_available(): torch.cuda.synchronize()
-                        time.sleep(0.005)
-                    avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
-                    CONTEXT_STAR_CACHE[perf] = avg_rank
-                    log(f"  ⭐ {perf}: estimated rank {avg_rank:.2f}")
-
-                # Pass 2: Preference classification
-                for i in range(0, len(loaded_data), 4):
-                    batch = loaded_data[i:i+4]
-                    imgs = [it[1] for it in batch]
-                    paths = [it[0] for it in batch]
-                    ranks = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
-                    
-                    with torch.no_grad():
-                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                        pv = inputs['pixel_values'].to(DEVICE)
-                        rank_t = torch.tensor(ranks, dtype=torch.float32).to(DEVICE)
-                        logits = MODEL.forward_single(pv, rank_t)
-                        logits = torch.nan_to_num(logits, nan=0.0)
-                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
-                        for p, s, r in zip(paths, scores, ranks):
-                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
-                            results.append({
-                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
-                                'predicted_rank': round(r, 2), 'performer': _get_performer_name(p)
-                            })
-                    if torch.cuda.is_available(): torch.cuda.synchronize()
-                    time.sleep(0.005)
-
             # ── Rank-Conditioned Binary: Two-pass (ranker + classifier) ────
-            elif isinstance(MODEL, RankedBinaryClassifier):
+            if isinstance(MODEL, RankedBinaryClassifier):
                 # Pass 0: Get performer ranks via RANKER_MODEL or fallback to 2.5
                 performer_data = {}
                 for p, img in loaded_data:
@@ -1214,69 +988,6 @@ def classify_batch():
                         pv = inputs['pixel_values'].to(DEVICE)
                         rank_t = torch.tensor(ranks, dtype=torch.float32).to(DEVICE)
                         logits = MODEL(pv, rank_t)
-                        logits = torch.nan_to_num(logits, nan=0.0)
-                        scores = (torch.sigmoid(logits) * 100).cpu().tolist()
-                        for p, s, r in zip(paths, scores, ranks):
-                            safe_s = float(s) if not (math.isnan(s) or math.isinf(s)) else 50.0
-                            results.append({
-                                'path': p, 'score': safe_s, 'decision': "keep" if safe_s >= threshold else "delete",
-                                'predicted_rank': round(r, 2), 'performer': _get_performer_name(p)
-                            })
-                    if torch.cuda.is_available(): torch.cuda.synchronize()
-                    time.sleep(0.005)
-
-            # ── Rank-Conditioned Siamese: Two-pass ────────────────────────────
-            elif isinstance(MODEL, RankedSiameseModel):
-                performer_data = {}
-                for p, img in loaded_data:
-                    perf = _get_performer_name(p)
-                    performer_data.setdefault(perf, []).append((p, img))
-                
-                for perf, items in performer_data.items():
-                    if perf in CONTEXT_STAR_CACHE: continue
-                    if RANKER_MODEL is not None:
-                        # NEW: Load up to 300 images for this performer
-                        log(f"  🔍 Gathering images for {perf} to establish robust rank...")
-                        performer_img_paths = _get_performer_images_for_rank(items[0][0], max_images=300)
-                        log(f"  🔍 Running ranker on {len(performer_img_paths)} images for {perf}...")
-                        
-                        rank_preds = []
-                        for ri in range(0, len(performer_img_paths), 8):
-                            chunk_paths = performer_img_paths[ri:ri+8]
-                            chunk_imgs = []
-                            for cp in chunk_paths:
-                                cimg = _load_image(cp, app_base_url)
-                                if cimg: chunk_imgs.append(cimg)
-                            
-                            if not chunk_imgs: continue
-                            
-                            with torch.no_grad():
-                                proc = RANKER_PROCESSOR or PROCESSOR
-                                inputs = proc(images=chunk_imgs, return_tensors="pt")
-                                pv = inputs['pixel_values'].to(DEVICE)
-                                ranks = RANKER_MODEL.predict_rank(pv)
-                                rank_preds.extend(ranks.cpu().tolist())
-                            
-                            for cimg in chunk_imgs: cimg.close()
-                            if torch.cuda.is_available(): torch.cuda.synchronize()
-                            
-                        avg_rank = sum(rank_preds) / max(len(rank_preds), 1) if rank_preds else 2.5
-                    else:
-                        avg_rank = 2.5
-                    CONTEXT_STAR_CACHE[perf] = avg_rank
-                    log(f"  ⭐ {perf}: rank {avg_rank:.2f} (based on {len(rank_preds) if RANKER_MODEL else 0} images)")
-                
-                for i in range(0, len(loaded_data), 4):
-                    batch = loaded_data[i:i+4]
-                    imgs = [it[1] for it in batch]
-                    paths = [it[0] for it in batch]
-                    ranks = [CONTEXT_STAR_CACHE.get(_get_performer_name(p), 2.5) for p in paths]
-                    
-                    with torch.no_grad():
-                        inputs = PROCESSOR(images=imgs, return_tensors="pt")
-                        pv = inputs['pixel_values'].to(DEVICE)
-                        rank_t = torch.tensor(ranks, dtype=torch.float32).to(DEVICE)
-                        logits = MODEL.forward_single(pv, rank_t)
                         logits = torch.nan_to_num(logits, nan=0.0)
                         scores = (torch.sigmoid(logits) * 100).cpu().tolist()
                         for p, s, r in zip(paths, scores, ranks):
@@ -1359,29 +1070,15 @@ def predict_rank():
             # Determine which model to use for ranking
             target_model = None
             target_processor = None
-            method_name = None
-            
+
             if RANKER_MODEL is not None:
                 target_model = RANKER_MODEL
                 target_processor = RANKER_PROCESSOR or PROCESSOR
-                method_name = 'predict_rank'
-            elif hasattr(MODEL, 'predict_stars'):
-                target_model = MODEL
-                target_processor = PROCESSOR
-                method_name = 'predict_stars'
-            elif hasattr(MODEL, 'predict_rank'):
-                target_model = MODEL
-                target_processor = PROCESSOR
-                method_name = 'predict_rank'
-            
+
             if not target_model:
-                # Try auto-loading a ranker. Prefer attention ranker if any exist.
+                # Try auto-loading the newest ranker
                 try:
-                    all_files = os.listdir(MODELS_DIR)
-                    attn_files = [f for f in all_files if f.startswith('performer_attention_ranker') and f.endswith('.pt')]
-                    legacy_files = [f for f in all_files if f.startswith('performer_ranker') and f.endswith('.pt')]
-                    ranker_files = attn_files if attn_files else legacy_files
-                    is_attention = bool(attn_files)
+                    ranker_files = [f for f in os.listdir(MODELS_DIR) if f.startswith('performer_ranker') and f.endswith('.pt')]
                     if ranker_files:
                         # Sort by modification time to get the newest
                         ranker_files.sort(key=lambda x: os.path.getmtime(os.path.join(MODELS_DIR, x)), reverse=True)
@@ -1393,10 +1090,7 @@ def predict_rank():
                         config = checkpoint.get('config', {})
                         model_name = config.get('model_name') or checkpoint.get('backbone') or "facebook/dinov2-large"
 
-                        if is_attention or checkpoint.get('model_type') == 'performer_attention_ranker':
-                            RANKER_MODEL = PerformerAttentionRanker(model_name).to(DEVICE)
-                        else:
-                            RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
+                        RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
                         RANKER_MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
                         RANKER_MODEL.eval()
                         RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(model_name)
@@ -1404,7 +1098,6 @@ def predict_rank():
 
                         target_model = RANKER_MODEL
                         target_processor = RANKER_PROCESSOR
-                        method_name = 'predict_rank'
                         log("✅ Auto-loaded ranker successfully.")
                 except Exception as le:
                     log(f"❌ Failed to auto-load ranker: {le}")
@@ -1412,45 +1105,14 @@ def predict_rank():
             if not target_model:
                 return jsonify({"success": False, "error": "No rank-capable model loaded (load a Ranker first)"}), 400
                 
-            # Gallery-level attention ranker: embed all images in chunks,
-            # then a single attention-aggregation produces one rating.
-            if isinstance(target_model, PerformerAttentionRanker):
-                cls_chunks = []
-                for i in range(0, len(loaded_imgs), 8):
-                    batch = loaded_imgs[i:i+8]
-                    with torch.no_grad():
-                        inputs = target_processor(images=batch, return_tensors="pt")
-                        pv = inputs['pixel_values'].to(DEVICE)
-                        cls_chunks.append(target_model._embed(pv))
-                    if torch.cuda.is_available(): torch.cuda.synchronize()
-                cls_all = torch.cat(cls_chunks, dim=0)  # (K, D)
-                with torch.no_grad():
-                    gallery, weights = target_model._aggregate(cls_all)
-                    rating = target_model.rank_head(gallery).clamp(0.0, 5.0).item()
-                # Surface top-3 most-weighted images for transparency
-                top_idx = torch.topk(weights, k=min(3, weights.numel())).indices.cpu().tolist()
-                log(f"  ✅ Prediction: {rating:.2f} stars (gallery of {len(loaded_imgs)}, top attn idx: {top_idx})")
-                return jsonify({
-                    'success': True,
-                    'predicted_rank': round(rating, 3),
-                    'sample_size': len(loaded_imgs),
-                    'aggregation': 'attention',
-                    'attention_top_indices': top_idx,
-                })
-
-            # Legacy per-image ranker: predict each, then average.
+            # Per-image ranker: predict each, then average.
             rank_preds = []
             for i in range(0, len(loaded_imgs), 8):
                 batch = loaded_imgs[i:i+8]
                 with torch.no_grad():
                     inputs = target_processor(images=batch, return_tensors="pt")
                     pv = inputs['pixel_values'].to(DEVICE)
-
-                    if method_name == 'predict_stars':
-                        ranks = target_model.predict_stars(pv)
-                    else:
-                        ranks = target_model.predict_rank(pv)
-
+                    ranks = target_model.predict_rank(pv)
                     rank_preds.extend(ranks.cpu().tolist())
                 if torch.cuda.is_available(): torch.cuda.synchronize()
 
@@ -1493,7 +1155,7 @@ def classify_single():
                 pixel_values = inputs['pixel_values'].to(DEVICE)
                 
                 # Dispatch based on model type
-                if isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
+                if isinstance(MODEL, RankedBinaryClassifier):
                     # Get rank for this performer
                     perf = _get_performer_name(image_path)
                     if perf not in CONTEXT_STAR_CACHE:
@@ -1525,10 +1187,7 @@ def classify_single():
                             CONTEXT_STAR_CACHE[perf] = 2.5
                     rank = CONTEXT_STAR_CACHE[perf]
                     rank_t = torch.tensor([rank], dtype=torch.float32).to(DEVICE)
-                    if isinstance(MODEL, RankedBinaryClassifier):
-                        raw_scores = MODEL(pixel_values, rank_t)
-                    else:
-                        raw_scores = MODEL.forward_single(pixel_values, rank_t)
+                    raw_scores = MODEL(pixel_values, rank_t)
                 elif hasattr(MODEL, 'forward_single'):
                     raw_scores = MODEL.forward_single(pixel_values)
                 else:
@@ -1587,7 +1246,7 @@ def score_images():
                     pv = inputs['pixel_values'].to(DEVICE)
                     
                     # Get scores — handle all model types
-                    if isinstance(MODEL, (RankedBinaryClassifier, RankedSiameseModel)):
+                    if isinstance(MODEL, RankedBinaryClassifier):
                         raw_scores = MODEL.forward_no_rank(pv)
                     elif hasattr(MODEL, 'forward_single'):
                         raw_scores = MODEL.forward_single(pv)

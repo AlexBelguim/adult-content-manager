@@ -252,8 +252,8 @@ function hashJobs() {
 }
 
 const TRAIN_TITLE = {
-  binary: 'Keep / delete classifier', context_binary: 'Context classifier',
-  pairwise: 'Pairwise ranker', siamese: 'Siamese performer ranker'
+  binary: 'Keep / delete classifier', ranked_binary: 'Ranked keep / delete classifier',
+  pairwise: 'Pairwise ranker', clip_siamese: 'CLIP siamese picture ranker', performer_ranker: 'Performer ranker'
 };
 
 async function trainJobs(fresh) {

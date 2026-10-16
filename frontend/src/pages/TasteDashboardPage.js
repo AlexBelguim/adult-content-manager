@@ -10,7 +10,7 @@ import {
 import {
   TrendingUp, Psychology, Storage, CloudOff, CloudDone,
   Warning, CheckCircle, ArrowBack, Refresh, Delete as DeleteIcon,
-  Star, EmojiEvents, Speed, Autorenew, Save, Dns,
+  Star, Speed, Autorenew, Save, Dns,
   FilterAlt, Compare, Tune, PlayArrow, Stop,
   ExpandMore, ExpandLess, Person, Science, RocketLaunch, DeleteOutline,
   School, ModelTraining, AutoAwesome
@@ -19,35 +19,102 @@ import { useNavigate } from 'react-router-dom';
 import { PageShell, PageHeader, Panel, LoadingState } from '../components/layout';
 
 const MODEL_TYPES = [
-  { id: 'binary', name: 'Simple Binary', icon: <FilterAlt />, desc: 'Keep vs Delete classifier. Fast training, good for general quality filtering.',
-    color: 'var(--ok)', output: 'binary_filtering.pt', requirements: 'Needs keep + delete image folders',
-    pros: ['Fast Training', 'Direct Application'], cons: ['Subject Bias', 'Global Average'] },
-  { id: 'pairwise', name: 'Pairwise Preference', icon: <Compare />, desc: 'Learns relative image preference from A vs B comparisons.',
-    color: 'var(--info)', output: 'pairwise_preference.pt', requirements: 'Needs 50+ labeled pairs from pairwise labeling',
-    pros: ['High Precision', 'Scale Invariant'], cons: ['Data Intensive', 'No Absolute Baseline'] },
-  { id: 'pairwise_siamese_binary', name: 'Siamese Binary Ranking', icon: <AutoAwesome />, desc: 'Trains a pairwise Siamese ranker using dynamic Keep > Delete pairs from your binary folders.',
-    color: 'var(--chart-0)', output: 'siamese_binary.pt', requirements: 'Needs keep + delete folders',
-    pros: ['Granular Ranking', 'Massive Augmentation'], cons: ['Slower Training'] },
-  { id: 'performer_ranker', name: 'Performer Ranker (Regression)', icon: <Star />, desc: 'Learns to predict performer star ratings from images via MSE regression on manifest stars. Use as a pre-step for ranked models.',
-    color: 'var(--chart-1)', output: 'performer_ranker.pt', requirements: 'Needs rated performers (star ratings) with keep + delete images',
-    pros: ['Visual Rank Estimation', 'Enables Context'], cons: ['Needs Star Ratings', 'Averages Pair Signal'] },
-  { id: 'performer_pairwise_ranker', name: 'Performer Ranker (Pairwise)', icon: <Compare />, desc: 'Siamese ranker trained directly on Smart Compare duels. Preserves the pairwise signal; calibrated to 0-5 stars after training so it\'s a drop-in replacement for the regression ranker.',
-    color: 'var(--chart-2)', output: 'performer_pairwise_ranker.pt', requirements: 'Needs Smart Compare duels (performer_comparisons) + base folder + ratings for calibration',
-    pros: ['Hard Pairs', 'No Label Collapse', 'Drop-in for Ranked Models'], cons: ['Needs Duels'] },
-  { id: 'ranked_binary', name: 'Ranked Binary', icon: <Tune />, desc: 'Binary classifier conditioned on performer rank. Learns that keep/delete thresholds vary by performer tier.',
-    color: 'var(--chart-3)', output: 'binary_filtering.pt', requirements: 'Needs keep + delete folders + star ratings in manifest',
-    pros: ['Context-Aware', 'Backward Compatible'], cons: ['Needs Ranker at Inference'] },
-  { id: 'ranked_siamese_binary', name: 'Ranked Siamese', icon: <EmojiEvents />, desc: 'Siamese ranking conditioned on performer tier. Most accurate context-aware model.',
-    color: 'var(--accent)', output: 'siamese_binary.pt', requirements: 'Needs keep + delete + star ratings',
-    pros: ['Highest Accuracy', 'Context-Aware'], cons: ['Needs Ranker', 'Slower'] },
-  // Legacy — kept for existing models
-  { id: 'context_binary', name: 'Context Binary (Legacy)', icon: <Psychology />, desc: 'Legacy context-aware model. Use Ranked Binary instead for new training.',
-    color: 'var(--warn)', output: 'context_binary.pt', requirements: 'Needs keep + delete folders with performer subdirectories',
-    pros: ['Personalized'], cons: ['Legacy', 'Complex Inference'] },
-  { id: 'rank_aware_siamese', name: 'Rank-Aware Siamese (Legacy)', icon: <Psychology />, desc: 'Legacy rank-aware siamese. Use Ranked Siamese instead for new training.',
-    color: 'var(--chart-4)', output: 'rank_siamese.pt', requirements: 'Needs rated performers with keep + delete images',
-    pros: ['Contextual'], cons: ['Legacy', 'Optimizer Bug Fixed'] },
+  { id: 'clip_siamese', name: 'CLIP Siamese (1st order)', icon: <AutoAwesome />, desc: 'Scores pictures so kept beats deleted and your Rank images winners beat their losers, inside one performer. Best model so far.',
+    color: 'var(--accent)', requirements: 'Needs keep + delete folders pushed to the AI server; also uses your same-performer Rank images pairs. The first run downloads CLIP ViT-L/14-336 (~1.7 GB) from Hugging Face.',
+    pros: ['Best on new performers', 'Fast: CLIP stays frozen'], cons: ['Scores are an order, not a %'] },
+  { id: 'binary', name: 'Simple Binary', icon: <FilterAlt />, desc: 'DINOv2 keep vs delete classifier.',
+    color: 'var(--ok)', requirements: 'Needs keep + delete image folders',
+    pros: ['Direct keep %'], cons: ['One global keep look'] },
+  { id: 'ranked_binary', name: 'Ranked Binary', icon: <Tune />, desc: 'Simple Binary that also gets the performer\'s stars as input.',
+    color: 'var(--chart-3)', requirements: 'Needs keep + delete folders + star ratings',
+    pros: ['Stricter for lower stars'], cons: ['Stars come from the ranker at filter time'] },
+  { id: 'pairwise', name: 'Pairwise Preference', icon: <Compare />, desc: 'DINOv2 trained on your Rank images pairs. CLIP Siamese does this job better.',
+    color: 'var(--info)', requirements: 'Needs 50+ labeled pairs from Rank images',
+    pros: ['Learns from your picks'], cons: ['Weaker than CLIP'] },
+  { id: 'performer_ranker', name: 'Performer Ranker', icon: <Star />, desc: 'Predicts a performer\'s stars from their pictures. No signal yet: too few rated performers.',
+    color: 'var(--chart-1)', requirements: 'Needs rated performers (star ratings) with keep + delete images',
+    pros: ['Feeds Ranked Binary'], cons: ['49% of duels (chance)'] },
 ];
+
+// What each model achieved so far (Claude's tests, 2026-10-16): keep vs delete on the 2,623 pictures of the
+// 38 performers added after the May training set, and Rank images pairs made after each model was trained.
+const MODEL_NOTES = [
+  {
+    name: 'CLIP Siamese — 1st order (within performer)', status: 'Best', tone: 'ok', where: 'Train here',
+    result: 'Keep vs delete AUC 0.82 on 38 new performers · 0.73 inside one performer · picks your winner in 66% of 1,091 later Rank images pairs',
+    data: '1,969 hand-made pairs from the old labeller (Dec 2025): 1,781 same performer, 188 across performers. 3 epochs. File: clip_siamese/clip_siamese_20251207.pt',
+    how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so SmartFilter picks the threshold per batch.',
+    better: [
+      'Retrain here: adds kept > deleted pairs of every performer plus your Rank images pairs, and holds performers out for an honest score',
+      'Older labels are not in the app yet: 3,461 pairs in the Jan 2026 labeller export, 788 in backend-pairwise/pairwise.db',
+      'A keep cut-off per performer, stricter for performers with fewer stars',
+      '2nd order (across performers) only from hand-made cross pairs; pairs made from stars teach the model who, not what',
+    ],
+  },
+  {
+    name: 'DINO Binary / Ranked Binary', status: 'OK', tone: 'warn', where: 'Train here',
+    result: 'Keep vs delete AUC 0.74–0.77 on the same 38 new performers · 0.65–0.69 inside one performer',
+    data: 'Keep folder (after filter performer) vs delete folder (deleted keep for training), May 2026 set: about 4,700 keep + 5,800 delete pictures. 15% of performers held out. Ranked also gets the performer\'s stars.',
+    how: 'DINOv2-large picture embedding → small head → keep probability. The backbone unfreezes from epoch 3. At filter time Ranked gets its stars from the Performer Ranker, which has no signal.',
+    better: [
+      'Learns one global "keep look", not your choice inside a performer; CLIP Siamese beats it on both',
+      'The old 98.5% score came from a random picture split (same performers in train and val), not new performers',
+    ],
+  },
+  {
+    name: 'DINO Pairwise', status: 'OK', tone: 'warn', where: 'Train here',
+    result: 'Keep vs delete AUC 0.75 · 0.68 inside one performer · 57% of 306 later Rank images pairs',
+    data: 'Your Rank images pairs. File: pairwise/pairwise_rating.pt',
+    how: 'The same pair idea as CLIP Siamese, on a DINOv2-large embedding with a margin loss.',
+    better: ['CLIP Siamese does the same job better; keep it only to compare'],
+  },
+  {
+    name: 'Performer Ranker', status: 'No signal', tone: 'bad', where: 'Train here',
+    result: 'Right in 49% of your Smart Compare duels (chance is 50%)',
+    data: 'Every picture of a rated performer gets that performer\'s stars (53 rated performers).',
+    how: 'DINOv2-large → small head → stars (0–5), regression. A performer\'s stars are the average over their pictures.',
+    better: [
+      'The real sample size is the number of rated performers (53), not the pictures, so it learns who, not what',
+      'Needs hundreds of rated performers; until then use your own stars. Smart Compare\'s Ask AI is off for this reason',
+    ],
+  },
+  {
+    name: 'Qwen keep/delete', status: 'Weak', tone: 'bad', where: 'scenetest test',
+    result: 'Keep vs delete AUC 0.65–0.69, accuracy 58–62%, with or without stars',
+    data: 'Keep and delete pictures of 16 training performers, 80 or 300 pictures each.',
+    how: 'The Qwen vision model scores each picture. A two-step version (performer score from 8 pictures, then picture + score) collapsed to the average.',
+    better: ['Too few performers to learn from; next try: the no-stars version on all 39 performers with keeps and deletes'],
+  },
+  {
+    name: 'Profile labeller (race, hair colour, age…)', status: 'Works', tone: 'ok', where: 'scenetest',
+    result: '83% of fields right on 8 held-out performers (81% before tuning)',
+    data: '30 performers labelled by Claude, 8 pictures each.',
+    how: 'Qwen3.5-9B looks at 8 pictures of a performer and fills in the profile fields; LoRA fine-tune.',
+    better: ['Habits to fix: hair length ("shoulder"), age ("mid 20s"), ethnicity', 'More labelled performers', 'Useful as input for taste models only once many more performers are rated'],
+  },
+  {
+    name: 'Scene labeller', status: 'Works', tone: 'ok', where: 'scenetest',
+    result: '86% of fields right on 104 held-out looks · solo dildo ride 46% → 95%',
+    data: '711 checked looks from 30 videos (the gold set).',
+    how: 'Qwen3.5-9B with a QLoRA fine-tune, merged as models/merged_261016_1331; the scenetest app uses it since 2026-10-16.',
+    better: ['Webcam framing: with only a head in frame it invents acts and calls bare shoulders topless', 'Grow the gold set from the scripted library; keep a frozen test set'],
+  },
+];
+
+const NOTE_TONE = {
+  ok: { color: 'var(--ok)', bg: 'var(--ok-quiet)' },
+  warn: { color: 'var(--warn)', bg: 'var(--warn-quiet)' },
+  bad: { color: 'var(--bad)', bg: 'var(--bad-quiet)' },
+};
+
+// Training-type → settings key of its default model (SmartFilter loads these)
+const PREFERRED_KEYS = {
+  binary: 'preferred_binary_model',
+  ranked_binary: 'preferred_ranked_binary_model',
+  pairwise: 'preferred_pairwise_model',
+  clip_siamese: 'preferred_clip_siamese_model',
+  performer_ranker: 'preferred_ranker_model',
+};
 
 function TasteDashboardPage() {
   const navigate = useNavigate();
@@ -60,7 +127,7 @@ function TasteDashboardPage() {
   const [savingUrl, setSavingUrl] = useState(false);
 
   // Training Hub state
-  const [selectedType, setSelectedType] = useState('binary');
+  const [selectedType, setSelectedType] = useState('clip_siamese');
   const [epochs, setEpochs] = useState(8);
   const [batchSize, setBatchSize] = useState(16);
   const [backbone, setBackbone] = useState('facebook/dinov2-large');
@@ -74,20 +141,12 @@ function TasteDashboardPage() {
   const [testResults, setTestResults] = useState({});
   const [pushingData, setPushingData] = useState(false);
   const [aiTrainingData, setAiTrainingData] = useState(null);
-  const [preferredBinaryModel, setPreferredBinaryModel] = useState('');
-  const [preferredRankedBinaryModel, setPreferredRankedBinaryModel] = useState('');
-  const [preferredPairwiseModel, setPreferredPairwiseModel] = useState('');
-  const [preferredContextModel, setPreferredContextModel] = useState('');
-  const [preferredSiameseModel, setPreferredSiameseModel] = useState('');
-  const [preferredRankSiameseModel, setPreferredRankSiameseModel] = useState('');
-  const [preferredRankedSiameseModel, setPreferredRankedSiameseModel] = useState('');
-  const [preferredRankerModel, setPreferredRankerModel] = useState('');
+  const [preferred, setPreferred] = useState({}); // training type → default model file
   const [useHardExamples, setUseHardExamples] = useState(true);
   const [enableMining, setEnableMining] = useState(false);
   const [miningMultiplier, setMiningMultiplier] = useState(4);
   const [deduplicate, setDeduplicate] = useState(true);
   const [syntheticPairsPerEpoch, setSyntheticPairsPerEpoch] = useState(500);
-  const [perPerformerPairs, setPerPerformerPairs] = useState(false);
   const [useQuantization, setUseQuantization] = useState(false);
   const [finetuneStart, setFinetuneStart] = useState(3);
   const pollRef = useRef(null);
@@ -144,14 +203,9 @@ function TasteDashboardPage() {
       .catch(() => {});
 
     // Load preferred models
-    fetch('/api/settings/preferred_binary_model').then(r => r.json()).then(d => d.value && setPreferredBinaryModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_ranked_binary_model').then(r => r.json()).then(d => d.value && setPreferredRankedBinaryModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_pairwise_model').then(r => r.json()).then(d => d.value && setPreferredPairwiseModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_context_model').then(r => r.json()).then(d => d.value && setPreferredContextModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_siamese_model').then(r => r.json()).then(d => d.value && setPreferredSiameseModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_rank_siamese_model').then(r => r.json()).then(d => d.value && setPreferredRankSiameseModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_ranked_siamese_model').then(r => r.json()).then(d => d.value && setPreferredRankedSiameseModel(d.value)).catch(() => {});
-    fetch('/api/settings/preferred_ranker_model').then(r => r.json()).then(d => d.value && setPreferredRankerModel(d.value)).catch(() => {});
+    Object.entries(PREFERRED_KEYS).forEach(([type, key]) =>
+      fetch(`/api/settings/${key}`).then(r => r.json())
+        .then(d => d.value && setPreferred(p => ({ ...p, [type]: d.value }))).catch(() => {}));
 
     fetchData();
   }, []);
@@ -223,8 +277,7 @@ function TasteDashboardPage() {
           deduplicate: deduplicate,
           quantize: useQuantization,
           finetune_start_epoch: finetuneStart,
-          synthetic_pairs_per_epoch: ['pairwise_siamese_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(selectedType) ? syntheticPairsPerEpoch : 0,
-          per_performer_pairs: ['pairwise_siamese_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(selectedType) ? perPerformerPairs : false
+          synthetic_pairs_per_epoch: selectedType === 'clip_siamese' ? syntheticPairsPerEpoch : 0
         })
       });
       const result = await res.json();
@@ -257,29 +310,13 @@ function TasteDashboardPage() {
   };
 
   const handleSetPreferred = async (modelName, type) => {
-    let key = 'preferred_binary_model';
-    if (type === 'ranked_binary') key = 'preferred_ranked_binary_model';
-    if (type === 'pairwise') key = 'preferred_pairwise_model';
-    if (type === 'context_binary') key = 'preferred_context_model';
-    if (type === 'siamese_binary') key = 'preferred_siamese_model';
-    if (type === 'rank_aware_siamese') key = 'preferred_rank_siamese_model';
-    if (type === 'ranked_siamese_binary') key = 'preferred_ranked_siamese_model';
-    if (type === 'performer_ranker') key = 'preferred_ranker_model';
-
     try {
-      await fetch(`/api/settings/${key}`, {
+      await fetch(`/api/settings/${PREFERRED_KEYS[type]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: modelName })
       });
-      if (type === 'binary') setPreferredBinaryModel(modelName);
-      else if (type === 'ranked_binary') setPreferredRankedBinaryModel(modelName);
-      else if (type === 'pairwise') setPreferredPairwiseModel(modelName);
-      else if (type === 'context_binary') setPreferredContextModel(modelName);
-      else if (type === 'siamese_binary') setPreferredSiameseModel(modelName);
-      else if (type === 'rank_aware_siamese') setPreferredRankSiameseModel(modelName);
-      else if (type === 'ranked_siamese_binary') setPreferredRankedSiameseModel(modelName);
-      else if (type === 'performer_ranker') setPreferredRankerModel(modelName);
+      setPreferred(p => ({ ...p, [type]: modelName }));
     } catch (err) {
       alert('Failed to save preferred model: ' + err.message);
     }
@@ -515,6 +552,11 @@ function TasteDashboardPage() {
             </CollapsibleSection>
           )}
 
+          {/* What each model achieved so far */}
+          <CollapsibleSection title="Models: results so far" count={`${MODEL_NOTES.length} models`} defaultOpen color="var(--accent)">
+            <ModelNotes />
+          </CollapsibleSection>
+
           {/* Rating Distribution */}
           <CollapsibleSection title="Rating Distribution"count={`${ratings.total || 0} rated`} defaultOpen>
             <Box sx={{ p: 2 }}>
@@ -681,7 +723,7 @@ function TasteDashboardPage() {
                 <TextField label="Batch Size" type="number" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 1)}
                   InputProps={{ inputProps: { min: 1, max: 64 } }} size="small"
                   sx={{ width: 100, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'var(--line-strong)' } }, '& .MuiInputLabel-root': { color: 'var(--muted)' } }} />
-                <FormControl size="small" sx={{ minWidth: 200 }}>
+                {selectedType !== 'clip_siamese' && <FormControl size="small" sx={{ minWidth: 200 }}>
                   <InputLabel sx={{ color: 'var(--muted)' }}>Backbone</InputLabel>
                   <Select
                     value={backbone}
@@ -715,7 +757,7 @@ function TasteDashboardPage() {
                       </Box>
                     </MenuItem>
                   </Select>
-                </FormControl>
+                </FormControl>}
                 <Button variant="contained" startIcon={trainingStatus?.active ? <Stop /> : <PlayArrow />}
                   disabled={!aiHealth || trainingStatus?.active || startingTraining}
                   onClick={handleStartTraining}
@@ -803,69 +845,22 @@ function TasteDashboardPage() {
                     </Button>
                   </Box>
                   
-                  {['pairwise_siamese_binary', 'rank_aware_siamese', 'ranked_siamese_binary'].includes(selectedType) && (
-                    <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px solid ${selectedType === 'rank_aware_siamese' ? 'rgba(103,58,183,0.25)' : 'var(--accent-quiet)'}` }}>
-                      
-                      {/* Mode toggle */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-                        <Box>
-                          <Typography variant="body2" sx={{ color: 'var(--text)', fontSize: '0.85rem', fontWeight: 700 }}>Pair Sampling Mode</Typography>
-                          <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
-                            {selectedType === 'rank_aware_siamese' 
-                              ? 'Strictly Per-Performer — focusing on intra-performer preference'
-                              : (perPerformerPairs
-                                ? 'Per Performer — balanced taste across all performers'
-                                : 'Global — random mix from all performers combined')}
-                          </Typography>
-                        </Box>
-                        {selectedType === 'pairwise_siamese_binary' && (
-                          <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            <Button
-                              size="small"
-                              variant={!perPerformerPairs ? 'contained' : 'outlined'}
-                              onClick={() => setPerPerformerPairs(false)}
-                              sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
-                                bgcolor: !perPerformerPairs ? 'var(--chart-0)' : 'transparent',
-                                borderColor: 'var(--chart-0)', color: !perPerformerPairs ? 'var(--text)' : 'var(--chart-0)',
-                                '&:hover': { bgcolor: !perPerformerPairs ? 'var(--chart-0)' : 'var(--accent-quiet)' } }}
-                            >
-                              Global
-                            </Button>
-                            <Button
-                              size="small"
-                              variant={perPerformerPairs ? 'contained' : 'outlined'}
-                              onClick={() => setPerPerformerPairs(true)}
-                              sx={{ minWidth: 70, height: 26, fontSize: '0.7rem', textTransform: 'none',
-                                bgcolor: perPerformerPairs ? 'var(--chart-0)' : 'transparent',
-                                borderColor: 'var(--chart-0)', color: perPerformerPairs ? 'var(--text)' : 'var(--chart-0)',
-                                '&:hover': { bgcolor: perPerformerPairs ? 'var(--chart-0)' : 'var(--accent-quiet)' } }}
-                            >
-                              Per Performer
-                            </Button>
-                          </Box>
-                        )}
-                        {selectedType === 'rank_aware_siamese' && (
-                          <Chip label="Per Performer Required" size="small" sx={{ bgcolor: 'rgba(103,58,183,0.15)', color: 'var(--accent)', fontWeight: 700 }} />
-                        )}
-                      </Box>
-
-                      {/* Pairs slider */}
+                  {selectedType === 'clip_siamese' && (
+                    <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid var(--accent-quiet)' }}>
                       <Typography variant="body2" sx={{ color: 'var(--text)', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
-                        Synthetic Keep &gt; Delete Pairs
-                        <Typography component="span" sx={{ color: selectedType === 'rank_aware_siamese' ? 'var(--accent)' : 'var(--chart-0)', fontWeight: 800 }}>
-                          {syntheticPairsPerEpoch} / {perPerformerPairs || selectedType === 'rank_aware_siamese' ? 'performer / epoch' : 'epoch'}
+                        Kept &gt; Deleted Pairs
+                        <Typography component="span" sx={{ color: 'var(--accent)', fontWeight: 800 }}>
+                          {syntheticPairsPerEpoch} / performer / epoch
                         </Typography>
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'var(--dim)', display: 'block', mb: 1 }}>
-                        {(perPerformerPairs || selectedType === 'rank_aware_siamese')
-                          ? `Each performer contributes ${syntheticPairsPerEpoch} pairs — total pairs = ${syntheticPairsPerEpoch} × performers`
-                          : `${syntheticPairsPerEpoch} random (keep, delete) pairs drawn from the full dataset each epoch`}
+                        Each performer with both kept and deleted pictures adds up to {syntheticPairsPerEpoch} random (kept, deleted) pairs every epoch, on top of your Rank images pairs
                       </Typography>
                       <Slider
                         value={syntheticPairsPerEpoch}
                         min={100} max={5000} step={100}
                         onChange={(_, v) => setSyntheticPairsPerEpoch(v)}
-                        sx={{ color: selectedType === 'rank_aware_siamese' ? 'var(--accent)' : 'var(--chart-0)' }}
+                        sx={{ color: 'var(--accent)' }}
                       />
                     </Box>
                   )}
@@ -1000,14 +995,7 @@ function TasteDashboardPage() {
                 testResults={testResults} 
                 setTestResults={setTestResults} 
                 onModelLoaded={fetchData}
-                preferredBinary={preferredBinaryModel}
-                preferredRankedBinary={preferredRankedBinaryModel}
-                preferredPairwise={preferredPairwiseModel}
-                preferredContext={preferredContextModel}
-                preferredSiamese={preferredSiameseModel}
-                preferredRankSiamese={preferredRankSiameseModel}
-                preferredRankedSiamese={preferredRankedSiameseModel}
-                preferredRanker={preferredRankerModel}
+                preferred={preferred}
                 onSetPreferred={handleSetPreferred}
               />
             </Box>
@@ -1066,26 +1054,63 @@ function CollapsibleSection({ title, count, defaultOpen = false, color, children
   );
 }
 
+// One card per model: best result on unseen data, what it learned from, how it works, what could improve it
+function ModelNotes() {
+  const block = (label, text) => (
+    <Box sx={{ mb: 1.25 }}>
+      <Typography variant="caption" sx={{ color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>{label}</Typography>
+      <Typography variant="body2" sx={{ color: 'var(--dim)', fontSize: '0.8rem', lineHeight: 1.45 }}>{text}</Typography>
+    </Box>
+  );
+  return (
+    <Box sx={{ p: 2 }}>
+      <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block', mb: 1.5, lineHeight: 1.5 }}>
+        Tested 2026-10-16 on pictures none of the models trained on: keep vs delete for the 2,623 pictures of 38 performers added
+        after the May training set, and Rank images pairs made after each model was trained. AUC: 0.5 is chance, 1.0 is perfect.
+      </Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
+        {MODEL_NOTES.map(n => {
+          const tone = NOTE_TONE[n.tone];
+          return (
+            <Box key={n.name} sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, borderLeft: `4px solid ${tone.color}` }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1, flexWrap: 'wrap' }}>
+                <Typography variant="subtitle2" sx={{ color: 'var(--text)', fontWeight: 800, flex: 1, minWidth: 160 }}>{n.name}</Typography>
+                <Chip label={n.status} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 800, bgcolor: tone.bg, color: tone.color }} />
+                <Chip label={n.where} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'var(--raised)', color: 'var(--dim)' }} />
+              </Box>
+              {block('Best result', n.result)}
+              {block('Training data', n.data)}
+              {block('How it works', n.how)}
+              <Typography variant="caption" sx={{ color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>What can be better</Typography>
+              <Box component="ul" sx={{ m: 0, pl: 2.25, color: 'var(--dim)', fontSize: '0.8rem', lineHeight: 1.45 }}>
+                {n.better.map(b => <li key={b}>{b}</li>)}
+              </Box>
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+}
+
 export default TasteDashboardPage;
 
 // ── Model Arsenal sub-component ──
 function ModelArsenal({ 
   models, aiUrl, aiHealth, testingModel, setTestingModel, testResults, setTestResults, onModelLoaded,
-  preferredBinary, preferredRankedBinary, preferredPairwise, preferredContext, preferredSiamese, preferredRankSiamese, preferredRankedSiamese, preferredRanker, onSetPreferred
+  preferred, onSetPreferred
 }) {
   const [loadingModel, setLoadingModel] = useState(null);
   const [quantizeLoad, setQuantizeLoad] = useState(false);
   const typeLabels = {
+    clip_siamese: { label: 'CLIP Siamese', color: 'var(--accent)', icon: ''},
     binary: { label: 'Binary', color: 'var(--ok)', icon: ''},
+    ranked_binary: { label: 'Ranked Binary', color: 'var(--chart-3)', icon: ''},
     pairwise: { label: 'Pairwise', color: 'var(--info)', icon: ''},
-    context_binary: { label: 'Context-Aware (Legacy)', color: 'var(--warn)', icon: ''},
-    siamese_binary: { label: 'Siamese Ranker', color: 'var(--chart-0)', icon: ''},
-    rank_aware_siamese: { label: 'Rank-Aware Siamese (Legacy)', color: 'var(--chart-4)', icon: ''},
     performer_ranker: { label: 'Performer Ranker', color: 'var(--chart-1)', icon: ''},
-    ranked_binary: { label: 'Ranked Binary', color: 'var(--accent)', icon: ''},
-    ranked_siamese_binary: { label: 'Ranked Siamese', color: 'var(--accent)', icon: ''},
     unknown: { label: 'Unknown', color: 'var(--muted)', icon: ''},
   };
+  const typeIcons = { clip_siamese: <AutoAwesome />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
   const grouped = {};
   models.forEach(m => { const t = m.type || 'unknown'; if (!grouped[t]) grouped[t] = []; grouped[t].push(m); });
   const handleTest = async (model) => {
@@ -1163,21 +1188,6 @@ function ModelArsenal({
                 </Box>
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                   {m.backbone && <Chip label={m.backbone.split('/').pop()} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--surface)', color: 'var(--dim)' }} />}
-                  {type === 'performer_ranker' && m.ranker_arch && (
-                    <Tooltip title={m.ranker_arch === 'pairwise'
-                      ? `Siamese ranker trained on Smart Compare duels. Calibrated: stars ≈ ${(m.cal_a ?? 1).toFixed(2)}·raw + ${(m.cal_b ?? 2.5).toFixed(2)}`
-                      : 'MSE regression on manifest star ratings'}>
-                      <Chip
-                        label={m.ranker_arch === 'pairwise'? 'Pairwise': 'Regression'}
-                        size="small"
-                        sx={{
-                          height: 18, fontSize: '0.6rem', fontWeight: 800,
-                          bgcolor: m.ranker_arch === 'pairwise' ? 'var(--info-quiet)' : 'rgba(255,111,0,0.18)',
-                          color: m.ranker_arch === 'pairwise' ? 'var(--info)' : 'var(--warn)'
-                        }}
-                      />
-                    </Tooltip>
-                  )}
                    {m.val_acc != null && <Chip label={`Val: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
                   {m.val_mae != null && <Chip label={`MAE: ${m.val_mae.toFixed(3)}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,111,0,0.1)', color: 'var(--chart-1)' }} />}
                   {m.rank_conditioned && <Chip label="Rank-Conditioned" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(0,191,165,0.1)', color: 'var(--chart-3)', fontWeight: 700 }} />}
@@ -1270,74 +1280,28 @@ function ModelArsenal({
 
                 {/* Preferred Selection Button */}
                 <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                  {['binary', 'pairwise', 'context_binary', 'siamese_binary', 'rank_aware_siamese', 'performer_ranker', 'ranked_binary', 'ranked_siamese_binary'].includes(type) && (
-                    <Button 
-                      fullWidth
-                      size="small" 
-                      variant={
-                        (type === 'binary' ? preferredBinary :
-                         type === 'ranked_binary' ? preferredRankedBinary :
-                         type === 'pairwise' ? preferredPairwise :
-                         type === 'context_binary' ? preferredContext :
-                         type === 'siamese_binary' ? preferredSiamese :
-                         type === 'rank_aware_siamese' ? preferredRankSiamese :
-                         type === 'ranked_siamese_binary' ? preferredRankedSiamese :
-                         type === 'performer_ranker' ? preferredRanker : '') === m.filename ? "contained" : "outlined"
-                      }
-                      onClick={() => onSetPreferred(m.filename, type)}
-                      startIcon={
-                        (type === 'binary' || type === 'ranked_binary' ? (
-                          (type === 'binary' ? preferredBinary : preferredRankedBinary) === m.filename ? <CheckCircle /> : <FilterAlt />
-                        ) :
-                         type === 'pairwise' ? (preferredPairwise === m.filename ? <CheckCircle /> : <Compare />) :
-                         type === 'context_binary' ? (preferredContext === m.filename ? <CheckCircle /> : <Psychology />) :
-                         type === 'siamese_binary' ? (preferredSiamese === m.filename ? <CheckCircle /> : <AutoAwesome />) :
-                         type === 'rank_aware_siamese' ? (preferredRankSiamese === m.filename ? <CheckCircle /> : <EmojiEvents />) :
-                         type === 'ranked_siamese_binary' ? (preferredRankedSiamese === m.filename ? <CheckCircle /> : <EmojiEvents />) :
-                         type === 'performer_ranker' ? (preferredRanker === m.filename ? <CheckCircle /> : <Star />) : null)
-                      }
-                      sx={{
-                        fontSize: '0.65rem',
-                        justifyContent: 'center',
-                        bgcolor: (type === 'binary' ? preferredBinary :
-                                  type === 'ranked_binary' ? preferredRankedBinary :
-                                  type === 'pairwise' ? preferredPairwise :
-                                  type === 'context_binary' ? preferredContext :
-                                  type === 'siamese_binary' ? preferredSiamese :
-                                  type === 'rank_aware_siamese' ? preferredRankSiamese :
-                                  type === 'ranked_siamese_binary' ? preferredRankedSiamese :
-                                  type === 'performer_ranker' ? preferredRanker : '') === m.filename ? `${tInfo.color}20` : 'transparent',
-                        color: (type === 'binary' ? preferredBinary :
-                                type === 'ranked_binary' ? preferredRankedBinary :
-                                type === 'pairwise' ? preferredPairwise :
-                                type === 'context_binary' ? preferredContext :
-                                type === 'siamese_binary' ? preferredSiamese :
-                                type === 'rank_aware_siamese' ? preferredRankSiamese :
-                                type === 'ranked_siamese_binary' ? preferredRankedSiamese :
-                                type === 'performer_ranker' ? preferredRanker : '') === m.filename ? tInfo.color: 'var(--dim)',
-                        borderColor: (type === 'binary' ? preferredBinary :
-                                      type === 'ranked_binary' ? preferredRankedBinary :
-                                      type === 'pairwise' ? preferredPairwise :
-                                      type === 'context_binary' ? preferredContext :
-                                      type === 'siamese_binary' ? preferredSiamese :
-                                      type === 'rank_aware_siamese' ? preferredRankSiamese :
-                                      type === 'ranked_siamese_binary' ? preferredRankedSiamese :
-                                      type === 'performer_ranker' ? preferredRanker : '') === m.filename ? tInfo.color: 'var(--muted)',
-                        '&:hover': { bgcolor: `${tInfo.color}30`, borderColor: tInfo.color }
-                      }}
-                    >
-                      {(type === 'binary' ? preferredBinary :
-                        type === 'ranked_binary' ? preferredRankedBinary :
-                        type === 'pairwise' ? preferredPairwise :
-                        type === 'context_binary' ? preferredContext :
-                        type === 'siamese_binary' ? preferredSiamese :
-                        type === 'rank_aware_siamese' ? preferredRankSiamese :
-                        type === 'ranked_siamese_binary' ? preferredRankedSiamese :
-                        type === 'performer_ranker' ? preferredRanker : '') === m.filename
-                        ? `Default ${tInfo.label} Model`
-                        : `Use as Default ${tInfo.label}`}
-                    </Button>
-                  )}
+                  {PREFERRED_KEYS[type] && (() => {
+                    const isDefault = preferred[type] === m.filename;
+                    return (
+                      <Button
+                        fullWidth
+                        size="small"
+                        variant={isDefault ? 'contained' : 'outlined'}
+                        onClick={() => onSetPreferred(m.filename, type)}
+                        startIcon={isDefault ? <CheckCircle /> : typeIcons[type]}
+                        sx={{
+                          fontSize: '0.65rem',
+                          justifyContent: 'center',
+                          bgcolor: isDefault ? `${tInfo.color}20` : 'transparent',
+                          color: isDefault ? tInfo.color : 'var(--dim)',
+                          borderColor: isDefault ? tInfo.color : 'var(--muted)',
+                          '&:hover': { bgcolor: `${tInfo.color}30`, borderColor: tInfo.color }
+                        }}
+                      >
+                        {isDefault ? `Default ${tInfo.label} Model` : `Use as Default ${tInfo.label}`}
+                      </Button>
+                    );
+                  })()}
                 </Box>
               </Panel>
             );

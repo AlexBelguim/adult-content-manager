@@ -273,7 +273,7 @@ export default function FunpipePage() {
           </Tooltip>
         )}
         <Tooltip title="Runs on the AI Inference App — change its address in the Training Hub">
-          <IconButton onClick={() => navigate('/training-hub')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
+          <IconButton onClick={() => navigate('/taste-dashboard')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
         </Tooltip>
         <Tooltip title="Rescan funscript folders">
           <span>

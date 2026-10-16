@@ -116,8 +116,7 @@ router.get('/data-summary', (req, res) => {
       performerComparisons,
       readyForTraining: {
         pairwise: pairwise.total_pairs >= 50,
-        binary: binaryData.keep >= 20 && binaryData.delete >= 20,
-        siamese: performerComparisons.total >= 20
+        binary: binaryData.keep >= 20 && binaryData.delete >= 20
       },
       hardExamples: {
         binary: (db.prepare(`SELECT COUNT(*) as c FROM hard_examples WHERE model_type = 'binary' OR model_type IS NULL`).get() || {c:0}).c,
@@ -406,7 +405,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (['binary', 'context_binary', 'pairwise_siamese_binary', 'performer_ranker', 'performer_attention_ranker', 'performer_pairwise_ranker', 'ranked_binary', 'ranked_siamese_binary', 'rank_aware_siamese'].includes(type)) {
+    } else if (['binary', 'clip_siamese', 'performer_ranker', 'ranked_binary'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -416,8 +415,7 @@ router.post('/start', async (req, res) => {
         batch_size,
         backbone,
         learning_rate,
-        performer_ratings: collectPerformerRatings(),
-      performer_comparison_counts: collectPerformerComparisonCounts()
+        performer_ratings: collectPerformerRatings()
       };
 
       if (req.body.use_hard_examples) {
@@ -427,31 +425,9 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-      // performer_pairwise_ranker needs the raw duels from performer_comparisons
-      // (winner/loser performer pairs) in addition to base_path + ratings.
-      if (type === 'performer_pairwise_ranker') {
-        try {
-          const duels = db.prepare(`
-            SELECT
-              pc.winner_id, pc.loser_id, pc.type AS duel_type, pc.source,
-              pc.winner_rating_before, pc.loser_rating_before,
-              pw.name AS winner_name, pl.name AS loser_name
-            FROM performer_comparisons pc
-            JOIN performers pw ON pw.id = pc.winner_id
-            JOIN performers pl ON pl.id = pc.loser_id
-            ORDER BY pc.created_at DESC
-          `).all();
-          trainingPayload.duels = duels;
-          trainingPayload.images_per_side = req.body.images_per_side || 4;
-          trainingPayload.margin = req.body.margin || 1.0;
-        } catch (e) {
-          return res.status(500).json({ error: 'Failed to load duels: ' + e.message });
-        }
-        if (!trainingPayload.duels || trainingPayload.duels.length < 5) {
-          return res.status(400).json({
-            error: `Need at least 5 performer duels in performer_comparisons (have ${trainingPayload.duels?.length || 0}). Use Smart Compare to create more.`
-          });
-        }
+      // CLIP siamese (1st order) also learns from the same-performer pairs made with Rank images
+      if (type === 'clip_siamese') {
+        trainingPayload.pairs = db.prepare(`SELECT winner, loser FROM pairwise_pairs WHERE type = 'intra'`).all();
       }
 
     } else {
@@ -465,12 +441,9 @@ router.post('/start', async (req, res) => {
     trainingPayload.deduplicate = req.body.deduplicate;
     trainingPayload.finetune_start_epoch = req.body.finetune_start_epoch;
 
-    // Synthetic pair count for Siamese Binary training
+    // Kept > deleted pairs per performer per epoch for CLIP siamese training
     if (req.body.synthetic_pairs_per_epoch) {
       trainingPayload.synthetic_pairs_per_epoch = req.body.synthetic_pairs_per_epoch;
-    }
-    if (req.body.per_performer_pairs !== undefined) {
-      trainingPayload.per_performer_pairs = req.body.per_performer_pairs;
     }
 
     // Send to AI server

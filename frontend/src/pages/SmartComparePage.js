@@ -18,6 +18,9 @@ const FLASH_MS = 240;
 // The swap is instant, so the second tap of an accidental double tap would
 // land on a set nobody has looked at yet. Votes this soon are ignored.
 const MIN_VIEW_MS = 180;
+// Ask AI runs the performer ranker, which picks the winner in only 49% of duels (2026-10-16).
+// Turn back on once a ranker beats chance on unseen performers.
+const ASK_AI_ENABLED = false;
 
 const previewUrl = (p) => `/api/files/preview?path=${encodeURIComponent(p)}`;
 
@@ -257,7 +260,6 @@ function SmartComparePage() {
   }, [fetchPics]);
 
   useEffect(() => {
-    const aiUrl = urlRef.current;
     const init = async () => {
       const all = await fetchPerformers();
       let list = listRef.current;
@@ -271,11 +273,6 @@ function SmartComparePage() {
       prefetchNext();
       setLoading(false);
 
-      // Auto-load Pairwise model for ratings
-      try {
-        await postJson('/api/filter/load-model', { modelId: 'pairwise_rating.pt', ai_server_url: aiUrl });
-      } catch (_) { /* the AI server may be offline; Ask AI reports it */ }
-
       // Fetch global model (calibration)
       try {
         const res = await fetch('/api/performers/calibration-model');
@@ -284,11 +281,6 @@ function SmartComparePage() {
       } catch (_) { /* "Default prior" is shown instead */ }
     };
     init();
-
-    // UNLOAD on leave to free VRAM
-    return () => {
-      postJson('/api/filter/unload-model', { ai_server_url: aiUrl }).catch(() => {});
-    };
   }, [fetchPerformers, loadPicsFor, prefetchNext]);
 
   useEffect(() => {
@@ -614,7 +606,7 @@ function SmartComparePage() {
     draw: handleDraw,
     skip: handleSkip,
     undo: handleUndo,
-    ask: handleAiAnalyze,
+    ask: ASK_AI_ENABLED ? handleAiAnalyze : null,
     save: handleSaveRankings,
     escape: () => setShowSettings(false),
     blocked: showSettings
@@ -651,9 +643,9 @@ function SmartComparePage() {
     { id: 'draw', label: 'Draw', kbd: 'X', icon: <DragHandle fontSize="small" />, onClick: handleDraw, disabled: !duel },
     { id: 'skip', label: 'Skip / Next', kbd: 'S', icon: <SkipNext fontSize="small" />, onClick: handleSkip, disabled: compareList.length === 0 },
     {
-      id: 'ask', label: analyzing ? analyzingStatus : 'Ask AI', kbd: 'I', tone: 'ai',
+      id: 'ask', label: !ASK_AI_ENABLED ? 'Ask AI (off)' : analyzing ? analyzingStatus : 'Ask AI', kbd: 'I', tone: 'ai',
       icon: analyzing ? <CircularProgress size={16} color="inherit" /> : <Psychology fontSize="small" />,
-      onClick: handleAiAnalyze, disabled: analyzing || compareList.length < 2
+      onClick: handleAiAnalyze, disabled: !ASK_AI_ENABLED || analyzing || compareList.length < 2
     },
     ...(multi ? [{ id: 'save', label: 'Save rankings', kbd: '↵', icon: <Check fontSize="small" />, onClick: handleSaveRankings, disabled: false }] : [])
   ];

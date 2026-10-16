@@ -24,11 +24,9 @@ export default function FilterSidebar({
   sortBy,
   sortOrder,
   hideKept,
-  mlEnabled,
   onSortBy,
   onSortOrder,
   onHideKept,
-  onMlEnabled,
   shortcuts,
   sheetOpen,
   onCloseSheet,
@@ -93,13 +91,6 @@ export default function FilterSidebar({
         <label className="fv-opt">
           <span>Hide kept files</span>
           <input type="checkbox" checked={hideKept} onChange={(e) => onHideKept(e.target.checked)} />
-        </label>
-        <label className="fv-opt">
-          <span>
-            🤖 ML predictions
-            {mlEnabled && <span className="fv-nomodel"> (no model)</span>}
-          </span>
-          <input type="checkbox" checked={mlEnabled} onChange={(e) => onMlEnabled(e.target.checked)} />
         </label>
       </section>
 

@@ -37,7 +37,6 @@ import SmartComparePage from './pages/SmartComparePage';
 import SmartFilterPage from './pages/SmartFilterPage';
 import TasteDashboardPage from './pages/TasteDashboardPage';
 import PairwiseRankPage from './pages/PairwiseRankPage';
-import TrainingHubPage from './pages/TrainingHubPage';
 import FunpipePage from './pages/FunpipePage';
 import VRPage from './pages/VRPage';
 import PlayerPage from './pages/PlayerPage';
@@ -627,7 +626,6 @@ function AppContent({ onThemeChange, currentThemeId }) {
                 toolbar ate 64px of a 360px-tall viewport and pushed the
                 Undo/Skip row off the bottom. */}
             <Route path="/pairwise-rank" element={<PairwiseRankPage />} />
-            <Route path="/training-hub" element={shell(<TrainingHubPage />)} />
             <Route path="/funpipe" element={shell(<FunpipePage />)} />
             <Route path="/jobs" element={shell(<JobsPage hashQueue={hashQueue} setHashQueue={setHashQueue} />)} />
             {/* Chrome-free: replaces the fullscreen modal the gallery used to
