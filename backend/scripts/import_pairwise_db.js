@@ -42,7 +42,7 @@ function resolve(oldPath) {
 const old = sqlite(file, { readonly: true });
 const rows = old.prepare(`SELECT winner, loser, type, performer, created_at FROM pairs ORDER BY id`).all();
 const insert = db.prepare(`
-  INSERT INTO pairwise_pairs (performer_id, winner, loser, type, created_at, source) VALUES (?, ?, ?, ?, ?, 'pairwise_db')
+  INSERT INTO pairwise_pairs (performer_id, performer_name, winner, loser, type, created_at, source) VALUES (?, ?, ?, ?, ?, ?, 'pairwise_db')
 `);
 
 const counts = { imported: 0, duplicate: 0, missingPicture: 0, unknownPerformer: 0, otherType: 0 };
@@ -56,7 +56,7 @@ db.transaction(() => {
     const key = pairKey(winner, loser);
     if (seen.has(key)) { counts.duplicate++; continue; }
     seen.add(key);
-    insert.run(performerId, winner, loser, r.type, r.created_at);
+    insert.run(performerId, r.performer, winner, loser, r.type, r.created_at);
     counts.imported++;
   }
 })();

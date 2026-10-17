@@ -20,8 +20,10 @@ const AI_SERVER_URL = getAiServerUrl();
 
 // ── Prepared Statements ──────────────────────────────────────
 const queries = {
+  // performer_name keeps whose pair it is after the performer is deleted (performer_id then becomes NULL)
   insertPair: db.prepare(`
-    INSERT INTO pairwise_pairs (performer_id, winner, loser, type) VALUES (?, ?, ?, ?)
+    INSERT INTO pairwise_pairs (performer_id, performer_name, winner, loser, type)
+    VALUES (@pid, (SELECT name FROM performers WHERE id = @pid), @winner, @loser, @type)
   `),
   getRecentPairs: db.prepare(`SELECT * FROM pairwise_pairs ORDER BY created_at DESC LIMIT ?`),
   getPairCount: db.prepare(`SELECT COUNT(*) as count FROM pairwise_pairs`),
@@ -221,7 +223,7 @@ router.post('/submit', (req, res) => {
   }
 
   const pid = parseInt(performer_id);
-  queries.insertPair.run(pid, winner, loser, type || 'intra');
+  queries.insertPair.run({ pid, winner, loser, type: type || 'intra' });
   seenPairs.add(pairKey(winner, loser));
   updateScores(pid, winner, loser);
 
@@ -283,7 +285,7 @@ router.post('/both-bad', (req, res) => {
 
   queries.upsertScore.run(pid, left, Math.max(0, s1.score - d1), s1.comparisons + 1);
   queries.upsertScore.run(pid, right, Math.max(0, s2.score - d2), s2.comparisons + 1);
-  queries.insertPair.run(pid, left, right, 'both_bad');
+  queries.insertPair.run({ pid, winner: left, loser: right, type: 'both_bad' });
 
   res.json({ success: true });
 });

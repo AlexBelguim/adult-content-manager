@@ -1072,7 +1072,8 @@ router.post('/:id/rename', async (req, res) => {
     
     // Update performer name in database
     db.prepare('UPDATE performers SET name = ? WHERE id = ?').run(trimmedNewName, id);
-    
+    db.prepare('UPDATE pairwise_pairs SET performer_name = ? WHERE performer_id = ?').run(trimmedNewName, id);
+
     res.send({
       success: true,
       message: `Renamed performer from "${oldName}" to "${trimmedNewName}"`,

@@ -529,8 +529,8 @@ class MergerService {
         .run(sourceId, sourceId);
 
       // Merge pairwise data → point to target
-      db.prepare('UPDATE pairwise_pairs SET performer_id = ? WHERE performer_id = ?')
-        .run(targetId, sourceId);
+      db.prepare('UPDATE pairwise_pairs SET performer_id = ?, performer_name = (SELECT name FROM performers WHERE id = ?) WHERE performer_id = ?')
+        .run(targetId, targetId, sourceId);
       db.prepare('UPDATE OR IGNORE pairwise_image_scores SET performer_id = ? WHERE performer_id = ?')
         .run(targetId, sourceId);
       db.prepare('DELETE FROM pairwise_image_scores WHERE performer_id = ?').run(sourceId);

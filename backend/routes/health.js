@@ -234,10 +234,6 @@ router.post('/cleanup', (req, res) => {
       DELETE FROM pairwise_image_scores WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = pairwise_image_scores.performer_id)
     `).run().changes;
 
-    results.pairwisePairs = db.prepare(`
-      DELETE FROM pairwise_pairs WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = pairwise_pairs.performer_id)
-    `).run().changes;
-
     results.filterActions = db.prepare(`
       DELETE FROM filter_actions WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = filter_actions.performer_id)
     `).run().changes;

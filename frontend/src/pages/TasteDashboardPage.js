@@ -56,7 +56,7 @@ const MODEL_NOTES = [
     how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so SmartFilter picks the threshold per batch.',
     better: [
       'Retrain here: adds kept > deleted pairs of every performer plus your same-performer hand pairs, and holds performers out for an honest score',
-      'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from backend-pairwise/pairwise.db (785 of its 788, 764 of them same performer); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
+      'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from backend-pairwise/pairwise.db (785 of its 788, 764 of them same performer: 483 in the app DB, 302 of performers deleted from the app in a PC file); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
       'A keep cut-off per performer, stricter for performers with fewer stars',
       '2nd order (across performers) only from hand-made cross pairs (698 in the labeller file, 21 from pairwise.db); pairs made from stars teach the model who, not what',
     ],
@@ -436,19 +436,24 @@ function TasteDashboardPage() {
   const ratings = health?.ratings || {};
   // Hand-pair sources: Rank images (source NULL), the pairwise.db import, and the old labeller's file on the AI PC.
   // Legacy sources count, and train, only while "Use legacy pairs" is on. all = every pair that trains, across
-  // performers too (CLIP 2nd order, DINO Pairwise; "both bad" votes order nothing), same = same performer (CLIP 1st order).
+  // performers too (CLIP 2nd order; "both bad" votes order nothing), same = same performer (CLIP 1st order),
+  // db = the part in the app DB (DINO Pairwise reads only that). The import's pairs of performers deleted from
+  // the app before it ran are in a PC file next to the labeller's, so they count for the CLIP models only.
   const tp = training?.pairwise || {};
   const labellerPairs = aiTrainingData?.labeller_pairs;
+  const orphans = aiTrainingData?.pairwise_db_orphans;
+  const rankPairs = (tp.rankPairs || 0) - (tp.bothBad || 0);
   const pairSources = [
-    { id: 'rank', label: 'Rank images', all: (tp.rankPairs || 0) - (tp.bothBad || 0), same: (tp.intraPairs || 0) - (tp.importedIntra || 0) },
-    { id: 'pairwise_db', label: 'pairwise.db import', legacy: true, all: tp.importedPairs || 0, same: tp.importedIntra || 0,
-      note: `${tp.importedIntra || 0} same performer` },
-    { id: 'labeller', label: 'old labeller file', legacy: true, all: labellerPairs == null ? null : labellerPairs + aiTrainingData.labeller_cross_pairs,
+    { id: 'rank', label: 'Rank images', all: rankPairs, db: rankPairs, same: (tp.intraPairs || 0) - (tp.importedIntra || 0) },
+    { id: 'pairwise_db', label: 'pairwise.db import', legacy: true, db: tp.importedPairs || 0,
+      all: (tp.importedPairs || 0) + (orphans || 0), same: (tp.importedIntra || 0) + (aiTrainingData?.pairwise_db_orphans_intra || 0),
+      note: `${tp.importedPairs || 0} in the app · ${orphans == null ? 'PC file: AI server offline' : `${orphans} in a PC file (deleted performers)`}` },
+    { id: 'labeller', label: 'old labeller file', legacy: true, db: 0, all: labellerPairs == null ? null : labellerPairs + aiTrainingData.labeller_cross_pairs,
       same: labellerPairs, note: labellerPairs == null ? 'AI server offline' : `${labellerPairs} same performer, on the AI PC` },
   ];
   const usedSources = pairSources.filter(s => useLegacy || !s.legacy);
   const sumPairs = (sources, key) => sources.reduce((n, s) => n + (s[key] || 0), 0);
-  const dinoPairs = sumPairs(usedSources.filter(s => s.id !== 'labeller'), 'all');  // DINO Pairwise reads only the app DB
+  const dinoPairs = sumPairs(usedSources, 'db');
   const legacyBox = { '&.dp-stat-box': { border: '1px dashed var(--line-strong)', backgroundColor: 'transparent' } };
 
   // CLIP taste levels (from the NAS folders), and the automatic pairs per epoch at the slider's setting,
@@ -479,7 +484,7 @@ function TasteDashboardPage() {
     clip_siamese: [picRow('Kept pictures of performers with deletes', keptWithDeletes, 'keep'), deletedRow, withinRow, ...handRows('same')],
     binary: binaryRows,
     ranked_binary: [...binaryRows, { label: 'Star ratings (an input)', value: `${rated.length} rated performers` }],
-    pairwise: handRows('all', pairSources.filter(s => s.id !== 'labeller')),
+    pairwise: handRows('db', pairSources.filter(s => s.id !== 'labeller')),
     performer_ranker: [{ label: 'Pictures of rated performers, labelled with their stars', value: `${(sumOf(rated, 'keep') + sumOf(rated, 'delete')).toLocaleString()} pictures · ${rated.length} performers` }],
   };
 
