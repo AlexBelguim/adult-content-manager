@@ -4,6 +4,7 @@ const db = require('../db');
 const fs = require('fs-extra');
 const path = require('path');
 const { findAllPerformersByNameOrAlias, normalizeName } = require('../utils/performerMatcher');
+const { scrapeLeakshaven, checkLeakshavenUpdates, modelNameFromUrl } = require('../services/scraperService');
 
 /**
  * Handle trash folder - either move contents to training or permanently delete
@@ -52,38 +53,6 @@ async function handleTrashFolder(trashFolderPath, performerName, basePath, fileT
     console.error('Error handling trash folder:', err);
     throw err;
   }
-}
-
-/**
- * Helper function to calculate actual upload timestamp from relative time string
- * @param {string} checkDate - ISO date string when the check was performed
- * @param {string} relativeTime - Relative time string like "10 days ago", "2 hours ago"
- * @returns {number} Unix timestamp in milliseconds of the actual upload date
- */
-function calculateUploadTimestamp(checkDate, relativeTime) {
-  if (!checkDate || !relativeTime) return null;
-  
-  const checkTimestamp = new Date(checkDate).getTime();
-  
-  // Parse the relative time string
-  const match = relativeTime.match(/(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago/i);
-  if (!match) return checkTimestamp; // If can't parse, assume it's current
-  
-  const value = parseInt(match[1]);
-  const unit = match[2].toLowerCase();
-  
-  let offsetMs = 0;
-  switch (unit) {
-    case 'minute': offsetMs = value * 60 * 1000; break;
-    case 'hour': offsetMs = value * 60 * 60 * 1000; break;
-    case 'day': offsetMs = value * 24 * 60 * 60 * 1000; break;
-    case 'week': offsetMs = value * 7 * 24 * 60 * 60 * 1000; break;
-    case 'month': offsetMs = value * 30 * 24 * 60 * 60 * 1000; break; // Approximate
-    case 'year': offsetMs = value * 365 * 24 * 60 * 60 * 1000; break; // Approximate
-    default: return checkTimestamp;
-  }
-  
-  return checkTimestamp - offsetMs;
 }
 
 /**
@@ -254,9 +223,9 @@ router.get('/all', async (req, res) => {
           overall: Math.round((picsProgress + vidsProgress + funscriptProgress) / 3)
         },
         leakshavenUpdate: {
+          url: performer.leakshaven_url,
           lastCheckDate: performer.last_leakshaven_check_date,
-          lastUpdateTime: performer.last_leakshaven_update_time,
-          searchName: performer.leakshaven_search_name,
+          newestUpload: performer.last_leakshaven_update_time,
           acknowledged: performer.leakshaven_update_acknowledged === 1,
           error: performer.leakshaven_check_error
         }
@@ -875,164 +844,81 @@ router.post('/:id/rescan', async (req, res) => {
 });
 
 /**
- * POST /api/performer-management/check-updates
- * Check all scraped performers for new content on leakshaven
+ * POST /api/performer-management/:id/check-update
+ * Check one linked performer for new Leakhaven uploads. The page calls this per performer, so it
+ * can show progress and stop.
+ *
+ * New = the newest upload is newer than the last one seen. On a first check nothing has been seen,
+ * so the performer's last folder scan is the line instead.
  */
-router.post('/check-updates', async (req, res) => {
+router.post('/:id/check-update', async (req, res) => {
+  const performer = db.prepare(`
+    SELECT leakshaven_url, last_leakshaven_update_time, leakshaven_update_acknowledged, last_scan_date, import_date
+    FROM performers WHERE id = ?
+  `).get(req.params.id);
+  if (!performer) {
+    return res.status(404).send({ error: 'Performer not found' });
+  }
+  const modelName = modelNameFromUrl(performer.leakshaven_url);
+  if (!modelName) {
+    return res.status(400).send({ error: 'No Leakhaven link' });
+  }
+
+  const checkDate = new Date().toISOString();
   try {
-    const { performerIds } = req.body; // Optional: check specific performers, otherwise check all
-    
-    // Get performers to check (either specific IDs or all with scraped data and not blacklisted)
-    let performers;
-    if (performerIds && performerIds.length > 0) {
-      const placeholders = performerIds.map(() => '?').join(',');
-      performers = db.prepare(`
-        SELECT id, name, aliases 
-        FROM performers 
-        WHERE id IN (${placeholders}) AND blacklisted = 0 AND moved_to_after = 1
-      `).all(...performerIds);
-    } else {
-      // Check all performers that are in "after" folder (moved_to_after = 1) with aliases or scraped data
-      performers = db.prepare(`
-        SELECT id, name, aliases 
-        FROM performers 
-        WHERE blacklisted = 0 
-          AND moved_to_after = 1
-          AND (aliases IS NOT NULL OR scraped_at IS NOT NULL)
-      `).all();
-    }
-    
-    console.log(`Checking ${performers.length} performers for updates...`);
-    
-    const results = {
-      total: performers.length,
-      checked: 0,
-      updated: 0,
-      errors: 0,
-      newUpdates: 0,
-      results: []
-    };
-    
-    const { checkLeakshavenUpdates } = require('../services/scraperService');
-    
-    // Check each performer
-    for (const performer of performers) {
-      const checkDate = new Date().toISOString();
-      
-      try {
-        // Parse aliases
-        let aliases = [];
-        if (performer.aliases) {
-          try {
-            aliases = JSON.parse(performer.aliases);
-          } catch (e) {
-            aliases = [];
-          }
-        }
-        
-        // Use saved working alias if available (from previous scrape)
-        const workingAlias = performer.leakshaven_alias || null;
-        
-        // Check for updates
-        const updateInfo = await checkLeakshavenUpdates(performer.name, aliases, workingAlias);
-        
-        // Get previous update time to detect changes
-        const previousData = db.prepare(`
-          SELECT last_leakshaven_update_time, last_leakshaven_check_date, leakshaven_update_acknowledged 
-          FROM performers 
-          WHERE id = ?
-        `).get(performer.id);
-        
-        // Calculate actual upload timestamps to properly detect new content
-        const currentUploadTimestamp = calculateUploadTimestamp(checkDate, updateInfo.lastUpdateTime);
-        let previousUploadTimestamp = null;
-        
-        if (previousData?.last_leakshaven_update_time && previousData?.last_leakshaven_check_date) {
-          previousUploadTimestamp = calculateUploadTimestamp(
-            previousData.last_leakshaven_check_date, 
-            previousData.last_leakshaven_update_time
-          );
-        }
-        
-        // New update = current upload is NEWER (later timestamp) than previous
-        const hasNewUpdate = previousUploadTimestamp === null || currentUploadTimestamp > previousUploadTimestamp;
-        
-        // Update database
-        db.prepare(`
-          UPDATE performers 
-          SET last_leakshaven_check_date = ?,
-              last_leakshaven_update_time = ?,
-              leakshaven_search_name = ?,
-              leakshaven_update_acknowledged = ?,
-              leakshaven_check_error = NULL
-          WHERE id = ?
-        `).run(
-          checkDate,
-          updateInfo.lastUpdateTime,
-          updateInfo.searchName,
-          hasNewUpdate ? 0 : (previousData?.leakshaven_update_acknowledged || 0), // Reset acknowledged if new
-          performer.id
-        );
-        
-        results.checked++;
-        if (updateInfo.lastUpdateTime) {
-          results.updated++;
-          if (hasNewUpdate && previousData?.last_leakshaven_update_time) {
-            results.newUpdates++;
-          }
-        }
-        
-        results.results.push({
-          id: performer.id,
-          name: performer.name,
-          success: true,
-          updateTime: updateInfo.lastUpdateTime,
-          searchName: updateInfo.searchName,
-          isNew: hasNewUpdate && previousData?.last_leakshaven_update_time !== null
-        });
-        
-        // Small delay to avoid overwhelming the server
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-      } catch (error) {
-        console.error(`Error checking ${performer.name}:`, error.message);
-        
-        // Store error in database
-        db.prepare(`
-          UPDATE performers 
-          SET last_leakshaven_check_date = ?,
-              leakshaven_check_error = ?
-          WHERE id = ?
-        `).run(checkDate, error.message, performer.id);
-        
-        results.checked++;
-        results.errors++;
-        
-        results.results.push({
-          id: performer.id,
-          name: performer.name,
-          success: false,
-          error: error.message
-        });
-      }
-    }
-    
-    console.log('Check updates complete:', results);
-    
-    res.send({
-      success: true,
-      message: `Checked ${results.checked} performers, found ${results.newUpdates} new updates`,
-      summary: {
-        total: results.total,
-        checked: results.checked,
-        updated: results.updated,
-        newUpdates: results.newUpdates,
-        errors: results.errors
-      },
-      results: results.results
-    });
+    const newest = await checkLeakshavenUpdates(modelName);
+    const previous = performer.last_leakshaven_update_time;
+    const scanned = performer.last_scan_date || performer.import_date;
+    // import_date is SQLite's UTC "YYYY-MM-DD HH:MM:SS"
+    const line = previous || (scanned ? new Date(scanned.includes('T') ? scanned : `${scanned.replace(' ', 'T')}Z`).toISOString() : '');
+
+    let acknowledged = previous ? performer.leakshaven_update_acknowledged : 1;
+    if (newest && newest > line) acknowledged = 0;
+
+    db.prepare(`
+      UPDATE performers
+      SET last_leakshaven_check_date = ?, last_leakshaven_update_time = ?,
+          leakshaven_update_acknowledged = ?, leakshaven_check_error = NULL
+      WHERE id = ?
+    `).run(checkDate, newest || previous, acknowledged, req.params.id);
+
+    res.send({ success: true, newestUpload: newest, isNew: !!newest && acknowledged === 0 });
   } catch (err) {
-    console.error('Error checking for updates:', err);
+    console.error(`Leakhaven check failed for ${modelName}:`, err.message);
+    db.prepare('UPDATE performers SET last_leakshaven_check_date = ?, leakshaven_check_error = ? WHERE id = ?')
+      .run(checkDate, err.message, req.params.id);
+    res.send({ success: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/performer-management/:id/leakhaven-link
+ * Set the performer's Leakhaven page by hand: a leakshaven.com/model/… link or a name Leakhaven
+ * knows. It is looked up first, so only a real model page is saved. An empty link removes it.
+ */
+router.put('/:id/leakhaven-link', async (req, res) => {
+  const link = (req.body.link || '').trim();
+  if (!db.prepare('SELECT id FROM performers WHERE id = ?').get(req.params.id)) {
+    return res.status(404).send({ error: 'Performer not found' });
+  }
+  try {
+    let url = null;
+    if (link) {
+      const found = await scrapeLeakshaven([link]);
+      if (!found) {
+        return res.status(404).send({ error: `No Leakhaven model page for "${link}"` });
+      }
+      url = found.url;
+    }
+    db.prepare(`
+      UPDATE performers
+      SET leakshaven_url = ?, last_leakshaven_check_date = NULL, last_leakshaven_update_time = NULL,
+          leakshaven_update_acknowledged = 0, leakshaven_check_error = NULL
+      WHERE id = ?
+    `).run(url, req.params.id);
+    res.send({ success: true, url });
+  } catch (err) {
+    console.error('Error setting Leakhaven link:', err);
     res.status(500).send({ error: err.message });
   }
 });

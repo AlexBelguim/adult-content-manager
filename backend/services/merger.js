@@ -549,7 +549,7 @@ class MergerService {
       const metaFields = [
         'age', 'born', 'birthplace', 'country_flag', 'height', 'weight',
         'measurements', 'hair_color', 'eye_color', 'ethnicity', 'body_type',
-        'orientation', 'scraped_tags'
+        'orientation', 'scraped_tags', 'leakshaven_url'
       ];
       for (const field of metaFields) {
         if (!target[field] && source[field]) {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Modal,
   Box,
@@ -15,11 +16,7 @@ import {
   DialogActions,
   TextField,
   CircularProgress,
-  Tooltip,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel
+  Tooltip
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -30,8 +27,13 @@ import {
   Fingerprint as HashIcon,
   Search as SearchIcon,
   Refresh as RefreshIcon,
-  Storage as StorageIcon
+  Storage as StorageIcon,
+  OpenInNew as OpenInNewIcon
 } from '@mui/icons-material';
+
+// Rate Performer (AI) runs the performer ranker, which picks the winner in only 49% of duels (2026-10-16).
+// Turn back on once a ranker beats chance on unseen performers. Same switch as ASK_AI_ENABLED in SmartComparePage.
+const RATE_AI_ENABLED = false;
 
 // Dark theme modal styles (matching UploadQueuePage)
 const darkModalStyles = {
@@ -147,13 +149,7 @@ function PerformerSettingsModal({
   const [renameFolderToo, setRenameFolderToo] = useState(true);
   const [isRenaming, setIsRenaming] = useState(false);
 
-  // Aliases state
-  const [aliases, setAliases] = useState([]);
-  const [aliasInput, setAliasInput] = useState('');
-  const [savingAliases, setSavingAliases] = useState(false);
-  const [scrapingData, setScrapingData] = useState(false);
-  const [availableScrapers, setAvailableScrapers] = useState([{ id: 'leakhaven', name: 'Leakhaven (Built-in)' }]);
-  const [selectedScraper, setSelectedScraper] = useState('leakhaven');
+  const navigate = useNavigate();
 
   // Hash actions state
   const [isCreatingHash, setIsCreatingHash] = useState(false);
@@ -169,14 +165,6 @@ function PerformerSettingsModal({
         const data = await response.json();
         setSettings(data);
         setNewName(data.performer?.name || performer.name);
-
-        // Load aliases
-        try {
-          const aliasesData = data.performer?.aliases ? JSON.parse(data.performer.aliases) : [];
-          setAliases(Array.isArray(aliasesData) ? aliasesData : []);
-        } catch (e) {
-          setAliases([]);
-        }
       }
     } catch (error) {
       console.error('Error fetching settings:', error);
@@ -187,16 +175,6 @@ function PerformerSettingsModal({
     if (open && performer?.id) {
       fetchSettings();
       setIsEditingName(false);
-      
-      // Fetch scrapers if we haven't already
-      if (availableScrapers.length === 1) {
-        fetch('/api/performers/scrapers/list')
-          .then(res => res.json())
-          .then(data => {
-            if (data.scrapers) setAvailableScrapers(data.scrapers);
-          })
-          .catch(err => console.error('Error fetching scrapers:', err));
-      }
     }
   }, [open, performer?.id, fetchSettings]);
 
@@ -294,68 +272,6 @@ function PerformerSettingsModal({
       alert('Failed to rename performer');
     } finally {
       setIsRenaming(false);
-    }
-  };
-
-  const handleSaveAliases = async () => {
-    if (!performer?.id || savingAliases) return;
-
-    setSavingAliases(true);
-    try {
-      const response = await fetch(`/api/performers/${performer.id}/aliases`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aliases })
-      });
-
-      if (response.ok) {
-        if (onUpdate) onUpdate();
-      } else {
-        const error = await response.json();
-        alert('Failed to save aliases: ' + (error.error || 'Unknown error'));
-      }
-    } catch (error) {
-      console.error('Error saving aliases:', error);
-      alert('Error saving aliases: ' + error.message);
-    } finally {
-      setSavingAliases(false);
-    }
-  };
-
-  const handleScrapeData = async () => {
-    if (!performer?.id || scrapingData) return;
-
-    setScrapingData(true);
-    try {
-      const response = await fetch(`/api/performers/${performer.id}/scrape`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: selectedScraper })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-
-        if (result.performer?.aliases) {
-          try {
-            const scrapedAliases = JSON.parse(result.performer.aliases);
-            setAliases(Array.isArray(scrapedAliases) ? scrapedAliases : []);
-          } catch (e) {
-            console.error('Error parsing scraped aliases:', e);
-          }
-        }
-
-        await fetchSettings();
-        if (onUpdate) onUpdate();
-      } else {
-        const error = await response.json();
-        alert('Failed to scrape data: ' + (error.error || 'Unknown error'));
-      }
-    } catch (error) {
-      console.error('Error scraping data:', error);
-      alert('Error scraping data: ' + error.message);
-    } finally {
-      setScrapingData(false);
     }
   };
 
@@ -796,101 +712,23 @@ function PerformerSettingsModal({
           </Box>
 
           <Box sx={darkModalStyles.content}>
-            {/* Aliases Section */}
-            <Box sx={darkModalStyles.section}>
-              <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                Aliases / Alternative Names
+            {/* Aliases, scraping and Leakhaven updates live on the performer management page */}
+            <Box sx={{ ...darkModalStyles.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', mb: 4 }}>
+              <Typography variant="body2" sx={darkModalStyles.textSecondary}>
+                Aliases, scraping and Leakhaven updates
               </Typography>
-              <Box sx={darkModalStyles.card}>
-                <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={aliasInput}
-                    onChange={(e) => setAliasInput(e.target.value)}
-                    placeholder="Add an alias..."
-                    sx={darkModalStyles.textField}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && aliasInput.trim()) {
-                        e.preventDefault();
-                        if (!aliases.includes(aliasInput.trim())) {
-                          setAliases([...aliases, aliasInput.trim()]);
-                        }
-                        setAliasInput('');
-                      }
-                    }}
-                  />
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      if (aliasInput.trim() && !aliases.includes(aliasInput.trim())) {
-                        setAliases([...aliases, aliasInput.trim()]);
-                        setAliasInput('');
-                      }
-                    }}
-                    disabled={!aliasInput.trim()}
-                    sx={darkModalStyles.outlinedButton}
-                  >
-                    Add
-                  </Button>
-                </Box>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                  {aliases.map((alias, index) => (
-                    <Chip
-                      key={index}
-                      label={alias}
-                      onDelete={() => setAliases(aliases.filter((_, i) => i !== index))}
-                      size="small"
-                      sx={{
-                        bgcolor: 'rgba(255, 142, 83, 0.2)',
-                        color: 'primary.light',
-                        '& .MuiChip-deleteIcon': { color: 'primary.light' }
-                      }}
-                    />
-                  ))}
-                  {aliases.length === 0 && (
-                    <Typography variant="body2" sx={darkModalStyles.textSecondary}>
-                      No aliases added yet
-                    </Typography>
-                  )}
-                </Box>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Button
-                    variant="contained"
-                    onClick={handleSaveAliases}
-                    disabled={savingAliases}
-                    startIcon={savingAliases ? <CircularProgress size={20} /> : <SaveIcon />}
-                    sx={darkModalStyles.gradientButton}
-                  >
-                    {savingAliases ? 'Saving...' : 'Save Aliases'}
-                  </Button>
-                  <FormControl size="small" sx={{ width: 220 }}>
-                    <InputLabel id="scraper-select-label" sx={{ color: 'var(--dim)' }}>Scraper</InputLabel>
-                    <Select
-                      labelId="scraper-select-label"
-                      value={selectedScraper}
-                      onChange={(e) => setSelectedScraper(e.target.value)}
-                      label="Scraper"
-                      sx={darkModalStyles.textField}
-                    >
-                      {availableScrapers.map(scraper => (
-                        <MenuItem key={scraper.id} value={scraper.id}>
-                          {scraper.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <Button
-                    variant="outlined"
-                    onClick={handleScrapeData}
-                    disabled={scrapingData}
-                    startIcon={scrapingData ? <CircularProgress size={20} /> : <SearchIcon />}
-                    sx={darkModalStyles.outlinedButton}
-                  >
-                    {scrapingData ? 'Scraping...' : 'Scrape'}
-                  </Button>
-                </Box>
-              </Box>
+              <Button
+                variant="outlined"
+                size="small"
+                endIcon={<OpenInNewIcon />}
+                onClick={() => {
+                  onClose();
+                  navigate(`/performer-management?performer=${performer.id}`);
+                }}
+                sx={{ ...darkModalStyles.outlinedButton, py: 0.5, px: 2 }}
+              >
+                Open in Performer Management
+              </Button>
             </Box>
 
             <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
@@ -951,12 +789,14 @@ function PerformerSettingsModal({
               </Typography>
               <Box sx={darkModalStyles.card}>
                 <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
-                  Use the active AI Ranker model to estimate this performer's star rating based on their content.
+                  {RATE_AI_ENABLED
+                    ? "Use the active AI Ranker model to estimate this performer's star rating based on their content."
+                    : 'Off until a performer ranker beats chance: the current one picks the right winner in 49% of duels.'}
                 </Typography>
                 <Button
                   variant="contained"
                   onClick={handlePredictRank}
-                  disabled={isPredictingRank}
+                  disabled={!RATE_AI_ENABLED || isPredictingRank}
                   startIcon={isPredictingRank ? <CircularProgress size={20} /> : <RefreshIcon />}
                   sx={{ 
                     ...darkModalStyles.gradientButton,
@@ -964,7 +804,7 @@ function PerformerSettingsModal({
                     '&:hover': { background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)' }
                    }}
                 >
-                  {isPredictingRank ? 'Analyzing Content...' : 'Rate Performer (AI)'}
+                  {!RATE_AI_ENABLED ? 'Rate Performer (AI) (off)' : isPredictingRank ? 'Analyzing Content...' : 'Rate Performer (AI)'}
                 </Button>
               </Box>
             </Box>

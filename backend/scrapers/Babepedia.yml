@@ -97,7 +97,7 @@ xPathScrapers:
               - regex: \sshow conversions
                 with: ""
           - replace:
-              - regex: "(\\d+)-(\\d+)-(\\d+).*"
+              - regex: "(\\d+)[-–](\\d+)[-–](\\d+).*"
                 with: "$1-$2-$3"
       CupSize:
         selector: //span[contains(@class, "label") and contains(text(), "Bra/cup size")]/following-sibling::span

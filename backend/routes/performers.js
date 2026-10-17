@@ -9,6 +9,9 @@ const path = require('path');
 const axios = require('axios');
 const { findPerformerByNameOrAlias, findFuzzyMatches } = require('../utils/performerMatcher');
 const mediaDimensions = require('../utils/mediaDimensions');
+const { scrapeLeakshaven, modelNameFromUrl, modelUrl } = require('../services/scraperService');
+const { getAvailableYamlScrapers, scrapeWithYaml } = require('../services/yamlScraperEngine');
+const { normalizeScrapedPerformerData, cleanScrapeResult } = require('../utils/scraperNormalizer');
 
 const AI_SERVER_URL = process.env.AI_SERVER_URL || 'http://localhost:3344';
 
@@ -2288,158 +2291,124 @@ router.put('/:id/aliases', (req, res) => {
   }
 });
 
-// Get available scrapers
+// Sites a scrape tries, in order. Alex sets order and on/off in the Scrape modal (app setting
+// scraper_sites: [{ id, enabled }]). Sites not in the setting are listed after it, switched off.
+const DEFAULT_SCRAPE_SITES = ['leakhaven', 'Babepedia', 'FreeonesCommunity', 'Boobpedia'];
+
+function getScrapeSites() {
+  const all = [{ id: 'leakhaven', name: 'Leakhaven' }, ...getAvailableYamlScrapers().map(s => ({ id: s.id, name: s.name }))];
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'scraper_sites'").get();
+  let order;
+  try { order = JSON.parse(row?.value || 'null'); } catch (e) { order = null; }
+  if (!Array.isArray(order)) order = DEFAULT_SCRAPE_SITES.map(id => ({ id, enabled: true }));
+
+  const byId = new Map(all.map(s => [s.id, s]));
+  const sites = order.filter(s => byId.has(s.id)).map(s => ({ ...byId.get(s.id), enabled: !!s.enabled }));
+  for (const site of all) {
+    if (!sites.some(s => s.id === site.id)) sites.push({ ...site, enabled: false });
+  }
+  return sites;
+}
+
+const parseList = (json) => {
+  try { return JSON.parse(json || '[]'); } catch (e) { return []; }
+};
+
 router.get('/scrapers/list', (req, res) => {
   try {
-    const { getAvailableYamlScrapers } = require('../services/yamlScraperEngine');
-    const yamlScrapers = getAvailableYamlScrapers();
-    
-    // Add built-in leakhaven
-    const allScrapers = [
-      { id: 'leakhaven', name: 'Leakhaven (Built-in)' },
-      ...yamlScrapers.map(s => ({ id: s.id, name: s.name + ' (Community)' }))
-    ];
-    
-    res.send({ scrapers: allScrapers });
+    res.send({ scrapers: getScrapeSites() });
   } catch (err) {
     res.status(500).send({ error: err.message });
   }
 });
 
-// Scrape performer data
+/**
+ * Look a performer up on one site. Nothing is saved: the result goes to the Scrape modal, and
+ * POST /:id/scrape/accept saves it once Alex confirms. The name is tried first, then each alias;
+ * for Leakhaven a saved link is tried before both. `link` (Leakhaven only) replaces all of them.
+ */
 router.post('/:id/scrape', async (req, res) => {
-  const { id } = req.params;
-  const { source = 'leakhaven' } = req.body;
+  const { source, link } = req.body;
+  const performer = db.prepare('SELECT name, aliases, leakshaven_url FROM performers WHERE id = ?').get(req.params.id);
+  if (!performer) {
+    return res.status(404).send({ error: 'Performer not found' });
+  }
+  const names = [...new Set([performer.name, ...parseList(performer.aliases)].filter(Boolean))];
 
+  try {
+    let result = null;
+    if (source === 'leakhaven') {
+      const found = await scrapeLeakshaven(link ? [link] : [performer.leakshaven_url, ...names].filter(Boolean));
+      result = found && cleanScrapeResult(found);
+    } else {
+      for (const name of names) {
+        try {
+          const { url, data } = await scrapeWithYaml(source, name);
+          const clean = cleanScrapeResult({ ...normalizeScrapedPerformerData(data, url), searchedFor: name });
+          if (Object.keys(clean.profile).length || clean.aliases.length || clean.tags.length) {
+            result = clean;
+            break;
+          }
+        } catch (err) {
+          console.log(`[Scrape] ${source}: nothing for "${name}" (${err.message})`);
+        }
+      }
+    }
+    res.send({ found: !!result, result, tried: link ? [link] : names });
+  } catch (err) {
+    console.error(`[Scrape] ${source} failed:`, err.message);
+    res.send({ found: false, error: err.message, tried: link ? [link] : names });
+  }
+});
+
+/**
+ * Save a scrape Alex confirmed. Only the fields the site gave are written; aliases and tags are
+ * added to the ones already there. A Leakhaven result also saves the model page as the performer's
+ * link, which starts update checks over.
+ */
+router.post('/:id/scrape/accept', (req, res) => {
+  const { source, result } = req.body;
+  const { id } = req.params;
   try {
     const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
+    const clean = cleanScrapeResult(result || {});
 
-    // Parse existing aliases
-    const existingAliases = performer.aliases ? JSON.parse(performer.aliases) : [];
-
-    let scrapedData;
-    let workingAlias = performer.name;
-
-    if (source === 'leakhaven') {
-      const { scrapeLeakshaven } = require('../services/scraperService');
-      scrapedData = await scrapeLeakshaven(performer.name, existingAliases);
-      workingAlias = scrapedData.workingAlias || performer.name;
-    } else {
-      const { scrapeWithYaml } = require('../services/yamlScraperEngine');
-      const { normalizeScrapedPerformerData } = require('../utils/scraperNormalizer');
-      
-      // For YAML scrapers, try main name first, then aliases until one works
-      const namesToTry = [performer.name, ...existingAliases];
-      let foundData = false;
-      
-      for (const name of namesToTry) {
-        try {
-          const rawYamlResults = await scrapeWithYaml(source, name);
-          if (rawYamlResults && (rawYamlResults.Name || rawYamlResults.Birthdate)) {
-            scrapedData = normalizeScrapedPerformerData(rawYamlResults);
-            foundData = true;
-            workingAlias = name;
-            break;
-          }
-        } catch (e) {
-          console.log(`Failed to scrape ${name} with ${source}: ${e.message}`);
-        }
+    const aliases = parseList(performer.aliases);
+    const seen = new Set([performer.name, ...aliases].map(a => a.toLowerCase()));
+    for (const alias of clean.aliases) {
+      if (!seen.has(alias.toLowerCase())) {
+        aliases.push(alias);
+        seen.add(alias.toLowerCase());
       }
-      
-      if (!foundData) {
-         return res.status(404).send({ error: `No data found using scraper ${source}` });
-      }
-      
-      // Ensure hasContent is true since we found data
-      scrapedData.hasContent = true;
     }
 
-    // Merge scraped aliases with existing ones (avoiding duplicates)
-    const allAliases = [...new Set([...existingAliases, ...(scrapedData.alsoKnownAs || [])])];
+    const set = {
+      ...clean.profile,
+      aliases: JSON.stringify(aliases),
+      scraped_tags: JSON.stringify([...new Set([...parseList(performer.scraped_tags), ...clean.tags])]),
+      scraped_at: new Date().toISOString(),
+      scraped_status: 'scraped',
+      scraped_source: source
+    };
+    const modelName = source === 'leakhaven' && modelNameFromUrl(clean.url);
+    if (modelName && modelUrl(modelName) !== performer.leakshaven_url) {
+      Object.assign(set, {
+        leakshaven_url: modelUrl(modelName),
+        last_leakshaven_check_date: null,
+        last_leakshaven_update_time: null,
+        leakshaven_update_acknowledged: 0,
+        leakshaven_check_error: null
+      });
+    }
 
-    // Prepare scraped tags as JSON string
-    const scrapedTagsJson = JSON.stringify(scrapedData.tags || []);
-    const aliasesJson = JSON.stringify(allAliases);
-
-    // Update database with scraped data
-    const now = new Date().toISOString();
-    console.log('Scraped data to save:', JSON.stringify(scrapedData, null, 2));
-
-    // Determine scraped status
-    const scrapedStatus = scrapedData.hasContent ? 'scraped' : 'found_no_data';
-
-    db.prepare(`
-      UPDATE performers 
-      SET aliases = ?,
-          age = ?,
-          born = ?,
-          birthplace = ?,
-          country_flag = ?,
-          height = ?,
-          weight = ?,
-          measurements = ?,
-          measurements_cup = ?,
-          measurements_band_size = ?,
-          measurements_fake = ?,
-          hair_color = ?,
-          eye_color = ?,
-          ethnicity = ?,
-          body_type = ?,
-          orientation = ?,
-          pubic_hair = ?,
-          tattoos = ?,
-          piercings = ?,
-          scraped_tags = ?,
-          scraped_at = ?,
-          scraped_status = ?,
-          leakshaven_alias = ?
-      WHERE id = ?
-    `).run(
-      aliasesJson,
-      scrapedData.personalInfo.age || null,
-      scrapedData.personalInfo.born || null,
-      scrapedData.personalInfo.birthplace || null,
-      scrapedData.personalInfo.countryFlag || null,
-      scrapedData.physicalAttributes.height || null,
-      scrapedData.physicalAttributes.weight || null,
-      scrapedData.physicalAttributes.measurements || null,
-      scrapedData.physicalAttributes.measurements_cup || null,
-      scrapedData.physicalAttributes.measurements_band_size || null,
-      scrapedData.physicalAttributes.measurements_fake !== undefined ? (scrapedData.physicalAttributes.measurements_fake ? 1 : 0) : null,
-      scrapedData.physicalAttributes.hair || null,
-      scrapedData.physicalAttributes.eyes || null,
-      scrapedData.physicalAttributes.ethnicity || null,
-      scrapedData.physicalAttributes.bodyType || null,
-      scrapedData.personalInfo.orientation || null,
-      scrapedData.physicalAttributes.pubic_hair || null,
-      scrapedData.physicalAttributes.tattoos || null,
-      scrapedData.physicalAttributes.piercings || null,
-      scrapedTagsJson,
-      now,
-      scrapedStatus,
-      workingAlias,
-      id
-    );
-
-    const updated = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
-
-    const statusMessage = scrapedData.hasContent
-      ? `Successfully scraped performer data from ${workingAlias}`
-      : `Model page found for ${workingAlias} but no additional data available. Alias saved for future update checks.`;
-
-    res.send({
-      success: true,
-      message: statusMessage,
-      hasContent: scrapedData.hasContent,
-      workingAlias: workingAlias,
-      performer: updated,
-      scrapedData
-    });
+    const columns = Object.keys(set);
+    db.prepare(`UPDATE performers SET ${columns.map(c => `${c} = ?`).join(', ')} WHERE id = ?`).run(...columns.map(c => set[c]), id);
+    res.send({ success: true, performer: db.prepare('SELECT * FROM performers WHERE id = ?').get(id) });
   } catch (err) {
-    console.error('Error scraping performer data:', err);
+    console.error('Error saving scrape:', err);
     res.status(500).send({ error: err.message });
   }
 });

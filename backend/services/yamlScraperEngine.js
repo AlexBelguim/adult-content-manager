@@ -84,16 +84,28 @@ function applyPostProcess(value, rules) {
     }
     
     if (rule.parseDate) {
-      // Basic date cleaning
-      // Very simplified version of Go's time.Parse
-      const date = new Date(result);
+      // Not Go's time.Parse: drop the weekday and "of" ("Sunday 9 of October 1994") and let Date read the rest
+      const date = new Date(result.replace(/\b(mon|tues|wednes|thurs|fri|satur|sun)day\b|\bof\b/gi, ' '));
       if (!isNaN(date.getTime())) {
-        result = date.toISOString().split('T')[0];
+        const pad = (n) => String(n).padStart(2, '0');
+        result = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
       }
     }
   }
-  
+
   return result.trim();
+}
+
+/** A scraper's performer fields, with its common $variables put into the selectors. */
+function performerSpec(scraper) {
+  const common = Object.entries(scraper?.common || {}).sort((a, b) => b[0].length - a[0].length);
+  const withCommon = (selector) => common.reduce((s, [name, xpath]) => s.split(name).join(xpath), selector);
+  const spec = {};
+  for (const [field, rule] of Object.entries(scraper?.performer || {})) {
+    if (typeof rule === 'string') spec[field] = withCommon(rule);
+    else spec[field] = rule.selector ? { ...rule, selector: withCommon(rule.selector) } : rule;
+  }
+  return spec;
 }
 
 /**
@@ -174,8 +186,8 @@ async function scrapeWithYaml(scraperId, performerName) {
     } else if (searchAction === 'scrapeXPath') {
       // 1B. XPath Search
       await page.goto(queryURL, { waitUntil: 'networkidle2', timeout: 30000 });
-      const spec = config.xPathScrapers?.[searchScraperName]?.performer?.URLs;
-      
+      const spec = performerSpec(config.xPathScrapers?.[searchScraperName]).URLs;
+
       if (spec) {
         targetUrl = await page.evaluate((spec) => {
           const getByXPath = (xpath) => {
@@ -207,9 +219,9 @@ async function scrapeWithYaml(scraperId, performerName) {
     // Step 2: Scrape the actual performer page
     const detailScraperConf = config.performerByURL[0];
     const detailScraperName = detailScraperConf.scraper;
-    const detailSpec = config.xPathScrapers?.[detailScraperName]?.performer;
-    
-    if (!detailSpec) {
+    const detailSpec = performerSpec(config.xPathScrapers?.[detailScraperName]);
+
+    if (!Object.keys(detailSpec).length) {
       throw new Error(`Missing xPathScrapers.${detailScraperName}.performer`);
     }
     
@@ -259,6 +271,10 @@ async function scrapeWithYaml(scraperId, performerName) {
     // Apply post processing
     const processedResults = {};
     for (const [field, rule] of Object.entries(detailSpec)) {
+      if (typeof rule === 'object' && rule.fixed !== undefined) {
+        processedResults[field] = rule.fixed;
+        continue;
+      }
       let val = scrapedRaw[field];
       if (!val) {
         processedResults[field] = null;
@@ -274,8 +290,8 @@ async function scrapeWithYaml(scraperId, performerName) {
     
     // Debug logging
     console.log(`[YAML Scraper] Processed Results:`, JSON.stringify(processedResults, null, 2));
-    
-    return processedResults;
+
+    return { url: targetUrl, data: processedResults };
     
   } finally {
     await browser.close();

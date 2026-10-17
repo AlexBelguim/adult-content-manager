@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -35,11 +35,11 @@ import {
   Radio,
   Badge,
   Select,
-  MenuItem,
   FormControl,
   InputLabel,
   Autocomplete,
-  Avatar
+  Avatar,
+  Link
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -59,15 +59,22 @@ import {
   ArrowUpward as ArrowUpwardIcon,
   ArrowDownward as ArrowDownwardIcon,
   Update as UpdateIcon,
-  History as HistoryIcon,
   Notifications as NotificationsIcon,
   NotificationsActive as NotificationsActiveIcon,
   Edit as EditIcon,
   ViewModule as ViewModuleIcon,
-  ViewList as ViewListIcon
+  ViewList as ViewListIcon,
+  Link as LinkIcon,
+  LinkOff as LinkOffIcon,
+  FiberNew as FiberNewIcon,
+  ErrorOutline as ErrorOutlineIcon,
+  Schedule as ScheduleIcon,
+  CloudQueue as CloudQueueIcon,
+  OpenInNew as OpenInNewIcon
 } from '@mui/icons-material';
 import { offlineStorage } from '../services/OfflineStorage';
 import { socketService } from '../services/SocketService';
+import ScrapeDialog from '../components/ScrapeDialog';
 import {
   PageShell, PageHeader, Panel, LoadingState, StatRow, EmptyState,
   Toolbar as LayoutToolbar, ICON, iconBtnSx
@@ -139,6 +146,43 @@ const dotSx = (tone) => ({
   }
 });
 
+/** An inline state flag with an icon and a word, clickable. */
+const flagSx = (tone, strong = false) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '3px',
+  fontSize: '0.68rem',
+  fontWeight: strong ? 650 : 400,
+  color: tone,
+  bgcolor: strong ? 'var(--bad-quiet)' : 'transparent',
+  borderRadius: 'var(--radius-sm, 4px)',
+  px: '4px',
+  ml: '-4px',
+  cursor: 'pointer',
+  textDecoration: 'none',
+  '& svg': { fontSize: ICON.inline },
+  '&:hover': { bgcolor: strong ? 'var(--bad-quiet)' : 'var(--raised)' }
+});
+
+/** "3 days ago" for an ISO date. */
+function timeAgo(iso) {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (days < 1) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days} days ago`;
+  if (days < 365) return `${Math.floor(days / 30)} month${days < 60 ? '' : 's'} ago`;
+  return `${Math.floor(days / 365)} year${days < 730 ? '' : 's'} ago`;
+}
+
+/** Where a performer stands on Leakhaven: none | unchecked | failed | new | current */
+function leakhavenState(performer) {
+  const upd = performer.leakshavenUpdate || {};
+  if (!upd.url) return 'none';
+  if (upd.error) return 'failed';
+  if (!upd.lastCheckDate) return 'unchecked';
+  return upd.newestUpload && !upd.acknowledged ? 'new' : 'current';
+}
+
 const tabChipSx = (active) => ({
   height: 24,
   fontSize: '0.7rem',
@@ -192,30 +236,28 @@ function PerformerManagementPage() {
   const [expandedPerformer, setExpandedPerformer] = useState(null);
   const [expandedGroup, setExpandedGroup] = useState(null);
   const [sortConfig, setSortConfig] = useState([]); // Array of {field, direction} for multi-level sorting
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [updateCheckResults, setUpdateCheckResults] = useState(null);
+  // { done, total, newCount, errors } while Check updates runs, then its result
+  const [checkProgress, setCheckProgress] = useState(null);
+  const stopCheckRef = useRef(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renamePerformer, setRenamePerformer] = useState(null);
   const [newPerformerName, setNewPerformerName] = useState('');
   const [renameFolderToo, setRenameFolderToo] = useState(true);
-  const [availableScrapers, setAvailableScrapers] = useState([{ id: 'leakhaven', name: 'Leakhaven (Built-in)' }]);
-  const [selectedScraper, setSelectedScraper] = useState('leakhaven');
+  const [scrapeTarget, setScrapeTarget] = useState(null);
+  const [newOnly, setNewOnly] = useState(false);
+  const [noLinkOnly, setNoLinkOnly] = useState(false);
+  const [aliasInputs, setAliasInputs] = useState({});
+  const [linkInputs, setLinkInputs] = useState({}); // performer id → link being typed; present while editing
+  const [linkBusy, setLinkBusy] = useState(null);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeSource, setMergeSource] = useState(null);
   const [mergeTarget, setMergeTarget] = useState(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // ?performer=<id>, from the settings modal's "Open in Performer Management"
+  const focusId = parseInt(searchParams.get('performer'), 10) || null;
 
   useEffect(() => {
-    // Fetch available scrapers
-    fetch('/api/performers/scrapers/list')
-      .then(res => res.json())
-      .then(data => {
-        if (data.scrapers) {
-          setAvailableScrapers(data.scrapers);
-        }
-      })
-      .catch(err => console.error('Error fetching scrapers:', err));
-
     // Initial load: try offline first
     loadPerformers(true);
 
@@ -234,6 +276,19 @@ function PerformerManagementPage() {
       socketService.off('performers_updated', handleUpdate);
     };
   }, []);
+
+  // Opened for one performer: show it expanded and scrolled into view, once
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    const target = focusId && !loading && performers.find(p => p.id === focusId);
+    if (!target || focusedRef.current) return;
+    focusedRef.current = true;
+    setCurrentTab(0);
+    setSearchTerm('');
+    setExpandedGroup(target.name);
+    setExpandedPerformer(focusId);
+    setTimeout(() => document.getElementById(`performer-${focusId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150);
+  }, [focusId, loading, performers]);
 
   const loadPerformers = async (loadOfflineFirst = false) => {
     try {
@@ -388,36 +443,84 @@ function PerformerManagementPage() {
     }
   };
 
+  const checkOne = (performerId) =>
+    fetch(`/api/performer-management/${performerId}/check-update`, { method: 'POST' })
+      .then(res => res.json())
+      .catch(err => ({ success: false, error: err.message }));
+
+  // One request per linked performer, so the button can show progress and stop
   const handleCheckUpdates = async () => {
+    if (checkProgress && checkProgress.done < checkProgress.total) {
+      stopCheckRef.current = true;
+      return;
+    }
+    const linked = performers.filter(p => p.leakshavenUpdate?.url && p.blacklisted !== 1);
+    stopCheckRef.current = false;
+    const progress = { done: 0, total: linked.length, newCount: 0, errors: 0 };
+    setCheckProgress({ ...progress });
+    for (const performer of linked) {
+      if (stopCheckRef.current) break;
+      const data = await checkOne(performer.id);
+      progress.done++;
+      if (data.isNew) progress.newCount++;
+      if (!data.success) progress.errors++;
+      setCheckProgress({ ...progress });
+    }
+    setCheckProgress({ ...progress, total: progress.done });
+    await loadPerformers();
+  };
+
+  const handleCheckOne = async (performer) => {
+    setLinkBusy(performer.id);
+    await checkOne(performer.id);
+    setLinkBusy(null);
+    await loadPerformers();
+  };
+
+  const handleSaveAliases = async (performer, aliases) => {
     try {
-      setCheckingUpdates(true);
-      setUpdateCheckResults(null);
-
-      const response = await fetch('/api/performer-management/check-updates', {
-        method: 'POST',
+      const response = await fetch(`/api/performers/${performer.id}/aliases`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}) // Empty body to check all performers
+        body: JSON.stringify({ aliases })
       });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setUpdateCheckResults(data.summary);
-        await loadPerformers(); // Reload to show updated data
-
-        if (data.summary.newUpdates > 0) {
-          alert(`Found ${data.summary.newUpdates} new content update${data.summary.newUpdates > 1 ? 's' : ''}!`);
-        } else {
-          alert('Update check complete. No new updates found.');
-        }
-      } else {
-        alert(`Error: ${data.error}`);
-      }
+      if (!response.ok) throw new Error((await response.json()).error);
+      setPerformers(prev => prev.map(p => (p.id === performer.id ? { ...p, aliases } : p)));
     } catch (error) {
-      console.error('Error checking for updates:', error);
-      alert('Failed to check for updates');
+      alert('Failed to save aliases: ' + error.message);
+    }
+  };
+
+  const handleAddAlias = (performer) => {
+    const alias = (aliasInputs[performer.id] || '').trim();
+    if (!alias) return;
+    if (!performer.aliases.some(a => a.toLowerCase() === alias.toLowerCase())) {
+      handleSaveAliases(performer, [...performer.aliases, alias]);
+    }
+    setAliasInputs(prev => ({ ...prev, [performer.id]: '' }));
+  };
+
+  // An empty link removes it
+  const handleSaveLink = async (performer, link) => {
+    setLinkBusy(performer.id);
+    try {
+      const response = await fetch(`/api/performer-management/${performer.id}/leakhaven-link`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link })
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+      setLinkInputs(prev => {
+        const next = { ...prev };
+        delete next[performer.id];
+        return next;
+      });
+      await loadPerformers();
+    } catch (error) {
+      alert(error.message);
     } finally {
-      setCheckingUpdates(false);
+      setLinkBusy(null);
     }
   };
 
@@ -567,29 +670,7 @@ function PerformerManagementPage() {
     navigate(`/hash-management?performerId=${performerId}`);
   };
 
-  const handleScrape = async (performer) => {
-    if (!performer || !performer.id) return;
-    setProcessing(true);
-    try {
-      const response = await fetch(`/api/performers/${performer.id}/scrape`, { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: selectedScraper })
-      });
-      const data = await response.json();
-      if (data.success) {
-        // refresh performers to show scraped data
-        await loadPerformers();
-      } else {
-        alert('Scrape failed: ' + (data.error || 'Unknown error'));
-      }
-    } catch (err) {
-      console.error('Error scraping performer:', err);
-      alert('Failed to run scraper');
-    } finally {
-      setProcessing(false);
-    }
-  };
+  const handleScrape = (performer) => setScrapeTarget(performer);
 
   const toggleExpandPerformer = (performerId) => {
     setExpandedPerformer(expandedPerformer === performerId ? null : performerId);
@@ -694,26 +775,15 @@ function PerformerManagementPage() {
             compareResult = (b.total_size_gb || 0) - (a.total_size_gb || 0);
             break;
 
-          case 'leakshaven':
-            // Sort by: 1) Has update time, 2) Unacknowledged first, 3) Check date
-            const aHasUpdate = a.leakshavenUpdate?.lastUpdateTime ? 1 : 0;
-            const bHasUpdate = b.leakshavenUpdate?.lastUpdateTime ? 1 : 0;
-            compareResult = bHasUpdate - aHasUpdate;
-
-            if (compareResult === 0 && aHasUpdate && bHasUpdate) {
-              // Both have updates - prioritize unacknowledged
-              const aUnack = !a.leakshavenUpdate?.acknowledged ? 1 : 0;
-              const bUnack = !b.leakshavenUpdate?.acknowledged ? 1 : 0;
-              compareResult = bUnack - aUnack;
-
-              if (compareResult === 0) {
-                // Sort by check date (most recent first)
-                const aDate = a.leakshavenUpdate?.lastCheckDate ? new Date(a.leakshavenUpdate.lastCheckDate).getTime() : 0;
-                const bDate = b.leakshavenUpdate?.lastCheckDate ? new Date(b.leakshavenUpdate.lastCheckDate).getTime() : 0;
-                compareResult = bDate - aDate;
-              }
+          case 'leakshaven': {
+            // New first, then linked by newest upload, then unlinked
+            const rank = { new: 3, current: 2, failed: 1, unchecked: 1, none: 0 };
+            compareResult = rank[leakhavenState(b)] - rank[leakhavenState(a)];
+            if (compareResult === 0) {
+              compareResult = (b.leakshavenUpdate?.newestUpload || '').localeCompare(a.leakshavenUpdate?.newestUpload || '');
             }
             break;
+          }
 
           default:
             break;
@@ -765,6 +835,8 @@ function PerformerManagementPage() {
         (p.aliases && p.aliases.some(a => a.toLowerCase().includes(lowerSearch)))
       );
     }
+    if (newOnly) performerList = performerList.filter(p => leakhavenState(p) === 'new');
+    if (noLinkOnly) performerList = performerList.filter(p => leakhavenState(p) === 'none');
 
     // Apply sorting
     performerList = applySorting(performerList);
@@ -841,6 +913,170 @@ function PerformerManagementPage() {
     }
   };
 
+  const sourceName = (id) => (id === 'leakhaven' ? 'Leakhaven' : id);
+
+  /** Inline Leakhaven state: no link opens the Scrape modal, every other state opens the linked page. */
+  const renderLeakhavenFlag = (performer) => {
+    const upd = performer.leakshavenUpdate || {};
+    const state = leakhavenState(performer);
+    if (state === 'none') {
+      return (
+        <Tooltip title="No Leakhaven page linked. Click to scrape">
+          <Box component="span" sx={flagSx('var(--muted)')} onClick={() => handleScrape(performer)}>
+            <LinkOffIcon />no link
+          </Box>
+        </Tooltip>
+      );
+    }
+    const [Icon, tone, label, tip] = {
+      new: [FiberNewIcon, 'var(--bad)', `new · ${timeAgo(upd.newestUpload)}`,
+        `New upload ${new Date(upd.newestUpload).toLocaleDateString()}. Click to open the Leakhaven page`],
+      current: [LinkIcon, 'var(--dim)', upd.newestUpload ? timeAgo(upd.newestUpload) : 'no uploads',
+        `Up to date${upd.newestUpload ? `, newest upload ${new Date(upd.newestUpload).toLocaleDateString()}` : ''}. Click to open the Leakhaven page`],
+      unchecked: [ScheduleIcon, 'var(--muted)', 'not checked', 'Linked, never checked for updates. Click to open the Leakhaven page'],
+      failed: [ErrorOutlineIcon, 'var(--warn)', 'check failed', `Last check failed: ${upd.error}`]
+    }[state];
+    return (
+      <Tooltip title={tip}>
+        <Link href={upd.url} target="_blank" rel="noopener noreferrer" underline="none" sx={flagSx(tone, state === 'new')}>
+          <Icon />{label}
+        </Link>
+      </Tooltip>
+    );
+  };
+
+  const renderScrapeFlag = (performer) => (
+    <Tooltip title={performer.hasScrapedData
+      ? `Scraped ${formatDate(performer.scrapedAt)}${performer.scraped_source ? ` from ${sourceName(performer.scraped_source)}` : ''}. Click to scrape again`
+      : 'Not scraped. Click to scrape'}>
+      <Box component="span" sx={flagSx(performer.hasScrapedData ? 'var(--ok)' : 'var(--muted)')} onClick={() => handleScrape(performer)}>
+        {performer.hasScrapedData ? <CloudDoneIcon /> : <CloudQueueIcon />}
+        {performer.hasScrapedData ? 'scraped' : 'not scraped'}
+      </Box>
+    </Tooltip>
+  );
+
+  const detailCardSx = (tone) => ({
+    height: '100%', bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderLeftWidth: '4px', borderLeftColor: tone
+  });
+
+  const renderLeakhavenCard = (performer) => {
+    const upd = performer.leakshavenUpdate || {};
+    const editing = linkInputs[performer.id] !== undefined;
+    const busy = linkBusy === performer.id;
+    const typed = linkInputs[performer.id] || '';
+
+    if (!upd.url || editing) {
+      return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
+            {upd.url ? 'Paste the new link or model name.' : 'No Leakhaven page linked. Paste a leakshaven.com/model/… link or a model name, or use Scrape.'}
+          </Typography>
+          <TextField size="small" value={typed} placeholder="leakshaven.com/model/…" className="dp-textfield"
+            onChange={(e) => setLinkInputs(prev => ({ ...prev, [performer.id]: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim()) handleSaveLink(performer, typed); }} />
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Button size="small" variant="contained" disabled={busy || !typed.trim()} onClick={() => handleSaveLink(performer, typed)}
+              startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null}>
+              Save link
+            </Button>
+            {editing && (
+              <Button size="small" sx={{ color: 'var(--dim)' }} onClick={() => setLinkInputs(prev => {
+                const next = { ...prev };
+                delete next[performer.id];
+                return next;
+              })}>
+                Cancel
+              </Button>
+            )}
+            {upd.url && <Button size="small" color="error" disabled={busy} onClick={() => handleSaveLink(performer, '')}>Remove link</Button>}
+          </Box>
+        </Box>
+      );
+    }
+
+    const isNew = leakhavenState(performer) === 'new';
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Link href={upd.url} target="_blank" rel="noopener noreferrer" underline="hover"
+          sx={{ color: 'var(--accent)', fontSize: '0.875rem', wordBreak: 'break-word' }}>
+          {decodeURIComponent(upd.url.replace(/^https?:\/\//, ''))} <OpenInNewIcon sx={{ fontSize: 14, verticalAlign: '-2px' }} />
+        </Link>
+        <Typography variant="body2" sx={{ color: isNew ? 'var(--bad)' : 'var(--dim)', fontWeight: isNew ? 650 : 400 }}>
+          Newest upload: {upd.newestUpload
+            ? `${new Date(upd.newestUpload).toLocaleDateString()} · ${timeAgo(upd.newestUpload)}${isNew ? ' · new' : ''}`
+            : upd.lastCheckDate ? 'none listed' : 'not checked yet'}
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'var(--muted)' }}>
+          Last checked: {upd.lastCheckDate ? new Date(upd.lastCheckDate).toLocaleString() : 'never'}
+        </Typography>
+        {upd.error && <Alert severity="warning" sx={{ py: 0 }}>{upd.error}</Alert>}
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+          {isNew && (
+            <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleAcknowledgeUpdate(performer.id, performer.name)}>
+              Mark seen
+            </Button>
+          )}
+          <Button size="small" variant="outlined" disabled={busy} onClick={() => handleCheckOne(performer)}
+            startIcon={busy ? <CircularProgress size={14} /> : <RefreshIcon />}>
+            Check now
+          </Button>
+          <Button size="small" variant="outlined" startIcon={<EditIcon />}
+            onClick={() => setLinkInputs(prev => ({ ...prev, [performer.id]: '' }))}>
+            Change link
+          </Button>
+        </Box>
+      </Box>
+    );
+  };
+
+  // Profile columns a scrape can fill, with the word the Profile card uses for an empty one
+  const PROFILE_FIELDS = {
+    born: 'born', birthplace: 'birthplace', height: 'height', weight: 'weight', measurements: 'measurements',
+    measurements_cup: 'cup', hair_color: 'hair', eye_color: 'eyes', ethnicity: 'ethnicity', body_type: 'body',
+    orientation: 'orientation', pubic_hair: 'pubic hair', tattoos: 'tattoos', piercings: 'piercings'
+  };
+
+  const renderProfileCard = (performer) => {
+    const empty = Object.keys(PROFILE_FIELDS).filter(f => !performer[f]);
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
+          Scraped: {performer.hasScrapedData
+            ? `${formatDate(performer.scraped_at)}${performer.scraped_source ? ` from ${sourceName(performer.scraped_source)}` : ''}`
+            : 'not yet'}
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
+          {Object.keys(PROFILE_FIELDS).length - empty.length} fields filled
+          {empty.length > 0 && ` · empty: ${empty.map(f => PROFILE_FIELDS[f]).join(', ')}`}
+        </Typography>
+        <Box>
+          <Button size="small" variant="contained" startIcon={<SearchIcon />} onClick={() => handleScrape(performer)}>
+            Scrape…
+          </Button>
+        </Box>
+      </Box>
+    );
+  };
+
+  const renderAliasesCard = (performer) => (
+    <>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+        {performer.aliases.map(alias => (
+          <Chip key={alias} label={alias} size="small" variant="outlined" color="info"
+            onDelete={() => handleSaveAliases(performer, performer.aliases.filter(a => a !== alias))} />
+        ))}
+        {performer.aliases.length === 0 && (
+          <Typography variant="body2" sx={{ color: 'var(--muted)' }}>No aliases yet</Typography>
+        )}
+      </Box>
+      <TextField size="small" fullWidth placeholder="Add alias, Enter to save" className="dp-textfield"
+        value={aliasInputs[performer.id] || ''}
+        onChange={(e) => setAliasInputs(prev => ({ ...prev, [performer.id]: e.target.value }))}
+        onKeyDown={(e) => { if (e.key === 'Enter') handleAddAlias(performer); }} />
+    </>
+  );
+
   /**
    * The expanded performer detail.
    *
@@ -850,6 +1086,23 @@ function PerformerManagementPage() {
    */
   const renderPerformerDetail = (performer) => (
     <Grid container spacing={2.5} sx={{ width: '100%' }}>
+      {/* Leakhaven, profile and aliases first: what a performer is usually opened for. A CSS grid,
+          because MUI 7's Grid ignores the item/md props the cards below still pass. */}
+      <Box sx={{ width: '100%', display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2.5 }}>
+        {[
+          ['Leakhaven', 'var(--info)', renderLeakhavenCard],
+          ['Profile', 'var(--accent)', renderProfileCard],
+          ['Aliases', 'var(--info)', renderAliasesCard]
+        ].map(([title, tone, render]) => (
+          <Card key={title} variant="outlined" sx={detailCardSx(tone)}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: tone, mb: 1.5 }}>{title}</Typography>
+              {render(performer)}
+            </CardContent>
+          </Card>
+        ))}
+      </Box>
+
       {/* Row 1: 4 equal-height cards taking full width */}
       {/* Basic Information Card - No path, no aliases */}
       <Grid item xs={12} sm={6} md={3}>
@@ -1095,101 +1348,6 @@ function PerformerManagementPage() {
                     Updated: {formatDate(performer.hashStats.lastUpdated)}
                   </Typography>
                 </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      )}
-
-      {/* Row 2: Aliases - Full Width */}
-      {performer.aliases && performer.aliases.length > 0 && (
-        <Grid item xs={12}>
-          <Card variant="outlined" sx={{ bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderLeftWidth: '4px', borderLeftColor: 'var(--accent)', width: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: 'var(--accent)', mb: 2 }}>
-                Aliases
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {performer.aliases.map((alias, idx) => (
-                  <Chip
-                    key={idx}
-                    label={alias}
-                    size="small"
-                    sx={{ fontWeight: 500 }}
-                    variant="outlined"
-                    color="info"
-                  />
-                ))}
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      )}
-
-      {/* Leakshaven Update Status Card */}
-      {(performer.leakshavenUpdate?.lastUpdateTime || performer.leakshavenUpdate?.error) && (
-        <Grid item xs={12} sm={6} md={3}>
-          <Card variant="outlined" sx={{ height: '100%', bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderLeftWidth: '4px', borderLeftColor: 'var(--info)' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: 'var(--info)', mb: 2 }}>
-                Leakshaven Update
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                {performer.leakshavenUpdate.lastUpdateTime ? (
-                  <>
-                    <Box
-                      component="a"
-                      href={`https://leakshaven.com/?q=${(performer.leakshavenUpdate.searchName || performer.name).replace(/\s+/g, '+')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        p: 2,
-                        bgcolor: performer.leakshavenUpdate.acknowledged ? 'var(--info-quiet)' : 'var(--bad-quiet)',
-                        borderRadius: 1,
-                        border: performer.leakshavenUpdate.acknowledged ? 'none' : '2px solid var(--bad)',
-                        textDecoration: 'none',
-                        cursor: 'pointer',
-                        transition: 'opacity 0.2s',
-                        '&:hover': {
-                          opacity: 0.8
-                        }
-                      }}
-                    >
-                      <Typography variant="body2" sx={{ fontWeight: 600, color: performer.leakshavenUpdate.acknowledged ? 'var(--info)' : 'var(--bad)' }}>
-                        {performer.leakshavenUpdate.acknowledged ? 'Latest Update': 'New Update!'}
-                      </Typography>
-                      <Typography variant="h6" sx={{ fontWeight: 700, color: performer.leakshavenUpdate.acknowledged ? 'var(--info)' : 'var(--bad)' }}>
-                        {performer.leakshavenUpdate.lastUpdateTime}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center', mt: 0.5 }}>
-                      <Typography variant="caption" color="textSecondary">
-                        Checked: {performer.leakshavenUpdate.lastCheckDate ? new Date(performer.leakshavenUpdate.lastCheckDate).toLocaleString() : 'Never'}
-                      </Typography>
-                    </Box>
-                    {!performer.leakshavenUpdate.acknowledged && (
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        size="small"
-                        startIcon={<CheckCircleIcon />}
-                        onClick={() => handleAcknowledgeUpdate(performer.id, performer.name)}
-                        fullWidth
-                      >
-                        Mark as Seen
-                      </Button>
-                    )}
-                  </>
-                ) : performer.leakshavenUpdate.error ? (
-                  <Alert severity="error">
-                    <Typography variant="body2">
-                      {performer.leakshavenUpdate.error}
-                    </Typography>
-                  </Alert>
-                ) : null}
               </Box>
             </CardContent>
           </Card>
@@ -1464,12 +1622,12 @@ function PerformerManagementPage() {
    */
   const renderPerformerCard = (performer, isDuplicate = false) => {
     const isExpanded = expandedPerformer === performer.id;
-    const upd = performer.leakshavenUpdate;
-    const hasUpdate = upd?.lastUpdateTime && !upd?.acknowledged;
+    const hasUpdate = leakhavenState(performer) === 'new';
 
     return (
       <Panel
         key={performer.id}
+        id={`performer-${performer.id}`}
         padded={false}
         sx={{
           ml: isDuplicate ? 3 : 0,
@@ -1511,11 +1669,6 @@ function PerformerManagementPage() {
               {performer.blacklisted === 1 && (
                 <Box component="span" sx={pillSx('var(--muted)')}>Blacklisted</Box>
               )}
-              {hasUpdate && (
-                <Tooltip title={`New content found ${upd.lastUpdateTime} — click Updates to open the source page`}>
-                  <Box component="span" sx={pillSx('var(--bad)')}>Update</Box>
-                </Tooltip>
-              )}
             </Box>
 
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mt: 0.5, flexWrap: 'wrap' }}>
@@ -1544,11 +1697,8 @@ function PerformerManagementPage() {
                   hash
                 </Box>
               </Tooltip>
-              <Tooltip title={performer.hasScrapedData ? `Scraped ${formatDate(performer.scrapedAt)}` : 'Not scraped'}>
-                <Box component="span" sx={dotSx(performer.hasScrapedData ? 'var(--ok)' : 'var(--faint)')}>
-                  scraped
-                </Box>
-              </Tooltip>
+              {renderScrapeFlag(performer)}
+              {renderLeakhavenFlag(performer)}
               <Tooltip title={performer.folderExists
                 ? `${performer.actualPath} — open in Explorer`
                 : `${performer.actualPath} — folder not found`}>
@@ -1578,9 +1728,9 @@ function PerformerManagementPage() {
                 <EditIcon />
               </IconButton>
             </Tooltip>
-            <Tooltip title={performer.hasScrapedData ? 'Re-run scraper' : 'Run scraper now'}>
+            <Tooltip title="Scrape…">
               <IconButton size="small" sx={iconBtnSx()} onClick={() => handleScrape(performer)}>
-                <CloudDoneIcon />
+                <SearchIcon />
               </IconButton>
             </Tooltip>
             {!performer.blacklisted && performer.folderExists && (
@@ -1791,19 +1941,7 @@ function PerformerManagementPage() {
             )}
           </TableCell>
           <TableCell align="center">
-            {performer.hasScrapedData ? (
-              <Tooltip title={`Scraped on ${formatDate(performer.scrapedAt)}`}>
-                <IconButton size="small" onClick={() => handleScrape(performer)}>
-                  <CloudDoneIcon color="success" fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            ) : (
-              <Tooltip title="Run scraper now">
-                <IconButton size="small" onClick={() => handleScrape(performer)}>
-                  <CloudDoneIcon color="disabled" fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
+            {renderScrapeFlag(performer)}
           </TableCell>
           <TableCell>
             <Typography variant="body2">
@@ -1816,58 +1954,16 @@ function PerformerManagementPage() {
             </Typography>
           </TableCell>
           <TableCell align="center">
-            {performer.leakshavenUpdate?.lastUpdateTime ? (
-              <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
-                <Tooltip title={`Last checked: ${performer.leakshavenUpdate.lastCheckDate ? new Date(performer.leakshavenUpdate.lastCheckDate).toLocaleString() : 'Never'}. Click to visit Leakshaven page.`}>
-                  <Box
-                    display="flex"
-                    alignItems="center"
-                    gap={0.5}
-                    component="a"
-                    href={`https://leakshaven.com/?q=${(performer.leakshavenUpdate.searchName || performer.name).replace(/\s+/g, '+')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    sx={{
-                      textDecoration: 'none',
-                      cursor: 'pointer',
-                      '&:hover': {
-                        opacity: 0.7
-                      }
-                    }}
-                  >
-                    <HistoryIcon fontSize="small" color={!performer.leakshavenUpdate.acknowledged ? "error" : "action"} />
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        fontWeight: !performer.leakshavenUpdate.acknowledged ? 700 : 400,
-                        color: !performer.leakshavenUpdate.acknowledged ? 'error.main' : 'text.secondary'
-                      }}
-                    >
-                      {performer.leakshavenUpdate.lastUpdateTime}
-                    </Typography>
-                  </Box>
+            <Box display="flex" alignItems="center" justifyContent="center" gap={0.5}>
+              {renderLeakhavenFlag(performer)}
+              {leakhavenState(performer) === 'new' && (
+                <Tooltip title="Mark as seen">
+                  <IconButton size="small" color="primary" onClick={() => handleAcknowledgeUpdate(performer.id, performer.name)}>
+                    <CheckCircleIcon fontSize="small" />
+                  </IconButton>
                 </Tooltip>
-                {!performer.leakshavenUpdate.acknowledged && (
-                  <Tooltip title="Mark as seen">
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      onClick={() => handleAcknowledgeUpdate(performer.id, performer.name)}
-                    >
-                      <CheckCircleIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                )}
-              </Box>
-            ) : performer.leakshavenUpdate?.error ? (
-              <Tooltip title={`Error: ${performer.leakshavenUpdate.error}`}>
-                <WarningIcon fontSize="small" color="error" />
-              </Tooltip>
-            ) : (
-              <Typography variant="caption" color="text.disabled">
-                Not checked
-              </Typography>
-            )}
+              )}
+            </Box>
           </TableCell>
           <TableCell>
             <Tooltip title="Rename performer">
@@ -1923,7 +2019,8 @@ function PerformerManagementPage() {
     );
   };
 
-  if (loading) {
+  // Only before the first load: a reload must not unmount open panels and the Scrape modal
+  if (loading && performers.length === 0) {
     return (
       <PageShell>
         <LoadingState label="Loading performers…" />
@@ -1933,17 +2030,16 @@ function PerformerManagementPage() {
 
   const { performerList, duplicateGroups } = getCurrentTabPerformers();
 
-  // Count unacknowledged updates
-  const unacknowledgedCount = performers.filter(p =>
-    p.leakshavenUpdate?.lastUpdateTime && !p.leakshavenUpdate?.acknowledged
-  ).length;
+  const unacknowledgedCount = performers.filter(p => leakhavenState(p) === 'new').length;
+  const noLinkCount = performers.filter(p => leakhavenState(p) === 'none').length;
+  const checking = checkProgress && checkProgress.done < checkProgress.total;
 
   return (
     <PageShell>
       <PageHeader
         title="Performer Management"
-        subtitle={updateCheckResults
-          ? `${summary?.total || 0} performers · last check: ${updateCheckResults.checked} checked, ${updateCheckResults.newUpdates} new, ${updateCheckResults.errors} errors`
+        subtitle={checkProgress && !checking
+          ? `${summary?.total || 0} performers · last check: ${checkProgress.done} checked, ${checkProgress.newCount} new, ${checkProgress.errors} failed`
           : `${summary?.total || 0} performers across all locations`}
         actions={
           <>
@@ -1951,20 +2047,21 @@ function PerformerManagementPage() {
               Reload
             </Button>
             <Badge badgeContent={unacknowledgedCount} color="error" max={99}>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={checkingUpdates
-                  ? <CircularProgress size={14} color="inherit" />
-                  : unacknowledgedCount > 0 ? <NotificationsActiveIcon /> : <UpdateIcon />}
-                onClick={handleCheckUpdates}
-                disabled={checkingUpdates}
-                sx={unacknowledgedCount > 0
-                  ? { borderColor: 'var(--bad)', color: 'var(--bad)' }
-                  : undefined}
-              >
-                {checkingUpdates ? 'Checking…' : 'Check updates'}
-              </Button>
+              <Tooltip title={checking ? 'Click to stop' : 'Check every linked performer for new Leakhaven uploads'}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={checking
+                    ? <CircularProgress size={14} color="inherit" />
+                    : unacknowledgedCount > 0 ? <NotificationsActiveIcon /> : <UpdateIcon />}
+                  onClick={handleCheckUpdates}
+                  sx={unacknowledgedCount > 0
+                    ? { borderColor: 'var(--bad)', color: 'var(--bad)' }
+                    : undefined}
+                >
+                  {checking ? `Checking ${checkProgress.done} / ${checkProgress.total}` : 'Check updates'}
+                </Button>
+              </Tooltip>
             </Badge>
           </>
         }
@@ -2003,6 +2100,27 @@ function PerformerManagementPage() {
           />
         ))}
 
+        {/* Leakhaven filters, combined with the location above */}
+        <Box sx={{ width: '1px', height: 18, bgcolor: 'var(--line-strong)', mx: 0.5 }} />
+        <Chip
+          size="small"
+          icon={<FiberNewIcon />}
+          label={`New content ${unacknowledgedCount}`}
+          onClick={() => setNewOnly(v => !v)}
+          sx={{
+            ...tabChipSx(newOnly),
+            ...(newOnly && { bgcolor: 'var(--bad)', borderColor: 'var(--bad)', color: '#fff', '&:hover': { bgcolor: 'var(--bad)' } }),
+            '& .MuiChip-icon': { fontSize: ICON.inline, color: 'inherit' }
+          }}
+        />
+        <Chip
+          size="small"
+          icon={<LinkOffIcon />}
+          label={`No Leakhaven link ${noLinkCount}`}
+          onClick={() => setNoLinkOnly(v => !v)}
+          sx={{ ...tabChipSx(noLinkOnly), '& .MuiChip-icon': { fontSize: ICON.inline, color: 'inherit' } }}
+        />
+
         <TextField
           size="small"
           placeholder="Search performers…"
@@ -2017,14 +2135,6 @@ function PerformerManagementPage() {
             )
           }}
         />
-
-        <TextField
-          select size="small" value={selectedScraper}
-          onChange={(e) => setSelectedScraper(e.target.value)}
-          sx={{ minWidth: 150, '& .MuiInputBase-input': { fontSize: '0.8rem', py: 0.75 } }}
-        >
-          {availableScrapers.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
-        </TextField>
 
         {/* Same affordance GalleryView uses, so the table is still one click
             away for anyone who wants to sort by size. */}
@@ -2058,7 +2168,7 @@ function PerformerManagementPage() {
           <EmptyState
             icon={<SearchIcon />}
             title="No performers match these filters"
-            description="Try a different tab, or clear the search."
+            description="Try a different tab, turn off a filter, or clear the search."
           />
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
@@ -2254,6 +2364,13 @@ function PerformerManagementPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ScrapeDialog
+        performer={scrapeTarget}
+        open={!!scrapeTarget}
+        onClose={() => setScrapeTarget(null)}
+        onSaved={() => loadPerformers()}
+      />
     </PageShell>
   );
 }
