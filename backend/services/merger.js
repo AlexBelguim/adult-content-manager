@@ -2,6 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
 const { findPerformerByNameOrAlias } = require('../utils/performerMatcher');
+const { deletePerformerRecord, relocatePerformerPaths, BEFORE_FOLDER, AFTER_FOLDER } = require('./performerRecords');
 
 class MergerService {
   async checkPerformerExists(performerName, basePath, location = 'after') {
@@ -86,6 +87,8 @@ class MergerService {
           WHERE performer_id = ?
         `).run(existingAfterPerformer.id, performerId);
         console.log(`Merged ${hashMergeResult.changes} hash records`);
+        // The existing performer's file list changed, drop its cached listing
+        db.prepare('DELETE FROM performer_file_cache WHERE performer_id = ?').run(existingAfterPerformer.id);
 
         // Remove the source folder after successful merge
         try {
@@ -95,20 +98,7 @@ class MergerService {
         }
 
         // Remove the "before filter performer" database record since it's now merged
-        db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(performerId);
-        db.prepare('DELETE FROM tags WHERE performer_id = ?').run(performerId);
-
-        // Cleanup other references to avoid FK constraint errors
-        // 1. Hash Runs
-        db.prepare('DELETE FROM hash_runs WHERE source_performer_id = ? OR target_performer_id = ?').run(performerId, performerId);
-
-        // 2. Content Items and Embeddings
-        // First delete embeddings for items belonging to this performer
-        db.prepare('DELETE FROM content_clip_embeddings WHERE content_item_id IN (SELECT id FROM content_items WHERE performer_id = ?)').run(performerId);
-        // Then delete the content items (this will cascade to ml_predictions)
-        db.prepare('DELETE FROM content_items WHERE performer_id = ?').run(performerId);
-
-        db.prepare('DELETE FROM performers WHERE id = ?').run(performerId);
+        deletePerformerRecord(performerId);
 
         // Update the existing "after filter performer" stats
         const stats = await this.updatePerformerStats(existingAfterPerformer.id, destPath);
@@ -137,13 +127,9 @@ class MergerService {
     // Update database and always clear filter actions since "after" represents final filtered state
     db.prepare('UPDATE performers SET moved_to_after = 1 WHERE id = ?').run(performerId);
 
-    // Update file paths in hash database
-    const hashUpdateResult = db.prepare(`
-      UPDATE performer_file_hashes 
-      SET file_path = REPLACE(file_path, 'before filter performer', 'after filter performer')
-      WHERE performer_id = ? AND file_path LIKE '%before filter performer%'
-    `).run(performerId);
-    console.log(`Updated ${hashUpdateResult.changes} hash file paths`);
+    // Thumbnail, slideshow, hash paths and cached file lists all pointed at the old folder
+    const relocated = relocatePerformerPaths(performerId, BEFORE_FOLDER, AFTER_FOLDER);
+    console.log(`Relocated paths for performer ${performerId}: ${JSON.stringify(relocated)}`);
 
     // Delete all filter actions - they're no longer needed in "after filter performer"
     db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(performerId);
@@ -175,70 +161,6 @@ class MergerService {
     );
 
     return stats;
-  }
-
-  async mergePerformers(performerId, options = {}) {
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performerId);
-    if (!performer) {
-      throw new Error('Performer not found');
-    }
-
-    const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(performer.folder_id);
-    const sourcePath = path.join(folder.path, 'before filter performer', performer.name);
-    const destPath = path.join(folder.path, 'after filter performer', performer.name);
-
-    if (!await fs.pathExists(destPath)) {
-      throw new Error('Destination performer does not exist');
-    }
-
-    // Merge pics
-    await this.mergeDirectory(
-      path.join(sourcePath, 'pics'),
-      path.join(destPath, 'pics')
-    );
-
-    // Merge vids
-    await this.mergeDirectory(
-      path.join(sourcePath, 'vids'),
-      path.join(destPath, 'vids')
-    );
-
-    // Merge funscript folders
-    await this.mergeFunscriptFolders(
-      path.join(sourcePath, 'vids', 'funscript'),
-      path.join(destPath, 'vids', 'funscript')
-    );
-
-    // Handle thumbnail
-    if (!options.keepCurrentThumbnail) {
-      const sourceThumbnail = await this.findThumbnail(path.join(sourcePath, 'pics'));
-      if (sourceThumbnail) {
-        db.prepare('UPDATE performers SET thumbnail = ? WHERE id = ?').run(sourceThumbnail, performerId);
-      }
-    }
-
-    // Remove source folder
-    try {
-      await fs.remove(sourcePath);
-    } catch (err) {
-      console.log(`Warning: Could not remove source folder ${sourcePath}: ${err.message}`);
-    }
-
-    // Update database
-    db.prepare('UPDATE performers SET moved_to_after = 1 WHERE id = ?').run(performerId);
-
-    // Update file paths in hash database
-    db.prepare(`
-      UPDATE performer_file_hashes 
-      SET file_path = REPLACE(file_path, 'before filter performer', 'after filter performer')
-      WHERE performer_id = ? AND file_path LIKE '%before filter performer%'
-    `).run(performerId);
-
-    return {
-      success: true,
-      message: `Performer ${performer.name} merged with existing performer in after folder`,
-      mergedPath: destPath
-    };
   }
 
   async mergeDirectory(sourceDir, destDir) {
@@ -391,6 +313,10 @@ class MergerService {
     // Only delete from "after filter performer" folder
     const afterPath = path.join(folder.path, 'after filter performer', performer.name);
 
+    // Remove from database first (single transaction, clears every FK dependent)
+    // so a failure here never leaves a card behind without its folder.
+    deletePerformerRecord(performerId);
+
     if (deleteFromSystem) {
       // Delete the folder from "after filter performer" location
       if (await fs.pathExists(afterPath)) {
@@ -398,12 +324,6 @@ class MergerService {
         await fs.remove(afterPath);
       }
     }
-
-    // Remove from database - this completely removes the performer record
-    // so it can be re-imported fresh without any moved_to_after conflicts
-    db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(performerId);
-    db.prepare('DELETE FROM tags WHERE performer_id = ?').run(performerId);
-    db.prepare('DELETE FROM performers WHERE id = ?').run(performerId);
 
     return {
       success: true,

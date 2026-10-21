@@ -6,6 +6,7 @@ const merger = require('../services/merger');
 const db = require('../db');
 const fs = require('fs-extra');
 const path = require('path');
+const { deletePerformerRecord, relocatePerformerPaths, BEFORE_FOLDER, AFTER_FOLDER } = require('../services/performerRecords');
 const axios = require('axios');
 const { findPerformerByNameOrAlias, findFuzzyMatches } = require('../utils/performerMatcher');
 const mediaDimensions = require('../utils/mediaDimensions');
@@ -1353,19 +1354,6 @@ router.post('/:id/move-to-after', async (req, res) => {
   }
 });
 
-// Merge performer with existing one in after folder
-router.post('/:id/merge', async (req, res) => {
-  const { id } = req.params;
-  const { keepCurrentThumbnail } = req.body;
-
-  try {
-    const result = await merger.mergePerformers(id, { keepCurrentThumbnail });
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-});
-
 // Move performer back to "before filter performer" folder
 router.post('/:id/move-to-before', async (req, res) => {
   const { id } = req.params;
@@ -1393,12 +1381,8 @@ router.post('/:id/move-to-before', async (req, res) => {
     // Move the folder
     await fs.move(afterPath, beforePath);
 
-    // Update file paths in hash database
-    db.prepare(`
-      UPDATE performer_file_hashes 
-      SET file_path = REPLACE(file_path, 'after filter performer', 'before filter performer')
-      WHERE performer_id = ? AND file_path LIKE '%after filter performer%'
-    `).run(id);
+    // Thumbnail, slideshow, hash paths and cached file lists all pointed at the old folder
+    relocatePerformerPaths(id, AFTER_FOLDER, BEFORE_FOLDER);
 
     // Reset all filter data - clear filter actions and reset flags
     db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
@@ -1774,19 +1758,6 @@ router.post('/:id/toggle-complete', async (req, res) => {
   }
 });
 
-// Move performer to "after filter performer" folder
-router.post('/:id/move-to-after', async (req, res) => {
-  const { id } = req.params;
-  const { force = false, keepCurrentThumbnail = false } = req.body;
-
-  try {
-    const result = await merger.movePerformerToAfter(id, keepCurrentThumbnail, force);
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-});
-
 // Delete all performer data (for re-import)
 router.delete('/:id/data', async (req, res) => {
   const { id } = req.params;
@@ -1794,9 +1765,7 @@ router.delete('/:id/data', async (req, res) => {
   try {
     // Delete from database - this completely removes the performer record
     // so it can be re-imported fresh without any moved_to_after conflicts
-    db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
-    db.prepare('DELETE FROM tags WHERE performer_id = ?').run(id);
-    db.prepare('DELETE FROM performers WHERE id = ?').run(id);
+    deletePerformerRecord(id);
 
     res.send({ success: true, message: 'Performer data deleted' });
   } catch (err) {
@@ -1879,6 +1848,10 @@ router.delete('/:id/folder', async (req, res) => {
       locationMessage = 'before filter performer folder';
     }
 
+    // Delete from database first (one transaction, clears every FK dependent) so a
+    // failure here can never leave an orphaned card behind without its folder.
+    deletePerformerRecord(id);
+
     // Delete folder from filesystem
     if (await fs.pathExists(performerPath)) {
       await fs.remove(performerPath);
@@ -1886,12 +1859,6 @@ router.delete('/:id/folder', async (req, res) => {
     } else {
       console.log(`Performer folder not found: ${performerPath}`);
     }
-
-    // Delete from database - this completely removes the performer record
-    // so it can be re-imported fresh without any moved_to_after conflicts
-    db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
-    db.prepare('DELETE FROM tags WHERE performer_id = ?').run(id);
-    db.prepare('DELETE FROM performers WHERE id = ?').run(id);
 
     res.send({
       success: true,
@@ -1921,119 +1888,6 @@ router.post('/:id/cleanup-trash', async (req, res) => {
     }
 
     res.send({ success: true, message: 'Trash folder cleaned up' });
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-});
-
-// Move performer back to "before filter performer" folder
-router.post('/:id/move-to-before', async (req, res) => {
-  const { id } = req.params;
-  const { markFilesAsKept = false } = req.body;
-
-  try {
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
-    if (!performer) {
-      return res.status(404).send({ error: 'Performer not found' });
-    }
-
-    // Only allow moving performers that are currently in "after filter performer" state
-    if (performer.moved_to_after !== 1) {
-      return res.status(400).send({ error: 'Performer is not in "after filter performer" folder' });
-    }
-
-    const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(performer.folder_id);
-
-    const afterPath = path.join(folder.path, 'after filter performer', performer.name);
-    const beforePath = path.join(folder.path, 'before filter performer', performer.name);
-
-    // Check if source folder exists
-    if (!await fs.pathExists(afterPath)) {
-      return res.status(400).send({ error: 'Performer folder not found in "after filter performer"' });
-    }
-
-    // Check if destination already exists
-    if (await fs.pathExists(beforePath)) {
-      return res.status(400).send({ error: 'Performer folder already exists in "before filter performer"' });
-    }
-
-    // Move the folder
-    await fs.move(afterPath, beforePath);
-
-    // Update database: reset moved_to_after flag and optionally mark files as kept
-    if (markFilesAsKept) {
-      // Mark all files as "keep" in filter_actions
-      // First, we need to scan the folder to get all files
-      const { scanPerformerFolder } = require('../services/fileScanner');
-      await scanPerformerFolder(beforePath); // This will update stats
-
-      // Get all files in the performer folder and mark them as kept
-      const fs = require('fs-extra');
-      const path = require('path');
-
-      async function markFilesInDirectory(dirPath, fileType) {
-        if (!await fs.pathExists(dirPath)) return;
-
-        const files = await fs.readdir(dirPath, { withFileTypes: true });
-        for (const file of files) {
-          const filePath = path.join(dirPath, file.name);
-
-          if (file.isFile()) {
-            const ext = path.extname(file.name).toLowerCase();
-            let currentFileType = fileType;
-
-            // Determine file type if not specified
-            if (!currentFileType) {
-              if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
-                currentFileType = 'image';
-              } else if (['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'].includes(ext)) {
-                currentFileType = 'video';
-              } else if (ext === '.funscript') {
-                currentFileType = 'funscript';
-              }
-            }
-
-            if (currentFileType) {
-              // Check if filter action already exists
-              const existingAction = db.prepare('SELECT * FROM filter_actions WHERE performer_id = ? AND file_path = ?').get(id, filePath);
-              if (!existingAction) {
-                // Insert new "keep" action
-                db.prepare('INSERT INTO filter_actions (performer_id, file_path, file_type, action) VALUES (?, ?, ?, ?)').run(id, filePath, currentFileType, 'keep');
-                console.log(`Marked as kept: ${filePath}`);
-              }
-            }
-          } else if (file.isDirectory() && file.name !== '.thumbnails' && file.name !== '.thumbnail' && file.name !== '.trash') {
-            // Recursively mark files in subdirectories
-            await markFilesInDirectory(filePath, fileType);
-          }
-        }
-      }
-
-      // Mark files in pics, vids, and funscript folders
-      await markFilesInDirectory(path.join(beforePath, 'pics'), 'image');
-      await markFilesInDirectory(path.join(beforePath, 'vids'), 'video');
-      await markFilesInDirectory(path.join(beforePath, 'vids', 'funscript'), 'funscript');
-
-      // Update performer flags to show filtering is complete
-      db.prepare(`
-        UPDATE performers 
-        SET moved_to_after = 0, ready_to_move = 0, pics_filtered = 1, vids_filtered = 1, funscript_vids_filtered = 1
-        WHERE id = ?
-      `).run(id);
-    } else {
-      // Just reset the moved_to_after flag, files will need to be filtered again
-      db.prepare(`
-        UPDATE performers 
-        SET moved_to_after = 0, ready_to_move = 0, pics_filtered = 0, vids_filtered = 0, funscript_vids_filtered = 0
-        WHERE id = ?
-      `).run(id);
-    }
-
-    res.send({
-      success: true,
-      message: `Performer ${performer.name} moved back to "before filter performer"`,
-      markedAsKept: markFilesAsKept
-    });
   } catch (err) {
     res.status(500).send({ error: err.message });
   }

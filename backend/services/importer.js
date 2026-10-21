@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
+const { adoptOrphanedHashes } = require('./performerRecords');
 const { scanPerformerFolder } = require('./fileScanner');
 const { execSync } = require('child_process');
 const os = require('os');
@@ -235,6 +236,9 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
     funscriptPath
   );
   
+  // Hashes left behind by an earlier performer of this name (deleted files)
+  adoptOrphanedHashes(result.lastInsertRowid, finalName);
+
   return {
     id: result.lastInsertRowid,
     name: finalName,

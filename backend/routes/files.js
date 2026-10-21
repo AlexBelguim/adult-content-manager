@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs-extra');
+const { resolveMediaPath } = require('../utils/mediaPath');
 const sharp = require('sharp');
 const ffmpegPath = require('ffmpeg-static');
 const { spawn } = require('child_process');
@@ -488,15 +489,17 @@ router.get('/stream-video', async (req, res) => {
 
 // Serve cached image (raw quality, from .cache folder)
 router.get('/cached-image', async (req, res) => {
-  const { path: filePath, basePath, folderType, checkOnly } = req.query;
+  const { path: requestedPath, basePath, folderType, checkOnly } = req.query;
 
-  if (!filePath || !basePath || !folderType) {
+  if (!requestedPath || !basePath || !folderType) {
     return res.status(400).send({ error: 'path, basePath, and folderType are required' });
   }
 
   try {
-    // Check if source file exists
-    if (!await fs.pathExists(filePath)) {
+    // Check if source file exists (falls back to the other before/after folder
+    // when a stored path went stale after a performer move)
+    const filePath = await resolveMediaPath(requestedPath);
+    if (!filePath) {
       return res.status(404).send({ error: 'File not found' });
     }
 
@@ -904,15 +907,17 @@ router.post('/regenerate-thumbnail', async (req, res) => {
 // Serve raw files (for download or full view)
 // Serve raw files - shared handler for /raw and /file endpoints
 const serveRawFile = async (req, res) => {
-  const { path: filePath } = req.query;
+  const { path: requestedPath } = req.query;
 
-  if (!filePath) {
+  if (!requestedPath) {
     return res.status(400).send({ error: 'File path is required' });
   }
 
   try {
-    // Check if file exists
-    if (!await fs.pathExists(filePath)) {
+    // Check if file exists (falls back to the other before/after folder when a
+    // stored path went stale after a performer move)
+    const filePath = await resolveMediaPath(requestedPath);
+    if (!filePath) {
       return res.status(404).send({ error: 'File not found' });
     }
 

@@ -605,6 +605,32 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         return null;
       })()}
 
+      {/* Placeholder when there is no thumbnail or it failed to load */}
+      {imageLoaded && thumbnail === 'placeholder-image.jpg' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            background: 'linear-gradient(160deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 100%)',
+            color: 'rgba(255,255,255,0.28)',
+            zIndex: 0
+          }}
+        >
+          <ImageIcon sx={{ fontSize: 56 }} />
+          <Typography variant="caption" sx={{ letterSpacing: 1, textTransform: 'uppercase' }}>
+            No image
+          </Typography>
+        </Box>
+      )}
+
       {/* Static background image if no slideshow */}
       {imageLoaded && (!performer.thumbnail_paths || JSON.parse(performer.thumbnail_paths || '[]').length <= 1) && (
         <Box

@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
+const { adoptOrphanedHashes } = require('./performerRecords');
 const { findThumbnail, scanPerformerFolderEnhanced } = require('./importer');
 const { scanPerformerFolder } = require('./fileScanner');
 const { findPerformerByNameOrAlias } = require('../utils/performerMatcher');
@@ -248,6 +249,8 @@ async function uploadImportPerformer(performerName, basePath, files, uploadId, c
         );
 
         resultId = result.lastInsertRowid;
+        // Hashes left behind by an earlier performer of this name (deleted files)
+        adoptOrphanedHashes(resultId, finalName);
     }
 
     // Optional: Create Hashes

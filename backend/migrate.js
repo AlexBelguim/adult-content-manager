@@ -39,6 +39,9 @@ function getCurrentVersion(db) {
 /**
  * Discover migration files, sorted by version number.
  * Each file must export { version: Number, name: String, up: Function }.
+ * A migration that rebuilds a table other tables reference can add `foreignKeys: false`:
+ * it then runs with PRAGMA foreign_keys off (SQLite's documented table-rebuild procedure) and
+ * `PRAGMA foreign_key_check` must come back clean before it is committed.
  */
 function discoverMigrations() {
   if (!fs.existsSync(MIGRATIONS_DIR)) {
@@ -80,20 +83,32 @@ function runMigrations(db) {
   for (const migration of pending) {
     console.log(`  ▸ Applying ${migration.file} — "${migration.name}" …`);
 
+    const withoutForeignKeys = migration.foreignKeys === false;
+
     const runOne = db.transaction(() => {
       migration.up(db);
+      if (withoutForeignKeys) {
+        const violations = db.pragma('foreign_key_check');
+        if (violations.length > 0) {
+          throw new Error(`foreign_key_check reported ${violations.length} violation(s), e.g. ${JSON.stringify(violations[0])}`);
+        }
+      }
       db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(
         migration.version,
         migration.name
       );
     });
 
+    // PRAGMA foreign_keys is a no-op inside a transaction, so toggle it around the whole migration
+    if (withoutForeignKeys) db.pragma('foreign_keys = OFF');
     try {
       runOne();
       console.log(`    ✔ v${migration.version} applied.`);
     } catch (err) {
       console.error(`    ✖ Migration v${migration.version} FAILED:`, err.message);
       throw err; // Stop on first failure – don't apply later migrations
+    } finally {
+      if (withoutForeignKeys) db.pragma('foreign_keys = ON');
     }
   }
 

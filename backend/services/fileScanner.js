@@ -2,6 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const chokidar = require('chokidar');
 const db = require('../db');
+const { adoptOrphanedHashes } = require('./performerRecords');
 
 // Import findThumbnail from importer
 async function findThumbnail(picsPath) {
@@ -205,6 +206,8 @@ async function scanAfterFolder(basePath) {
           stats.funscript_vids_count
         );
         
+        adoptOrphanedHashes(result.lastInsertRowid, performer.name);
+
         existingPerformers.push({
           name: performer.name,
           path: performerPath,

@@ -245,6 +245,14 @@ server.listen(port, '0.0.0.0', async () => {
       console.log(`Cleaned up ${deleted.changes} hidden folder entries from performers table`);
     }
 
+    // Repair thumbnails / slideshows / cached file lists still pointing at the
+    // folder a performer was moved out of (before <-> after filter performer)
+    const { repairPerformerPaths } = require('./services/performerRecords');
+    const repaired = repairPerformerPaths();
+    if (repaired.performers > 0 || repaired.fileCacheRows > 0) {
+      console.log(`Repaired stale folder paths: ${repaired.performers} performer(s), ${repaired.fileCacheRows} cached file list row(s)`);
+    }
+
     // Create .cache folders for all registered base paths
     const folders = db.prepare('SELECT path FROM folders').all();
     for (const folder of folders) {

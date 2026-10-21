@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { deletePerformerRecord } = require('../services/performerRecords');
 const fs = require('fs-extra');
 const path = require('path');
 const { findAllPerformersByNameOrAlias, normalizeName } = require('../utils/performerMatcher');
@@ -711,37 +712,8 @@ router.delete('/:id/complete', async (req, res) => {
       }
     }
     
-    // Delete all database records in correct order (respecting foreign keys)
-    
-    // 1. Delete hash_run_items that reference this performer's file hashes
-    const hashRunItemsResult = db.prepare(`
-      DELETE FROM hash_run_items 
-      WHERE file_id_ref IN (SELECT id FROM performer_file_hashes WHERE performer_id = ?)
-         OR candidate_id IN (SELECT id FROM performer_file_hashes WHERE performer_id = ?)
-    `).run(id, id);
-    deletedItems.databaseRecords.hashRunItems = hashRunItemsResult.changes;
-    
-    // 2. Delete filter actions
-    const filterActionsResult = db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
-    deletedItems.databaseRecords.filterActions = filterActionsResult.changes;
-    
-    // 3. Delete tags
-    const tagsResult = db.prepare('DELETE FROM tags WHERE performer_id = ?').run(id);
-    deletedItems.databaseRecords.tags = tagsResult.changes;
-    
-    // 4. Delete file hashes
-    const hashesResult = db.prepare('DELETE FROM performer_file_hashes WHERE performer_id = ?').run(id);
-    deletedItems.databaseRecords.fileHashes = hashesResult.changes;
-    
-    // 5. Delete hash runs
-    const hashRunsResult = db.prepare(
-      'DELETE FROM hash_runs WHERE source_performer_id = ? OR target_performer_id = ?'
-    ).run(id, id);
-    deletedItems.databaseRecords.hashRuns = hashRunsResult.changes;
-    
-    // 6. Finally delete the performer
-    const performerResult = db.prepare('DELETE FROM performers WHERE id = ?').run(id);
-    deletedItems.databaseRecords.performer = performerResult.changes;
+    // Delete all database records (one transaction, clears every FK dependent)
+    Object.assign(deletedItems.databaseRecords, deletePerformerRecord(id));
     
     res.send({
       success: true,
