@@ -618,7 +618,9 @@ function AppContent({ onThemeChange, currentThemeId }) {
               <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
             )} />
             <Route path="/group-rate" element={shell(<GroupRatePage />)} />
-            <Route path="/smart-compare" element={phoneLandscape ? <SmartComparePage /> : shell(<SmartComparePage />)} />
+            {/* Phones never get the desktop app bar — it's reached from the
+                phone shell's Score tab, which has no bar to match. */}
+            <Route path="/smart-compare" element={(isPhone || phoneLandscape) ? <SmartComparePage /> : shell(<SmartComparePage />)} />
             <Route path="/smart-filter/:performerId" element={shell(<SmartFilterPage />)} />
             <Route path="/taste-dashboard" element={shell(<TasteDashboardPage />)} />
             {/* Chrome-free: a full-bleed comparison tool opened in its own tab

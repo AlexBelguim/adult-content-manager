@@ -4,6 +4,7 @@ import {
   Menu, MenuItem, Button
 } from '@mui/material';
 import { Search, Sort, Refresh } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import MobilePerformerList from './MobilePerformerList';
 // The shared filter view carries its own phone layout (swipe, round buttons,
 // bottom sheet), so the phone shell no longer needs a separate sorter.
@@ -18,7 +19,8 @@ import MobileGallery from './MobileGallery';
  * seven-icon tool row, the ML switches) is mounted at all.
  *
  * Gallery taps open the unified gallery; Filter taps go straight into
- * fullscreen sorting.
+ * fullscreen sorting; Pairs taps open the pair labeler for that performer.
+ * Score isn't a list at all — it opens the performer scorer (Smart Compare).
  */
 
 /**
@@ -69,11 +71,19 @@ const COMPARATORS = {
 
 const MODES = [
   { key: 'gallery', label: 'Gallery' },
-  { key: 'filter', label: 'Sort' }
+  { key: 'filter', label: 'Sort' },
+  { key: 'pairs', label: 'Pairs' },
+  // Not a list mode: tapping it leaves the shell for the scorer.
+  { key: 'score', label: 'Score', route: '/smart-compare' }
 ];
+const LIST_MODES = MODES.filter((m) => !m.route).map((m) => m.key);
 
 function MobileShell() {
-  const [mode, setMode] = useState(() => localStorage.getItem('mobileMode') || 'filter');
+  const navigate = useNavigate();
+  const [mode, setMode] = useState(() => {
+    const saved = localStorage.getItem('mobileMode');
+    return LIST_MODES.includes(saved) ? saved : 'filter';
+  });
   const [performers, setPerformers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -101,7 +111,9 @@ function MobileShell() {
         const data = await res.json();
         setPerformers(Array.isArray(data?.performers) ? data.performers : []);
       } else {
-        // The gallery endpoint answers a bare array.
+        // The gallery endpoint answers a bare array. Pairs uses it too: the
+        // labeler compares a performer's own photos, so it wants the same
+        // after-folder performers the gallery shows.
         const res = await fetch('/api/performers/gallery');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -170,8 +182,18 @@ function MobileShell() {
 
   const handleSelect = useCallback((performer) => {
     if (mode === 'filter') setSorting(performer);
-    else setViewing(performer);
-  }, [mode]);
+    else if (mode === 'pairs') {
+      // A route push rather than the window.open the desktop gallery uses: in
+      // the installed PWA a new window opens in the browser, outside the app.
+      // The labeler's Back then finds history to go back to.
+      const params = new URLSearchParams({
+        performerId: performer.id,
+        performerName: performer.name || '',
+        basePath: performer.folder_path || ''
+      });
+      navigate(`/pairwise-rank?${params.toString()}`);
+    } else setViewing(performer);
+  }, [mode, navigate]);
 
   const handleSorterExit = useCallback(() => {
     setSorting(null);
@@ -249,7 +271,7 @@ function MobileShell() {
           {MODES.map((m) => (
             <Button
               key={m.key}
-              onClick={() => setMode(m.key)}
+              onClick={() => (m.route ? navigate(m.route, { state: { backTo: '/' } }) : setMode(m.key))}
               size="small"
               sx={{
                 flex: 1, minHeight: 38, textTransform: 'none', fontWeight: 650,

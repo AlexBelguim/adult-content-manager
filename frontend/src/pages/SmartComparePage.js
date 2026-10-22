@@ -146,6 +146,9 @@ const Placeholder = () => (
 function SmartComparePage() {
   const navigate = useNavigate();
   const location = useLocation();
+  // The phone shell opens this from its Score tab and wants the user back
+  // there; everywhere else Back means the ranking list.
+  const backTo = location.state?.backTo || '/group-rate';
   const isLandscape = useMediaQuery('(max-height:500px) and (orientation:landscape)');
   const isNarrow = useMediaQuery('(max-width:600px)');
   const isPortraitPhone = isNarrow && !isLandscape;
@@ -350,7 +353,7 @@ function SmartComparePage() {
     setHistory(h => [...h, { list: compareList, pics: randomPics, ai: aiAnalysis, cal: calibratedStars, voted, tokens }]);
     if (voted) setSessionCount(n => n + 1);
     if (!autoNext) {
-      Promise.resolve(tokens).catch(() => null).then(() => navigate('/group-rate'));
+      Promise.resolve(tokens).catch(() => null).then(() => navigate(backTo));
       return;
     }
     advance(flashIndex);
@@ -874,8 +877,8 @@ function SmartComparePage() {
         px: isLandscape ? 1 : '10px', py: isLandscape ? '2px' : '6px',
         bgcolor: 'var(--surface)', borderBottom: '1px solid var(--line)'
       }}>
-        <Box component="button" onClick={() => navigate('/group-rate')} aria-label="Back to the ranking list"
-          title="Back to the ranking list" sx={{ ...iconBtnSx(isLandscape ? 30 : 36), color: 'var(--text)' }}>
+        <Box component="button" onClick={() => navigate(backTo)} aria-label="Back"
+          title="Back" sx={{ ...iconBtnSx(isLandscape ? 30 : 36), color: 'var(--text)' }}>
           <ArrowBack fontSize="small" />
         </Box>
         <Typography component="h2" noWrap sx={{ fontSize: isLandscape ? '.84rem' : '.98rem', fontWeight: 640, minWidth: 0 }}>
