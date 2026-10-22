@@ -5,8 +5,11 @@
  * profile as JSON (initialProfileData in the page's RSC payload). Both are read over plain HTTP, so
  * no browser and no HTML parsing:
  *   - api.leakshaven.com/content?search=<name> resolves a name or alias to the model it belongs to
- *     (richProfileName) and lists uploads with their createdAt dates;
- *   - leakshaven.com/model/<model name> holds the profile.
+ *     (richProfileId, richProfileName) and lists uploads with their createdAt dates;
+ *   - api.leakshaven.com/profile/<richProfileId> holds the profile;
+ *   - leakshaven.com/model/<model name> embeds the same profile, and is the fallback when the API
+ *     has none. Some model pages answer HTTP 451 (taken down on request) while the API profile
+ *     still works, which is why the API is read first.
  */
 const axios = require('axios');
 const { formatHeight, formatWeight } = require('../utils/scraperNormalizer');
@@ -57,9 +60,25 @@ function jsonObjectAt(text, start) {
   return null;
 }
 
+/** The profile the API holds for a model, or null when it has none. */
+async function fetchApiProfile(richProfileId) {
+  try {
+    const data = await get(`${API}/profile/${encodeURIComponent(richProfileId)}`);
+    return data && data.name ? data : null;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
 /** The profile a model page embeds, or null when the page has none. */
 async function fetchModelProfile(modelName) {
-  const html = await get(modelUrl(modelName));
+  const html = await get(modelUrl(modelName)).catch(err => {
+    if (err.response?.status === 451) {
+      throw new Error(`Leakhaven has taken down the page for "${modelName}" (HTTP 451)`);
+    }
+    throw err;
+  });
   const rsc = [...html.matchAll(/\.rsc\.push\(("(?:[^"\\]|\\.)*")\)/g)].map(m => JSON.parse(m[1])).join('');
   const key = '"initialProfileData":';
   const at = rsc.indexOf(key);
@@ -118,9 +137,10 @@ function toScrapeResult(data) {
 async function scrapeLeakshaven(names) {
   for (const [i, name] of names.entries()) {
     if (i > 0) await pause(1000);
-    const modelName = modelNameFromUrl(name) || (await searchContent(name, 1)).richProfileName;
-    if (!modelName) continue;
-    const data = await fetchModelProfile(modelName);
+    const { richProfileId, richProfileName } = await searchContent(modelNameFromUrl(name) || name, 1);
+    if (!richProfileName) continue;
+    // The API profile first: it still answers for models whose page Leakhaven has taken down (451)
+    const data = (richProfileId && await fetchApiProfile(richProfileId)) || await fetchModelProfile(richProfileName);
     if (data) return { ...toScrapeResult(data), searchedFor: name };
   }
   return null;
