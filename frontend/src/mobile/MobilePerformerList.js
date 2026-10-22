@@ -10,7 +10,8 @@ import { Box, Typography, Avatar, LinearProgress } from '@mui/material';
  *
  * Props:
  *  - performers: array
- *  - mode: 'filter' | 'gallery' — filter rows carry sort progress
+ *  - mode: 'filter' | 'gallery' | 'pairs' — filter rows carry sort progress,
+ *    and an outline when the performer also has a folder in After
  *  - onSelect: (performer) => void
  */
 
@@ -45,6 +46,7 @@ function MobilePerformerList({ performers, mode, onSelect }) {
         const pics = Math.round(stats.picsCompletion || 0);
         const vids = Math.round(stats.vidsCompletion || 0);
         const size = fmtSize(p.total_size_gb);
+        const inAfter = mode === 'filter' && !!p.in_after;
 
         return (
           <Box
@@ -56,7 +58,9 @@ function MobilePerformerList({ performers, mode, onSelect }) {
             sx={{
               display: 'flex', alignItems: 'center', gap: 1.25, p: 1,
               bgcolor: 'var(--surface)',
-              border: '1px solid var(--line)',
+              border: '1px solid',
+              borderColor: inAfter ? 'var(--info)' : 'var(--line)',
+              boxShadow: inAfter ? 'inset 0 0 0 1px var(--info)' : 'none',
               borderRadius: 'var(--radius, 6px)',
               // .App is a flex column; rows in a nested flex column collapse
               // without this. Same note as the management cards.
@@ -92,6 +96,7 @@ function MobilePerformerList({ performers, mode, onSelect }) {
                 <Typography sx={metaSx}><b>{p.pics_count ?? 0}</b> pics</Typography>
                 <Typography sx={metaSx}><b>{p.vids_count ?? 0}</b> vids</Typography>
                 {size && <Typography sx={metaSx}>{size}</Typography>}
+                {inAfter && <Typography sx={{ ...metaSx, color: 'var(--info)', fontWeight: 650 }}>also in After</Typography>}
               </Box>
 
               {mode === 'filter' && (

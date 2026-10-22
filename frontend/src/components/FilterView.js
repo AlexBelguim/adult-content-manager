@@ -499,6 +499,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
               <MenuItem value="vids-completion-desc">Videos % (Most Done)</MenuItem>
               <MenuItem value="overall-completion-asc">Overall % (Least Done)</MenuItem>
               <MenuItem value="overall-completion-desc">Overall % (Most Done)</MenuItem>
+              <MenuItem value="in-after-first">Also in After (First)</MenuItem>
             </Select>
           </FormControl>
         </Box>

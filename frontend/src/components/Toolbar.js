@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves } from '@mui/icons-material';
+import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider, Popover, Badge } from '@mui/material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves, Vibration } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 import JobsIndicator from './JobsIndicator';
 import Logo from './Logo';
@@ -111,6 +111,8 @@ function Toolbar({
   const [vrSupported, setVrSupported] = useState(null); // null = unknown yet
 
   const [showVideoPathModal, setShowVideoPathModal] = useState(false);
+  // Below lg the Handy input collapses into a button that opens it here.
+  const [handyAnchor, setHandyAnchor] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -153,6 +155,41 @@ function Toolbar({
     window.open(url, '_blank');
     setShowVideoPathModal(false);
   };
+
+  const handyControl = (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', gap: 0.5,
+      pl: 1.25, py: '3px', pr: '3px',
+      bgcolor: 'var(--bg)',
+      border: '1px solid var(--line)',
+      borderRadius: 'var(--radius, 6px)'
+    }}>
+      <Box sx={{
+        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+        bgcolor: handyConnected ? 'var(--ok)' : 'var(--faint)'
+      }} />
+      <InputBase
+        placeholder="Handy code"
+        value={localHandyCode}
+        onChange={(e) => {
+          setLocalHandyCode(e.target.value);
+          localStorage.setItem('handyConnectionCode', e.target.value);
+        }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !handyConnected) handleHandyConnect(); }}
+        disabled={handyConnected}
+        sx={{ flex: 1, width: 108, fontSize: '0.8rem', color: 'var(--text)' }}
+      />
+      <Button
+        variant={handyConnected ? 'outlined' : 'contained'}
+        color={handyConnected ? 'error' : 'primary'}
+        onClick={handleHandyConnect}
+        size="small"
+        sx={{ minWidth: 0, px: 1.25 }}
+      >
+        {handyConnected ? 'Disconnect' : 'Connect'}
+      </Button>
+    </Box>
+  );
 
   return (
     <AppBar position="sticky">
@@ -226,12 +263,12 @@ function Toolbar({
             onClick={() => navigate('/local-import')}
             startIcon={<FolderOpen />}
             size="small"
-            sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+            sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
           >
             Upload Folder
           </Button>
           <Tooltip title="Upload Folder">
-            <IconButton onClick={() => navigate('/local-import')} sx={{ display: { xs: 'inline-flex', sm: 'none' }, color: 'var(--dim)' }}>
+            <IconButton onClick={() => navigate('/local-import')} sx={{ display: { xs: 'inline-flex', lg: 'none' }, color: 'var(--dim)' }}>
               <FolderOpen />
             </IconButton>
           </Tooltip>
@@ -279,8 +316,10 @@ function Toolbar({
 
           <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 1.25, borderColor: 'var(--line)' }} />
 
+          {/* Kept on desktop as a pointer to the headset; on a phone or tablet
+              it can only ever be disabled, so there it just takes room. */}
           <Tooltip title={vrSupported === false ? 'Enter VR — open this page on a headset (e.g. Quest 3)' : 'Enter VR mode'}>
-            <span>
+            <Box component="span" sx={{ display: vrSupported === false ? { xs: 'none', lg: 'inline-flex' } : 'inline-flex' }}>
               <IconButton
                 onClick={() => navigate('/vr')}
                 disabled={vrSupported === false}
@@ -293,7 +332,7 @@ function Toolbar({
               >
                 <ViewInAr />
               </IconButton>
-            </span>
+            </Box>
           </Tooltip>
 
           <Tooltip title="Keyboard shortcuts & settings">
@@ -307,38 +346,35 @@ function Toolbar({
           </Tooltip>
 
           {/* Handy connection. Reads as one control rather than a loose
-              input + button pair. */}
-          <Box sx={{
-            display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.5,
-            ml: 1, pl: 1.25, py: '3px', pr: '3px',
-            bgcolor: 'var(--bg)',
-            border: '1px solid var(--line)',
-            borderRadius: 'var(--radius, 6px)'
-          }}>
-            <Box sx={{
-              width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-              bgcolor: handyConnected ? 'var(--ok)' : 'var(--faint)'
-            }} />
-            <InputBase
-              placeholder="Handy code"
-              value={localHandyCode}
-              onChange={(e) => {
-                setLocalHandyCode(e.target.value);
-                localStorage.setItem('handyConnectionCode', e.target.value);
-              }}
-              disabled={handyConnected}
-              sx={{ flex: 1, width: 108, fontSize: '0.8rem', color: 'var(--text)' }}
-            />
-            <Button
-              variant={handyConnected ? 'outlined' : 'contained'}
-              color={handyConnected ? 'error' : 'primary'}
-              onClick={handleHandyConnect}
-              size="small"
-              sx={{ minWidth: 0, px: 1.25 }}
-            >
-              {handyConnected ? 'Disconnect' : 'Connect'}
-            </Button>
+              input + button pair. Inline from lg up; narrower (the unfolded
+              Fold held sideways is ~960px) it is a button that opens the same
+              control, since the inline one pushed the bar onto two rows. */}
+          <Box sx={{ display: { xs: 'none', lg: 'flex' }, ml: 1 }}>
+            {handyControl}
           </Box>
+          <Tooltip title={handyConnected ? 'Handy connected' : 'Connect Handy'}>
+            <IconButton
+              onClick={(e) => setHandyAnchor(e.currentTarget)}
+              size="small"
+              aria-label="Handy connection"
+              sx={{ display: { xs: 'inline-flex', lg: 'none' }, color: 'var(--dim)', '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' } }}
+            >
+              <Badge variant="dot" overlap="circular"
+                sx={{ '& .MuiBadge-dot': { bgcolor: handyConnected ? 'var(--ok)' : 'var(--faint)' } }}>
+                <Vibration />
+              </Badge>
+            </IconButton>
+          </Tooltip>
+          <Popover
+            open={!!handyAnchor}
+            anchorEl={handyAnchor}
+            onClose={() => setHandyAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            slotProps={{ paper: { sx: { p: 1, bgcolor: 'var(--surface)', border: '1px solid var(--line)' } } }}
+          >
+            {handyControl}
+          </Popover>
         </Box>
       </MuiToolbar>
 

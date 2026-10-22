@@ -73,7 +73,10 @@ export default function JobsIndicator({ hashQueue }) {
         {busy
           ? <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)' }} />
           : <CheckIcon sx={{ fontSize: 14, color: 'var(--muted)' }} />}
-        <span>{busy ? `${running.length} running` : 'No jobs running'}</span>
+        {/* Idle, the tick says it; the words only fit on a wide bar. */}
+        <Box component="span" sx={busy ? undefined : { display: { xs: 'none', lg: 'inline' } }}>
+          {busy ? `${running.length} running` : 'No jobs running'}
+        </Box>
         {failed > 0 && (
           <Box component="span" sx={{ color: 'var(--bad)' }}>· {failed} failed</Box>
         )}

@@ -286,10 +286,21 @@ router.get('/filter', (req, res) => {
         case 'funscript-asc':
           orderByClause = 'ORDER BY p.funscript_vids_count ASC';
           break;
+        case 'in-after-first':
+          orderByClause = 'ORDER BY in_after DESC, p.total_size_gb DESC';
+          break;
         default:
           orderByClause = 'ORDER BY p.total_size_gb DESC';
       }
     }
+
+    // A performer can sit in before AND after at once — new content imported
+    // under a name that was already filtered and moved. Same-named rows are
+    // the only link between the two, so match on name.
+    const inAfterColumn = `EXISTS (
+      SELECT 1 FROM performers a
+      WHERE a.moved_to_after = 1 AND lower(a.name) = lower(p.name)
+    ) AS in_after`;
 
     // Build WHERE clause for search
     const searchCondition = searchTerm ? `AND p.name LIKE ?` : '';
@@ -314,7 +325,7 @@ router.get('/filter', (req, res) => {
     if (isCompletionSort) {
       // For completion-based sorting, fetch ALL performers first, add stats, sort, then paginate
       const allPerformersQuery = `
-        SELECT p.*, f.path as folder_path 
+        SELECT p.*, f.path as folder_path, ${inAfterColumn}
         FROM performers p 
         JOIN folders f ON p.folder_id = f.id
         WHERE p.moved_to_after = 0 AND (p.blacklisted IS NULL OR p.blacklisted = 0) ${searchCondition}
@@ -370,7 +381,7 @@ router.get('/filter', (req, res) => {
     } else {
       // For regular sorting, use database ORDER BY with pagination
       const performersQuery = `
-        SELECT p.*, f.path as folder_path 
+        SELECT p.*, f.path as folder_path, ${inAfterColumn}
         FROM performers p 
         JOIN folders f ON p.folder_id = f.id
         WHERE p.moved_to_after = 0 AND (p.blacklisted IS NULL OR p.blacklisted = 0) ${searchCondition}

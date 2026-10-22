@@ -553,6 +553,12 @@ function PerformerCard({ performer, onClick, onChangeThumbnail, onSettings, onDe
         boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
         position: 'relative',
         cursor: 'pointer',
+        // Still being filtered, but a folder under the same name is already
+        // in After. Outside the card so the blurred overlay can't cover it.
+        ...(mode === 'filter' && performer.in_after && {
+          outline: '2px solid var(--info)',
+          outlineOffset: '3px'
+        }),
         '&:hover': {
           transform: 'translateY(-2px)',
           boxShadow: '0 6px 12px rgba(0, 0, 0, 0.3)'

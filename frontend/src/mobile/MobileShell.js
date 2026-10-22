@@ -50,7 +50,8 @@ const SORTS = [
   { key: 'vids-completion-asc', label: 'Videos % — least done', filterOnly: true },
   { key: 'vids-completion-desc', label: 'Videos % — most done', filterOnly: true },
   { key: 'overall-completion-asc', label: 'Overall % — least done', filterOnly: true },
-  { key: 'overall-completion-desc', label: 'Overall % — most done', filterOnly: true }
+  { key: 'overall-completion-desc', label: 'Overall % — most done', filterOnly: true },
+  { key: 'in-after-first', label: 'Also in After — first', filterOnly: true }
 ];
 
 // Gallery-mode comparators, matching the server's fields for the same keys.
