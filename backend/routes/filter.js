@@ -152,33 +152,6 @@ router.post('/delete', async (req, res) => {
 });
 
 
-// GET /api/filter/smart-batch/:performerId
-router.get('/smart-batch/:performerId', async (req, res) => {
-  const { performerId } = req.params;
-  const { threshold, modelId, ai_server_url, app_base_url, modelType, limit, performer_rank } = req.query;
-
-  // Determine TrueNAS IP for image fetching
-  const protocol = req.protocol;
-  const host = req.headers.host;
-  const myBaseUrl = app_base_url || `${protocol}://${host}`;
-
-  try {
-    const result = await filterService.getSmartBatch(performerId, {
-      threshold: threshold ? parseFloat(threshold) : 50.0,
-      modelId,
-      ai_server_url: ai_server_url || getAiServerUrl(),
-      app_base_url: myBaseUrl,
-      modelType,
-      limit: limit ? parseInt(limit) : 100,
-      performer_rank: performer_rank ? parseFloat(performer_rank) : undefined
-    });
-    res.send(result);
-  } catch (err) {
-    console.error('Error in /smart-batch:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
 // POST /api/filter/apply-smart-batch
 router.post('/apply-smart-batch', async (req, res) => {
   const { performerId, results, performerName, basePath } = req.body;
@@ -192,65 +165,17 @@ router.post('/apply-smart-batch', async (req, res) => {
   }
 });
 
-// GET /api/filter/models - Proxy to AI server to list models
-router.get('/models', async (req, res) => {
-  const { ai_server_url } = req.query;
-  const AI_URL = ai_server_url || getAiServerUrl();
+// POST /api/filter/keep-scores - K's keep % for pictures of one performer, refit on the ones of hers already sorted
+router.post('/keep-scores', async (req, res) => {
+  const { performerId, paths, ai_server_url, app_base_url } = req.body;
   try {
-    const axios = require('axios');
-    const response = await axios.get(`${AI_URL}/list_models`);
-    res.send(response.data);
-  } catch (err) {
-    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
-  }
-});
-
-// POST /api/filter/load-model - Proxy to AI server to load a specific model
-router.post('/load-model', async (req, res) => {
-  const { modelId, ai_server_url } = req.body;
-  const AI_URL = ai_server_url || getAiServerUrl();
-  try {
-    const axios = require('axios');
-    const response = await axios.post(`${AI_URL}/load_model`, { model_id: modelId });
-    res.send(response.data);
-  } catch (err) {
-    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
-  }
-});
-
-// POST /api/filter/unload-ranker - Proxy to AI server to unload only the ranker
-router.post('/unload-ranker', async (req, res) => {
-  const { ai_server_url } = req.body;
-  const AI_URL = ai_server_url || getAiServerUrl();
-  try {
-    const axios = require('axios');
-    const response = await axios.post(`${AI_URL}/unload_ranker`);
-    res.send(response.data);
-  } catch (err) {
-    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
-  }
-});
-
-// POST /api/filter/unload-model - Proxy to AI server to unload current model
-router.post('/unload-model', async (req, res) => {
-  const { ai_server_url } = req.body;
-  const AI_URL = ai_server_url || getAiServerUrl();
-  try {
-    const axios = require('axios');
-    const response = await axios.post(`${AI_URL}/unload_model`);
-    res.send(response.data);
-  } catch (err) {
-    res.status(500).send({ error: 'AI Server not reachable', message: err.message });
-  }
-});
-
-// POST /api/filter/predict-quality - Get quality prediction for a single image
-router.post('/predict-quality', async (req, res) => {
-  const { imagePath } = req.body;
-  try {
-    const result = await filterService.predictQuality(imagePath);
+    const result = await filterService.keepScores(performerId, paths, {
+      ai_server_url: ai_server_url || getAiServerUrl(),
+      app_base_url: app_base_url || `${req.protocol}://${req.headers.host}`
+    });
     res.send(result);
   } catch (err) {
+    console.error('Error in /keep-scores:', err.message);
     res.status(500).send({ error: err.message });
   }
 });
@@ -291,60 +216,6 @@ router.post('/proxy-classify', async (req, res) => {
     res.send(response.data);
   } catch (err) {
     res.status(500).send({ error: 'AI Server not reachable', message: err.message });
-  }
-});
-
-// GET /api/filter/pre-rank-performer/:performerId
-// Runs the performer ranker on up to 200 of the performer's images and returns the rank.
-// Must be called before filtering with a rank-conditioned model.
-router.get('/pre-rank-performer/:performerId', async (req, res) => {
-  const { performerId } = req.params;
-  const { ai_server_url, app_base_url } = req.query;
-  const AI_URL = ai_server_url || getAiServerUrl();
-  const myBaseUrl = app_base_url || `${req.protocol}://${req.headers.host}`;
-
-  try {
-    const db = require('../db');
-    const path = require('path');
-    const fs = require('fs-extra');
-
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(parseInt(performerId));
-    if (!performer) return res.status(404).json({ error: 'Performer not found' });
-
-    const folder = db.prepare('SELECT path FROM folders WHERE id = ?').get(performer.folder_id);
-    if (!folder) return res.status(404).json({ error: 'Folder not found' });
-
-    const performerPath = performer.moved_to_after === 1
-      ? path.join(folder.path, 'after filter performer', performer.name)
-      : path.join(folder.path, 'before filter performer', performer.name);
-    const picsDir = path.join(performerPath, 'pics');
-
-    if (!await fs.pathExists(picsDir)) {
-      return res.status(404).json({ error: 'Pics directory not found' });
-    }
-
-    const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
-    const entries = await fs.readdir(picsDir);
-    const imagePaths = entries
-      .filter(f => IMAGE_EXTS.has(path.extname(f).toLowerCase()))
-      .slice(0, 200)
-      .map(f => path.join(picsDir, f));
-
-    if (imagePaths.length === 0) {
-      return res.status(404).json({ error: 'No images found for performer' });
-    }
-
-    const axios = require('axios');
-    const response = await axios.post(`${AI_URL}/rank_performer`, {
-      image_paths: imagePaths,
-      performer_name: performer.name,
-      app_base_url: myBaseUrl
-    }, { timeout: 120000 });
-
-    res.json(response.data);
-  } catch (err) {
-    console.error('[pre-rank-performer] Error:', err.message);
-    res.status(500).json({ error: err.message });
   }
 });
 

@@ -111,6 +111,25 @@
 .fv-th span { position: absolute; right: 3px; bottom: 3px; font-size: 10px; font-weight: 650; background: var(--scrim-strong); border-radius: 3px; padding: 0 4px; line-height: 15px; }
 .fv-th em { position: absolute; left: 3px; top: 3px; font-style: normal; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 0 5px; line-height: 15px; background: var(--ok); color: var(--bg); }
 
+/* ── AI: K's keep % (useKeepScores), on the stage, the queue and the sorted view ── */
+.fv-kbadge { position: absolute; top: 14px; right: 14px; z-index: 3; pointer-events: none; font-weight: 700; font-size: .85rem; font-variant-numeric: tabular-nums; padding: 2px 10px; border-radius: 99px; border: 1px solid currentColor; background: var(--scrim-strong); }
+.fv-th i.fv-k { position: absolute; left: 3px; bottom: 3px; font-style: normal; font-size: 10px; font-weight: 700; background: var(--scrim-strong); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.fv-kbadge.keep, .fv-k.keep, .fv-kzone.keep .fv-kzone-h b { color: var(--ok); }
+.fv-kbadge.delete, .fv-k.delete, .fv-kzone.delete .fv-kzone-h b { color: var(--bad); }
+.fv-kbadge.unsure, .fv-k.unsure, .fv-kzone.unsure .fv-kzone-h b { color: var(--muted); }
+.pl-btn.keep { border-color: var(--ok); color: var(--ok); }
+.pl-btn.delete { border-color: var(--bad); color: var(--bad); }
+.fv-ksort { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 16px 24px; }
+.fv-ksort-head { display: flex; align-items: center; gap: 10px; }
+.fv-ksort-head .fv-sub { display: block; }
+.fv-kzone { margin-top: 16px; }
+.fv-kzone-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.fv-kgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.fv-th.is-flip { outline: 2px dashed var(--warn); outline-offset: -2px; }
+.fv-th em.flip { background: var(--warn); }
+.fv-kbig { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 20px; border: 0; background: var(--scrim-strong); cursor: zoom-out; }
+.fv-kbig img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
 @media (max-width: 1100px) {
   .fv { grid-template-columns: 300px minmax(0, 1fr); }
   .fv-right { display: none; }

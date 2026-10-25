@@ -27,6 +27,8 @@ export default function FilterSidebar({
   onSortBy,
   onSortOrder,
   onHideKept,
+  ai,
+  onAi,
   shortcuts,
   sheetOpen,
   onCloseSheet,
@@ -92,6 +94,12 @@ export default function FilterSidebar({
           <span>Hide kept files</span>
           <input type="checkbox" checked={hideKept} onChange={(e) => onHideKept(e.target.checked)} />
         </label>
+        {currentTab === 'pics' && (
+          <label className="fv-opt" title="K's keep % on every picture; it learns from your keeps and deletes of this performer">
+            <span>AI keep % (K)</span>
+            <input type="checkbox" checked={ai} onChange={(e) => onAi(e.target.checked)} />
+          </label>
+        )}
       </section>
 
       <section className="pl-pn" data-panel="keys">

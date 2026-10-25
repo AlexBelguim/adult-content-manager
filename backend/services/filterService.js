@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
+const axios = require('axios');
 const { scanPerformerFolderEnhanced } = require('./importer');
 const funpipeService = require('./funpipeService');
 
@@ -986,6 +987,72 @@ class FilterService {
     
     return stats;
   }
+
+  async applySmartBatch(performerId, results, options = {}) {
+    console.log(`Applying smart batch for performer ${performerId} (${results.length} items)`);
+    const summary = { kept: 0, deleted: 0, errors: 0 };
+
+    for (const item of results) {
+      try {
+        await this.performFilterAction(performerId, item.path, item.decision, options);
+        if (item.decision === 'keep') summary.kept++;
+        else summary.deleted++;
+      } catch (err) {
+        console.error(`Error applying action to ${item.path}:`, err);
+        summary.errors++;
+      }
+    }
+    
+    // Save human corrections for hard example mining
+    if (options.corrections && options.corrections.length > 0) {
+      console.log(`[SmartBatch] Saving ${options.corrections.length} human corrections as hard examples`);
+      const stmt = db.prepare(`
+        INSERT INTO hard_examples (performer_id, file_path, original_label, corrected_label, model_type, model_name)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      for (const corr of options.corrections) {
+        try {
+          stmt.run(performerId, corr.path, corr.original_label, corr.corrected_label, corr.model_type, corr.model_name);
+        } catch (e) {
+          // Ignore unique constraint or other minor errors
+        }
+      }
+    }
+
+    // Force stats refresh after batch
+    this.scheduleStatsRefresh(performerId);
+
+    return { success: true, summary };
+  }
+
+  // K's keep % for pictures of one performer (the filter view's AI badge and its sorted view). The AI server refits K on her
+  // latest 200 sorted pictures first (a deleted one sits in pics/.trash) and loads K when another model is loaded.
+  async keepScores(performerId, paths, options = {}) {
+    const AI_URL = options.ai_server_url || process.env.AI_SERVER_URL || 'http://localhost:3344';
+    const health = await axios.get(`${AI_URL}/health`, { timeout: 5000 });
+    if (!health.data.model_loaded || health.data.model_type !== 'clip_keepdelete') {
+      const preferred = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('preferred_clip_keepdelete_model')?.value;
+      const models = (await axios.get(`${AI_URL}/list_models`, { timeout: 60000 })).data.models || [];
+      const k = models.find(m => m.filename === preferred) || models.find(m => m.type === 'clip_keepdelete');
+      if (!k) throw new Error('No K model on the AI server yet: train one in the Taste Dashboard');
+      await axios.post(`${AI_URL}/load_model`, { model_id: k.filename }, { timeout: 120000 });
+    }
+
+    const sorted = db.prepare(`
+      SELECT file_path, action FROM filter_actions
+      WHERE performer_id = ? AND file_type = 'image' AND action IN ('keep', 'delete')
+      ORDER BY id DESC LIMIT 200
+    `).all(performerId);
+    const response = await axios.post(`${AI_URL}/classify_batch`, {
+      images: paths,
+      threshold: 50,
+      app_base_url: options.app_base_url,
+      sorted_keep: sorted.filter(a => a.action === 'keep').map(a => a.file_path),
+      sorted_delete: sorted.filter(a => a.action === 'delete').map(a => path.join(path.dirname(a.file_path), '.trash', path.basename(a.file_path)))
+    }, { timeout: 120000 });
+    return { scores: Object.fromEntries(response.data.results.map(r => [r.path, r.score])), learned: sorted.length };
+  }
+
 }
 
 module.exports = new FilterService();

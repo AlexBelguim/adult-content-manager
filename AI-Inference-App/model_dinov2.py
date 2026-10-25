@@ -1,5 +1,7 @@
+import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.linear_model import LogisticRegression
 from transformers import AutoModel, CLIPVisionModelWithProjection
 
 class DinoV2PreferenceModel(nn.Module):
@@ -170,3 +172,39 @@ class ClipPreferenceModel(nn.Module):
 
     def forward_single(self, pixel_values):
         return self.score_head(self.features(pixel_values))
+
+
+class ClipKeepDeleteModel(nn.Module):
+    """
+    K: a keep % for any picture with a fixed 50% line, learned from keep/delete alone (trainer.train_clip_keepdelete):
+    the frozen CLIP ViT-L/14-336 image embedding, L2-normalized, into one linear layer fitted as a class-balanced
+    logistic regression (C=1) on every kept (1) and deleted (0) picture. The checkpoint keeps those training
+    embeddings (train_X, train_y), so the filter view's AI can refit K with the pictures already sorted of the
+    performer being filtered.
+    """
+    def __init__(self, model_name="openai/clip-vit-large-patch14-336"):
+        super().__init__()
+        self.backbone = CLIPVisionModelWithProjection.from_pretrained(model_name)
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+        self.head = nn.Linear(self.backbone.config.projection_dim, 1)
+        self.train_X = self.train_y = None
+
+    def features(self, pixel_values):
+        return nn.functional.normalize(self.backbone(pixel_values=pixel_values).image_embeds, dim=-1)
+
+    def forward_single(self, pixel_values):
+        return self.head(self.features(pixel_values))
+
+    def refit(self, X, y, weight=20.0):
+        """A head refit with one performer's sorted pictures (X their embeddings, y 1 kept / 0 deleted) added to the
+        training pictures, each counting as `weight` of them. Tested leave-one-performer-out (2026-10-24): her
+        unsorted pictures went from AUC 0.760 to 0.792 after 20 sorted and 0.814 after 50."""
+        m = LogisticRegression(C=1.0, max_iter=3000, class_weight='balanced').fit(
+            np.concatenate([self.train_X, X]), np.concatenate([self.train_y, y]),
+            sample_weight=np.r_[np.ones(len(self.train_y)), np.full(len(y), weight)])
+        head = nn.Linear(X.shape[1], 1).to(self.head.weight.device)
+        with torch.no_grad():
+            head.weight.copy_(torch.from_numpy(m.coef_))
+            head.bias.copy_(torch.from_numpy(m.intercept_))
+        return head

@@ -25,6 +25,9 @@ const MODEL_TYPES = [
   { id: 'clip_taste', name: 'CLIP Taste (2nd order)', icon: <Psychology />, desc: 'A keep % for any picture with a fixed 50% line. Learns kept vs deleted inside a performer and across performers: your disliked and blacklisted performers, and your stars.',
     color: 'var(--chart-5)', requirements: 'Needs keep + delete folders pushed to the AI server. Performers with only deleted pictures count as disliked, or as blacklisted when blacklisted in the app; stars only pick pairs (2+ stars apart), they are no input. Uses every hand pair, across performers too. 15% of the performers of every level are held out.',
     pros: ['Keep % with a 50% line', 'Knows disliked performers'], cons: ['Only 11 blacklisted performers'] },
+  { id: 'clip_keepdelete', name: 'K (keep / delete)', icon: <FilterAlt />, desc: 'A keep % for any picture with a fixed 50% line, learned from your keeps and deletes alone, so it grows as you filter. With the AI toggle in the filter view it refits every 10 decisions, with that performer\'s sorted pictures weighing 20x.',
+    color: 'var(--ok)', requirements: 'Needs keep + delete folders pushed to the AI server; uses the performers that have both. No pairs, no stars. Trains in about a minute once the pictures are embedded (the model keeps the embeddings, so the next run only embeds new pictures). 15% of the performers are held out.',
+    pros: ['Learns the performer while you filter', 'Best inside a performer (AUC 0.770 vs 0.753)'], cons: ['Does not know disliked performers'] },
   { id: 'binary', name: 'Simple Binary', icon: <FilterAlt />, desc: 'DINOv2 keep vs delete classifier.',
     color: 'var(--ok)', requirements: 'Needs keep + delete image folders',
     pros: ['Direct keep %'], cons: ['One global keep look'] },
@@ -46,14 +49,14 @@ const MODEL_NOTES = [
     name: 'CLIP Taste — 2nd order (keep %)', status: 'New', tone: 'warn', where: 'Train here',
     result: 'Not trained yet: results on held-out performers come after the first GPU run',
     data: 'Kept pictures (keep) against deleted pictures of kept performers and every picture of disliked (delete-only) and blacklisted performers; on 2026-10-17: 68 kept performers (6,891 pictures, 47 with 3,979 deletes), 49 disliked (2,925), 11 blacklisted (400). Pairs: kept > deleted, kept > disliked/blacklisted, disliked > blacklisted, stars 2+ apart, and every hand pair (legacy ones optional).',
-    how: 'The CLIP Siamese network (frozen CLIP ViT-L/14-336 + score head) with two losses: keep/delete (a real keep %, so SmartFilter cuts at a fixed 50%) and RankNet on the pairs. Stars only pick pairs, never kept vs kept: those would teach who, not what. 15% of the performers of every level are held out.',
+    how: 'The CLIP Siamese network (frozen CLIP ViT-L/14-336 + score head) with two losses: keep/delete (a real keep %, cut at a fixed 50%) and RankNet on the pairs. Stars only pick pairs, never kept vs kept: those would teach who, not what. 15% of the performers of every level are held out.',
     better: ['Only 11 blacklisted performers have pictures (another 49 are blacklisted without any)', 'More hand pairs across performers'],
   },
   {
     name: 'CLIP Siamese — 1st order (within performer)', status: 'Best', tone: 'ok', where: 'Train here',
     result: 'Keep vs delete AUC 0.82 on 38 new performers · 0.73 inside one performer · picks your winner in 66% of 1,091 later Rank images pairs',
     data: '1,969 hand-made pairs from the old labeller (Dec 2025): 1,781 same performer, 188 across performers. 3 epochs. File: clip_siamese/clip_siamese_20251207.pt',
-    how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so SmartFilter picks the threshold per batch.',
+    how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so a cut has to be picked per batch.',
     better: [
       'Retrain here: adds kept > deleted pairs of every performer plus your same-performer hand pairs, and holds performers out for an honest score',
       'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from backend-pairwise/pairwise.db (785 of its 788, 764 of them same performer: 483 in the app DB, 302 of performers deleted from the app in a PC file); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
@@ -117,13 +120,14 @@ const NOTE_TONE = {
   bad: { color: 'var(--bad)', bg: 'var(--bad-quiet)' },
 };
 
-// Training-type → settings key of its default model (SmartFilter loads these)
+// Training-type → settings key of its default model (the filter view's AI loads K's)
 const PREFERRED_KEYS = {
   binary: 'preferred_binary_model',
   ranked_binary: 'preferred_ranked_binary_model',
   pairwise: 'preferred_pairwise_model',
   clip_siamese: 'preferred_clip_siamese_model',
   clip_taste: 'preferred_clip_taste_model',
+  clip_keepdelete: 'preferred_clip_keepdelete_model',
   performer_ranker: 'preferred_ranker_model',
 };
 
@@ -140,6 +144,7 @@ function TasteDashboardPage() {
   // Training Hub state
   const [selectedType, setSelectedType] = useState('clip_siamese');
   const isClip = selectedType === 'clip_siamese' || selectedType === 'clip_taste';
+  const fixedBackbone = isClip || selectedType === 'clip_keepdelete';
   const [epochs, setEpochs] = useState(8);
   const [batchSize, setBatchSize] = useState(16);
   const [backbone, setBackbone] = useState('facebook/dinov2-large');
@@ -482,6 +487,7 @@ function TasteDashboardPage() {
       { label: 'Auto, across performers: kept > disliked/blacklisted, disliked > blacklisted (half weight), stars 2+ apart', value: `≈${crossPairs.toLocaleString()} / epoch` },
       ...handRows('all')],
     clip_siamese: [picRow('Kept pictures of performers with deletes', keptWithDeletes, 'keep'), deletedRow, withinRow, ...handRows('same')],
+    clip_keepdelete: [picRow('Kept pictures of performers with deletes', keptWithDeletes, 'keep'), deletedRow],
     binary: binaryRows,
     ranked_binary: [...binaryRows, { label: 'Star ratings (an input)', value: `${rated.length} rated performers` }],
     pairwise: handRows('db', pairSources.filter(s => s.id !== 'labeller')),
@@ -825,7 +831,7 @@ function TasteDashboardPage() {
                 <TextField label="Batch Size" type="number" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 1)}
                   InputProps={{ inputProps: { min: 1, max: 64 } }} size="small"
                   sx={{ width: 100, '& .MuiOutlinedInput-root': { color: 'var(--text)', '& fieldset': { borderColor: 'var(--line-strong)' } }, '& .MuiInputLabel-root': { color: 'var(--muted)' } }} />
-                {!isClip && <FormControl size="small" sx={{ minWidth: 200 }}>
+                {!fixedBackbone && <FormControl size="small" sx={{ minWidth: 200 }}>
                   <InputLabel sx={{ color: 'var(--muted)' }}>Backbone</InputLabel>
                   <Select
                     value={backbone}
@@ -1223,13 +1229,14 @@ function ModelArsenal({
   const typeLabels = {
     clip_siamese: { label: 'CLIP Siamese', color: 'var(--accent)', icon: ''},
     clip_taste: { label: 'CLIP Taste', color: 'var(--chart-5)', icon: ''},
+    clip_keepdelete: { label: 'K (keep / delete)', color: 'var(--ok)', icon: ''},
     binary: { label: 'Binary', color: 'var(--ok)', icon: ''},
     ranked_binary: { label: 'Ranked Binary', color: 'var(--chart-3)', icon: ''},
     pairwise: { label: 'Pairwise', color: 'var(--info)', icon: ''},
     performer_ranker: { label: 'Performer Ranker', color: 'var(--chart-1)', icon: ''},
     unknown: { label: 'Unknown', color: 'var(--muted)', icon: ''},
   };
-  const typeIcons = { clip_siamese: <AutoAwesome />, clip_taste: <Psychology />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
+  const typeIcons = { clip_siamese: <AutoAwesome />, clip_taste: <Psychology />, clip_keepdelete: <FilterAlt />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
   const grouped = {};
   models.forEach(m => { const t = m.type || 'unknown'; if (!grouped[t]) grouped[t] = []; grouped[t].push(m); });
   const handleTest = async (model) => {
@@ -1307,7 +1314,7 @@ function ModelArsenal({
                 </Box>
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                   {m.backbone && <Chip label={m.backbone.split('/').pop()} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--surface)', color: 'var(--dim)' }} />}
-                   {m.val_acc != null && <Chip label={`${m.type === 'clip_taste' ? 'AUC' : 'Val'}: ${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
+                   {m.val_acc != null && <Chip label={`${['clip_taste', 'clip_keepdelete'].includes(m.type) ? 'AUC' : 'Val'}:${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
                   {m.val_mae != null && <Chip label={`MAE: ${m.val_mae.toFixed(3)}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,111,0,0.1)', color: 'var(--chart-1)' }} />}
                   {m.rank_conditioned && <Chip label="Rank-Conditioned" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(0,191,165,0.1)', color: 'var(--chart-3)', fontWeight: 700 }} />}
                   {m.samples && <Chip label={`${m.samples} samples`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }} />}

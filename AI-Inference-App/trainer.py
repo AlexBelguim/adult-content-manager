@@ -1,10 +1,12 @@
 """
 Training module for AI Inference App.
-Supports: binary, pairwise, CLIP siamese, CLIP taste, performer ranker and rank-conditioned binary.
+Supports: binary, pairwise, CLIP siamese, CLIP taste, CLIP keep/delete (K), performer ranker and rank-conditioned binary.
 Runs in a background thread so the server stays responsive.
 """
 import os, sys, time, random, json, threading, torch, torch.nn as nn
+import numpy as np
 from pathlib import Path
+from sklearn.linear_model import LogisticRegression
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -1275,11 +1277,81 @@ def train_clip_taste(config):
     return {'model': f'clip_taste/{out_path.name}', 'best_val_acc': best_auc}
 
 
+def train_clip_keepdelete(config):
+    """K: a keep % for any picture with a fixed 50% line, from keep/delete alone (no pairs, no stars), so it grows as Alex
+    filters: a class-balanced logistic regression (C=1) on the L2-normalized frozen CLIP embedding of every kept (1) and
+    deleted (0) picture of the performers that have both. Leave one performer out (2026-10-24) it ordered the pictures
+    inside a performer better than CLIP Siamese (AUC 0.770 vs 0.753).
+    15% of the performers are held out (split like CLIP Siamese) for the inside-performer AUC, then K is fitted on all.
+    The checkpoint keeps every training embedding: the filter view's AI refits K with the performer being filtered, and the next
+    training only embeds pictures that are new.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    backbone = 'openai/clip-vit-large-patch14-336'
+    config['backbone'] = backbone  # the DINO backbone picker on the page does not apply
+    base_path = config.get('base_path', '')
+    keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
+    delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
+    both = sorted(set(keep_map) & set(delete_map))
+    if not both:
+        raise ValueError("No performers have both keep and delete images.")
+    train_performers, val_performers = split_performers(both, val_frac=0.15)
+    rows = [(p, 1, perf) for perf in both for p in keep_map[perf]] + [(p, 0, perf) for perf in both for p in delete_map[perf]]
+    config['_keep_count'] = sum(len(keep_map[perf]) for perf in both)
+    config['_delete_count'] = sum(len(delete_map[perf]) for perf in both)
+    training_state['total_epochs'] = 1
+    tlog(f"📋 K (keep/delete) | {config['_keep_count']} kept + {config['_delete_count']} deleted pictures of {len(both)} performers "
+         f"| {len(train_performers)} train / {len(val_performers)} val (holdout)")
+
+    out_dir = Path(__file__).parent / 'models' / 'clip_keepdelete'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    known = {}
+    last = sorted(out_dir.glob('clip_keepdelete_*.pt'))
+    if last:
+        prev = torch.load(last[-1], map_location='cpu')
+        known = dict(zip(prev['paths'], prev['features'].float()))
+    new = sorted({p for p, _, _ in rows} - set(known))
+    tlog(f"  🖼️ {len(rows) - len(new)} embeddings reused{f' from {last[-1].name}' if last else ''}, {len(new)} pictures to embed")
+    if new:
+        _, idx, feats = embed_clip(backbone, new, device)
+        feats = nn.functional.normalize(feats, dim=-1).cpu()
+        known.update((p, feats[i]) for p, i in idx.items())
+        if device.type == 'cuda': torch.cuda.empty_cache()
+    rows = [r for r in rows if r[0] in known]
+    X = torch.stack([known[p] for p, _, _ in rows])
+    y = np.array([v for _, v, _ in rows])
+    held = np.isin([perf for _, _, perf in rows], val_performers)
+
+    training_state['phase'] = 'fitting'
+    fit = lambda m: LogisticRegression(C=1.0, max_iter=3000, class_weight='balanced').fit(X[m].numpy(), y[m])
+    scores = torch.from_numpy(fit(~held).decision_function(X[held].numpy()))
+    perfs, labels = np.array([perf for _, _, perf in rows])[held], y[held]
+    val_auc = float(np.mean([auc(scores[(perfs == q) & (labels == 1)], scores[(perfs == q) & (labels == 0)]) for q in val_performers]))
+    training_state.update(epoch=1, val_acc=val_auc, best_val_acc=val_auc)
+    training_state['epoch_history'].append({'epoch': 1, 'val_acc': round(val_auc, 4), 'pictures': len(rows)})
+    tlog(f"  Inside-performer AUC on {len(val_performers)} held-out performers: {val_auc:.3f}")
+
+    m = fit(np.ones(len(rows), dtype=bool))
+    out_path = out_dir / f'clip_keepdelete_{time.strftime("%Y%m%d_%H%M%S")}.pt'
+    torch.save({
+        # CLIP is frozen, so only the head is saved; the backbone comes from the pretrained weights
+        'model_state_dict': {'head.weight': torch.from_numpy(m.coef_).float(), 'head.bias': torch.from_numpy(m.intercept_).float()},
+        'val_acc': val_auc, 'backbone': backbone, 'model_type': 'clip_keepdelete',
+        'holdout_performers': val_performers, 'samples': len(rows),
+        'paths': [p for p, _, _ in rows], 'features': X.half(), 'labels': torch.from_numpy(y).to(torch.int8),
+        'config': {'model_name': backbone},
+        'created_at': time.time()
+    }, out_path)
+    tlog(f"  ⭐ Saved → {out_path.name} (AUC {val_auc:.3f})")
+    return {'model': f'clip_keepdelete/{out_path.name}', 'best_val_acc': val_auc}
+
+
 TRAIN_FNS = {
     'binary': train_binary,
     'pairwise': train_pairwise,
     'clip_siamese': train_clip_siamese,
     'clip_taste': train_clip_taste,
+    'clip_keepdelete': train_clip_keepdelete,
     'performer_ranker': train_performer_ranker,
     'ranked_binary': train_ranked_binary,
 }

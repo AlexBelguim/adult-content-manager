@@ -48,7 +48,7 @@ except Exception as e:
     traceback.print_exc()
 
 # ── Module Imports ────────────────────────────────────────────────────────────
-from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel
+from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, ClipKeepDeleteModel
 
 
 # Initialize Calibration Engine
@@ -66,9 +66,12 @@ RANKER_MODEL = None        # Optional standalone PerformerRankerModel
 RANKER_PROCESSOR = None
 RANKER_MODEL_ID = None
 CONTEXT_STAR_CACHE = {}    # performer_name → predicted star rating (per inference session)
+KEEP_SEEN = {'performer': None, 'features': {}, 'sorted': None, 'head': None}   # K: the performer being filtered, her picture file names → CLIP embeddings, and the head refit on her sorted pictures
 
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor
 MODEL_LOCK = Lock()
+IMAGE_POOL = ThreadPoolExecutor(8)   # classify_batch opens its pictures from the share in parallel
 MODELS_DIR = Path(__file__).parent / 'models'
 MODEL_METADATA_CACHE = {}  # Cache for model file metadata to prevent heavy I/O
 
@@ -191,6 +194,10 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                     MODEL = BinaryClassifier(MODEL_NAME, quantize=quantize)
                 elif model_type in ('clip_siamese', 'clip_taste'):
                     MODEL = ClipPreferenceModel(MODEL_NAME)
+                elif model_type == 'clip_keepdelete':
+                    MODEL = ClipKeepDeleteModel(MODEL_NAME)
+                    MODEL.train_X, MODEL.train_y = checkpoint['features'].float().numpy(), checkpoint['labels'].numpy()
+                    KEEP_SEEN.update(performer=None, features={}, sorted=None, head=None)
                 else:
                     MODEL = DinoV2PreferenceModel(model_name=MODEL_NAME, freeze_backbone=True, quantize=quantize)
             except ImportError as ie:
@@ -876,17 +883,23 @@ def classify_batch():
             log(f"⚠️ Invalid performer_rank '{performer_rank_override}' — falling back to computed rank")
 
     # 1. PRE-LOAD IMAGES (Outside lock to avoid blocking and system lag)
-    # We do this in smaller chunks to avoid memory spikes
-    loaded_data = [] # List of (path, PIL_Image)
+    # 8 at a time: they come from the NAS share, and opening them one by one took most of a batch's time
     log(f"🧠 SMART FILTERING {len(image_paths)} images (Threshold: {threshold})...")
-    
-    for p in image_paths:
-        img = _load_image(p, app_base_url)
-        if img:
-            loaded_data.append((p, img))
-            
+    open_all = lambda paths: [(p, img) for p, img in zip(paths, IMAGE_POOL.map(lambda q: _load_image(q, app_base_url), paths)) if img]
+    loaded_data = open_all(image_paths)  # List of (path, PIL_Image)
+
     if not loaded_data:
         return jsonify({"success": False, "error": "Could not load any images."}), 500
+
+    # K: the pictures of this performer already sorted (the filter view's keep-scores sends them) refit it for this batch. Her
+    # embeddings are kept by file name while she is filtered, so a sorted picture is only opened again if it was never scored here.
+    sorted_pics = [(p, 1) for p in data.get('sorted_keep') or []] + [(p, 0) for p in data.get('sorted_delete') or []]
+    unseen = []
+    if isinstance(MODEL, ClipKeepDeleteModel):
+        performer = _get_performer_name(image_paths[0])
+        if KEEP_SEEN['performer'] != performer:
+            KEEP_SEEN.update(performer=performer, features={}, sorted=None, head=None)
+        unseen = open_all([p for p, _ in sorted_pics if Path(p).name not in KEEP_SEEN['features']])
 
     results = []
     start_time = time.time()
@@ -1001,16 +1014,38 @@ def classify_batch():
 
             # ── Binary / Pairwise / Siamese: direct classification ──────────
             else:
+                keep_model = isinstance(MODEL, ClipKeepDeleteModel)
+                head = None
+                if keep_model:
+                    seen = KEEP_SEEN['features']
+                    for i in range(0, len(unseen), 4):
+                        with torch.no_grad():
+                            pv = PROCESSOR(images=[img for _, img in unseen[i:i+4]], return_tensors="pt")['pixel_values'].to(DEVICE)
+                            for (p, _), v in zip(unseen[i:i+4], MODEL.features(pv).cpu()):
+                                seen[Path(p).name] = v
+                    known = [(Path(p).name, y) for p, y in sorted_pics if Path(p).name in seen]
+                    if known and KEEP_SEEN['sorted'] == known:   # the filter view scores her in chunks: refit once per change
+                        head = KEEP_SEEN['head']
+                    elif known:
+                        head = MODEL.refit(torch.stack([seen[n] for n, _ in known]).numpy(), torch.tensor([y for _, y in known]).numpy())
+                        KEEP_SEEN.update(sorted=known, head=head)
+                        log(f"🔁 K refit with {len(known)} sorted pictures of {KEEP_SEEN['performer']}")
+
                 for i in range(0, len(loaded_data), 4):
                     batch = loaded_data[i:i+4]
                     imgs = [it[1] for it in batch]
                     paths = [it[0] for it in batch]
-                    
+
                     with torch.no_grad():
                         inputs = PROCESSOR(images=imgs, return_tensors="pt")
                         pv = inputs['pixel_values'].to(DEVICE)
-                        
-                        if hasattr(MODEL, 'forward_single'): logits = MODEL.forward_single(pv)
+
+                        if keep_model:
+                            feats = MODEL.features(pv)
+                            for p, v in zip(paths, feats.cpu()):
+                                KEEP_SEEN['features'][Path(p).name] = v
+                            logits = (MODEL.head if head is None else head)(feats)
+                        elif hasattr(MODEL, 'forward_single'): logits = MODEL.forward_single(pv)
                         else: logits = MODEL(pv)
                         
                         logits = torch.nan_to_num(logits, nan=0.0)
@@ -1032,7 +1067,7 @@ def classify_batch():
             import traceback; traceback.print_exc()
         finally:
             # Clean up PIL images from RAM
-            for _, img in loaded_data: img.close()
+            for _, img in loaded_data + unseen: img.close()
             import gc; gc.collect()
             if torch.cuda.is_available(): torch.cuda.empty_cache()
 

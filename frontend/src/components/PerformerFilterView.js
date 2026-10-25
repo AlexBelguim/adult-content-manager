@@ -7,7 +7,9 @@ import FileCard from './filter/FileCard';
 import FilterSidebar from './filter/FilterSidebar';
 import FunscriptCard from './filter/FunscriptCard';
 import Icon from './filter/Icon';
+import KSortView from './filter/KSortView';
 import QueueRail from './filter/QueueRail';
+import useKeepScores, { K_READY, kZone } from './filter/useKeepScores';
 import useSwipeStage from './filter/useSwipeStage';
 import { ACTION_LABEL, TABS, TAB_LABEL, errorMessage, matchesKey, mediaItemFor, tabProgress } from './filter/filterUtils';
 import './filter/filter.css';
@@ -57,6 +59,10 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const [scenesOpen, setScenesOpen] = useState(false);
   const [loop, setLoop] = useState(false);
   const [mediaInfo, setMediaInfo] = useState(null);
+  const [ai, setAi] = useState(() => localStorage.getItem('performerFilterAI') === '1');
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortProgress, setSortProgress] = useState(null); // { done, total } while the sorted view scores the rest
+  const [applyBusy, setApplyBusy] = useState(false);
 
   const rootRef = useRef(null);
   const videoRef = useRef(null);
@@ -67,6 +73,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const serverStats = useRef(null);
   const flashTimer = useRef(null);
   const historyId = useRef(0);
+  const kOffered = useRef(false); // the sorted view was offered for this performer
 
   const phone = useMediaQuery('(max-width:760px)');
   const file = files[currentIndex] || null;
@@ -105,9 +112,12 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     setStats(null);
     serverStats.current = null;
     setMediaInfo(null);
+    setSortOpen(false);
+    kOffered.current = false;
   }, [performer.id]);
 
   useEffect(() => localStorage.setItem('performerFilterSortBy', sortBy), [sortBy]);
+  useEffect(() => localStorage.setItem('performerFilterAI', ai ? '1' : '0'), [ai]);
   useEffect(() => localStorage.setItem('performerFilterSortOrder', sortOrder), [sortOrder]);
 
   useEffect(() => () => clearTimeout(flashTimer.current), []);
@@ -369,6 +379,79 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     }
   }, [undoBusy, history, currentTab, currentIndex, switchTab, reloadAll, refreshStatsSoon, notify]);
 
+  /* ── AI: K's keep % on every picture, learning from this performer's keeps and deletes ── */
+  const k = useKeepScores({
+    performerId: performer.id,
+    enabled: ai && currentTab === 'pics',
+    files,
+    currentIndex,
+    decisions: tally.pics.keep + tally.pics.delete
+  });
+
+  const openSort = useCallback(async () => {
+    setSnack(null);
+    setSortOpen(true);
+    const paths = files.map((f) => f.path);
+    setSortProgress({ done: 0, total: paths.length });
+    try {
+      await k.scoreAll(paths, (done) => setSortProgress({ done, total: paths.length }));
+    } catch (err) {
+      notify('error', `K could not score her pictures: ${err.message}`);
+    } finally {
+      setSortProgress(null);
+    }
+  }, [files, k, notify]);
+
+  // Once K has learned from enough of her pictures, offer the sorted view for the rest.
+  useEffect(() => {
+    if (!ai || currentTab !== 'pics' || sortOpen || kOffered.current || k.learned < K_READY || files.length < 2) return;
+    kOffered.current = true;
+    setSnack({
+      severity: 'info',
+      msg: `K has learned from ${k.learned} of her pictures — sort the remaining ${files.length}?`,
+      action: { label: 'Sort the rest', onClick: openSort }
+    });
+  }, [ai, currentTab, sortOpen, k.learned, files.length, openSort]);
+
+  const applySorted = useCallback(async (results, corrections) => {
+    setApplyBusy(true);
+    try {
+      const res = await fetch('/api/filter/apply-smart-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performerId: performer.id, performerName: performer.name, results, corrections })
+      });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const { summary } = await res.json();
+      const done = new Set(results.map((r) => r.path));
+      const kept = new Set(results.filter((r) => r.decision === 'keep').map((r) => r.path));
+      const removed = results.filter((r) => r.decision === 'delete' || hideKeptFiles).length;
+      setFiles((prev) => prev
+        .filter((f) => !done.has(f.path) || (kept.has(f.path) && !hideKeptFiles))
+        .map((f) => (kept.has(f.path) ? { ...f, filtered: 'keep' } : f)));
+      setCurrentIndex(0);
+      loadRef.current.offset = Math.max(0, loadRef.current.offset - removed);
+      setDelta((d) => bump(d, 'pics', 'done', summary.kept + summary.deleted));
+      setTally((t) => bump(bump(t, 'pics', 'keep', summary.kept), 'pics', 'delete', summary.deleted));
+      notify(summary.errors ? 'warning' : 'success',
+        `Kept ${summary.kept}, deleted ${summary.deleted}${summary.errors ? `, ${summary.errors} failed` : ''}`);
+      refreshStatsSoon();
+    } catch (err) {
+      notify('error', `Could not apply the sorted pictures: ${err.message}`);
+    } finally {
+      setApplyBusy(false);
+    }
+  }, [performer.id, performer.name, hideKeptFiles, notify, refreshStatsSoon]);
+
+  // The uncertain ones back to one by one, most unsure first.
+  const oneByOne = useCallback((list) => {
+    const order = [...list].sort((a, b) => Math.abs(k.scores[a.path] - 50) - Math.abs(k.scores[b.path] - 50));
+    const ids = new Set(order.map((f) => f.path));
+    setFiles((prev) => [...order, ...prev.filter((f) => !ids.has(f.path))]);
+    setCurrentIndex(0);
+    setSortOpen(false);
+  }, [k.scores]);
+
   /* ── funscript tab ── */
   const funscriptAction = useCallback(async (action, script, options) => {
     const target = files[currentIndex];
@@ -483,6 +566,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   /* ── keys ── */
   const keyActions = useRef({});
   keyActions.current = {
+    blocked: sortOpen, // the sorted view has no current file to decide on
     decide,
     undo,
     goPrev,
@@ -506,6 +590,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
       if ((t && (TYPING.test(t.tagName) || t.isContentEditable)) || e.ctrlKey || e.metaKey || e.altKey) return;
       const s = shortcutsRef.current;
       const a = keyActions.current;
+      if (a.blocked) return;
       if (matchesKey(e, s.keep)) a.decide('keep');
       else if (matchesKey(e, s.delete)) a.decide('delete');
       else if (matchesKey(e, s.move_to_funscript)) {
@@ -580,6 +665,8 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
         onSortBy={setSortBy}
         onSortOrder={setSortOrder}
         onHideKept={setHideKeptFiles}
+        ai={ai}
+        onAi={setAi}
         shortcuts={shortcuts}
         sheetOpen={sheetOpen}
         onCloseSheet={() => setSheetOpen(false)}
@@ -595,6 +682,17 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
             onToggleTags={() => setTagsOpen((v) => !v)}
             onToggleScenes={() => setScenesOpen((v) => !v)}
           />
+        )}
+        {ai && currentTab === 'pics' && (
+          <section className="pl-pn" data-panel="ai">
+            <h4>AI · K</h4>
+            <p className="pl-hint">
+              {k.error ? `K is not available: ${k.error}` : `Learned from ${k.learned} of her sorted pictures; it refits every 10 decisions.`}
+            </p>
+            {!sortOpen && files.length > 1 && !k.error && (
+              <button type="button" className="pl-btn sm" style={{ marginTop: 8 }} onClick={openSort}>Sort the rest with K</button>
+            )}
+          </section>
         )}
         {item && tagsOpen && <TagPanel item={item} />}
         {item && isVideo && scenesOpen && <ScenesPanel item={item} scenes={scenes} videoRef={videoRef} />}
@@ -622,6 +720,18 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
           <span className="fv-chip">{p.pct}%</span>
           <button type="button" className="pl-ib" onClick={() => setSheetOpen(true)} aria-label="Progress, file details and options"><Icon name="menu" size={18} /></button>
         </div>
+        {sortOpen ? (
+          <KSortView
+            files={files}
+            scores={k.scores}
+            learned={k.learned}
+            progress={sortProgress}
+            busy={applyBusy}
+            onApply={applySorted}
+            onOneByOne={oneByOne}
+            onClose={() => setSortOpen(false)}
+          />
+        ) : (
         <MediaStage
           className="fv-sw"
           item={item}
@@ -639,6 +749,9 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
             <>
               {swipeStamps}
               {flash && <div key={flash.n} className={`fv-flash ${flash.kind}`} aria-hidden="true" />}
+              {ai && currentTab === 'pics' && file && k.scores[file.path] != null && (
+                <div className={`fv-kbadge ${kZone(k.scores[file.path])}`}>K {Math.round(k.scores[file.path])}%</div>
+              )}
               {stateNode}
             </>
           )}
@@ -657,6 +770,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
             />
           )}
         />
+        )}
       </section>
 
       <QueueRail
@@ -666,17 +780,28 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
         files={files}
         currentTab={currentTab}
         currentIndex={currentIndex}
-        onPick={goTo}
+        onPick={(i) => { setSortOpen(false); goTo(i); }}
+        kScores={ai && currentTab === 'pics' ? k.scores : null}
       />
 
       <Snackbar
         open={!!snack}
-        autoHideDuration={4000}
-        onClose={() => setSnack(null)}
+        autoHideDuration={snack?.action ? null : 4000}
+        onClose={(e, reason) => { if (reason !== 'clickaway' || !snack?.action) setSnack(null); }}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       >
         {snack ? (
-          <Alert severity={snack.severity} variant="filled" onClose={() => setSnack(null)}>
+          <Alert
+            severity={snack.severity}
+            variant="filled"
+            onClose={() => setSnack(null)}
+            action={snack.action ? (
+              <>
+                <button type="button" className="pl-btn sm" onClick={snack.action.onClick}>{snack.action.label}</button>
+                <button type="button" className="pl-btn sm" onClick={() => setSnack(null)}>Later</button>
+              </>
+            ) : undefined}
+          >
             {snack.msg}
           </Alert>
         ) : undefined}

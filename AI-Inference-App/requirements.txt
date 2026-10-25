@@ -12,6 +12,7 @@ tqdm
 bitsandbytes
 accelerate
 peft
+scikit-learn  # calibration.py and K (clip_keepdelete)
 
 # Funscript generation pipeline (funpipe/, served at /funpipe).
 # These resolve against the existing torch build — do NOT let them pull a

@@ -1,15 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import { fmtTime } from '../player';
 import { ACTION_BADGE, mediaItemFor } from './filterUtils';
+import { kZone } from './useKeepScores';
 
 const HISTORY_SHOWN = 4;
 
 /**
  * Right column: "Recent decisions" (newest first, Undo on the newest) and
  * "Up next" — a two-column grid of tall thumbnails (three on a phone), the
- * current one highlighted and kept in view; click = jump.
+ * current one highlighted and kept in view; click = jump. With the AI on, K's keep % (kScores).
  */
-export default function QueueRail({ history, onUndo, undoBusy, files, currentTab, currentIndex, onPick }) {
+export default function QueueRail({ history, onUndo, undoBusy, files, currentTab, currentIndex, onPick, kScores }) {
   const boxRef = useRef(null);
   const isVideo = currentTab !== 'pics';
 
@@ -54,6 +55,7 @@ export default function QueueRail({ history, onUndo, undoBusy, files, currentTab
             >
               <img loading="lazy" alt="" src={mediaItemFor(f, currentTab).thumbnail} onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
               {f.filtered === 'keep' && <em>KEPT</em>}
+              {kScores && kScores[f.path] != null && <i className={`fv-k ${kZone(kScores[f.path])}`}>{Math.round(kScores[f.path])}%</i>}
               {isVideo && f.duration ? <span>{fmtTime(f.duration)}</span> : null}
             </button>
           ))}

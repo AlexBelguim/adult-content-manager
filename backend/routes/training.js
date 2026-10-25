@@ -407,7 +407,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (['binary', 'clip_siamese', 'clip_taste', 'performer_ranker', 'ranked_binary'].includes(type)) {
+    } else if (['binary', 'clip_siamese', 'clip_taste', 'clip_keepdelete', 'performer_ranker', 'ranked_binary'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {

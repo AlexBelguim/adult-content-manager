@@ -253,7 +253,7 @@ function hashJobs() {
 
 const TRAIN_TITLE = {
   binary: 'Keep / delete classifier', ranked_binary: 'Ranked keep / delete classifier',
-  pairwise: 'Pairwise ranker', clip_siamese: 'CLIP siamese picture ranker', clip_taste: 'CLIP taste keep / delete model',
+  pairwise: 'Pairwise ranker', clip_siamese: 'CLIP siamese picture ranker', clip_taste: 'CLIP taste keep / delete model', clip_keepdelete: 'K keep / delete model',
   performer_ranker: 'Performer ranker'
 };
 
