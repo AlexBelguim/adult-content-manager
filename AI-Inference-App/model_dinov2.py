@@ -1,8 +1,13 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from safetensors.torch import load_file
 from sklearn.linear_model import LogisticRegression
-from transformers import AutoModel, CLIPVisionModelWithProjection
+from transformers import AutoModel, CLIPVisionModelWithProjection, SiglipImageProcessor, SiglipVisionConfig, SiglipVisionModel
+
+# K's backbone: SigLIP so400m-patch14-384 (the vision tower of ComfyUI's clip_vision file is the trainer's starting point)
+SIGLIP = dict(hidden_size=1152, intermediate_size=4304, num_hidden_layers=27, num_attention_heads=16, image_size=384, patch_size=14)
+SIGLIP_BASE = r"C:\Users\alexw\AppData\Roaming\StabilityMatrix\Packages\ComfyUI\models\clip_vision\sigclip_vision_patch14_384.safetensors"
 
 class DinoV2PreferenceModel(nn.Module):
     """
@@ -174,24 +179,28 @@ class ClipPreferenceModel(nn.Module):
         return self.score_head(self.features(pixel_values))
 
 
-class ClipKeepDeleteModel(nn.Module):
+class KeepDeleteModel(nn.Module):
     """
     K: a keep % for any picture with a fixed 50% line, learned from keep/delete alone (trainer.train_clip_keepdelete):
-    the frozen CLIP ViT-L/14-336 image embedding, L2-normalized, into one linear layer fitted as a class-balanced
-    logistic regression (C=1) on every kept (1) and deleted (0) picture. The checkpoint keeps those training
-    embeddings (train_X, train_y), so the filter view's AI can refit K with the pictures already sorted of the
-    performer being filtered.
+    SigLIP so400m-patch14-384 fine-tuned with a LoRA on Alex's keep/delete pictures, its pooled embedding
+    L2-normalized, into one linear layer fitted as a class-balanced logistic regression (C=1) on every kept (1) and
+    deleted (0) picture. Inside held-out performers (5 folds, 2026-10-25) it scored 0.779 against 0.764 for frozen
+    SigLIP and 0.750 for frozen CLIP. The checkpoint holds the merged vision tower and the training embeddings
+    (train_X, train_y), so the filter view's AI can refit K with the pictures already sorted of the performer
+    being filtered. base: the starting weights (ComfyUI's clip_vision file) when training; a checkpoint has its own.
     """
-    def __init__(self, model_name="openai/clip-vit-large-patch14-336"):
+    def __init__(self, base=None):
         super().__init__()
-        self.backbone = CLIPVisionModelWithProjection.from_pretrained(model_name)
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-        self.head = nn.Linear(self.backbone.config.projection_dim, 1)
+        self.backbone = SiglipVisionModel(SiglipVisionConfig(**SIGLIP))
+        if base:
+            self.backbone.load_state_dict({k.removeprefix("vision_model."): v for k, v in load_file(base).items()})
+        self.head = nn.Linear(SIGLIP['hidden_size'], 1)
+        self.processor = SiglipImageProcessor(size={"height": SIGLIP['image_size'], "width": SIGLIP['image_size']},
+                                              image_mean=[0.5] * 3, image_std=[0.5] * 3)
         self.train_X = self.train_y = None
 
     def features(self, pixel_values):
-        return nn.functional.normalize(self.backbone(pixel_values=pixel_values).image_embeds, dim=-1)
+        return nn.functional.normalize(self.backbone(pixel_values=pixel_values).pooler_output.float(), dim=-1)
 
     def forward_single(self, pixel_values):
         return self.head(self.features(pixel_values))

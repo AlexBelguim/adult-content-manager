@@ -5,13 +5,15 @@ Runs in a background thread so the server stays responsive.
 """
 import os, sys, time, random, json, threading, torch, torch.nn as nn
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from peft import LoraConfig, get_peft_model
 from sklearn.linear_model import LogisticRegression
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
-from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel
+from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel, SIGLIP_BASE
 
 IMAGE_EXTS = {'.jpg','.jpeg','.png','.webp','.gif','.bmp'}
 
@@ -1279,16 +1281,19 @@ def train_clip_taste(config):
 
 def train_clip_keepdelete(config):
     """K: a keep % for any picture with a fixed 50% line, from keep/delete alone (no pairs, no stars), so it grows as Alex
-    filters: a class-balanced logistic regression (C=1) on the L2-normalized frozen CLIP embedding of every kept (1) and
-    deleted (0) picture of the performers that have both. Leave one performer out (2026-10-24) it ordered the pictures
-    inside a performer better than CLIP Siamese (AUC 0.770 vs 0.753).
-    15% of the performers are held out (split like CLIP Siamese) for the inside-performer AUC, then K is fitted on all.
-    The checkpoint keeps every training embedding: the filter view's AI refits K with the performer being filtered, and the next
-    training only embeds pictures that are new.
+    filters. SigLIP so400m-patch14-384 gets a LoRA (r 16 on attention and MLP) and a keep/delete head, trained for 3
+    epochs on the pictures of the training performers (class-balanced BCE, random flips; the page's epochs do not
+    apply); K's head is then a class-balanced logistic regression (C=1) on the fine-tuned, L2-normalized embeddings of
+    every kept (1) and deleted (0) picture of the performers that have both. Inside held-out performers (5 folds,
+    2026-10-25) this scored 0.779 against 0.764 for frozen SigLIP and 0.750 for frozen CLIP.
+    15% of the performers are held out (split like CLIP Siamese) of the fine-tune and the head for the inside-performer
+    AUC; the saved head is fitted on all. The checkpoint holds the merged tower (fp16) and every training embedding,
+    which the filter view's AI refits K on. About 40 minutes on the GPU.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    backbone = 'openai/clip-vit-large-patch14-336'
+    backbone = 'siglip-so400m-patch14-384 + LoRA'
     config['backbone'] = backbone  # the DINO backbone picker on the page does not apply
+    epochs, bs = 3, 16
     base_path = config.get('base_path', '')
     keep_map = scan_performer_dirs(os.path.join(base_path, 'keep'))
     delete_map = scan_performer_dirs(os.path.join(base_path, 'delete'))
@@ -1299,26 +1304,68 @@ def train_clip_keepdelete(config):
     rows = [(p, 1, perf) for perf in both for p in keep_map[perf]] + [(p, 0, perf) for perf in both for p in delete_map[perf]]
     config['_keep_count'] = sum(len(keep_map[perf]) for perf in both)
     config['_delete_count'] = sum(len(delete_map[perf]) for perf in both)
-    training_state['total_epochs'] = 1
+    training_state['total_epochs'] = epochs
     tlog(f"📋 K (keep/delete) | {config['_keep_count']} kept + {config['_delete_count']} deleted pictures of {len(both)} performers "
-         f"| {len(train_performers)} train / {len(val_performers)} val (holdout)")
+         f"| {len(train_performers)} train / {len(val_performers)} val (holdout) | SigLIP + LoRA, {epochs} epochs")
 
-    out_dir = Path(__file__).parent / 'models' / 'clip_keepdelete'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    known = {}
-    last = sorted(out_dir.glob('clip_keepdelete_*.pt'))
-    if last:
-        prev = torch.load(last[-1], map_location='cpu')
-        known = dict(zip(prev['paths'], prev['features'].float()))
-    new = sorted({p for p, _, _ in rows} - set(known))
-    tlog(f"  🖼️ {len(rows) - len(new)} embeddings reused{f' from {last[-1].name}' if last else ''}, {len(new)} pictures to embed")
-    if new:
-        _, idx, feats = embed_clip(backbone, new, device)
-        feats = nn.functional.normalize(feats, dim=-1).cpu()
-        known.update((p, feats[i]) for p, i in idx.items())
-        if device.type == 'cuda': torch.cuda.empty_cache()
-    rows = [r for r in rows if r[0] in known]
-    X = torch.stack([known[p] for p, _, _ in rows])
+    model = KeepDeleteModel(SIGLIP_BASE)
+    model.backbone = get_peft_model(model.backbone, LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05,
+                                                               target_modules=["q_proj", "v_proj", "out_proj", "fc1", "fc2"]))
+    model.backbone.base_model.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.to(device)
+    pool = ThreadPoolExecutor(8)
+
+    def pixels(paths, flip=False):
+        """(the paths that opened, their pixel batch); pictures that can't be opened are skipped"""
+        def one(p):
+            try:
+                return model.processor(images=[Image.open(p).convert('RGB')], return_tensors='pt')['pixel_values'][0]
+            except Exception:
+                return None
+        got = [(p, x) for p, x in zip(paths, pool.map(one, paths)) if x is not None]
+        if not got:
+            return [], None
+        x = torch.stack([x for _, x in got]).to(device)
+        if flip:
+            x = torch.where(torch.rand(len(got), 1, 1, 1, device=device) < 0.5, x.flip(3), x)
+        return [p for p, _ in got], x
+
+    train = [(p, v) for p, v, perf in rows if perf in set(train_performers)]
+    pos = sum(v for _, v in train)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor((len(train) - pos) / pos, device=device))
+    optimizer = torch.optim.AdamW([{'params': [p for p in model.backbone.parameters() if p.requires_grad], 'lr': 1e-4},
+                                   {'params': model.head.parameters(), 'lr': 1e-3}], weight_decay=0.01)
+    steps = epochs * ((len(train) + bs - 1) // bs)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=[1e-4, 1e-3], total_steps=steps, pct_start=0.1)
+    model.train()
+    for epoch in range(1, epochs + 1):
+        training_state.update(epoch=epoch, phase='train', total_batches=(len(train) + bs - 1) // bs)
+        random.shuffle(train)
+        total = 0.0
+        for bi, i in enumerate(range(0, len(train), bs), 1):
+            label = dict(train[i:i + bs])
+            got, x = pixels(list(label), flip=True)
+            if not got:
+                scheduler.step()
+                continue
+            with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
+                loss = criterion(model.forward_single(x).squeeze(1), torch.tensor([float(label[p]) for p in got], device=device))
+            optimizer.zero_grad(); loss.backward(); optimizer.step(); scheduler.step()
+            total += loss.item()
+            training_state.update(batch=bi, train_loss=total / bi)
+        tlog(f"  Epoch {epoch}/{epochs} | Loss: {total / training_state['total_batches']:.4f}")
+
+    training_state.update(phase='embedding', batch=0, total_batches=(len(rows) + 31) // 32)
+    model.eval()
+    feats = {}
+    with torch.inference_mode(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
+        for bi, i in enumerate(range(0, len(rows), 32), 1):
+            got, x = pixels([p for p, _, _ in rows[i:i + 32]])
+            if got:
+                feats.update(zip(got, model.features(x).float().cpu()))
+            training_state['batch'] = bi
+    rows = [r for r in rows if r[0] in feats]
+    X = torch.stack([feats[p] for p, _, _ in rows])
     y = np.array([v for _, v, _ in rows])
     held = np.isin([perf for _, _, perf in rows], val_performers)
 
@@ -1332,16 +1379,21 @@ def train_clip_keepdelete(config):
     tlog(f"  Inside-performer AUC on {len(val_performers)} held-out performers: {val_auc:.3f}")
 
     m = fit(np.ones(len(rows), dtype=bool))
+    model.backbone = model.backbone.merge_and_unload()
+    state = {k: v.half() for k, v in model.state_dict().items() if k.startswith('backbone.')}
+    state.update({'head.weight': torch.from_numpy(m.coef_).float(), 'head.bias': torch.from_numpy(m.intercept_).float()})
+    out_dir = Path(__file__).parent / 'models' / 'clip_keepdelete'
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f'clip_keepdelete_{time.strftime("%Y%m%d_%H%M%S")}.pt'
     torch.save({
-        # CLIP is frozen, so only the head is saved; the backbone comes from the pretrained weights
-        'model_state_dict': {'head.weight': torch.from_numpy(m.coef_).float(), 'head.bias': torch.from_numpy(m.intercept_).float()},
+        'model_state_dict': state,
         'val_acc': val_auc, 'backbone': backbone, 'model_type': 'clip_keepdelete',
         'holdout_performers': val_performers, 'samples': len(rows),
         'paths': [p for p, _, _ in rows], 'features': X.half(), 'labels': torch.from_numpy(y).to(torch.int8),
-        'config': {'model_name': backbone},
+        'config': {'model_name': backbone, 'epochs': epochs, 'batch_size': bs},
         'created_at': time.time()
     }, out_path)
+    if device.type == 'cuda': torch.cuda.empty_cache()
     tlog(f"  ⭐ Saved → {out_path.name} (AUC {val_auc:.3f})")
     return {'model': f'clip_keepdelete/{out_path.name}', 'best_val_acc': val_auc}
 

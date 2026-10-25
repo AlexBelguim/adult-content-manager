@@ -48,7 +48,7 @@ except Exception as e:
     traceback.print_exc()
 
 # ── Module Imports ────────────────────────────────────────────────────────────
-from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, ClipKeepDeleteModel
+from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel
 
 
 # Initialize Calibration Engine
@@ -195,7 +195,8 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                 elif model_type in ('clip_siamese', 'clip_taste'):
                     MODEL = ClipPreferenceModel(MODEL_NAME)
                 elif model_type == 'clip_keepdelete':
-                    MODEL = ClipKeepDeleteModel(MODEL_NAME)
+                    MODEL = KeepDeleteModel()
+                    MODEL.load_state_dict(checkpoint['model_state_dict'])   # its whole fine-tuned tower: every key must be there
                     MODEL.train_X, MODEL.train_y = checkpoint['features'].float().numpy(), checkpoint['labels'].numpy()
                     KEEP_SEEN.update(performer=None, features={}, sorted=None, head=None)
                 else:
@@ -218,7 +219,7 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                 log(f"  🎯 Rank-conditioned model: will use ranker for context")
             
             # Load processor
-            PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
+            PROCESSOR = MODEL.processor if isinstance(MODEL, KeepDeleteModel) else AutoImageProcessor.from_pretrained(MODEL_NAME)
             
             val_acc = checkpoint.get('val_acc')
             if val_acc: log(f"  Val accuracy at save: {val_acc*100:.1f}%")
@@ -895,7 +896,7 @@ def classify_batch():
     # embeddings are kept by file name while she is filtered, so a sorted picture is only opened again if it was never scored here.
     sorted_pics = [(p, 1) for p in data.get('sorted_keep') or []] + [(p, 0) for p in data.get('sorted_delete') or []]
     unseen = []
-    if isinstance(MODEL, ClipKeepDeleteModel):
+    if isinstance(MODEL, KeepDeleteModel):
         performer = _get_performer_name(image_paths[0])
         if KEEP_SEEN['performer'] != performer:
             KEEP_SEEN.update(performer=performer, features={}, sorted=None, head=None)
@@ -1014,7 +1015,7 @@ def classify_batch():
 
             # ── Binary / Pairwise / Siamese: direct classification ──────────
             else:
-                keep_model = isinstance(MODEL, ClipKeepDeleteModel)
+                keep_model = isinstance(MODEL, KeepDeleteModel)
                 head = None
                 if keep_model:
                     seen = KEEP_SEEN['features']
