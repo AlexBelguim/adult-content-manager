@@ -50,6 +50,16 @@ export const pollHashJobStatus = (queueJobId, backendJobId, setHashQueue, curren
   pollingIntervalRef.current = setInterval(async () => {
     try {
       const response = await fetch(`/api/hashes/status/${backendJobId}`);
+      if (response.status === 404) {
+        // the server keeps jobs in memory: after a restart it no longer knows this one
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+        setHashQueue(prev => prev.map(j =>
+          j.id === queueJobId ? { ...j, status: 'error', error: 'Lost when the server restarted; run it again' } : j
+        ));
+        currentJobRef.current = null;
+        return;
+      }
       const data = await response.json();
 
       if (data.success) {

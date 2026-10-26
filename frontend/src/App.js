@@ -417,7 +417,12 @@ function AppContent({ onThemeChange, currentThemeId }) {
     // setClipQueue(prev => prev.filter(j => j.status === 'processing' || j.status === 'queued'));
 
     const processingHashJob = hashQueue.find(j => j.status === 'processing');
-    if (processingHashJob && processingHashJob.backendJobId) {
+    if (processingHashJob && !processingHashJob.backendJobId) {
+      // the page closed before the server answered: nothing to poll, and it would block the queue
+      setHashQueue(prev => prev.map(j =>
+        j.id === processingHashJob.id ? { ...j, status: 'error', error: 'Never started on the server; run it again' } : j
+      ));
+    } else if (processingHashJob) {
       // Resume polling for this job
       currentJobRef.current = processingHashJob.id;
       pollHashJobStatus(
