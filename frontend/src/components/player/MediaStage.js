@@ -166,7 +166,8 @@ export default function MediaStage({
   barStart,
   counterText,
   stageProps,
-  className
+  className,
+  timeline
 }) {
   const rootRef = useRef(null);
   const stageRef = useRef(null);
@@ -344,6 +345,7 @@ export default function MediaStage({
       </div>
 
       <div className="pl-ctl">
+        {timeline}
         <SeekAndTime videoEl={isVideo ? videoEl : null} item={item} scenes={scenes}>
           {(timeText) => (
             <div className="pl-ctl-row">

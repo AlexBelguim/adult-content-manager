@@ -13,9 +13,11 @@ import { Box, Button, ButtonBase, Tooltip, Snackbar, Alert, Collapse } from '@mu
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
 import { PageShell, PageHeader, LoadingState, SPACE } from '../components/layout';
 import useJobs, { JOB_TYPES, jobPercent } from '../hooks/useJobs';
 import { JOB_TYPE_ICONS, JobBar } from '../components/JobsIndicator';
+import PipelineDialog from '../components/PipelineDialog';
 
 const STACK = '@media (max-width: 860px)';
 
@@ -36,7 +38,7 @@ const SECTIONS = [
 const START_LINKS = [
   ['import', 'Import a folder', '/local-import'],
   ['funpipe', 'Queue funscripts', '/funpipe'],
-  ['hash', 'Build hash DB', '/hash-management']
+  ['hash', 'Build hash DB', '/performer-management']
 ];
 
 // ── formatting ───────────────────────────────────────────────
@@ -83,9 +85,15 @@ const post = (url, body) => send('POST', url, body || {});
  */
 function capabilities(j) {
   const finished = j.status === 'done' || j.status === 'failed';
-  const cap = { cancel: false, remove: false, retry: false, why: '' };
+  const cap = { cancel: false, remove: false, retry: false, front: false, why: '' };
 
   switch (j.type) {
+    case 'pipeline':
+      cap.cancel = j.status === 'running';
+      cap.remove = j.status !== 'running';
+      cap.retry = j.status === 'failed';
+      cap.front = j.status === 'queued';
+      break;
     case 'import':
       cap.remove = j.status !== 'running';
       cap.why = 'An import can\'t be interrupted once it is moving files';
@@ -211,7 +219,7 @@ function JobThumb({ job }) {
   );
 }
 
-function JobRow({ job, open, busy, onToggle, onCancel, onRemove, onRetry, onLink }) {
+function JobRow({ job, open, busy, onToggle, onCancel, onRemove, onRetry, onFront, onLink }) {
   const cap = capabilities(job);
   const log = job.type === 'funpipe' ? (job.raw?.log_tail || []) : null;
   const hasDetail = !!log || !!job.error;
@@ -253,6 +261,7 @@ function JobRow({ job, open, busy, onToggle, onCancel, onRemove, onRetry, onLink
           </SmallButton>
         )}
         {cap.retry && <SmallButton disabled={busy} onClick={onRetry}>Retry</SmallButton>}
+        {cap.front && <SmallButton disabled={busy} onClick={onFront}>Run next</SmallButton>}
         {running
           ? <SmallButton danger disabled={busy || !cap.cancel} tip={cap.cancel ? '' : cap.why} onClick={onCancel}>Cancel</SmallButton>
           : <SmallButton disabled={busy || !cap.remove} tip={cap.remove ? '' : cap.why} onClick={onRemove}>Remove</SmallButton>}
@@ -309,6 +318,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
   const [busyIds, setBusyIds] = useState(() => new Set());
   const [toast, setToast] = useState(null);
   const [editor, setEditor] = useState(null);
+  const [pipelineOpen, setPipelineOpen] = useState(false);
 
   // The hash queue in App.js only learns that a job ended from its own poll.
   // The server list is authoritative, so hand the final state back — otherwise
@@ -357,6 +367,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
   const funpipeOn = jobs.some(j => j.type === 'funpipe' && j.status === 'running');
   const gpuWarning = services?.gpu.warning || null;
   const gpuShared = trainingOn && funpipeOn;
+  const st = services?.scenetest;   // the labels & funscripts queue on scenetest
 
   // ── actions ────────────────────────────────────────────────
   const fail = (err) => setToast({ severity: 'error', msg: err.message });
@@ -371,7 +382,10 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
 
   const dropLocalHash = (ids) => setHashQueue && setHashQueue(prev => prev.filter(q => !ids.includes(q.id)));
 
+  const pipelineJob = (j, action) => post(`/api/pipelines/job/${encodeURIComponent(j.sourceId)}/${action}`);
+
   const removeOne = async (j) => {
+    if (j.type === 'pipeline') return pipelineJob(j, j.status === 'running' ? 'cancel' : 'remove');
     if (j.type === 'import') return send('DELETE', `/api/upload-queue/${encodeURIComponent(j.sourceId)}`);
     if (j.type === 'funpipe') return post('/api/funpipe/queue/remove', { id: j.sourceId });
     if (j.type === 'encode') return send('DELETE', `/api/encode/jobs/${j.sourceId}`);
@@ -380,6 +394,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
   };
 
   const retryOne = async (j) => {
+    if (j.type === 'pipeline') return pipelineJob(j, 'retry');
     if (j.type === 'hash') {
       if (!setHashQueue) throw new Error('The hash queue is not available on this page');
       // Back to "queued": App.js starts it as soon as nothing else is hashing.
@@ -408,6 +423,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
   };
 
   const handleRemove = (j) => withBusy([j.id], () => removeOne(j));
+  const handleFront = (j) => withBusy([j.id], () => pipelineJob(j, 'front'));
   const handleRetry = (j) => withBusy([j.id], async () => {
     await retryOne(j);
     setToast({ severity: 'success', msg: `Re-queued ${j.title}` });
@@ -430,6 +446,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
     if (types.has('import')) calls.push(post('/api/upload-queue/clear-completed'));
     if (types.has('funpipe')) calls.push(post('/api/funpipe/queue/clear-done'));
     if (types.has('encode')) calls.push(post('/api/encode/clear'));
+    finishedInScope.filter(j => j.type === 'pipeline').forEach(j => calls.push(pipelineJob(j, 'remove')));
     const dismissIds = finishedInScope.filter(j => (j.type === 'hash' && !j.local) || j.type === 'cleanup').map(j => j.id);
     if (dismissIds.length) calls.push(post('/api/jobs/dismiss', { ids: dismissIds }));
     dropLocalHash(finishedInScope.filter(j => j.type === 'hash' && j.local).map(j => j.sourceId));
@@ -439,6 +456,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
   });
 
   const funpipeCall = (path) => withBusy(['funpipe-bar'], () => post(path));
+  const pausePipelines = (on) => withBusy(['pipeline-bar'], () => post('/api/pipelines/pause', { on }));
 
   // ── render ─────────────────────────────────────────────────
   const stats = [
@@ -454,7 +472,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
     <PageShell>
       <PageHeader
         title="Jobs"
-        subtitle="Everything running in the background — imports, funscripts, hashing, encoding, cleanup and training"
+        subtitle="Everything running in the background — imports, labels and funscripts, hashing, encoding, cleanup and training"
         actions={(
           <>
             <Button size="small" variant="outlined" disabled={finishedInScope.length === 0} onClick={clearFinished}>
@@ -501,6 +519,11 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
             <ServiceRow tone={!services?.ai.online ? 'idle' : (gpuWarning || gpuShared || trainingOn) ? 'warn' : 'ok'}>
               GPU — {!services?.ai.online ? 'unknown' : trainingOn ? 'busy (training)' : (gpuWarning || gpuShared) ? 'busy' : 'free'}
             </ServiceRow>
+            <ServiceRow tone={!st ? 'idle' : !st.online ? 'off' : st.paused ? 'warn' : 'ok'}>
+              <Box component="span" title={st?.error || st?.url || ''}>
+                Labels &amp; funscripts — {!st ? 'checking…' : !st.online ? 'offline' : st.paused ? 'paused' : 'running'}
+              </Box>
+            </ServiceRow>
             <ServiceRow tone={!services ? 'idle' : services.ffmpeg.available ? 'ok' : 'off'}>
               FFmpeg — {!services ? 'checking…' : services.ffmpeg.available ? 'ready' : 'not found'}
             </ServiceRow>
@@ -511,6 +534,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
 
           <Box>
             <Box sx={railHeadSx}>Start something</Box>
+            <RailButton icon={<ViewTimelineIcon />} label="Labels & funscripts…" onClick={() => setPipelineOpen(true)} />
             {START_LINKS.map(([key, label, to]) => {
               const Icon = JOB_TYPE_ICONS[key];
               return <RailButton key={to} icon={<Icon />} label={`${label} ↗`} onClick={() => navigate(to)} />;
@@ -586,6 +610,26 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
             </Box>
           )}
 
+          {(typeFilter === 'pipeline' || jobs.some(j => j.type === 'pipeline' && (j.status === 'queued' || j.status === 'running'))) && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: SPACE.md, p: '8px 12px',
+              fontSize: '.84rem', bgcolor: 'var(--surface)', border: '1px solid var(--line)',
+              borderRadius: 'var(--radius-lg, 10px)'
+            }}>
+              <Box sx={{
+                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                bgcolor: !st?.online ? 'var(--bad)' : st.paused ? 'var(--warn)' : 'var(--ok)'
+              }} />
+              <b>Labels &amp; funscripts: {!st?.online ? (st?.error || 'scenetest offline') : st.paused ? 'paused' : 'running'}</b>
+              <Box sx={{ flex: 1 }} />
+              <SmallButton disabled={!st?.online || busyIds.has('pipeline-bar')} onClick={() => pausePipelines(!st.paused)}
+                tip="Pausing puts the current video back in the queue and frees the GPU">
+                {st?.paused ? 'Resume' : 'Pause'}
+              </SmallButton>
+              <SmallButton onClick={() => setPipelineOpen(true)}>Add…</SmallButton>
+            </Box>
+          )}
+
           {!loaded && <LoadingState label="Loading jobs…" />}
 
           {loaded && visible.length === 0 && (
@@ -618,6 +662,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
                     onCancel={() => handleRemove(j)}
                     onRemove={() => handleRemove(j)}
                     onRetry={() => handleRetry(j)}
+                    onFront={() => handleFront(j)}
                     onLink={() => navigate(j.link)}
                   />
                 ))}
@@ -626,6 +671,12 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
           })}
         </Box>
       </Box>
+
+      <PipelineDialog
+        open={pipelineOpen}
+        onClose={() => setPipelineOpen(false)}
+        onQueued={(msg) => { setToast({ severity: 'success', msg }); refresh(); }}
+      />
 
       <Snackbar
         open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)}

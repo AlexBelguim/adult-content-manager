@@ -13,7 +13,7 @@
  *                               sources have no remove endpoint of their own)
  *
  * Job shape:
- *   { id, sourceId, type: 'import'|'funpipe'|'hash'|'encode'|'cleanup'|'train',
+ *   { id, sourceId, type: 'import'|'funpipe'|'pipeline'|'hash'|'encode'|'cleanup'|'train',
  *     title, subtitle, status: 'queued'|'running'|'done'|'failed',
  *     progress (0-1|null), done, total, unit, stage, currentFile, note,
  *     elapsedMs, startedAt, finishedAt, error, result, chips: [], thumbPath,
@@ -28,6 +28,7 @@ const { getQueueStatus } = require('../services/uploadQueue');
 const funpipeService = require('../services/funpipeService');
 const encodeService = require('../services/encodeService');
 const hashService = require('../services/hashService');
+const scenetestService = require('../services/scenetestService');
 const { getAiServerUrl } = require('../utils/aiUrl');
 
 // In-memory sources are never pruned by their owners, so "recent" needs a bound.
@@ -61,6 +62,7 @@ async function remote(key, fetcher, isOk, fresh) {
 
 const getFunpipeQueue = (fresh) => remote('funpipe', () => funpipeService.getQueue(), v => v.ok !== false, fresh);
 const getFunpipeHealth = (fresh) => remote('funpipeHealth', () => funpipeService.health(), v => v.ok !== false, fresh);
+const getScenetest = (fresh) => remote('scenetest', () => scenetestService.getState(), v => v.ok !== false, fresh);
 
 const getTraining = (fresh) => remote('training', async () => {
   try {
@@ -149,6 +151,32 @@ async function funpipeJobs(fresh) {
       result: status === 'done' ? 'Funscript written — needs review' : null,
       thumbPath: j.src || null,
       raw: j
+    });
+  });
+}
+
+// scenetest's 'cancelled' = removed or stopped by hand: not a job any more
+const PIPELINE_STATUS = { queued: 'queued', running: 'running', done: 'done', error: 'failed' };
+const PIPELINE_STEP = { detect: 'Labels', script: 'Funscript' };
+
+async function pipelineJobs(fresh) {
+  const s = await getScenetest(fresh);
+  if (!s.ok) return [];
+  return s.jobs.filter(j => PIPELINE_STATUS[j.status] && isRecent(j.finishedMs)).map(j => {
+    const status = PIPELINE_STATUS[j.status];
+    const r = j.result || {};
+    return job({
+      type: 'pipeline', sourceId: j.id, title: path.basename(j.path), subtitle: performerFromPath(j.path), status,
+      progress: status === 'done' ? 1 : (j.kind === 'detect' ? clamp01(j.progress) : null),
+      stage: status === 'running' ? (j.message || null) : (status === 'queued' && s.paused ? 'paused' : null),
+      startedAt: j.startedMs, finishedAt: j.finishedMs, elapsedMs: elapsed(j.startedMs, j.finishedMs),
+      error: status === 'failed' ? (j.message || 'failed — see scenetest\'s worker.log') : null,
+      result: status !== 'done' ? null : j.kind === 'detect'
+        ? `${r.segments ?? '?'} scenes${r.app && r.app !== 'sent' ? ` · ${r.app}` : ''}`
+        : `${r.parts ?? 0} scenes scripted${r.placed ? ` → ${path.basename(r.placed)}` : ''}`,
+      chips: [PIPELINE_STEP[j.kind] || j.kind],
+      thumbPath: j.path,
+      raw: { kind: j.kind, status: j.status, paused: s.paused }
     });
   });
 }
@@ -285,6 +313,7 @@ router.get('/', async (req, res) => {
   const sources = [
     ['import', () => importJobs()],
     ['funpipe', () => funpipeJobs(fresh)],
+    ['pipeline', () => pipelineJobs(fresh)],
     ['hash', () => hashJobs()],
     ['encode', () => encodeJobs()],
     ['cleanup', () => cleanupJobs()],
@@ -302,11 +331,12 @@ router.get('/', async (req, res) => {
 
 router.get('/services', async (req, res) => {
   const fresh = req.query.fresh === '1';
-  const [queue, health, training] = await Promise.all([
-    getFunpipeQueue(fresh), getFunpipeHealth(fresh), getTraining(fresh)
+  const [queue, health, training, scenetest] = await Promise.all([
+    getFunpipeQueue(fresh), getFunpipeHealth(fresh), getTraining(fresh), getScenetest(fresh)
   ]);
   res.json({
     funpipe: { online: queue.ok !== false, workerRunning: !!queue.running, url: queue.url },
+    scenetest: { online: scenetest.ok, paused: !!scenetest.paused, url: scenetest.url, error: scenetest.ok ? null : scenetest.error },
     gpu: { warning: health.ok !== false ? (health.gpu_warning || null) : null },
     ffmpeg: { available: !!encodeService.ffmpegAvailable, ffprobe: !!encodeService.ffprobeAvailable },
     ai: { online: training.ok || queue.ok !== false, url: getAiServerUrl(), trainingActive: !!(training.ok && training.active) }

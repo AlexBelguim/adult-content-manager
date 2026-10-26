@@ -15,12 +15,14 @@ import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import MovieFilterIcon from '@mui/icons-material/MovieFilter';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
 import PsychologyIcon from '@mui/icons-material/Psychology';
+import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
 import useJobs, { jobPercent } from '../hooks/useJobs';
 
 /** One icon per job type — shared with the Jobs page so the two never drift. */
 export const JOB_TYPE_ICONS = {
   import: MoveToInboxIcon,
   funpipe: SmartToyIcon,
+  pipeline: ViewTimelineIcon,
   hash: VpnKeyIcon,
   encode: MovieFilterIcon,
   cleanup: CleaningServicesIcon,

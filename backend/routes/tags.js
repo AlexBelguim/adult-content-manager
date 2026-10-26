@@ -4,13 +4,45 @@ const router = express.Router();
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
+const tagRules = require('../services/tagRules');
 
-// Get tags for a specific file
+// Get tags for a specific file; `auto` = the ones a tag rule set from labelmaster's scenes
 router.get('/file', (req, res) => {
   const { path: filePath } = req.query;
   if (!filePath) return res.status(400).json({ error: 'File path required' });
-  const rows = db.prepare('SELECT tag FROM file_tags WHERE file_path = ?').all(filePath);
-  res.json({ tags: rows.map(r => r.tag) });
+  const rows = db.prepare('SELECT tag, source FROM file_tags WHERE file_path = ?').all(filePath);
+  res.json({ tags: rows.map(r => r.tag), auto: rows.filter(r => r.source === 'labelmaster').map(r => r.tag) });
+});
+
+// Tag rules: what a tag means in labelmaster's terms (services/tagRules), and the terms there are
+router.get('/rules', (req, res) => {
+  res.json({ rules: tagRules.rules(), terms: tagRules.TERMS });
+});
+
+// How many labelled videos a rule would tag, before saving it
+router.post('/rules/preview', (req, res) => {
+  const { terms, min_share: minShare } = req.body;
+  if (!Array.isArray(terms) || !terms.length) return res.json({ matches: 0 });
+  res.json({ matches: tagRules.countMatches(terms, Number(minShare) || 0) });
+});
+
+// Save a tag's rule and run it over every labelled video
+router.put('/rules', (req, res) => {
+  const { tag, terms, min_share: minShare } = req.body;
+  if (!tag || !Array.isArray(terms) || !terms.length) return res.status(400).json({ error: 'tag and terms required' });
+  db.prepare(`
+    INSERT INTO tag_rules (tag, terms, min_share) VALUES (?, ?, ?)
+    ON CONFLICT(tag) DO UPDATE SET terms = excluded.terms, min_share = excluded.min_share
+  `).run(tag, JSON.stringify(terms), Number(minShare) || 0.1);
+  res.json({ success: true, tagged: tagRules.applyRule(tag) });
+});
+
+// Forget a tag's rule (the tags it already set stay)
+router.delete('/rules', (req, res) => {
+  const { tag } = req.body;
+  if (!tag) return res.status(400).json({ error: 'tag required' });
+  db.prepare('DELETE FROM tag_rules WHERE tag = ?').run(tag);
+  res.json({ success: true });
 });
 
 // Get tags for a specific performer
@@ -57,6 +89,7 @@ router.post('/assign-file', (req, res) => {
   const { path: filePath, tag } = req.body;
   if (!filePath || !tag) return res.status(400).json({ error: 'File path and tag required' });
   db.prepare('INSERT OR IGNORE INTO file_tags (file_path, tag) VALUES (?, ?)').run(filePath, tag);
+  db.prepare('DELETE FROM auto_tag_dismissed WHERE file_path = ? AND tag = ?').run(filePath, tag);
   res.json({ success: true });
 });
 
@@ -64,7 +97,10 @@ router.post('/assign-file', (req, res) => {
 router.post('/remove-file', (req, res) => {
   const { path: filePath, tag } = req.body;
   if (!filePath || !tag) return res.status(400).json({ error: 'File path and tag required' });
+  const row = db.prepare('SELECT source FROM file_tags WHERE file_path = ? AND tag = ?').get(filePath, tag);
   db.prepare('DELETE FROM file_tags WHERE file_path = ? AND tag = ?').run(filePath, tag);
+  // taken off by hand: its rule must not set it again
+  if (row?.source === 'labelmaster') db.prepare('INSERT OR IGNORE INTO auto_tag_dismissed (file_path, tag) VALUES (?, ?)').run(filePath, tag);
   res.json({ success: true });
 });
 
@@ -102,9 +138,11 @@ router.delete('/', async (req, res) => {
     if (files.length > 0) {
       return res.status(400).json({ error: 'Tag folder is not empty' });
     }
-    // Remove tag from all files
+    // Remove tag from all files, with its rule
     db.prepare('DELETE FROM file_tags WHERE tag = ?').run(tag);
     db.prepare('DELETE FROM tags WHERE tag = ? AND performer_id IS NULL').run(tag);
+    db.prepare('DELETE FROM tag_rules WHERE tag = ?').run(tag);
+    db.prepare('DELETE FROM auto_tag_dismissed WHERE tag = ?').run(tag);
     await fs.remove(tagFolder);
     res.json({ success: true });
   } catch (e) {

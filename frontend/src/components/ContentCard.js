@@ -39,6 +39,7 @@ import {
   chipLabelOriginFunscriptsSx,
   chipLabelOriginTotalSx
 } from '../styles/ContentCard.styles';
+import PipelineQuickButton from './PipelineQuickButton';
 
 function ContentCard({ genre, onClick, basePath }) {
   const handleClick = () => {
@@ -63,7 +64,12 @@ function ContentCard({ genre, onClick, basePath }) {
   const showBreakdown = origin.pics !== undefined && virtual.pics !== undefined;
 
   return (
-    <Card className="content-card" sx={cardSx}>
+    <Card className="content-card" sx={{ ...cardSx, position: 'relative' }}>
+      {vids > 0 && (
+        <Box sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}>
+          <PipelineQuickButton target={{ folders: [genre.name] }} hint={`${vids} videos in ${genre.name}`} />
+        </Box>
+      )}
       <CardActionArea onClick={handleClick} sx={cardActionAreaSx}>
         <CardContent sx={cardContentSx}>
           {/* Genre Icon */}

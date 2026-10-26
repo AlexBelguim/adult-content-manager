@@ -72,6 +72,8 @@ app.use('/api/tags', require('./routes/tags'));
 app.use('/api/funscripts', require('./routes/funscripts'));
 app.use('/api/funpipe', require('./routes/funpipe')); // Funscript auto-generation pipeline
 app.use('/api/scenes', require('./routes/scenes'));
+app.use('/api/video-labels', require('./routes/video-labels')); // labelmaster's scenes, sent by scenetest
+app.use('/api/pipelines', require('./routes/pipelines')); // labels + funscripts run by scenetest on the GPU PC
 app.use('/api/truenas', require('./routes/truenas'));
 app.use('/api/mobile', require('./routes/mobile')); // Mobile app API
 app.use('/api/ratings', require('./routes/ratings'));

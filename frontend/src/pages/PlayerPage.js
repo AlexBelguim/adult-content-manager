@@ -16,6 +16,9 @@ import {
   usePlayerKeys,
   useScenes
 } from '../components/player';
+import SceneStrip, { SceneChips } from '../components/player/SceneStrip';
+import ScenesCompact from '../components/player/ScenesCompact';
+import { useVideoLabels } from '../components/player/videoLabels';
 import './PlayerPage.css';
 
 const AUTONEXT_KEY = 'player.autoplayNext';
@@ -112,6 +115,11 @@ export default function PlayerPage({ handyIntegration, handyConnected, handyCode
   const path = item?.path;
 
   const videoRef = useRef(null);
+  const [videoEl, setVideoEl] = useState(null);
+  const attachVideo = useCallback((el) => {
+    videoRef.current = el;
+    setVideoEl(el);
+  }, []);
   const stageApi = useRef(null);
   const [autoPlay, setAutoPlay] = useState(false);
   const [loop, setLoop] = useState(false);
@@ -123,6 +131,7 @@ export default function PlayerPage({ handyIntegration, handyConnected, handyCode
   const leftRef = useRef(null);
 
   const scenes = useScenes(isVideo ? path : null);
+  const labels = useVideoLabels(isVideo ? path : null);
   const { funscripts, reload: reloadFunscripts } = useFunscripts(isVideo ? path : null);
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -273,7 +282,9 @@ export default function PlayerPage({ handyIntegration, handyConnected, handyCode
             onNotify={notify}
           />
         )}
-        {isVideo && <ScenesPanel item={item} scenes={scenes} videoRef={videoRef} />}
+        {isVideo && (labels
+          ? <ScenesCompact data={labels} videoEl={videoEl} item={item} />
+          : <ScenesPanel item={item} scenes={scenes} videoRef={videoRef} />)}
         <FileInfoPanel item={item} dimensions={info} duration={info?.duration} />
       </aside>
       {sheetOpen && <button type="button" className="pp-sheet-scrim" aria-label="Close panel" onClick={() => setSheetOpen(false)} />}
@@ -282,8 +293,9 @@ export default function PlayerPage({ handyIntegration, handyConnected, handyCode
         className="pp-sw"
         item={item}
         scenes={scenes}
-        videoRef={videoRef}
+        videoRef={attachVideo}
         apiRef={stageApi}
+        timeline={labels ? <SceneStrip data={labels} videoEl={videoEl} /> : null}
         autoPlay={autoPlay}
         loop={loop}
         onLoopChange={setLoop}
@@ -293,6 +305,7 @@ export default function PlayerPage({ handyIntegration, handyConnected, handyCode
         stageProps={stageProps}
         overlay={(
           <>
+            {labels && <SceneChips data={labels} videoEl={videoEl} />}
             <div className="pp-ud">
               <button type="button" onClick={goPrev} disabled={index <= 0} title="Previous (P)" aria-label="Previous">
                 <Chevron d="M5 15l7-7 7 7" />

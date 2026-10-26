@@ -12,7 +12,7 @@ const NONE = [];
  */
 export default function TagPanel({ item, onTagsChange }) {
   const path = item?.path;
-  const [state, setState] = useState({ path: null, fileTags: NONE });
+  const [state, setState] = useState({ path: null, fileTags: NONE, auto: NONE });
   const [allTags, setAllTags] = useState(NONE);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
@@ -41,8 +41,9 @@ export default function TagPanel({ item, onTagsChange }) {
     if (!path) return null;
     try {
       const res = await fetch(`/api/tags/file?path=${encodeURIComponent(path)}`);
-      const fileTags = res.ok ? ((await res.json()).tags || []) : [];
-      if (latestPath.current === path) setState({ path, fileTags });
+      const data = res.ok ? await res.json() : {};
+      const fileTags = data.tags || [];
+      if (latestPath.current === path) setState({ path, fileTags, auto: data.auto || NONE });
       return fileTags;
     } catch (e) {
       if (latestPath.current === path) setError('Failed to load tags');
@@ -66,6 +67,8 @@ export default function TagPanel({ item, onTagsChange }) {
   const itemTags = Array.isArray(item?.tags) ? item.tags : NONE;
   const fileTags = current ? state.fileTags : itemTags;
   const genre = extractGenreFromPath(path);
+
+  const auto = current ? state.auto : NONE;   // set by a tag rule from labelmaster's scenes
 
   const sorted = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -111,17 +114,18 @@ export default function TagPanel({ item, onTagsChange }) {
       <div className="pl-chips">
         {sorted.map((tag) => {
           const isGenre = !!genre && String(tag).toLowerCase() === genre;
+          const isAuto = auto.includes(tag);
           return (
             <button
               key={tag}
               type="button"
               className={`pl-tg${fileTags.includes(tag) ? ' is-on' : ''}`}
               disabled={isGenre || busyTag === tag || !current}
-              title={isGenre ? 'Genre tag — comes from the folder' : undefined}
+              title={isGenre ? 'Genre tag — comes from the folder' : isAuto ? 'Set from the video’s scenes (tag rule); take it off and it stays off' : undefined}
               aria-pressed={fileTags.includes(tag)}
               onClick={() => toggle(tag)}
             >
-              {tag}
+              {isAuto ? `✦ ${tag}` : tag}
             </button>
           );
         })}

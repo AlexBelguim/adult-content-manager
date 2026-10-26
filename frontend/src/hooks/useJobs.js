@@ -14,6 +14,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 export const JOB_TYPES = {
   import: 'Import',
   funpipe: 'Funscripts',
+  pipeline: 'Labels & funscripts',
   hash: 'Hashing',
   encode: 'Encoding',
   cleanup: 'Cleanup',
