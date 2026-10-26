@@ -104,8 +104,17 @@ def load_labeller_pairs():
     pairs = json.loads(path.read_text(encoding='utf-8'))['pairs']
     return [(p['winner'], p['loser'], p['winner_performer'], p['loser_performer']) for p in pairs]
 
+def load_pairwise_db_orphans():
+    """pairwise.db pairs of performers that were deleted from the app before the import, so they are not in
+    its pairwise_pairs. Kept on this PC in training_data/pairwise_db_orphans.json, in the shape of the app's
+    pairs ({winner, loser, type, source: 'pairwise_db'}); the pictures resolve through training_data/delete."""
+    path = Path(__file__).parent / 'training_data' / 'pairwise_db_orphans.json'
+    if not path.exists(): return []
+    return json.loads(path.read_text(encoding='utf-8'))['pairs']
+
 # Hand-pair sources. Rank images pairs have no source in pairwise_pairs; the other two are legacy
 # and are used only while the training page's "Use legacy pairs" is on (config['use_legacy']).
+# 'pairwise_db' covers the app DB import plus load_pairwise_db_orphans().
 PAIR_SOURCES = {'rank': 'Rank images', 'pairwise_db': 'pairwise.db import', 'labeller': 'old labeller file'}
 
 def log_pair_sources(totals, used):
@@ -987,7 +996,8 @@ def train_clip_siamese(config):
     with RankNet on two kinds of winner > loser pairs:
       - kept beats deleted, within one performer (train performers, resampled every epoch);
       - hand-made same-performer pairs: Rank images and the pairs imported from the old pairwise.db
-        (both in pairwise_pairs, told apart by `source`), plus the old labeller's local file.
+        (both in pairwise_pairs, told apart by `source`; the import's pairs of deleted performers are in a
+        local file), plus the old labeller's local file.
     Val: kept > deleted pairs of held-out performers, plus hand pairs of held-out performers.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1008,7 +1018,8 @@ def train_clip_siamese(config):
     val_set = set(val_performers)
     use_legacy = config.get('use_legacy', True)
     tlog(f"  🎭 Performer split: {len(train_performers)} train / {len(val_performers)} val (holdout) | legacy pairs {'on' if use_legacy else 'off'}")
-    sent = [p for p in config.get('pairs', []) if use_legacy or not p.get('source')]
+    sent = config.get('pairs', []) + [p for p in load_pairwise_db_orphans() if p['type'] == 'intra']
+    sent = [p for p in sent if use_legacy or not p.get('source')]
     labeller = [(w, l, wp) for w, l, wp, lp in load_labeller_pairs() if wp == lp] if use_legacy else []
     hand = [(resolve_path(p['winner']), resolve_path(p['loser']), p.get('source') or 'rank') for p in sent]
     hand = [(w, l, src, performer_from_path(w)) for w, l, src in hand if w and l]
@@ -1144,7 +1155,7 @@ def train_clip_taste(config):
         tlog(f"  🎭 {lvl}: {len(perfs)} performers, {n} pictures, {sum(p in val for p in perfs)} performers held out")
     tlog(f"  🎭 deleted pictures of kept performers: {sum(len(delete_map[p]) for p in both)} ({len(both)} performers)")
 
-    sent = [p for p in config.get('pairs', []) if use_legacy or not p.get('source')]
+    sent = [p for p in config.get('pairs', []) + load_pairwise_db_orphans() if use_legacy or not p.get('source')]
     labeller = load_labeller_pairs() if use_legacy else []
     hand = [(resolve_path(p['winner']), resolve_path(p['loser']), p.get('source') or 'rank') for p in sent]
     hand = [(w, l, src, performer_from_path(w), performer_from_path(l)) for w, l, src in hand if w and l]

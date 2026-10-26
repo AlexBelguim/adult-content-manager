@@ -1314,7 +1314,7 @@ def score_images():
     return jsonify({'success': True, 'results': results, 'duration': duration})
 
 # ── Training Endpoints ────────────────────────────────────────────────────────
-from trainer import training_state, start_training, load_labeller_pairs
+from trainer import training_state, start_training, load_labeller_pairs, load_pairwise_db_orphans
 import zipfile, shutil, json as json_module
 
 TRAINING_DATA_DIR = Path(__file__).parent / 'training_data'
@@ -1394,6 +1394,7 @@ def api_training_data_status():
     keep_performers = sorted([d.name for d in keep_dir.iterdir() if d.is_dir()]) if keep_dir.exists() else []
     delete_performers = sorted([d.name for d in delete_dir.iterdir() if d.is_dir()]) if delete_dir.exists() else []
     labeller = load_labeller_pairs()
+    orphans = load_pairwise_db_orphans()
 
     return jsonify({
         'has_data': keep_count > 0 or delete_count > 0,
@@ -1404,7 +1405,10 @@ def api_training_data_status():
         'manifest': manifest,
         # Old labeller pairs: same performer (both CLIP models), across performers (CLIP taste only)
         'labeller_pairs': sum(wp == lp for _, _, wp, lp in labeller),
-        'labeller_cross_pairs': sum(wp != lp for _, _, wp, lp in labeller)
+        'labeller_cross_pairs': sum(wp != lp for _, _, wp, lp in labeller),
+        # pairwise.db pairs of performers deleted from the app, kept in a local file (legacy, like the import)
+        'pairwise_db_orphans': len(orphans),
+        'pairwise_db_orphans_intra': sum(p['type'] == 'intra' for p in orphans)
     })
 
 
