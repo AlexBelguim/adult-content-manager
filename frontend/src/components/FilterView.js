@@ -308,14 +308,12 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
   };
 
   const handleOpenHash = (performerId) => {
-    const performer = allPerformers.find(p => p.id === performerId);
-    const performerName = performer?.name || '';
-    const url = `/hash-management?performer=${encodeURIComponent(performerName)}`;
+    const url = `/performer-management?performer=${performerId}`;
 
     // Try to find existing window
     const hashWindow = window.open('', 'hashManagementWindow');
 
-    if (hashWindow && hashWindow.location.pathname === '/hash-management') {
+    if (hashWindow && hashWindow.location.pathname === '/performer-management') {
       // Window exists and is on hash management page - just update the URL param without reload
       const newUrl = new URL(url, window.location.origin);
       hashWindow.history.pushState({}, '', newUrl);

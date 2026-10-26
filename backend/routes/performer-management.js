@@ -728,6 +728,64 @@ router.delete('/:id/complete', async (req, res) => {
 });
 
 /**
+ * DELETE /api/performer-management/:id/forget
+ * Delete a performer and her training data: her folders and trash (nothing saved for training), what was already
+ * saved under "deleted keep for training", and every record, the keep/delete decisions, picture pairs and picture
+ * scores she was in included. File hashes stay, so a re-download is still recognised.
+ */
+router.delete('/:id/forget', async (req, res) => {
+  try {
+    const performer = db.prepare(`
+      SELECT p.*, f.path as folder_path FROM performers p LEFT JOIN folders f ON p.folder_id = f.id WHERE p.id = ?
+    `).get(req.params.id);
+    if (!performer) {
+      return res.status(404).send({ error: 'Performer not found' });
+    }
+
+    const deletedFolders = [];
+    if (performer.folder_path && performer.name) {
+      const folders = ['before filter performer', 'after filter performer', 'trash', 'deleted keep for training']
+        .map(f => path.join(performer.folder_path, f, performer.name));
+      for (const folder of folders) {
+        if (!await fs.pathExists(folder)) continue;
+        try {
+          await deleteFolderWithRetry(folder);
+          deletedFolders.push(folder);
+        } catch (err) {
+          return res.status(500).send({
+            error: `Failed to delete folder (file may be open in another program): ${err.message}`,
+            path: folder
+          });
+        }
+      }
+    }
+
+    // her pictures as pair members (any performer's pair) and their scores, then the records themselves
+    const literal = performer.name.replace(/[\\%_]/g, c => `\\${c}`);   // a "_" in her name must not match any letter
+    const inHerFolders = ['before filter performer', 'after filter performer', 'deleted keep for training']
+      .map(f => `%/${f}/${literal}/%`);
+    const forget = db.transaction(() => {
+      const pairs = db.prepare(`
+        DELETE FROM pairwise_pairs WHERE performer_id = ? OR (performer_id IS NULL AND performer_name = ?)
+          OR ${inHerFolders.map(() => "(winner LIKE ? ESCAPE '\\' OR loser LIKE ? ESCAPE '\\')").join(' OR ')}
+      `).run(performer.id, performer.name, ...inHerFolders.flatMap(p => [p, p])).changes;
+      const scores = db.prepare('DELETE FROM image_elo_scores WHERE performer_id = ?').run(performer.id).changes;
+      return { pairs, scores, ...deletePerformerRecord(performer.id) };
+    });
+
+    res.send({
+      success: true,
+      message: `"${performer.name}" deleted with her training data`,
+      deletedFolders,
+      databaseRecords: forget()
+    });
+  } catch (err) {
+    console.error('Error forgetting performer:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+/**
  * POST /api/performer-management/:id/rescan
  * Rescan a performer folder and update stats
  */

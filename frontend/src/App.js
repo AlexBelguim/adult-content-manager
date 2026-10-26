@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Link, Typography, CircularProgress, Box, Alert, Divider } from '@mui/material';
 import Toolbar from './components/Toolbar';
 import MainPage from './pages/MainPage';
@@ -7,7 +7,6 @@ import MobileShell from './mobile/MobileShell';
 import useIsPhone from './mobile/useIsPhone';
 import UnifiedGalleryPage from './pages/UnifiedGalleryPage';
 
-import HashManagementPage from './pages/HashManagementPage';
 import HashResultsPage from './pages/HashResultsPage';
 import PerformerManagementPage from './pages/PerformerManagementPageNew';
 import ThumbnailSelectorWrapper from './components/ThumbnailSelectorWrapper';
@@ -592,23 +591,16 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/scene-editor" element={
               <SceneManagerPage />
             } />
-            <Route path="/hash-management" element={shell(
-              <HashManagementPage
-                basePath={basePath}
-                hashQueue={hashQueue}
-                setHashQueue={setHashQueue}
-                currentJobRef={currentJobRef}
-                pollingIntervalRef={pollingIntervalRef}
-                setShowGlobalQueue={setShowGlobalQueue}
-              />
-            )} />
+            <Route path="/hash-management" element={<Navigate to="/performer-management" replace />} />
             <Route path="/hash-results/:runId" element={shell(<HashResultsPage />)} />
 
             {/* /upload-queue is an alias — it renders the combined import page */}
             <Route path="/upload-queue" element={shell(<LocalImportPage basePath={basePath} />)} />
             <Route path="/local-import" element={shell(<LocalImportPage basePath={basePath} />)} />
             <Route path="/tindersorting" element={shell(<TinderSortingPage basePath={basePath} />)} />
-            <Route path="/performer-management" element={shell(<PerformerManagementPage />)} />
+            <Route path="/performer-management" element={shell(
+              <PerformerManagementPage basePath={basePath} hashQueue={hashQueue} setHashQueue={setHashQueue} />
+            )} />
             <Route path="/pairwise/*" element={shell(<PairwisePage />)} />
             <Route path="/pairwise-mobile" element={
               <PairwiseMobilePage />

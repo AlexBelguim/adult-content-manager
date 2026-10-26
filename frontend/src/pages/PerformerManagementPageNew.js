@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+import useHashActions from '../components/hash/useHashActions';
+import MediaOptimizationPanel from '../components/MediaOptimizationPanel';
+import PipelineDialog from '../components/PipelineDialog';
+import PipelineQuickButton from '../components/PipelineQuickButton';
 import {
   Container,
   Typography,
@@ -28,6 +32,7 @@ import {
   CardContent,
   Grid,
   Alert,
+  Snackbar,
   LinearProgress,
   Collapse,
   RadioGroup,
@@ -70,7 +75,10 @@ import {
   ErrorOutline as ErrorOutlineIcon,
   Schedule as ScheduleIcon,
   CloudQueue as CloudQueueIcon,
-  OpenInNew as OpenInNewIcon
+  OpenInNew as OpenInNewIcon,
+  Storage as StorageIcon,
+  FindInPage as FindInPageIcon,
+  CompareArrows as CompareArrowsIcon
 } from '@mui/icons-material';
 import { offlineStorage } from '../services/OfflineStorage';
 import { socketService } from '../services/SocketService';
@@ -216,8 +224,20 @@ function calculateAge(birthDateStr) {
   }
 }
 
-function PerformerManagementPage() {
+/* Row buttons in three groups: performer, hash DB, labels & funscripts (the first two were separate pages). */
+const actionGroupSx = {
+  display: 'flex', alignItems: 'center', gap: 0.25, px: 0.25, py: '1px',
+  border: '1px solid var(--line)', borderRadius: 'var(--radius, 6px)', bgcolor: 'var(--bg)'
+};
+const actionDividerSx = { display: 'inline-block', width: '1px', height: 18, bgcolor: 'var(--line-strong)', mx: 0.75, verticalAlign: 'middle' };
+
+function PerformerManagementPage({ basePath, hashQueue, setHashQueue }) {
   const [performers, setPerformers] = useState([]);
+  const [pipelineFor, setPipelineFor] = useState(null);   // a performer id: the Labels & funscripts dialog is open for her
+  const [pipelineNote, setPipelineNote] = useState('');
+  const [labelCounts, setLabelCounts] = useState({});   // labelled videos per "<location>/<name>" (GET /api/video-labels/counts)
+  // hash databases (they were the Hash Management page): build through App.js's hash queue, check, compare
+  const hash = useHashActions({ basePath, hashQueue, setHashQueue, onChanged: () => loadPerformers(), onError: (msg) => alert(msg) });
   const [grouped, setGrouped] = useState({ before: [], after: [], 'missing-or-empty': [], blacklisted: [] });
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -246,13 +266,13 @@ function PerformerManagementPage() {
   const [scrapeTarget, setScrapeTarget] = useState(null);
   const [newOnly, setNewOnly] = useState(false);
   const [noLinkOnly, setNoLinkOnly] = useState(false);
+  const [noHashOnly, setNoHashOnly] = useState(false);
   const [aliasInputs, setAliasInputs] = useState({});
   const [linkInputs, setLinkInputs] = useState({}); // performer id → link being typed; present while editing
   const [linkBusy, setLinkBusy] = useState(null);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeSource, setMergeSource] = useState(null);
   const [mergeTarget, setMergeTarget] = useState(null);
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // ?performer=<id>, from the settings modal's "Open in Performer Management"
   const focusId = parseInt(searchParams.get('performer'), 10) || null;
@@ -289,6 +309,10 @@ function PerformerManagementPage() {
     setExpandedPerformer(focusId);
     setTimeout(() => document.getElementById(`performer-${focusId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150);
   }, [focusId, loading, performers]);
+
+  const loadLabelCounts = () => fetch('/api/video-labels/counts').then(r => (r.ok ? r.json() : { counts: {} }))
+    .then(d => setLabelCounts(d.counts || {})).catch(() => {});
+  useEffect(() => { loadLabelCounts(); }, []);
 
   const loadPerformers = async (loadOfflineFirst = false) => {
     try {
@@ -344,19 +368,19 @@ function PerformerManagementPage() {
 
     if (performer.blacklisted === 1) {
       // Blacklisted: can unblacklist or delete completely
-      options = ['unblacklist', 'delete-complete'];
+      options = ['unblacklist', 'delete-complete', 'delete-forget'];
       setSelectedDeleteOption('unblacklist');
     } else if (performer.location === 'after') {
       // In after: can cleanup before folder or delete completely
-      options = ['cleanup-before', 'delete-complete'];
+      options = ['cleanup-before', 'delete-complete', 'delete-forget'];
       setSelectedDeleteOption('cleanup-before');
     } else if (performer.location === 'before') {
       // In before: can blacklist, delete folder only, or delete completely
-      options = ['blacklist', 'delete-folder-only', 'delete-complete'];
+      options = ['blacklist', 'delete-folder-only', 'delete-complete', 'delete-forget'];
       setSelectedDeleteOption('blacklist');
     } else {
       // Missing/empty: only complete delete
-      options = ['delete-complete'];
+      options = ['delete-complete', 'delete-forget'];
       setSelectedDeleteOption('delete-complete');
     }
 
@@ -400,6 +424,12 @@ function PerformerManagementPage() {
 
         case 'delete-complete':
           response = await fetch(`/api/performer-management/${selectedPerformer.id}/complete`, {
+            method: 'DELETE'
+          });
+          break;
+
+        case 'delete-forget':
+          response = await fetch(`/api/performer-management/${selectedPerformer.id}/forget`, {
             method: 'DELETE'
           });
           break;
@@ -664,12 +694,6 @@ function PerformerManagementPage() {
     }
   };
 
-  const handleOpenHashDB = (performerId) => {
-    if (!performerId) return;
-    // navigate to hash management, include performerId as query param
-    navigate(`/hash-management?performerId=${performerId}`);
-  };
-
   const handleScrape = (performer) => setScrapeTarget(performer);
 
   const toggleExpandPerformer = (performerId) => {
@@ -837,6 +861,7 @@ function PerformerManagementPage() {
     }
     if (newOnly) performerList = performerList.filter(p => leakhavenState(p) === 'new');
     if (noLinkOnly) performerList = performerList.filter(p => leakhavenState(p) === 'none');
+    if (noHashOnly) performerList = performerList.filter(p => !p.hasHashDB);
 
     // Apply sorting
     performerList = applySorting(performerList);
@@ -892,6 +917,7 @@ function PerformerManagementPage() {
       case 'delete-folder-only': return 'Delete Folder Only (Keep Database)';
       case 'cleanup-before': return 'Clean Up Before Folder';
       case 'delete-complete': return 'Delete Everything';
+      case 'delete-forget': return 'Delete Everything, Training Data Too';
       default: return option;
     }
   };
@@ -908,6 +934,8 @@ function PerformerManagementPage() {
         return 'Clean up leftover "before filter performer" folder and trash. Merges hash databases. Your "after" folder stays intact.';
       case 'delete-complete':
         return 'PERMANENT deletion of ALL data and files! Deletes folders, database records, hash DB, everything. Cannot be undone!';
+      case 'delete-forget':
+        return 'PERMANENT: everything above, and nothing of her is kept for training. Her trash is deleted instead of saved, her pictures already saved in "deleted keep for training" are deleted, and so are her keep/delete decisions, picture pairs and picture scores. File hashes stay, so a re-download is still recognised. Models already trained on her keep what they learned until their next training. Cannot be undone!';
       default:
         return '';
     }
@@ -1343,6 +1371,9 @@ function PerformerManagementPage() {
                     {performer.hashStats.deletedCount}
                   </Typography>
                 </Box>
+                <Button size="small" color="error" variant="outlined" startIcon={<DeleteIcon />} onClick={() => hash.remove(performer)}>
+                  Delete hash DB
+                </Button>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center', mt: 0.5 }}>
                   <Typography variant="caption" color="textSecondary">
                     Updated: {formatDate(performer.hashStats.lastUpdated)}
@@ -1688,15 +1719,17 @@ function PerformerManagementPage() {
               <Tooltip title={performer.hasHashDB
                 ? `Hash database — ${performer.hashStats?.fileCount ?? 0} files`
                 : 'No hash database'}>
-                <Box
-                  component="span"
-                  onClick={performer.hasHashDB ? (e) => { e.stopPropagation(); handleOpenHashDB(performer.id); } : undefined}
-                  sx={{ ...dotSx(performer.hasHashDB ? 'var(--ok)' : 'var(--faint)'),
-                        cursor: performer.hasHashDB ? 'pointer' : 'default' }}
-                >
+                <Box component="span" sx={dotSx(performer.hasHashDB ? 'var(--ok)' : 'var(--faint)')}>
                   hash
                 </Box>
               </Tooltip>
+              {performer.vids_count > 0 && (
+                <Tooltip title={`${labelledOf(performer)} of ${performer.vids_count} videos labelled (scenes, dress state, tags)`}>
+                  <Box component="span" sx={dotSx(unlabelledOf(performer) ? 'var(--warn)' : 'var(--ok)')}>
+                    {unlabelledOf(performer) ? `${unlabelledOf(performer)} unlabelled` : 'labelled'}
+                  </Box>
+                </Tooltip>
+              )}
               {renderScrapeFlag(performer)}
               {renderLeakhavenFlag(performer)}
               <Tooltip title={performer.folderExists
@@ -1714,7 +1747,7 @@ function PerformerManagementPage() {
             </Box>
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexShrink: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
             {hasUpdate && (
               <Tooltip title="Mark update as seen">
                 <IconButton size="small" sx={iconBtnSx('var(--bad)', 'var(--ok)')}
@@ -1723,33 +1756,43 @@ function PerformerManagementPage() {
                 </IconButton>
               </Tooltip>
             )}
-            <Tooltip title="Rename performer">
-              <IconButton size="small" sx={iconBtnSx()} onClick={() => handleRenameClick(performer)}>
-                <EditIcon />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Scrape…">
-              <IconButton size="small" sx={iconBtnSx()} onClick={() => handleScrape(performer)}>
-                <SearchIcon />
-              </IconButton>
-            </Tooltip>
-            {!performer.blacklisted && performer.folderExists && (
-              <Tooltip title="Rescan performer folder">
-                <IconButton size="small" sx={iconBtnSx()} onClick={() => handleRescanPerformer(performer)}>
-                  <RefreshIcon />
+            <Box sx={actionGroupSx} title="Performer">
+              <Tooltip title="Rename performer">
+                <IconButton size="small" sx={iconBtnSx()} onClick={() => handleRenameClick(performer)}>
+                  <EditIcon />
                 </IconButton>
               </Tooltip>
+              <Tooltip title="Scrape…">
+                <IconButton size="small" sx={iconBtnSx()} onClick={() => handleScrape(performer)}>
+                  <SearchIcon />
+                </IconButton>
+              </Tooltip>
+              {!performer.blacklisted && performer.folderExists && (
+                <Tooltip title="Rescan performer folder">
+                  <IconButton size="small" sx={iconBtnSx()} onClick={() => handleRescanPerformer(performer)}>
+                    <RefreshIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+              <Tooltip title="Merge into another performer">
+                <IconButton size="small" sx={iconBtnSx('var(--dim)', 'var(--warn)')} onClick={() => handleMergeClick(performer)}>
+                  <MergeIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete or manage">
+                <IconButton size="small" sx={iconBtnSx('var(--dim)', 'var(--bad)')} onClick={() => handleDeleteClick(performer)}>
+                  <DeleteIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+            <Box sx={actionGroupSx} title="Hash DB">
+              {renderHashButtons(performer, true)}
+            </Box>
+            {!performer.blacklisted && performer.folderExists && (
+              <Box sx={actionGroupSx} title="Labels & funscripts">
+                {renderPipelineButton(performer, true)}
+              </Box>
             )}
-            <Tooltip title="Merge into another performer">
-              <IconButton size="small" sx={iconBtnSx('var(--dim)', 'var(--warn)')} onClick={() => handleMergeClick(performer)}>
-                <MergeIcon />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Delete or manage">
-              <IconButton size="small" sx={iconBtnSx('var(--dim)', 'var(--bad)')} onClick={() => handleDeleteClick(performer)}>
-                <DeleteIcon />
-              </IconButton>
-            </Tooltip>
             <Tooltip title={isExpanded ? 'Hide details' : 'Show details'}>
               <IconButton size="small" sx={iconBtnSx()} onClick={() => toggleExpandPerformer(performer.id)}>
                 {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
@@ -1775,6 +1818,89 @@ function PerformerManagementPage() {
    * group already knows which two records are the pair, so Merge acts on them
    * directly rather than sending you to an Autocomplete over every performer.
    */
+  const labelledOf = (performer) => labelCounts[`${performer.location}/${performer.name}`] || 0;
+  const unlabelledOf = (performer) => Math.max(0, (performer.vids_count || 0) - labelledOf(performer));
+
+  /** Labels or labels + funscripts for her videos (a menu); "Choose more…" opens the picker with her selected. */
+  const renderPipelineButton = (performer, card) => (
+    <PipelineQuickButton
+      target={{ performerIds: [performer.id] }}
+      hint={performer.vids_count ? `${unlabelledOf(performer)} of ${performer.vids_count} videos unlabelled` : 'no videos'}
+      onMore={() => setPipelineFor(performer.id)}
+      sx={card ? iconBtnSx() : undefined}
+      fontSize={card ? undefined : 'small'}
+      color={card ? undefined : 'primary'}
+    />
+  );
+
+  /** Her hash-database buttons: build or rebuild, duplicates in her own files, compare with another performer. */
+  const renderHashButtons = (performer, card) => {
+    const size = card ? undefined : 'small';
+    const sx = card ? iconBtnSx() : undefined;
+    const ready = performer.hasHashDB;
+    const queued = hash.queued(performer.id);
+    return (
+      <>
+        {!performer.blacklisted && performer.folderExists && (
+          <Tooltip title={queued ? 'Hash DB queued, see Jobs' : ready ? `Rebuild her hash DB (${performer.hashStats?.fileCount ?? 0} files)` : 'Build her hash DB'}>
+            <span>
+              <IconButton size="small" sx={sx} color={card ? undefined : 'primary'} disabled={queued} onClick={() => hash.build(performer)}>
+                {queued ? <CircularProgress size={14} color="inherit" /> : <StorageIcon fontSize={size} />}
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
+        <Tooltip title={ready ? 'Find duplicates among her own files' : 'Needs a hash DB first'}>
+          <span>
+            <IconButton size="small" sx={sx} color={card ? undefined : 'info'} disabled={!ready || hash.isBusy(performer.id)}
+              onClick={() => hash.checkOwn(performer.id)}>
+              <FindInPageIcon fontSize={size} />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title={ready ? 'Compare her files with another performer' : 'Needs a hash DB first'}>
+          <span>
+            <IconButton size="small" sx={sx} color={card ? undefined : 'info'} disabled={!ready} onClick={() => hash.compare(performer.id)}>
+              <CompareArrowsIcon fontSize={size} />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </>
+    );
+  };
+
+  /** A name in both before and after: compare their files (both need a hash DB, else build them), or merge them. */
+  const renderPairButtons = (before, after) => {
+    const missing = [before, after].filter(p => !p.hasHashDB);
+    const hashing = missing.length > 0 && missing.every(p => hash.queued(p.id));
+    return (
+      <Box sx={{ display: 'flex', gap: 0.75, flexShrink: 0 }}>
+        {missing.length > 0 ? (
+          <Tooltip title={`Compare needs both hash DBs: build the ${missing.map(p => p.location).join(' and ')} one`}>
+            <span>
+              <Button variant="outlined" size="small" startIcon={<StorageIcon />} disabled={hashing}
+                onClick={() => missing.forEach(p => hash.build(p))}>
+                {hashing ? 'Hashing…' : missing.length === 2 ? 'Hash both' : 'Hash it'}
+              </Button>
+            </span>
+          </Tooltip>
+        ) : (
+          <Tooltip title="Which of her files are in both folders (results open in a new tab)">
+            <span>
+              <Button variant="outlined" size="small" startIcon={<CompareArrowsIcon />} disabled={hash.isBusy(before.id, after.id)}
+                onClick={() => hash.compare(before.id, after.id)}>
+                Compare
+              </Button>
+            </span>
+          </Tooltip>
+        )}
+        <Button variant="contained" size="small" startIcon={<MergeIcon />} onClick={() => handleMergeNow(before.id, after.id)}>
+          Merge
+        </Button>
+      </Box>
+    );
+  };
+
   const renderDuplicateGroupCard = (group) => {
     const groupKey = group[0].name;
     const isExpanded = expandedGroup === groupKey;
@@ -1822,16 +1948,7 @@ function PerformerManagementPage() {
               </Typography>
             </Box>
 
-            {mergeable && (
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<MergeIcon />}
-                onClick={() => handleMergeNow(beforePerformers[0].id, afterPerformers[0].id)}
-              >
-                Merge
-              </Button>
-            )}
+            {mergeable && renderPairButtons(beforePerformers[0], afterPerformers[0])}
           </Box>
         </Panel>
         {isExpanded && group.map(p => renderPerformerCard(p, true))}
@@ -1859,17 +1976,7 @@ function PerformerManagementPage() {
                   {groupKey} <Chip label={`${performers.length} duplicates`} size="small" color="warning" sx={{ ml: 1 }} />
                 </Typography>
               </Box>
-              {beforePerformers.length > 0 && afterPerformers.length > 0 && (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="small"
-                  startIcon={<MergeIcon />}
-                  onClick={() => handleMergeNow(beforePerformers[0].id, afterPerformers[0].id)}
-                >
-                  Merge Now
-                </Button>
-              )}
+              {beforePerformers.length > 0 && afterPerformers.length > 0 && renderPairButtons(beforePerformers[0], afterPerformers[0])}
             </Box>
           </TableCell>
         </TableRow>
@@ -1927,12 +2034,10 @@ function PerformerManagementPage() {
           </TableCell>
           <TableCell align="center">
             {performer.hasHashDB ? (
-              <Tooltip title={`Open Hash Management (${performer.hashStats.fileCount} files)`}>
-                <IconButton size="small" onClick={() => handleOpenHashDB(performer.id)}>
-                  <Badge badgeContent={performer.hashStats.fileCount} color="primary" max={999}>
-                    <FingerprintIcon color="success" fontSize="small" />
-                  </Badge>
-                </IconButton>
+              <Tooltip title={`Hash DB: ${performer.hashStats.fileCount} files`}>
+                <Badge badgeContent={performer.hashStats.fileCount} color="primary" max={999}>
+                  <FingerprintIcon color="success" fontSize="small" />
+                </Badge>
               </Tooltip>
             ) : (
               <Tooltip title="No hash database">
@@ -1946,6 +2051,9 @@ function PerformerManagementPage() {
           <TableCell>
             <Typography variant="body2">
               {performer.pics_count} / {performer.vids_count} / {performer.funscript_vids_count}
+              {unlabelledOf(performer) > 0 && (
+                <Box component="span" sx={{ display: 'block', fontSize: '.72rem', color: 'var(--warn)' }}>{unlabelledOf(performer)} unlabelled</Box>
+              )}
             </Typography>
           </TableCell>
           <TableCell>
@@ -2004,6 +2112,10 @@ function PerformerManagementPage() {
                 <DeleteIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            <Box component="span" sx={actionDividerSx} />
+            {renderHashButtons(performer, false)}
+            {!performer.blacklisted && performer.folderExists && <Box component="span" sx={actionDividerSx} />}
+            {!performer.blacklisted && performer.folderExists && renderPipelineButton(performer, false)}
           </TableCell>
         </TableRow>
         <TableRow>
@@ -2032,6 +2144,7 @@ function PerformerManagementPage() {
 
   const unacknowledgedCount = performers.filter(p => leakhavenState(p) === 'new').length;
   const noLinkCount = performers.filter(p => leakhavenState(p) === 'none').length;
+  const noHashCount = performers.filter(p => !p.hasHashDB && p.blacklisted !== 1).length;
   const checking = checkProgress && checkProgress.done < checkProgress.total;
 
   return (
@@ -2119,6 +2232,13 @@ function PerformerManagementPage() {
           label={`No Leakhaven link ${noLinkCount}`}
           onClick={() => setNoLinkOnly(v => !v)}
           sx={{ ...tabChipSx(noLinkOnly), '& .MuiChip-icon': { fontSize: ICON.inline, color: 'inherit' } }}
+        />
+        <Chip
+          size="small"
+          icon={<FingerprintIcon />}
+          label={`No hash DB ${noHashCount}`}
+          onClick={() => setNoHashOnly(v => !v)}
+          sx={{ ...tabChipSx(noHashOnly), '& .MuiChip-icon': { fontSize: ICON.inline, color: 'inherit' } }}
         />
 
         <TextField
@@ -2243,6 +2363,20 @@ function PerformerManagementPage() {
         </Panel>
       )}
 
+      <MediaOptimizationPanel />
+      {hash.modals}
+
+      <PipelineDialog
+        open={!!pipelineFor}
+        initialPerformerIds={pipelineFor ? [pipelineFor] : []}
+        onClose={() => setPipelineFor(null)}
+        onQueued={setPipelineNote}
+      />
+      <Snackbar open={!!pipelineNote} autoHideDuration={6000} onClose={() => setPipelineNote('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity="success" onClose={() => setPipelineNote('')}>{pipelineNote} — follow them on the Jobs page</Alert>
+      </Snackbar>
+
       {/* Delete/Action Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => !processing && setDeleteDialogOpen(false)} maxWidth="sm" fullWidth
         PaperProps={{ sx: { bgcolor: 'var(--surface)', border: '1px solid var(--line)' } }}>
@@ -2260,7 +2394,7 @@ function PerformerManagementPage() {
             ))}
           </RadioGroup>
           {selectedDeleteOption && (
-            <Alert severity={selectedDeleteOption === 'delete-complete' ? 'error' : 'info'} sx={{ mt: 2 }}>
+            <Alert severity={['delete-complete', 'delete-forget'].includes(selectedDeleteOption) ? 'error' : 'info'} sx={{ mt: 2 }}>
               {getDeleteOptionDescription(selectedDeleteOption)}
             </Alert>
           )}
@@ -2273,7 +2407,7 @@ function PerformerManagementPage() {
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)} disabled={processing} sx={{ color: 'var(--dim)' }}>Cancel</Button>
           <Button onClick={handleDeleteConfirm} variant="contained"
-            color={selectedDeleteOption === 'delete-complete' ? 'error' : 'primary'}
+            color={['delete-complete', 'delete-forget'].includes(selectedDeleteOption) ? 'error' : 'primary'}
             disabled={processing || !selectedDeleteOption}
             startIcon={processing ? <CircularProgress size={20} /> : null}>
             {processing ? 'Processing...' : 'Confirm'}

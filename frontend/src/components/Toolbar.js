@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider, Popover, Badge } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Difference, Science, ViewInAr, Waves, Vibration } from '@mui/icons-material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Science, ViewInAr, Waves, Vibration } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 import JobsIndicator from './JobsIndicator';
 import Logo from './Logo';
@@ -282,8 +282,7 @@ function Toolbar({
           {[
             [
               ['Scene Editor — open video file', <Videocam key="v" />, () => setShowVideoPathModal(true)],
-              ['Performer Management', <People key="p" />, () => window.open('/performer-management', '_blank')],
-              ['Hash-based duplicate detection', <Difference key="d" />, () => window.open('/hash-management', '_blank')]
+              ['Performer Management — hash DBs and duplicates too', <People key="p" />, () => window.open('/performer-management', '_blank')]
             ],
             [
               ['Taste Dashboard — system health & AI', <Science key="s" />, () => navigate('/taste-dashboard')],
