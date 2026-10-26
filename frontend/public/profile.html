@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Profile data</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* the app's darkroom tokens (frontend/src/styles/tokens.js), as in extra/taste-preview */
+:root {
+  --bg: #0B0B0C; --surface: #141416; --raised: #1C1C1F; --overlay: #242428;
+  --text: #EDEDEF; --dim: #A1A1A6; --muted: #6E6E76; --faint: #4A4A52;
+  --line: rgba(255,255,255,0.08); --line-strong: rgba(255,255,255,0.14);
+  --scrim: rgba(16,16,18,0.72); --scrim-strong: rgba(16,16,18,0.88);
+  --accent: #F0703A; --accent-quiet: rgba(240,112,58,0.14);
+  --ok: #5FA97B; --ok-quiet: rgba(95,169,123,0.15); --warn: #C9922E; --info: #6E8CA8; --info-quiet: rgba(110,140,168,0.15);
+  --bad: #C9564B;
+  --radius: 6px; --radius-lg: 10px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 Inter, Roboto, "Segoe UI", Arial, sans-serif; }
+button, select, input { font: inherit; color: inherit; }
+h2 { margin: 0; font-size: 1.05rem; font-weight: 640; letter-spacing: -.01em; }
+h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.sub { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+
+.fv { height: 100vh; height: 100dvh; display: grid; grid-template-columns: 250px minmax(0, 1fr) 280px; }
+.left { min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; border-right: 1px solid var(--line); }
+.mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.right { min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+.search { width: 100%; background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 6px 9px; }
+.search:focus { outline: none; border-color: var(--accent); }
+.facet button { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 7px; cursor: pointer; font-size: .84rem; }
+.facet button:hover { background: var(--raised); }
+.facet button.is-on { border-color: var(--accent); background: var(--accent-quiet); }
+.facet button span { color: var(--dim); font-variant-numeric: tabular-nums; }
+.facet button.zero { opacity: .35; }
+
+.head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.head .grow { flex: 1 1 200px; min-width: 0; }
+.select { background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 5px 7px; font-size: .84rem; }
+.select option { background: var(--surface); }
+.btn { background: none; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 5px 11px; cursor: pointer; font-size: .84rem; }
+.btn:hover { background: var(--raised); }
+.body { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 14px 16px 40px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.card { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: var(--raised); cursor: pointer; text-align: left; }
+.card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card .info { position: absolute; left: 0; right: 0; bottom: 0; padding: 5px 7px 6px; background: var(--scrim-strong); }
+.card .nm { font-weight: 600; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .tags { color: var(--dim); font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card em { position: absolute; right: 5px; top: 5px; font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; border-radius: 3px; padding: 0 5px; line-height: 15px; text-transform: uppercase; }
+.card em.babepedia { background: var(--info); color: var(--bg); }
+.card em.boobpedia { background: var(--warn); color: var(--bg); }
+
+.box { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); padding: 12px; }
+.dist { display: grid; grid-template-columns: 76px 1fr 34px; gap: 3px 8px; align-items: center; font-size: .76rem; }
+.dist .lab { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist .bar { height: 7px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.dist .bar i { display: block; height: 100%; background: var(--accent); }
+.dist .n { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hint { margin: 0; color: var(--muted); font-size: .76rem; }
+
+.lb { position: fixed; inset: 0; z-index: 10; background: var(--scrim-strong); display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1fr); }
+.lb[hidden] { display: none; }
+.lb-pics { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.lb-main { position: relative; min-height: 0; overflow: hidden; background: var(--bg); }
+.lb-main img { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); object-fit: contain; }
+.lb-strip { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--surface); border-top: 1px solid var(--line); }
+.lb-strip img { height: 76px; border-radius: 4px; cursor: pointer; opacity: .6; }
+.lb-strip img.is-on { opacity: 1; outline: 2px solid var(--accent); }
+.lb-side { background: var(--surface); border-left: 1px solid var(--line); padding: 14px; overflow-y: auto; }
+.card b.v { position: absolute; left: 5px; top: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; border-radius: 3px; padding: 0 5px; line-height: 15px; text-transform: uppercase; color: var(--bg); }
+.card b.v.keep { background: var(--ok); } .card b.v.delete { background: var(--bad); } .card b.v.bad { background: var(--warn); }
+.card b.v.app { top: auto; bottom: 46px; background: var(--info); }
+.card b.v.guess { left: auto; right: 5px; top: 24px; opacity: .9; }
+/* after a swipe the screen's edge flashes green when the model guessed the same, red when not (as components/filter/filter.css) */
+.dflash { position: fixed; inset: 0; z-index: 25; pointer-events: none; animation: dflash .9s ease-out forwards; }
+.dflash.agree { box-shadow: inset 0 0 0 5px var(--ok), inset 0 0 120px var(--ok); }
+.dflash.disagree { box-shadow: inset 0 0 0 5px var(--bad), inset 0 0 120px var(--bad); }
+.dflash b { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; font-size: 3.2rem; font-weight: 800; line-height: 1; text-shadow: 0 2px 10px var(--bg); }
+.dflash b small { display: block; font-size: .9rem; font-weight: 650; margin-top: 4px; color: var(--text); }
+.dflash.agree b { color: var(--ok); } .dflash.disagree b { color: var(--bad); }
+@keyframes dflash { 0%, 45% { opacity: .9; } 100% { opacity: 0; } }
+.dscore { margin-left: auto; background: none; border: 0; padding: 0; font-size: .82rem; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--dim); cursor: pointer; }
+.dscore .y { color: var(--ok); } .dscore .n { color: var(--bad); }
+.vrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 0 6px; }
+.vbtn.love.is-on { background: var(--accent-quiet); border-color: var(--accent); color: var(--accent); }
+.vbad { width: 100%; margin-bottom: 10px; height: 30px; border-radius: var(--radius); border: 1px dashed var(--line-strong); background: none; cursor: pointer; color: var(--dim); font-size: .8rem; }
+.vbad.is-on { border-style: solid; border-color: var(--warn); color: var(--warn); }
+.vbtn { display: flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border-radius: var(--radius-lg); border: 1px solid var(--line-strong); background: var(--raised); cursor: pointer; font-weight: 650; }
+.vbtn.keep.is-on { background: var(--ok-quiet); border-color: var(--ok); color: var(--ok); }
+.vbtn.delete.is-on { background: rgba(201,86,75,0.15); border-color: var(--bad); color: var(--bad); }
+kbd { font: 600 .7rem ui-monospace, Consolas, monospace; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; opacity: .7; }
+.reasons { display: grid; gap: 5px; }
+.reasons.off { opacity: .35; pointer-events: none; }
+.rrow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip { border: 1px solid var(--line-strong); background: none; border-radius: 99px; padding: 1px 9px; font-size: .76rem; cursor: pointer; color: var(--dim); }
+.chip.part { color: var(--text); font-weight: 600; }
+.chip.is-on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+.rparts { display: flex; flex-wrap: wrap; gap: 5px; }
+.rlab { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; min-width: 54px; }
+
+/* the swipe deck: one performer at a time, Tinder-like (the phone's start screen) */
+.deck { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 12px; max-width: 560px; margin: 0 auto; }
+.deck[hidden] { display: none; }
+.dtop { display: flex; align-items: center; gap: 10px; }
+.dcard { position: relative; flex: 1 1 0; min-height: 0; border-radius: 14px; overflow: hidden; background: var(--raised); touch-action: none; user-select: none; cursor: grab; overscroll-behavior: contain; }
+.dcard.fly { transition: transform .22s ease-out, opacity .22s; }
+.dcard img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.dbars { position: absolute; left: 8px; right: 8px; top: 8px; display: flex; gap: 4px; }
+.dbars i { flex: 1; height: 3px; border-radius: 2px; background: var(--text); opacity: .35; }
+.dbars i.on { opacity: 1; }
+.dinfo { position: absolute; left: 0; right: 0; bottom: 0; padding: 48px 14px 12px; background: linear-gradient(transparent, var(--scrim-strong)); pointer-events: none; }
+.dname { font-size: 1.35rem; font-weight: 700; }
+.dtags { color: var(--dim); font-size: .86rem; margin-top: 2px; }
+.dmine { display: inline-block; margin-top: 6px; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border-radius: 3px; padding: 0 6px; color: var(--bg); }
+.dstamp { position: absolute; top: 30px; font-size: 1.7rem; font-weight: 800; letter-spacing: .06em; padding: 2px 12px; border: 3px solid currentColor; border-radius: var(--radius-lg); opacity: 0; pointer-events: none; }
+.dstamp.keep { left: 18px; color: var(--ok); transform: rotate(-12deg); }
+.dstamp.nope { right: 18px; color: var(--bad); transform: rotate(12deg); }
+.dstamp.love { left: 50%; top: auto; bottom: 110px; color: var(--accent); transform: translateX(-50%) rotate(-6deg); }
+.dround.love { color: var(--accent); border-color: var(--accent); }
+.card b.v.love { background: var(--accent); }
+
+/* duels, laid out like the app's Smart Compare (frontend/src/pages/SmartComparePage.js): a header, two performer columns with
+   their photo grids and a VS between them, and Undo / Draw / Skip in a bar at the bottom, or a middle column on a phone held
+   sideways */
+.duel { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+.duel[hidden] { display: none; }
+.duhead { display: flex; align-items: center; gap: 8px; flex: none; padding: 6px 10px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.duhead h2 { font-size: .98rem; }
+.ibtn { width: 36px; height: 36px; display: inline-grid; place-items: center; background: none; border: 0; border-radius: 6px; cursor: pointer; color: var(--text); padding: 0; font-size: 1.1rem; }
+.ibtn:hover { background: var(--raised); }
+.ibtn[hidden] { display: none; }
+.chip2 { font-size: .72rem; font-weight: 600; border-radius: 99px; padding: 2px 8px; border: 1px solid var(--line-strong); color: var(--dim); white-space: nowrap; }
+.chip2.accent { color: var(--accent); border-color: var(--accent); background: var(--accent-quiet); }
+.dubody { flex: 1 1 0; min-height: 0; display: flex; position: relative; touch-action: manipulation; }
+.ducol { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; cursor: pointer; position: relative; }
+.ducol:hover { background: var(--surface); }
+.ducol + .ducol { border-left: 1px solid var(--line); }
+.durow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.durow img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex: none; background: var(--raised); }
+.durow .who { flex: 1 1 0; min-width: 0; }
+.durow .nm { font-weight: 700; font-size: .98rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.durow .sc { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.dugrid { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 8px; display: grid; gap: 6px; align-content: start; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.dugrid img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 5px; display: block; background: var(--raised); }
+.pickhint { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 0 10px; text-align: center; font-weight: 700; color: var(--ok); pointer-events: none; opacity: 0; transition: opacity .12s; background: linear-gradient(to top, var(--ok-quiet), transparent); }
+.ducol:hover .pickhint { opacity: 1; }
+.duwin { position: absolute; inset: 0; pointer-events: none; z-index: 2; box-shadow: inset 0 0 0 3px var(--ok), inset 0 0 70px var(--ok); animation: duwin .3s ease-out forwards; }
+@keyframes duwin { from { opacity: 1; } to { opacity: 0; } }
+.vs { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); border: 1px solid var(--accent); color: var(--accent); font-size: .68rem; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.55); pointer-events: none; }
+.dumid { display: none; flex-direction: column; justify-content: center; gap: 8px; padding: 0 6px; background: var(--surface); border-left: 1px solid var(--line); border-right: 1px solid var(--line); flex: none; z-index: 3; }
+.dubar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; flex: none; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
+.act { display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; font-size: .88rem; white-space: nowrap; cursor: pointer; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); height: 46px; border-radius: 8px; padding: 0 8px; }
+.act:hover { filter: brightness(1.25); }
+.act:disabled { opacity: .3; cursor: default; filter: none; }
+.dumid .act { width: 46px; height: 46px; border-radius: 50%; padding: 0; }
+.dumid .act span, .dumid .act kbd { display: none; }
+.duempty { flex: 1; display: grid; place-items: center; text-align: center; color: var(--dim); padding: 20px; }
+/* a phone held upright: the two performers above each other; held sideways: compact, actions in the middle column */
+@media (max-width: 600px) and (orientation: portrait) {
+  .dubody { flex-direction: column; }
+  .ducol + .ducol { border-left: 0; border-top: 1px solid var(--line); }
+  .dugrid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  .durow img { width: 34px; height: 34px; }
+  .dubar { gap: 4px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .duhead { padding: 2px 8px; }
+  .duhead h2 { font-size: .84rem; }
+  .ibtn { width: 30px; height: 30px; }
+  .durow { padding: 3px 8px; gap: 6px; }
+  .durow img { width: 28px; height: 28px; }
+  .durow .nm { font-size: .82rem; }
+  .dugrid { padding: 4px; gap: 4px; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  .dumid { display: flex; }
+  .dubar, .vs { display: none; }
+}
+.fab.fab2 { bottom: 92px; color: var(--accent); border-color: var(--accent); font-size: 1rem; font-weight: 800; }
+.dwhy { flex: none; max-height: 28vh; overflow-y: auto; display: grid; gap: 6px; }
+.dwhy .chip { padding: 4px 11px; font-size: .84rem; }
+.dwhy .rrow { gap: 6px; }
+.dbtns { flex: none; display: flex; justify-content: center; align-items: center; gap: 18px; }
+.dround { width: 50px; height: 50px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--surface); font-size: 1.25rem; font-weight: 700; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.dround.nope, .dround.keep { width: 64px; height: 64px; font-size: 1.7rem; }
+.dround.nope { color: var(--bad); border-color: var(--bad); }
+.dround.keep { color: var(--ok); border-color: var(--ok); }
+.dround.bad { color: var(--warn); border-color: var(--warn); }
+.dround.back { color: var(--dim); }
+.note { width: 100%; margin-top: 8px; background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 5px 8px; font-size: .8rem; }
+.nav { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; font-size: .8rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+
+.phone { display: none; }
+.mbar { display: none; }
+.fab { position: fixed; right: 16px; bottom: 18px; z-index: 5; width: 62px; height: 62px; border-radius: 50%; border: 1px solid var(--ok); background: var(--surface); color: var(--ok); font-size: 1.6rem; box-shadow: 0 4px 12px rgba(0,0,0,.55); cursor: pointer; }
+
+@media (max-width: 1100px) { .fv { grid-template-columns: 220px minmax(0, 1fr); } .right { display: none; } }
+/* phone: filters behind a button, the detail view as picture on top and a sticky action bar over the reasons; swipe the
+   picture left for the next unlabelled, right for back, tap it for her next picture */
+@media (max-width: 760px) {
+  .fv { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .phone { display: inline-flex; }
+  .fab.phone { display: grid; place-items: center; }
+  #swipe { display: none; }
+  kbd { display: none; }
+  .left { display: none; border-right: 0; border-bottom: 1px solid var(--line); max-height: 60vh; }
+  .left.is-open { display: flex; }
+  .head { padding: 10px 12px; gap: 8px; }
+  .mid { min-height: 0; }
+  .body { flex: none; overflow: visible; padding: 10px 10px 40px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+  .lb { display: flex; flex-direction: column; }
+  .lb-pics { flex: 0 0 52vh; flex: 0 0 52dvh; }
+  .lb-main img { inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); }
+  .lb-strip { padding: 6px 8px; }
+  .lb-strip img { height: 52px; }
+  .lb-side { flex: 1 1 0; min-height: 0; border-left: 0; border-top: 1px solid var(--line); padding: 0 12px 16px; }
+  .mbar { display: grid; grid-template-columns: 44px 1fr 1fr 64px 44px; gap: 6px; position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 8px 0; margin: 0 0 4px; }
+  .mbar button { height: 46px; border-radius: var(--radius-lg); border: 1px solid var(--line-strong); background: var(--raised); font-weight: 650; font-size: .9rem; padding: 0; }
+  .mbar .vbad { margin: 0; height: 46px; font-size: .78rem; }
+  .vrow, .side-bad, .nav .step { display: none; }
+  .chip { padding: 4px 11px; font-size: .84rem; }
+  .rrow { gap: 6px; }
+}
+</style>
+</head>
+<body>
+<div class="fv">
+  <aside class="left">
+    <div><a class="sub" href="/taste-dashboard" style="color:var(--dim);text-decoration:none">← Taste Dashboard</a><h2>Profile data</h2><span class="sub">Babepedia + Boobpedia · read only</span></div>
+    <input class="search" id="q" placeholder="Search names" autocomplete="off">
+    <div id="facets"></div>
+  </aside>
+  <main class="mid">
+    <div class="head">
+      <div class="grow"><h2 id="count">Loading…</h2><span class="sub" id="sub"></span></div>
+      <button class="btn phone" id="filters">Filters</button>
+      <select class="select" id="sort">
+        <option value="popular">Popular first</option><option value="newest">Newest first</option><option value="name">Name</option><option value="age">Age</option><option value="cup">Cup</option>
+        <option value="likely">Model: likely keep first</option><option value="unsure">Model: unsure first</option><option value="p2">Your ranking (duels)</option><option value="lists">Your sorted lists</option>
+      </select>
+      <label class="sub" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="guess" checked style="accent-color:var(--accent)"> Model guesses</label>
+      <label class="sub" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="hide" checked style="accent-color:var(--accent)"> Hide judged</label>
+      <button class="btn" id="clear">Clear filters</button>
+      <button class="btn" id="labelnext">Label next <kbd>→</kbd></button>
+      <button class="btn" id="swipe" style="border-color:var(--accent);color:var(--accent)">Swipe</button>
+      <button class="btn" id="duelbtn">Duels</button>
+    </div>
+    <div class="body"><div class="grid" id="grid"></div></div>
+  </main>
+  <aside class="right">
+    <div class="box" id="dists"></div>
+    <div class="box" id="mine"></div>
+    <p class="hint">Only performers the sites list as adult performers, with a birth year and 18 or older in their first active year. Age is this year minus the birth year. The page refreshes every minute while the collection runs.</p>
+    <p class="hint">The model's % is its keep chance for her: 50% is a coin flip, above leans keep, below leans delete; the further from 50, the surer (58% is a slight lean to keep, 90% fairly sure keep, 10% fairly sure delete).</p>
+    <p class="hint">Your verdict is per performer: would you want her. Reasons are optional, for keep and delete alike: the part alone means it decided it, a word says how. Bad data (no usable picture) stays out of training. Keys for the left hand (right hand on the mouse for reasons): F keep, D delete, Q bad data; → next unlabelled (also from the grid), ← back, Esc close.</p>
+  </aside>
+</div>
+<button class="fab phone" id="fab" title="Swipe">♥</button>
+<button class="fab fab2 phone" id="fab2" title="Duels: who do you like more">VS</button>
+<div class="lb" id="lb" hidden>
+  <div class="lb-pics"><div class="lb-main"><img id="lbimg" alt=""></div><div class="lb-strip" id="strip"></div></div>
+  <div class="lb-side" id="side"></div>
+</div>
+<div class="deck" id="deck" hidden>
+  <div class="dtop"><button class="btn" id="dgrid">Grid</button><button class="btn" id="dduels">Duels</button><span class="sub" id="dcount"></span><button class="dscore" id="dscore" title="How often the model guessed your swipe (tap to reset)"></button></div>
+  <div class="dcard" id="dcard"><img id="dimg" alt=""><div class="dbars" id="dbars"></div>
+    <b class="dstamp keep" id="dyes">KEEP</b><b class="dstamp nope" id="dno">NOPE</b><b class="dstamp love" id="dlove">LOVE</b>
+    <div class="dinfo"><div class="dname" id="dname"></div><div class="dtags" id="dtags"></div><span class="dmine" id="dmine" hidden></span></div></div>
+  <div class="dwhy" id="dwhy"></div>
+  <div class="dbtns"><button class="dround back" id="dback" title="Back (←)">↺</button><button class="dround nope" id="dnope" title="Delete (D)">✕</button><button class="dround love" id="dstar" title="Love: a keep you like a lot (R, or swipe up)">★</button><button class="dround keep" id="dkeep" title="Keep (F)">♥</button><button class="dround bad" id="dbad" title="Bad data: no usable picture (Q)">!</button></div>
+</div>
+<div class="duel" id="duel" hidden>
+  <div class="duhead">
+    <button class="ibtn" id="dugrid" title="Back to the grid">←</button><h2>Duels</h2>
+    <span class="chip2 accent" id="dusession"></span><span class="chip2" id="dutotal"></span><span style="flex:1"></span>
+    <button class="ibtn" id="dufull" title="Full screen">⛶</button>
+  </div>
+  <div class="dubody" id="dubody"></div>
+  <div class="dubar" id="dubar"></div>
+</div>
+<script>
+const FACETS = [['label', 'Your verdict'], ['inapp', 'In your app'], ['site', 'Site'], ['ethnicity', 'Ethnicity'], ['hair', 'Hair'], ['body', 'Body type'], ['cup', 'Cup'],
+                ['natural', 'Breasts'], ['eyes', 'Eyes'], ['tattoos', 'Tattoos'], ['ageband', 'Age']];
+const PARTS = {
+  face: ['cute', 'pretty', 'sexy', 'plain', 'not my type', 'too much surgery'],
+  breasts: ['small', 'medium', 'big', 'perky', 'saggy', 'fake'],
+  nipples: ['small', 'big', 'puffy', 'dark', 'light', 'pierced'],
+  butt: ['small', 'big', 'round', 'flat'],
+  body: ['slim', 'curvy', 'athletic', 'chubby', 'skinny', 'no curves'],
+  hair: ['blonde', 'brunette', 'black', 'red', 'dyed', 'short', 'long'],
+  skin: ['pale', 'tan', 'dark', 'tattoos', 'piercings'],
+  age: ['young look', 'older look'],
+  vibe: ['innocent', 'slutty', 'elegant', 'girl next door', 'cosplay', 'too much makeup'],
+};
+const DIST = [['ethnicity', 'Ethnicity'], ['hair', 'Hair'], ['body', 'Body type'], ['cup', 'Cup'], ['natural', 'Breasts'], ['ageband', 'Age']];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const band = a => a == null ? null : a < 25 ? 'under 25' : a < 30 ? '25–29' : a < 35 ? '30–34' : a < 40 ? '35–39' : a < 50 ? '40–49' : '50+';
+let all = [], order = [], on = {}, modelInfo = null;
+
+async function load() {
+  const [rows, mi] = await Promise.all([fetch('/api/profile/performers').then(r => r.json()), fetch('/api/profile/model').then(r => r.json())]);
+  modelInfo = mi;
+  rows.forEach((p, i) => { p.ageband = band(p.age); p.i = i; p.label = p.label || 'not yet'; p.inapp = p.in_app ? 'yes' : 'no'; });
+  all = rows; render();
+}
+// Hide judged keeps the grid to performers without a verdict, unless the Your verdict filter asks for judged ones
+const hiding = () => $('hide').checked && !on.label?.size;
+const match = (p, skip) => Object.entries(on).every(([k, vals]) => k === skip || !vals.size || vals.has(String(p[k])))
+  && (skip === 'label' || !hiding() || p.label === 'not yet')
+  && (!$('q').value || p.name.toLowerCase().includes($('q').value.toLowerCase()));
+
+function render() {
+  const shown = all.filter(p => match(p));
+  const sort = $('sort').value;
+  const cupN = c => c ? c.charCodeAt(0) : 0;
+  shown.sort(sort === 'popular' ? (a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.i - a.i
+    : sort === 'likely' ? (a, b) => (b.pred ?? -1) - (a.pred ?? -1)
+    : sort === 'p2' ? (a, b) => (b.p2 ?? -1e9) - (a.p2 ?? -1e9)
+    : sort === 'lists' ? (a, b) => (a.lpos ?? 1e12) - (b.lpos ?? 1e12)
+    : sort === 'unsure' ? (a, b) => Math.abs((a.pred ?? 9) - 0.5) - Math.abs((b.pred ?? 9) - 0.5)
+    : sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : sort === 'age' ? (a, b) => (a.age ?? 99) - (b.age ?? 99)
+    : sort === 'cup' ? (a, b) => cupN(b.cup) - cupN(a.cup) : (a, b) => b.i - a.i);
+  order = shown;
+  const bySite = s => all.filter(p => p.site === s).length;
+  $('count').textContent = `${shown.length.toLocaleString()} of ${all.length.toLocaleString()} performers`;
+  $('sub').textContent = `Babepedia ${bySite('babepedia')} · Boobpedia ${bySite('boobpedia')} · ${all.reduce((n, p) => n + p.pictures, 0).toLocaleString()} pictures`;
+  $('grid').innerHTML = shown.slice(0, 600).map((p, j) => {
+    const tags = [p.rank && `#${p.rank}`, p.age && `${p.age}`, p.ethnicity, p.hair, p.body, p.cup && `${p.cup}${p.natural === 'enhanced' ? ' (enh.)' : ''}`].filter(Boolean).join(' · ');
+    return `<button class="card" data-j="${j}"><img loading="lazy" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}" alt=""><em class="${p.site}">${p.site === 'babepedia' ? 'BP' : 'BB'}</em>${p.label !== 'not yet' ? `<b class="v ${p.label}">${p.label}</b>` : ''}${p.in_app ? '<b class="v app">in your app</b>' : ''}${$('guess').checked && p.pred != null ? `<b class="v guess ${p.pred >= 0.5 ? 'keep' : 'delete'}">model ${Math.round(p.pred * 100)}%</b>` : ''}<div class="info"><div class="nm">${esc(p.name)}</div><div class="tags">${esc(tags)}</div></div></button>`;
+  }).join('') + (shown.length > 600 ? `<p class="hint" style="grid-column:1/-1">Showing the first 600; filter to see the rest.</p>` : '');
+  $('facets').innerHTML = FACETS.map(([k, label]) => {
+    const counts = {};
+    all.filter(p => match(p, k)).forEach(p => { const v = String(p[k] ?? 'unknown'); counts[v] = (counts[v] || 0) + 1; });
+    const vals = [...new Set(all.map(p => String(p[k] ?? 'unknown')))].sort((a, b) => (counts[b] || 0) - (counts[a] || 0));
+    return `<div class="facet"><h3>${label}</h3>${vals.map(v => `<button data-k="${k}" data-v="${esc(v)}" class="${on[k]?.has(v) ? 'is-on' : ''}${counts[v] ? '' : ' zero'}">${esc(v)}<span>${counts[v] || 0}</span></button>`).join('')}</div>`;
+  }).join('');
+  $('dists').innerHTML = '<h3>Variety in the current selection</h3>' + DIST.map(([k, label]) => {
+    const c = {}; shown.forEach(p => { if (p[k] != null) c[p[k]] = (c[p[k]] || 0) + 1; });
+    const top = Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 8), mx = Math.max(1, ...top.map(x => x[1]));
+    return `<div style="margin:10px 0 4px" class="sub">${label}</div><div class="dist">${top.map(([v, n]) => `<span class="lab">${esc(v)}</span><span class="bar"><i style="width:${100 * n / mx}%"></i></span><span class="n">${n}</span>`).join('')}</div>`;
+  }).join('');
+  const n = v => all.filter(p => p.label === v).length;
+  const m = modelInfo?.model;
+  $('mine').innerHTML = `<h3>Your verdicts</h3><div class="sub">${n('love')} love · ${n('keep')} keep · ${n('delete')} delete · ${n('bad')} bad data · ${n('not yet')} not yet</div>`
+    + (m ? `<h3 style="margin-top:12px">The model</h3><div class="sub">${esc(m.variant)}, learned from ${modelInfo.judged} verdicts; on performers it did not learn from it ranks a keep above a delete ${Math.round(m.auc * 100)}% of the time (AUC ${m.auc}). Guesses for ${all.filter(p => p.pred != null).length} performers, updated ${esc(modelInfo.made)}.</div>` : '');
+}
+
+$('facets').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const s = on[b.dataset.k] || (on[b.dataset.k] = new Set());
+  s.has(b.dataset.v) ? s.delete(b.dataset.v) : s.add(b.dataset.v);
+  render();
+};
+$('q').oninput = render; $('sort').onchange = render;
+try { $('hide').checked = localStorage.getItem('hideJudged') !== '0'; } catch (e) {}
+$('hide').onchange = () => { try { localStorage.setItem('hideJudged', $('hide').checked ? '1' : '0'); } catch (e) {} render(); };
+try { $('guess').checked = localStorage.getItem('modelGuesses') !== '0'; } catch (e) {}
+$('guess').onchange = () => { try { localStorage.setItem('modelGuesses', $('guess').checked ? '1' : '0'); } catch (e) {} render(); };
+$('clear').onclick = () => { on = {}; $('q').value = ''; render(); };
+
+// reasons in two steps: the parts first; a picked part shows its words. A word stands for its part ("breasts:saggy"), so picking
+// one drops the bare part, dropping the last word brings the bare part back, and the part again clears it all
+function reasonsHTML(set) {
+  const active = p => set.has(p) || [...set].some(r => r.startsWith(p + ':'));
+  return `<div class="rparts">${Object.keys(PARTS).map(p => `<button class="chip part${active(p) ? ' is-on' : ''}" data-part="${p}">${p}</button>`).join('')}</div>`
+    + Object.entries(PARTS).filter(([p]) => active(p)).map(([p, words]) => `<div class="rrow"><span class="rlab">${p}</span>${words.map(w =>
+      `<button class="chip${set.has(p + ':' + w) ? ' is-on' : ''}" data-word="${p}:${w}">${w}</button>`).join('')}</div>`).join('');
+}
+function reasonClick(set, e) {
+  const b = e.target.closest('.chip');
+  if (!b) return false;
+  if (b.dataset.part) {
+    const p = b.dataset.part, words = [...set].filter(r => r.startsWith(p + ':'));
+    if (set.has(p) || words.length) { set.delete(p); words.forEach(w => set.delete(w)); } else set.add(p);
+  } else {
+    const w = b.dataset.word, p = w.split(':')[0];
+    if (set.has(w)) { set.delete(w); if (![...set].some(r => r.startsWith(p + ':'))) set.add(p); }
+    else { set.add(w); set.delete(p); }
+  }
+  return true;
+}
+
+let at = -1, cur = null, noteTimer = null, showPic = null, pics = [];
+// the picture on a phone: swipe left = next unlabelled, swipe right = back, tap = her next picture
+let touch = null;
+$('lbimg').parentElement.addEventListener('touchstart', e => { touch = [e.touches[0].clientX, e.touches[0].clientY]; }, { passive: true });
+$('lbimg').parentElement.addEventListener('touchend', e => {
+  if (!touch) return;
+  const dx = e.changedTouches[0].clientX - touch[0], dy = e.changedTouches[0].clientY - touch[1];
+  touch = null;
+  if (Math.abs(dx) > 60 && Math.abs(dy) < 60) dx < 0 ? nextNew() : open(at - 1);
+  else if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && pics.length > 1) {
+    const i = pics.findIndex(f => $('lbimg').src.endsWith('file=' + f));
+    showPic(pics[(i + 1) % pics.length]);
+  }
+});
+async function open(j) {
+  if (j < 0 || j >= order.length) return;
+  at = j;
+  const p = order[j];
+  const r = await fetch(`/api/profile/performer?site=${p.site}&slug=${encodeURIComponent(p.slug)}`).then(x => x.json());
+  cur = { p, verdict: r.label?.verdict || null, reasons: new Set(r.label?.reasons || []), note: r.label?.note || '' };
+  const pic = f => `/api/profile/full?site=${p.site}&slug=${encodeURIComponent(p.slug)}&file=${f}`;
+  const show = f => { $('lbimg').src = pic(f); [...$('strip').children].forEach(i => i.classList.toggle('is-on', i.dataset.f === f)); };
+  $('strip').innerHTML = r.pictures.map(f => `<img data-f="${f}" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}&file=${f}" alt="">`).join('');
+  $('strip').onclick = e => e.target.dataset.f && show(e.target.dataset.f);
+  const f = r.fields;
+  const rows = Object.entries(f).filter(([k]) => k !== 'categories').map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('');
+  $('side').innerHTML = `<div class="mbar"><button class="mprev">‹</button><button class="vbtn keep" data-v="keep">Keep</button><button class="vbtn delete" data-v="delete">Delete</button><button class="vbad" data-v="bad">Bad data</button><button class="mnext">›</button></div>
+    <h2>${esc(r.name)}</h2><span class="sub">${j + 1} of ${order.length} · ${r.site} · <a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></span>
+    <div class="vrow"><button class="vbtn keep" data-v="keep">Keep <kbd>F</kbd></button><button class="vbtn love" data-v="love">★ Love <kbd>R</kbd></button><button class="vbtn delete" data-v="delete">Delete <kbd>D</kbd></button></div>
+    <button class="vbad side-bad" data-v="bad">Bad data: no usable picture <kbd>Q</kbd></button>
+    <div class="reasons" id="reasons"></div>
+    <input class="note" id="note" placeholder="Note (optional)" value="${esc(cur.note)}">
+    <div class="nav"><button class="btn step" id="prev">Back <kbd>←</kbd></button><button class="btn step" id="nextnew">Next unlabelled <kbd>→</kbd></button><button class="btn" id="lbx">Close <kbd>Esc</kbd></button></div>
+    <dl class="kv">${p.age ? `<dt>age</dt><dd>${p.age}</dd>` : ''}${rows}</dl>
+    ${f.categories?.length ? `<h3 style="margin-top:14px">Categories</h3><p class="sub">${esc(f.categories.join(', '))}</p>` : ''}
+    ${r.babepedia_fields ? `<h3 style="margin-top:14px">Also on Babepedia (pictures b1 …)</h3><dl class="kv">${Object.entries(r.babepedia_fields).map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('')}</dl>` : ''}`;
+  $('side').querySelectorAll('.vbtn, .vbad').forEach(b => b.onclick = () => setVerdict(b.dataset.v));
+  $('reasons').onclick = e => { if (reasonClick(cur.reasons, e)) { save(); paint(); } };
+  $('note').oninput = e => { cur.note = e.target.value; clearTimeout(noteTimer); noteTimer = setTimeout(save, 600); };
+  $('prev').onclick = () => open(at - 1); $('nextnew').onclick = nextNew;
+  $('side').querySelector('.mprev').onclick = () => open(at - 1); $('side').querySelector('.mnext').onclick = nextNew;
+  $('lbx').onclick = close;
+  showPic = f => show(f); pics = r.pictures;
+  show(r.pictures[0]); paint(); $('lb').hidden = false; $('side').scrollTop = 0;
+}
+function paint() {
+  $('side').querySelectorAll('.vbtn, .vbad').forEach(b => b.classList.toggle('is-on', b.dataset.v === cur.verdict));
+  $('reasons').classList.toggle('off', !cur.verdict || cur.verdict === 'bad');
+  $('reasons').innerHTML = reasonsHTML(cur.reasons);
+}
+function save() {
+  if (!cur.verdict) return;
+  cur.p.label = cur.verdict;
+  fetch('/api/profile/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ site: cur.p.site, slug: cur.p.slug, verdict: cur.verdict, reasons: [...cur.reasons], note: cur.note }) });
+}
+function setVerdict(v) {
+  cur.verdict = cur.verdict === v ? null : v;   // pressing it again takes the verdict back
+  if (cur.verdict) save();
+  else {
+    cur.p.label = 'not yet';
+    fetch('/api/profile/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ site: cur.p.site, slug: cur.p.slug, verdict: null }) });
+  }
+  paint();
+}
+function nextNew() {
+  const j = order.findIndex((p, i) => i > at && p.label === 'not yet');
+  open(j >= 0 ? j : order.findIndex(p => p.label === 'not yet'));
+}
+function close() { $('lb').hidden = true; render(); }
+
+// the swipe deck: her pictures tapped through (right of the card next, left third back), dragged right = keep, left = delete; the
+// reasons picked before the swipe go with it; ↺ shows the one before again, its verdict can be swiped anew
+let dpics = [], dpi = 0, drag = null;
+async function deck(j) {
+  const card = $('dcard');
+  card.classList.remove('fly'); card.style.transform = ''; card.style.opacity = '';
+  $('deck').hidden = false;
+  if (j < 0 || j >= order.length) {
+    cur = null; dpics = []; $('dimg').removeAttribute('src'); $('dbars').innerHTML = ''; $('dwhy').innerHTML = ''; $('dmine').hidden = true;
+    $('dname').textContent = 'All done'; $('dtags').textContent = 'No one left without a verdict in this selection.'; $('dcount').textContent = '';
+    return;
+  }
+  at = j;
+  const p = order[j];
+  const r = await fetch(`/api/profile/performer?site=${p.site}&slug=${encodeURIComponent(p.slug)}`).then(x => x.json());
+  cur = { p, verdict: r.label?.verdict || null, reasons: new Set(r.label?.reasons || []), note: r.label?.note || '' };
+  p.pred = r.pred ?? p.pred;   // the model may have guessed her since the page loaded
+  dpics = r.pictures.map(f => `/api/profile/full?site=${p.site}&slug=${encodeURIComponent(p.slug)}&file=${f}`); dpi = 0;
+  dshow();
+  $('dname').textContent = r.name + (p.age ? `, ${p.age}` : '');
+  $('dtags').textContent = [p.rank && `#${p.rank}`, p.ethnicity, p.hair, p.body, p.cup && p.cup + (p.natural === 'enhanced' ? ' (enhanced)' : ''),
+                            p.tattoos === 'yes' && 'tattoos', p.in_app && 'in your app'].filter(Boolean).join(' · ');
+  $('dmine').hidden = !cur.verdict;
+  if (cur.verdict) { $('dmine').textContent = `you said ${cur.verdict}`; $('dmine').style.background = `var(--${{ keep: 'ok', love: 'accent', delete: 'bad', bad: 'warn' }[cur.verdict]})`; }
+  $('dcount').textContent = `${order.filter(x => x.label === 'not yet').length} without a verdict`;
+  $('dwhy').innerHTML = reasonsHTML(cur.reasons);
+  const next = order.find((x, i) => i > j && x.label === 'not yet');
+  if (next) new Image().src = `/api/profile/thumb?site=${next.site}&slug=${encodeURIComponent(next.slug)}`;
+}
+function dshow() { $('dimg').src = dpics[dpi]; $('dbars').innerHTML = dpics.length > 1 ? dpics.map((_, i) => `<i class="${i === dpi ? 'on' : ''}"></i>`).join('') : ''; }
+function dnext() { const j = order.findIndex((p, i) => i > at && p.label === 'not yet'); deck(j >= 0 ? j : order.findIndex(p => p.label === 'not yet')); }
+// the model's guess shows only after the swipe, so it cannot steer the verdicts it learns from: a green or red flash, and the
+// running count of agreements (kept in this browser; tap it to start over)
+let score = { y: 0, n: 0 };
+try { score = JSON.parse(localStorage.getItem('modelScore')) || score; } catch (e) {}
+function showScore() {
+  const t = score.y + score.n;
+  $('dscore').innerHTML = t ? `Model <span class="y">✓ ${score.y}</span> · <span class="n">✗ ${score.n}</span> · ${Math.round(100 * score.y / t)}%` : 'Model ✓ 0 · ✗ 0';
+}
+$('dscore').onclick = () => { score = { y: 0, n: 0 }; try { localStorage.setItem('modelScore', JSON.stringify(score)); } catch (e) {} showScore(); };
+showScore();
+function dverdict(v) {
+  if (!cur) return;
+  cur.verdict = v;
+  save();
+  const g = cur.p.pred;
+  if (g != null && v !== 'bad') {
+    const agree = (g >= 0.5) === (v === 'keep' || v === 'love');
+    score[agree ? 'y' : 'n']++;
+    try { localStorage.setItem('modelScore', JSON.stringify(score)); } catch (e) {}
+    showScore();
+    const f = document.createElement('div');
+    f.className = `dflash ${agree ? 'agree' : 'disagree'}`;
+    f.innerHTML = `<b>${Math.round(g * 100)}%<small>model's keep chance</small></b>`;
+    document.body.appendChild(f);
+    setTimeout(() => f.remove(), 920);
+  }
+  const card = $('dcard');
+  card.classList.add('fly');
+  card.style.transform = v === 'love' ? 'translateY(-130%)' : v === 'bad' ? 'translateY(120%)'
+    : `translateX(${v === 'keep' ? 130 : -130}%) rotate(${v === 'keep' ? 16 : -16}deg)`;
+  card.style.opacity = '0';
+  setTimeout(dnext, 220);
+}
+$('dwhy').onclick = e => { if (cur && reasonClick(cur.reasons, e)) { if (cur.verdict) save(); $('dwhy').innerHTML = reasonsHTML(cur.reasons); } };
+$('dcard').addEventListener('pointerdown', e => { if (!cur) return; drag = { x: e.clientX, y: e.clientY, dx: 0 }; $('dcard').setPointerCapture(e.pointerId); });
+$('dcard').addEventListener('pointermove', e => {
+  if (!drag) return;
+  drag.dx = e.clientX - drag.x; drag.dy = e.clientY - drag.y;
+  const up = drag.dy < 0 && Math.abs(drag.dy) > Math.abs(drag.dx);   // up = love
+  $('dcard').style.transform = up ? `translateY(${drag.dy}px)` : `translateX(${drag.dx}px) rotate(${drag.dx / 22}deg)`;
+  $('dyes').style.opacity = up ? 0 : Math.max(0, drag.dx / 90); $('dno').style.opacity = up ? 0 : Math.max(0, -drag.dx / 90);
+  $('dlove').style.opacity = up ? Math.max(0, -drag.dy / 90) : 0;
+});
+const dend = e => {
+  if (!drag) return;
+  const dx = drag.dx, dy = e.clientY - drag.y;
+  drag = null;
+  $('dyes').style.opacity = 0; $('dno').style.opacity = 0; $('dlove').style.opacity = 0;
+  if (dy < -110 && Math.abs(dx) < 90) return dverdict('love');
+  if (dx > 100) return dverdict('keep');
+  if (dx < -100) return dverdict('delete');
+  $('dcard').style.transform = '';
+  if (e.type === 'pointerup' && Math.abs(dx) < 8 && Math.abs(dy) < 8 && dpics.length > 1) {
+    const box = $('dcard').getBoundingClientRect();
+    dpi = e.clientX - box.left < box.width / 3 ? Math.max(0, dpi - 1) : Math.min(dpics.length - 1, dpi + 1);
+    dshow();
+  }
+};
+$('dcard').addEventListener('pointerup', dend);
+$('dcard').addEventListener('pointercancel', dend);
+$('dkeep').onclick = () => dverdict('keep');
+$('dstar').onclick = () => dverdict('love');
+$('dnope').onclick = () => dverdict('delete');
+$('dbad').onclick = () => dverdict('bad');
+$('dback').onclick = () => deck(at - 1);
+$('dgrid').onclick = () => { $('deck').hidden = true; render(); };
+$('swipe').onclick = $('fab').onclick = () => { at = -1; dnext(); };
+
+// duels as the app's Smart Compare: the server picks two keeps or loves the ranking cannot tell apart; tap anywhere in the one you
+// like more. Draw = alike, Skip = no answer (both kept, so the pair is not asked again; neither teaches P2); Undo steps back
+let du = null, duHist = [], duBusy = false, duSession = 0;
+const ACTS = [['undo', '↺', 'Undo', 'Z'], ['draw', '=', 'Draw', 'X'], ['skip', '»', 'Skip', 'S']];
+const actHTML = () => ACTS.map(([id, icon, label, key]) => `<button class="act" data-act="${id}" title="${label} (${key})">${icon} <span>${label}</span> <kbd>${key}</kbd></button>`).join('');
+$('dubar').innerHTML = actHTML();
+async function duelNext() {
+  $('deck').hidden = true; $('duel').hidden = false;
+  const r = await fetch('/api/profile/duel/next').then(x => x.json());
+  $('dusession').textContent = `${duSession} this session`;
+  $('dutotal').textContent = `${r.progress} · ${r.done} duels`;
+  du = r.a ? { a: r.a, b: r.b } : null;
+  duRender();
+}
+function duCol(p, s) {
+  const t = f => `/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}&file=${f}`;
+  return `<div class="ducol" data-s="${s}"><div class="durow"><img src="${t(p.pictures[0])}" alt=""><div class="who"><div class="nm">${esc(p.name)}${p.age ? `, ${p.age}` : ''}</div>`
+    + `<div class="sc">${esc([p.ethnicity, p.hair, p.body, p.cup].filter(Boolean).join(' · '))}</div></div><span class="chip2">${p.duels} duels</span>`
+    + `${p.verdict === 'love' ? '<span class="chip2 accent">★ love</span>' : ''}</div>`
+    + `<div class="dugrid">${p.pictures.map(f => `<img loading="lazy" src="${t(f)}" alt="">`).join('')}</div><div class="pickhint">${s === 'a' ? '← Pick' : 'Pick →'}</div></div>`;
+}
+function duRender() {
+  $('dubody').innerHTML = du ? duCol(du.a, 'a') + `<div class="dumid">${actHTML()}</div>` + duCol(du.b, 'b') + '<div class="vs">VS</div>'
+    : '<div class="duempty"><div><h2>No pairs left</h2>Keep or love more performers first.</div></div>';
+}
+async function duChoose(w) {
+  if (!du || duBusy) return;
+  duBusy = true;
+  if (w === 'a' || w === 'b') document.querySelector(`.ducol[data-s="${w}"]`).insertAdjacentHTML('beforeend', '<div class="duwin"></div>');
+  await fetch('/api/profile/duel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ a: du.a.key, b: du.b.key, winner: w }) });
+  duHist.push(du); duSession++;
+  setTimeout(async () => { await duelNext(); duBusy = false; }, w === 'a' || w === 'b' ? 280 : 0);
+}
+async function duUndo() {
+  if (!duHist.length || duBusy) return;
+  await fetch('/api/profile/duel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ undo: true }) });
+  du = duHist.pop(); duSession = Math.max(0, duSession - 1);
+  $('dusession').textContent = `${duSession} this session`;
+  duRender();
+}
+const duAct = id => id === 'undo' ? duUndo() : duChoose(id);
+$('dubody').onclick = e => {
+  const a = e.target.closest('.act');
+  if (a) return duAct(a.dataset.act);
+  const col = e.target.closest('.ducol');
+  if (col) duChoose(col.dataset.s);
+};
+$('dubar').onclick = e => { const a = e.target.closest('.act'); if (a) duAct(a.dataset.act); };
+$('dugrid').onclick = () => { $('duel').hidden = true; load(); };
+// full screen, held sideways where the phone allows it (Android Chrome; Safari on an iPhone has no full screen for pages, so
+// the button is not shown there)
+$('dufull').hidden = !document.fullscreenEnabled;
+$('dufull').onclick = async () => {
+  if (document.fullscreenElement) return document.exitFullscreen();
+  await document.documentElement.requestFullscreen();
+  screen.orientation?.lock?.('landscape')?.catch(() => {});
+};
+$('duelbtn').onclick = $('fab2').onclick = $('dduels').onclick = duelNext;
+
+$('grid').onclick = e => { const b = e.target.closest('.card'); if (b) open(+b.dataset.j); };
+$('labelnext').onclick = () => { at = -1; nextNew(); };
+$('filters').onclick = () => document.querySelector('.left').classList.toggle('is-open');
+document.onkeydown = e => {
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
+  // the left hand only, the right hand on the mouse for reasons (Alex, Moonlander AZERTY): F keep, D delete, Q bad data on the
+  // home row, the arrows of the left half to move: → next unlabelled, ← back
+  const k = e.key.toLowerCase();
+  if (!$('duel').hidden) {   // duels, the app's Smart Compare keys: ← / A left, → / D right, X draw, S skip, Z undo
+    if (k === 'escape') $('dugrid').click();
+    else if (k === 'arrowleft' || k === 'a') duChoose('a');
+    else if (k === 'arrowright' || k === 'd') duChoose('b');
+    else if (k === 'x') duChoose('draw');
+    else if (k === 's') duChoose('skip');
+    else if (k === 'z') duUndo();
+    return;
+  }
+  if (!$('deck').hidden) {
+    if (k === 'escape') $('dgrid').click();
+    else if (k === 'r') dverdict('love');
+    else if (k === 'f') dverdict('keep');
+    else if (k === 'd') dverdict('delete');
+    else if (k === 'q') dverdict('bad');
+    else if (k === 'arrowright') dnext();
+    else if (k === 'arrowleft') deck(at - 1);
+    return;
+  }
+  if ($('lb').hidden) { if (k === 'arrowright') { at = -1; nextNew(); } return; }
+  if (k === 'escape') close();
+  else if (k === 'r') setVerdict('love');
+  else if (k === 'f') setVerdict('keep');
+  else if (k === 'd') setVerdict('delete');
+  else if (k === 'q') setVerdict('bad');
+  else if (k === 'arrowright') nextNew();
+  else if (k === 'arrowleft') open(at - 1);
+};
+// /profile.html#duels (the Taste Dashboard's Duels button) opens the duels; otherwise a phone starts in the swipe deck
+load().then(() => { if (location.hash === '#duels') duelNext(); else if (matchMedia('(max-width: 760px)').matches) { at = -1; dnext(); } });
+setInterval(() => { if ($('lb').hidden && $('deck').hidden && $('duel').hidden) load(); }, 60000);
+</script>
+</body>
+</html>

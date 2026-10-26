@@ -592,8 +592,14 @@ function TasteDashboardPage() {
                   sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'var(--dim)', '&:hover': { bgcolor: 'var(--raised)' } }}>
                   Pairwise Labeling
                 </Button>
-
-
+                <Button fullWidth size="small" component="a" href="/profile.html"
+                  sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'var(--dim)', '&:hover': { bgcolor: 'var(--raised)' } }}>
+                  Profile Page
+                </Button>
+                <Button fullWidth size="small" component="a" href="/profile.html#duels"
+                  sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'var(--dim)', '&:hover': { bgcolor: 'var(--raised)' } }}>
+                  Profile Duels
+                </Button>
                 <Button fullWidth size="small" onClick={handleCleanup} disabled={cleaning}
                   sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'var(--dim)', '&:hover': { bgcolor: 'var(--raised)' } }}>
                   {cleaning ? 'Cleaning...': 'Database Cleanup'}

@@ -74,6 +74,7 @@ app.use('/api/funpipe', require('./routes/funpipe')); // Funscript auto-generati
 app.use('/api/scenes', require('./routes/scenes'));
 app.use('/api/video-labels', require('./routes/video-labels')); // labelmaster's scenes, sent by scenetest
 app.use('/api/pipelines', require('./routes/pipelines')); // labels + funscripts run by scenetest on the GPU PC
+app.use('/api/profile', require('./routes/profile')); // the profile page's performers, verdicts and duels (/profile.html)
 app.use('/api/truenas', require('./routes/truenas'));
 app.use('/api/mobile', require('./routes/mobile')); // Mobile app API
 app.use('/api/ratings', require('./routes/ratings'));
