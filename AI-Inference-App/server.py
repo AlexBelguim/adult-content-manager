@@ -48,6 +48,7 @@ except Exception as e:
 
 # ── Module Imports ────────────────────────────────────────────────────────────
 from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel, image_processor
+import qwen_vlm
 
 
 # Initialize Calibration Engine
@@ -82,12 +83,16 @@ try:
     log("🌊 Initializing Funpipe funscript pipeline...")
     from funpipe_worker import funpipe_bp, init_funpipe
     app.register_blueprint(funpipe_bp, url_prefix='/funpipe')
-    init_funpipe(model_loaded_probe=lambda: MODEL is not None or RANKER_MODEL is not None)
+    init_funpipe(model_loaded_probe=lambda: MODEL is not None or RANKER_MODEL is not None or qwen_vlm.loaded())
     log("✅ Funpipe registered at /funpipe")
 except Exception as e:
     log(f"⚠️ Funpipe module failed to load: {e}")
     import traceback
     traceback.print_exc()
+
+# Qwen3.5-9B: profile labeller and keep/delete (qwen_vlm.py). It loads on first use and holds its own lock.
+app.register_blueprint(qwen_vlm.qwen_bp, url_prefix='/qwen')
+log("✅ Qwen models registered at /qwen")
 
 def map_path(path):
     """Maps remote paths (TrueNAS) to local paths (Windows)."""
@@ -1415,6 +1420,7 @@ def api_train():
         PROCESSOR = None
         MODEL_NAME = None
         torch.cuda.empty_cache()
+    qwen_vlm.unload()
 
     # If base_path is provided but doesn't exist locally, use cached training data
     base_path = data.get('base_path', '')

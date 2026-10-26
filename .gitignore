@@ -71,6 +71,7 @@ extra/
 *.safetensors
 backend/ml-datasets/
 backend-pairwise/models/
+AI-Inference-App/models/qwen/
 
 # ===========================================
 # Standalone ML / vision projects (separate repos)
