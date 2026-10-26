@@ -10,10 +10,10 @@ from pathlib import Path
 from peft import LoraConfig, get_peft_model
 from sklearn.linear_model import LogisticRegression
 from PIL import Image
-from transformers import AutoImageProcessor, AutoModel
+from transformers import AutoModel, BitsAndBytesConfig
 from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
-from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel, SIGLIP_BASE
+from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel, SIGLIP_BASE, image_processor
 
 IMAGE_EXTS = {'.jpg','.jpeg','.png','.webp','.gif','.bmp'}
 
@@ -138,7 +138,7 @@ class BinaryClassifier(nn.Module):
         super().__init__()
         if quantize:
             tlog(f"  💎 Loading backbone in 8-bit quantization...")
-            self.backbone = AutoModel.from_pretrained(backbone_name, load_in_8bit=True, device_map="auto")
+            self.backbone = AutoModel.from_pretrained(backbone_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map="auto")
         else:
             self.backbone = AutoModel.from_pretrained(backbone_name)
         hs = self.backbone.config.hidden_size
@@ -325,7 +325,7 @@ def train_binary(config):
     if not val_keep or not val_delete:
         tlog("  ⚠️ Val split missing one class — val_acc will be unreliable")
 
-    processor = AutoImageProcessor.from_pretrained(backbone)
+    processor = image_processor(backbone)
 
     # Mining setup
     mining_pool = [] # list of (path, label)
@@ -484,7 +484,7 @@ def train_pairwise(config):
 
     pair_tuples = [(resolve(p['winner']), resolve(p['loser'])) for p in pairs]
     
-    processor = AutoImageProcessor.from_pretrained(backbone)
+    processor = image_processor(backbone)
     full_ds = PairwiseDataset(pair_tuples, processor, deduplicate=False)
     tlog(f"  Valid pairs after path check: {len(full_ds)}")
     if len(full_ds) < 5:
@@ -660,7 +660,7 @@ def train_performer_ranker(config):
         raise ValueError(f"Too few training samples ({len(train_samples)}) after performer split.")
 
     # 4. Dataset
-    processor = AutoImageProcessor.from_pretrained(backbone)
+    processor = image_processor(backbone)
 
     class RankerDS(Dataset):
         def __init__(self, samples, augment=True):
@@ -842,7 +842,7 @@ def train_ranked_binary(config):
     if not train_samples:
         raise ValueError("No training samples after performer split")
 
-    processor = AutoImageProcessor.from_pretrained(backbone)
+    processor = image_processor(backbone)
 
     class RankedBinaryDS(Dataset):
         def __init__(self, samples, augment=True):
@@ -962,7 +962,7 @@ def train_ranked_binary(config):
 def embed_clip(backbone, paths, device):
     """Embed every picture once with the frozen CLIP. Returns (model, {path: row}, features);
     pictures that can't be opened are skipped."""
-    processor = AutoImageProcessor.from_pretrained(backbone)
+    processor = image_processor(backbone)
     model = ClipPreferenceModel(backbone).to(device).eval()
     training_state['phase'] = 'embedding'
     training_state['total_batches'] = (len(paths) + 31) // 32

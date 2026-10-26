@@ -84,7 +84,7 @@ echo [AI System] Checking dependencies...
 if %ERRORLEVEL% equ 0 goto DEPS_OK
 
 echo [AI System] Installing dependencies... (this may take a few minutes first time)
-.\venv\Scripts\python.exe -m pip install -r requirements.txt einops timm --extra-index-url https://download.pytorch.org/whl/cu124
+.\venv\Scripts\python.exe -m pip install -r requirements.txt einops timm --extra-index-url https://download.pytorch.org/whl/cu130
 if %ERRORLEVEL% neq 0 (
     echo [WARNING] CUDA install failed, trying standard...
     .\venv\Scripts\python.exe -m pip install -r requirements.txt einops timm

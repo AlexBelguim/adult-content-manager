@@ -3,11 +3,19 @@ import torch
 import torch.nn as nn
 from safetensors.torch import load_file
 from sklearn.linear_model import LogisticRegression
-from transformers import AutoModel, CLIPVisionModelWithProjection, SiglipImageProcessor, SiglipVisionConfig, SiglipVisionModel
+from transformers import (AutoImageProcessor, AutoModel, BitsAndBytesConfig, CLIPVisionModelWithProjection, SiglipImageProcessor,
+                          SiglipVisionConfig, SiglipVisionModel)
 
 # K's backbone: SigLIP so400m-patch14-384 (the vision tower of ComfyUI's clip_vision file is the trainer's starting point)
 SIGLIP = dict(hidden_size=1152, intermediate_size=4304, num_hidden_layers=27, num_attention_heads=16, image_size=384, patch_size=14)
 SIGLIP_BASE = r"C:\Users\alexw\AppData\Roaming\StabilityMatrix\Packages\ComfyUI\models\clip_vision\sigclip_vision_patch14_384.safetensors"
+
+
+def image_processor(model_name):
+    """The backbone's image processor, PIL backend: the heads were trained on transformers 4.x's PIL pixels, and 5.x's
+    default torchvision resize shifts them slightly (up to 0.005 on head scores)."""
+    return AutoImageProcessor.from_pretrained(model_name, backend='pil')
+
 
 class DinoV2PreferenceModel(nn.Module):
     """
@@ -17,7 +25,7 @@ class DinoV2PreferenceModel(nn.Module):
         super().__init__()
         if quantize:
             print(f"💎 Loading {model_name} with 8-bit quantization...")
-            self.backbone = AutoModel.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+            self.backbone = AutoModel.from_pretrained(model_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map="auto")
         else:
             self.backbone = AutoModel.from_pretrained(model_name)
         hidden_dim = self.backbone.config.hidden_size
@@ -68,7 +76,7 @@ class PerformerRankerModel(nn.Module):
         super().__init__()
         if quantize:
             print(f"💎 Loading {model_name} with 8-bit quantization...")
-            self.backbone = AutoModel.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+            self.backbone = AutoModel.from_pretrained(model_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map="auto")
         else:
             self.backbone = AutoModel.from_pretrained(model_name)
         hidden_dim = self.backbone.config.hidden_size
@@ -113,7 +121,7 @@ class RankedBinaryClassifier(nn.Module):
     def __init__(self, backbone_name='facebook/dinov2-large', quantize=False):
         super().__init__()
         if quantize:
-            self.backbone = AutoModel.from_pretrained(backbone_name, load_in_8bit=True, device_map="auto")
+            self.backbone = AutoModel.from_pretrained(backbone_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map="auto")
         else:
             self.backbone = AutoModel.from_pretrained(backbone_name)
         hs = self.backbone.config.hidden_size

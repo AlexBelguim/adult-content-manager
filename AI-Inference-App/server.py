@@ -11,7 +11,6 @@ try:
     from urllib.parse import quote
     from flask import Flask, request, jsonify
     from PIL import Image
-    from transformers import AutoImageProcessor
     from flask_cors import CORS
 except Exception as e:
     print(f"\n❌ CRITICAL STARTUP ERROR: {e}")
@@ -48,7 +47,7 @@ except Exception as e:
     traceback.print_exc()
 
 # ── Module Imports ────────────────────────────────────────────────────────────
-from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel
+from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel, image_processor
 
 
 # Initialize Calibration Engine
@@ -177,7 +176,7 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                     ranker.to(DEVICE)
                     ranker.eval()
                     RANKER_MODEL = ranker
-                    RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_NAME)
+                    RANKER_PROCESSOR = image_processor(MODEL_NAME)
                     RANKER_MODEL_ID = model_id
                     val_mae = checkpoint.get('val_mae')
                     if val_mae: log(f"  Ranker MAE at save: {val_mae:.3f}")
@@ -219,7 +218,7 @@ def load_model(checkpoint_path, model_id=None, quantize=False):
                 log(f"  🎯 Rank-conditioned model: will use ranker for context")
             
             # Load processor
-            PROCESSOR = MODEL.processor if isinstance(MODEL, KeepDeleteModel) else AutoImageProcessor.from_pretrained(MODEL_NAME)
+            PROCESSOR = MODEL.processor if isinstance(MODEL, KeepDeleteModel) else image_processor(MODEL_NAME)
             
             val_acc = checkpoint.get('val_acc')
             if val_acc: log(f"  Val accuracy at save: {val_acc*100:.1f}%")
@@ -525,7 +524,7 @@ def api_test_model():
             test_model.to(DEVICE)
             test_model.eval()
 
-            processor = AutoImageProcessor.from_pretrained(model_name)
+            processor = image_processor(model_name)
 
             # Helper to load image from sample object
             def load_img(sample_obj):
@@ -1129,7 +1128,7 @@ def predict_rank():
                         RANKER_MODEL = PerformerRankerModel(model_name).to(DEVICE)
                         RANKER_MODEL.load_state_dict(checkpoint['model_state_dict'], strict=False)
                         RANKER_MODEL.eval()
-                        RANKER_PROCESSOR = AutoImageProcessor.from_pretrained(model_name)
+                        RANKER_PROCESSOR = image_processor(model_name)
                         RANKER_MODEL_ID = ranker_filename
 
                         target_model = RANKER_MODEL
