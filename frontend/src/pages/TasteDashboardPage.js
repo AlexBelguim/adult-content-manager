@@ -92,11 +92,11 @@ const MODEL_NOTES = [
     ],
   },
   {
-    name: 'Qwen keep/delete', status: 'Weak', tone: 'bad', where: 'scenetest test',
-    result: 'Keep vs delete AUC 0.65–0.69, accuracy 58–62%, with or without stars',
-    data: 'Keep and delete pictures of 16 training performers, 80 or 300 pictures each.',
-    how: 'The Qwen vision model scores each picture. A two-step version (performer score from 8 pictures, then picture + score) collapsed to the average.',
-    better: ['Too few performers to learn from; next try: the no-stars version on all 39 performers with keeps and deletes'],
+    name: 'Qwen keep/delete and Qwen Taste', status: 'Removed', tone: 'bad', where: 'scenetest test, then the AI app',
+    result: 'Keep vs delete AUC 0.65–0.69 on 16 performers; Qwen Taste over 46 performers (5 folds, 2026-10-26): 0.724 inside one performer, against K 0.779 and CLIP Taste 0.730',
+    data: 'Keep and delete pictures of 16, then 46 performers.',
+    how: 'Qwen3.5-9B with a LoRA reads one picture and answers keep or delete. A two-step version (performer score from 8 pictures, then picture + score) collapsed to the average.',
+    better: ['No higher than the CLIP models and 0.25 s a picture on the GPU, so it was taken out of the AI app on 2026-10-26; K is the keep/delete model'],
   },
   {
     name: 'Profile labeller (race, hair colour, age…)', status: 'Works', tone: 'ok', where: 'scenetest',

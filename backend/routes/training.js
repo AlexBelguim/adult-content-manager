@@ -407,7 +407,7 @@ router.post('/start', async (req, res) => {
         } catch (e) {}
       }
 
-    } else if (['binary', 'clip_siamese', 'clip_taste', 'clip_keepdelete', 'performer_ranker', 'ranked_binary', 'qwen_profile', 'qwen_keep', 'qwen_taste'].includes(type)) {
+    } else if (['binary', 'clip_siamese', 'clip_taste', 'clip_keepdelete', 'performer_ranker', 'ranked_binary'].includes(type)) {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (!folder) return res.status(400).json({ error: 'No base folder configured' });
       trainingPayload = {
@@ -440,11 +440,6 @@ router.post('/start', async (req, res) => {
         trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type != 'both_bad'`).all();
         trainingPayload.blacklisted_performers = db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name);
         trainingPayload.use_legacy = use_legacy;
-      }
-
-      // Qwen taste learns CLIP taste's levels, without pairs
-      if (type === 'qwen_taste') {
-        trainingPayload.blacklisted_performers = db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name);
       }
 
     } else {
