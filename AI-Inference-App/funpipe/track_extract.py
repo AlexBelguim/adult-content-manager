@@ -542,6 +542,7 @@ KPT_GROUPS = {"head": [0, 1, 2, 3, 4], "torso": [5, 6],
               "arms": [7, 8, 9, 10], "hips": [11, 12],
               "legs": [13, 14, 15, 16]}
 BG_DEMOTE = 0.4          # score multiplier for off-person clusters
+PREFER_BOOST = 1.5       # score multiplier for clusters on the --prefer body part
 
 
 def load_pose(video: Path):
@@ -609,6 +610,8 @@ def cmd_extract_auto(video: Path, data, meta, args):
                                                    wframes["frames"])
                         if c["label"] == "background":
                             c["score"] *= BG_DEMOTE
+                        elif args.prefer and c["label"] == args.prefer:
+                            c["score"] *= PREFER_BOOST
                     clusters.sort(key=lambda c: -c["score"])
 
             entry = {"scene": int(key), "window": wi,
@@ -921,6 +924,10 @@ def main():
         p.add_argument("--idle-threshold", type=float, default=0.08,
                        help="auto mode: periodicity score below this = idle "
                             "window, flat line (default 0.08)")
+        p.add_argument("--prefer", choices=sorted(KPT_GROUPS), default=None,
+                       help="auto mode with pose labels: favour clusters on "
+                            f"this body part (score x{PREFER_BOOST}), e.g. "
+                            "head for oral, hips for riding")
 
     for p in (p_seed, p_track, p_ext, p_all):
         p.add_argument("video", type=Path)
