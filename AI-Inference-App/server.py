@@ -48,6 +48,7 @@ except Exception as e:
 
 # ── Module Imports ────────────────────────────────────────────────────────────
 from model_dinov2 import DinoV2PreferenceModel, PerformerRankerModel, RankedBinaryClassifier, ClipPreferenceModel, KeepDeleteModel, image_processor
+import performer_model
 
 
 # Initialize Calibration Engine
@@ -253,6 +254,7 @@ def health():
         'rank_conditioned': RANK_CONDITIONED,
         'ranker_loaded': RANKER_MODEL is not None,
         'ranker_model': RANKER_MODEL_ID,
+        'performer_model': performer_model.STATE,
         'vram_allocated': f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.2f} MB" if torch.cuda.is_available() else "0 MB"
     })
 
@@ -1457,5 +1459,7 @@ if __name__ == '__main__':
     # Models are now loaded dynamically by the frontend on mount
     log("🚀 AI Server starting on http://0.0.0.0:3344 (Idle - Waiting for model load)")
     log("🎬 Video analysis available at /video/*")
+    performer_model.start()
+    log("👤 P and P2 follow the profile page (performer_model.py)")
     # Using use_reloader=False to prevent double model loading in debug mode
     app.run(host='0.0.0.0', port=3344, threaded=True, debug=True, use_reloader=False)

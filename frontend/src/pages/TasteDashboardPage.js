@@ -99,6 +99,13 @@ const MODEL_NOTES = [
     better: ['No higher than the CLIP models and 0.25 s a picture on the GPU, so it was taken out of the AI app on 2026-10-26; K is the keep/delete model'],
   },
   {
+    name: 'P and P2 — performers (profile page)', status: 'Live', tone: 'ok', where: 'AI app, by itself', live: 'profile',
+    result: 'No numbers yet: P and P2 retrain while the AI app runs',
+    data: 'P: your keep / love / delete on the profile page, plus this app\'s performers (keep folder = keep, delete-only = delete) counted 10x. P2: your profile duels, plus your sorted lists at half weight.',
+    how: 'A performer is the mean CLIP ViT-L/14-336 embedding of her pictures. P: a class-balanced logistic regression on it, her keep chance. P2: a score learned from who wins your duels. The AI app retrains both on every new verdict or duel, cross-validates every 25 and saves models/performer_keep/performer_keep.pt and models/performer_rank/performer_rank.pt.',
+    better: ['More duels: P2 learns slowly from about 270', 'Pictures only: the site fields (hair, cup, ethnicity) never beat them'],
+  },
+  {
     name: 'Profile labeller (race, hair colour, age…)', status: 'Works', tone: 'ok', where: 'scenetest',
     result: '83% of fields right on 8 held-out performers (81% before tuning)',
     data: '30 performers labelled by Claude, 8 pictures each.',
@@ -1186,6 +1193,14 @@ function CollapsibleSection({ title, count, defaultOpen = false, color, children
 
 // One card per model: best result on unseen data, what it learned from, how it works, what could improve it
 function ModelNotes() {
+  // P and P2 report their own cross-validation to the profile API each time the AI app retrains them
+  const [profile, setProfile] = useState(null);
+  useEffect(() => { fetch('/api/profile/model').then(r => r.json()).then(setProfile).catch(() => {}); }, []);
+  const pct = x => `${(x * 100).toFixed(1)}%`;
+  const live = profile?.model && [
+    `P: page AUC ${profile.model.auc}${profile.model.app_auc != null ? ` · this app's performers AUC ${profile.model.app_auc}` : ''} · ${profile.judged.toLocaleString()} verdicts (${profile.made})`,
+    profile.p2 && `P2: ${profile.p2.held_out != null ? `${pct(profile.p2.held_out)} of held-out duels right · ` : ''}${profile.p2.duels} duels, ${profile.p2.list_pairs} list pairs (${profile.p2.made})`,
+  ].filter(Boolean).join(' — ');
   const block = (label, text) => (
     <Box sx={{ mb: 1.25 }}>
       <Typography variant="caption" sx={{ color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>{label}</Typography>
@@ -1208,7 +1223,7 @@ function ModelNotes() {
                 <Chip label={n.status} size="small" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 800, bgcolor: tone.bg, color: tone.color }} />
                 <Chip label={n.where} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: 'var(--raised)', color: 'var(--dim)' }} />
               </Box>
-              {block('Best result', n.result)}
+              {block('Best result', (n.live === 'profile' && live) || n.result)}
               {block('Training data', n.data)}
               {block('How it works', n.how)}
               <Typography variant="caption" sx={{ color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>What can be better</Typography>
@@ -1240,6 +1255,8 @@ function ModelArsenal({
     ranked_binary: { label: 'Ranked Binary', color: 'var(--chart-3)', icon: ''},
     pairwise: { label: 'Pairwise', color: 'var(--info)', icon: ''},
     performer_ranker: { label: 'Performer Ranker', color: 'var(--chart-1)', icon: ''},
+    performer_keep: { label: 'P (performer keep %)', color: 'var(--chart-2)', icon: '', alone: true },
+    performer_rank: { label: 'P2 (performer ranking)', color: 'var(--chart-4)', icon: '', alone: true },
     unknown: { label: 'Unknown', color: 'var(--muted)', icon: ''},
   };
   const typeIcons = { clip_siamese: <AutoAwesome />, clip_taste: <Psychology />, clip_keepdelete: <FilterAlt />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
@@ -1320,7 +1337,7 @@ function ModelArsenal({
                 </Box>
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                   {m.backbone && <Chip label={m.backbone.split('/').pop()} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--surface)', color: 'var(--dim)' }} />}
-                   {m.val_acc != null && <Chip label={`${['clip_taste', 'clip_keepdelete'].includes(m.type) ? 'AUC' : 'Val'}:${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
+                   {m.val_acc != null && <Chip label={`${['clip_taste', 'clip_keepdelete', 'performer_keep'].includes(m.type) ? 'AUC' : 'Val'}:${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
                   {m.val_mae != null && <Chip label={`MAE: ${m.val_mae.toFixed(3)}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,111,0,0.1)', color: 'var(--chart-1)' }} />}
                   {m.rank_conditioned && <Chip label="Rank-Conditioned" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(0,191,165,0.1)', color: 'var(--chart-3)', fontWeight: 700 }} />}
                   {m.samples && <Chip label={`${m.samples} samples`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }} />}
@@ -1396,6 +1413,9 @@ function ModelArsenal({
                   </Box>
                 )}
                 {result?.error && <Alert severity="error" sx={{ py: 0, mb: 1, fontSize: '0.7rem' }}>{result.error}</Alert>}
+                {tInfo.alone ? (
+                  <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.65rem' }}>Runs by itself in the AI app; saved again every 25 verdicts or duels</Typography>
+                ) : (
                 <Box sx={{ display: 'flex', gap: 0.5 }}>
                   <Button size="small" variant={isLoaded ? 'contained' : 'outlined'} disabled={isLoaded || isLoadingThis || !aiHealth}
                     onClick={() => handleLoad(m)} sx={{ flex: 1, fontSize: '0.65rem', textTransform: 'none', borderColor: `${tInfo.color}40`, color: isLoaded ? 'var(--text)' : tInfo.color, bgcolor: isLoaded ? `${tInfo.color}30` : 'transparent' }}>
@@ -1409,6 +1429,7 @@ function ModelArsenal({
                     <DeleteOutline sx={{ fontSize: 16 }} />
                   </IconButton>
                 </Box>
+                )}
 
                 {/* Preferred Selection Button */}
                 <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid rgba(255,255,255,0.05)' }}>

@@ -264,9 +264,13 @@ router.post('/duel', (req, res) => {
   res.json({ done: done.length });
 });
 
+// P's and P2's latest numbers (the AI app's performer_model.py), for the page and the Taste Dashboard
 router.get('/model', (req, res) => {
-  const p = readJson(PREDICTIONS, {});
-  res.json({ model: p.model ?? null, made: p.made ?? null, judged: p.judged ?? null });
+  const p = readJson(PREDICTIONS, {}), r = readJson(RANKING, {});
+  res.json({
+    model: p.model ?? null, made: p.made ?? null, judged: p.judged ?? null,
+    p2: r.made ? { made: r.made, duels: r.duels, list_pairs: r.list_pairs, held_out: r.held_out ?? null } : null,
+  });
 });
 
 router.get('/performers', (req, res) => {
