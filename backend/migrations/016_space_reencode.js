@@ -98,12 +98,15 @@ module.exports = {
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_encode_jobs_status ON encode_jobs(status);
       CREATE INDEX IF NOT EXISTS idx_encode_jobs_source ON encode_jobs(source_path);
+      CREATE INDEX IF NOT EXISTS idx_encode_jobs_out ON encode_jobs(out_path);
     `);
 
-    // The estimate-only feature queued rows nothing ever ran. A video becomes a job of the real queue (planned again
-    // when it's claimed, skipped when a re-encode wouldn't help); a picture to WebP isn't something the queue does.
-    db.prepare("UPDATE encode_jobs SET status = 'queued', kind = 'space', position = id WHERE status = 'pending' AND target_format = 'h265'").run();
-    db.prepare("UPDATE encode_jobs SET status = 'skipped', error_message = 'Pictures to WebP is not part of the re-encode queue' WHERE status = 'pending'").run();
+    // The estimate-only feature queued rows nothing ever ran. None becomes a job of the real queue: nothing may encode
+    // and swap library files until something is queued on the Space page, so they're finished as never run.
+    db.prepare(`UPDATE encode_jobs SET status = 'skipped', completed_at = COALESCE(completed_at, created_at),
+      error_message = 'Queued by the old Media Optimization panel and never run: queue it again in Settings → Space'
+      WHERE status = 'pending' AND target_format = 'h265'`).run();
+    db.prepare("UPDATE encode_jobs SET status = 'skipped', completed_at = COALESCE(completed_at, created_at), error_message = 'Pictures to WebP is not part of the re-encode queue' WHERE status = 'pending'").run();
     db.prepare("DELETE FROM encode_jobs WHERE status = 'cancelled'").run();
     db.prepare("UPDATE encode_jobs SET status = 'failed', error_message = COALESCE(error_message, 'Never ran') WHERE status = 'processing'").run();
     db.prepare("UPDATE encode_jobs SET status = 'done' WHERE status = 'completed'").run();

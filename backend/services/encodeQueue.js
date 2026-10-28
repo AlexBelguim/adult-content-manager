@@ -162,10 +162,16 @@ const parseJson = (s) => { try { return s ? JSON.parse(s) : null; } catch { retu
 
 const shortSide = (f) => Math.min(f.width || f.height || 0, f.height || f.width || 0);
 
+// a word that says VR on its own, and words that only do together ("Part 180" is an ordinary title, "180_LR" isn't)
+const VR_WORD = /^(vr|vr180|vr360|sbs|3dh|3dv|mkx200|mkx220|fisheye|fisheye190|rf52|180x180|360x180)$/;
+const VR_FIELD = /^(180|360)$/;
+const VR_LAYOUT = /^(lr|rl|tb|bt|ou)$/;
+
 /** A VR video (side by side, over-under, fisheye): re-encoding it to 1080p would ruin it, so it's left alone. */
 function isVR(f) {
   const words = path.basename(f.path).toLowerCase().split(/[^a-z0-9]+/);
-  if (words.some(w => /^(vr|vr180|vr360|180|360|sbs|3dh|3dv|lr|tb|ou|mkx200|mkx220|fisheye|fisheye190|rf52)$/.test(w))) return true;
+  if (words.some(w => VR_WORD.test(w))) return true;
+  if (words.some(w => VR_FIELD.test(w)) && words.some(w => VR_LAYOUT.test(w))) return true;
   const ratio = f.width && f.height ? f.width / f.height : 0;
   return (Math.abs(ratio - 2) < 0.02 && f.width >= 3000) || (Math.abs(ratio - 1) < 0.02 && f.width >= 2500);
 }
@@ -358,8 +364,12 @@ function removeJob(id) {
   if (job.status === 'running') {
     if (job.phase === 'verifying' || job.phase === 'swapping') throw Object.assign(new Error('It\'s being checked and swapped in: a moment'), { status: 409 });
     if (job.worker_id === 'local' && local.jobId === id) { local.removing = true; killLocal(); }
+    // a worker's half-uploaded file: gone now, unless a chunk is still arriving — that upload removes it when it
+    // finds the job gone (workerUpload), so its write can't bring the file back
     const tmp = tmpOf(job);
-    if (tmp && job.worker_id !== 'local') fs.rmSync(tmp, { force: true });
+    if (tmp && job.worker_id !== 'local' && !uploading.has(id)) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* still open: cleanup() clears it */ }
+    }
   } else if (job.status !== 'queued') {
     throw Object.assign(new Error('Only a queued or running job can be removed'), { status: 409 });
   }
@@ -602,16 +612,28 @@ function ffmpegArgs(src, out, f, plan, { encoder = 'cpu' } = {}) {
   return { args, expect };
 }
 
+// how far the new file's length, and where its video starts, may be from the original's: funscripts are timed against both
+const LENGTH_SLACK_S = 0.5;
+const START_SLACK_S = 0.1;
+
+/** Where the main video begins on the file's timeline: what a player's 0 s is for it, and so for its funscript. */
+const videoOffset = (p) => (p.video_start != null ? p.video_start - (p.start ?? 0) : 0);
+
 /**
- * The new file has to be the whole thing: as long as the original (funscripts are timed against it), every track
- * there. The original's length is the probe's, never the new file's.
+ * The new file has to be the whole thing: as long as the original, its video starting at the same point of the
+ * timeline (a shifted video with the same length puts every funscript action out of step), every track there. The
+ * original is probed again for that; its length is the probe's that planned the job, never the new file's.
  */
-async function verify(out, f, expect) {
+async function verify(out, f, expect, src) {
   const want = f.duration;
   if (!want) throw new Error('the original\'s length isn\'t known, so the new file can\'t be checked against it');
-  const p = await probe.probeFile(out);
-  if (!p.duration || Math.abs(p.duration - want) > Math.max(1, want * 0.003)) {
-    throw new Error(`the new file is ${(p.duration || 0).toFixed(1)} s long, the original ${want.toFixed(1)} s`);
+  const [p, o] = await Promise.all([probe.probeFile(out), probe.probeFile(src)]);
+  if (!p.duration || Math.abs(p.duration - want) > LENGTH_SLACK_S) {
+    throw new Error(`the new file is ${(p.duration || 0).toFixed(2)} s long, the original ${want.toFixed(2)} s`);
+  }
+  const shift = videoOffset(p) - videoOffset(o);
+  if (Math.abs(shift) > START_SLACK_S) {
+    throw new Error(`the new file's video starts ${Math.abs(shift).toFixed(2)} s ${shift > 0 ? 'later' : 'earlier'} than the original's (funscripts would be out of step)`);
   }
   const got = { video: 0, audio: 0, subtitle: 0, attachment: 0 };
   for (const s of p.streams) if (s.type in got) got[s.type] += 1;
@@ -767,6 +789,14 @@ function failJob(job, message) {
   forget();
 }
 
+/** The job was removed, or put back in the queue, while its new file was being checked: nothing is swapped. */
+class JobGone extends Error {
+  constructor(deleted) {
+    super(deleted ? 'removed while it was being checked; nothing was swapped' : 'taken back while it was being checked; nothing was swapped');
+    this.deleted = deleted;
+  }
+}
+
 /**
  * The new file in the work folder, wherever it was made: checked, then swapped in — the original to the holding folder
  * for 14 days, the new file into its place — and the library's records brought up to date. Throws nothing.
@@ -783,7 +813,7 @@ async function finishJob(job, prep, by) {
     resuming.delete(job.id);
     setJob(job.id, { phase: 'verifying', hold: null, held: 0 });
     const { expect } = ffmpegArgs(job.source_path, tmp, f, plan);
-    const out = await verify(tmp, f, expect);
+    const out = await verify(tmp, f, expect, job.source_path);
     const outBytes = out.size || fingerprint(tmp)?.size || 0;
     // re-encoded only to save room: one that didn't is thrown away, the original stays
     if (outBytes > f.size * KEEP_MAX) {
@@ -808,6 +838,10 @@ async function finishJob(job, prep, by) {
     if (final !== job.source_path && fs.existsSync(final)) {
       throw new Error(`there's already a ${path.basename(final)} beside it, so it wasn't swapped in`);
     }
+    // still this worker's job? Removing or requeueing it is refused while it's being checked, but whatever got in
+    // before that must not end with an original in .originals that no record knows about
+    const cur = db.prepare('SELECT status, worker_id FROM encode_jobs WHERE id = ?').get(job.id);
+    if (!cur || cur.status !== 'running' || cur.worker_id !== job.worker_id) throw new JobGone(!cur);
     fs.mkdirSync(path.dirname(held), { recursive: true });
     // from here to "done" nothing waits, so nothing else runs in between
     setJob(job.id, { phase: 'swapping', held_path: held, out_path: final, held_until: null });
@@ -838,6 +872,13 @@ async function finishJob(job, prep, by) {
       console.error(`[encode] ${job.label}: ${msg}`);
       return { ok: false, error: e.message };
     }
+    if (e instanceof JobGone) {
+      // nothing was moved; the row isn't ours to write any more. Its new file goes only when the job is gone
+      // altogether (back in the queue, the same name may be another worker's upload soon)
+      if (e.deleted) fs.rmSync(tmp, { force: true });
+      console.log(`[encode] ${job.label}: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
     fs.rmSync(tmp, { force: true });
     setJob(job.id, { held_path: null, out_path: null, held_until: null });
     failJob(job, `${e.message || e}${made}`);
@@ -864,14 +905,25 @@ function pathColumns() {
   return pathCols;
 }
 
-/** A file under a new name: every record of the old one follows it (ratings, tags, hashes, scenes, labels …). */
+/**
+ * A file under a new name: every record of the old one follows it (ratings, tags, hashes, scenes, labels …).
+ * A record already under the new name is of a file that isn't there any more (the swap and Undo both check that
+ * nothing is at the new path), so where the two clash on a unique key the moving one replaces it — said in the log.
+ */
 function repointPath(from, to) {
   if (from === to) return;
+  const replaced = [];
   db.transaction(() => {
     for (const [t, c] of pathColumns()) {
-      db.prepare(`UPDATE OR IGNORE "${t}" SET "${c}" = ? WHERE "${c}" = ?`).run(to, from);
+      const moving = db.prepare(`SELECT COUNT(*) AS n FROM "${t}" WHERE "${c}" = ?`).get(from).n;
+      if (!moving) continue;
+      const before = db.prepare(`SELECT COUNT(*) AS n FROM "${t}" WHERE "${c}" = ?`).get(to).n;
+      db.prepare(`UPDATE OR REPLACE "${t}" SET "${c}" = ? WHERE "${c}" = ?`).run(to, from);
+      const gone = before + moving - db.prepare(`SELECT COUNT(*) AS n FROM "${t}" WHERE "${c}" = ?`).get(to).n;
+      if (gone > 0) replaced.push(`${gone} in ${t}.${c}`);
     }
   })();
+  if (replaced.length) console.log(`[encode] ${path.basename(to)}: stale records under its new name replaced by the moved ones (${replaced.join(', ')})`);
 }
 
 /** A performer's cached file lists: the entry follows a new name and is looked at again (size, dates) on the next load. */
@@ -1215,6 +1267,11 @@ function workerUpload(w, jobId, offset, req) {
     req.pipe(out);
     out.on('finish', () => {
       if (refused) return;
+      // removed (or taken back) while this chunk was arriving: what it wrote mustn't stay behind
+      if (!heldBy(w, job.id)) {
+        try { fs.rmSync(tmp, { force: true }); } catch { /* cleanup() clears it */ }
+        return settle({ status: 410 });
+      }
       seen(w);
       setJob(job.id, { heartbeat_at: Date.now() });
       settle({ status: 200, received: have + n });
@@ -1233,6 +1290,8 @@ async function workerComplete(w, jobId, { size } = {}) {
   let have = 0;
   try { have = fs.statSync(tmp).size; } catch { /* none */ }
   if (!have || (size && have !== size)) return { status: 409, error: `Got ${have} of ${size} bytes`, received: have };
+  // before anything waits: from now on Remove and the stale-worker requeue leave the job alone
+  setJob(job.id, { phase: 'verifying', heartbeat_at: Date.now() });
   const prep = await prepareJob(job, { claim: false });
   if (!prep) return { status: 409, error: 'The original changed since: not swapped in' };
   const r = await finishJob(job, prep, w.name);
@@ -1317,6 +1376,23 @@ function forget() {
   ours = null;
 }
 
+// path → { sig, f, a }: a file as read and what a re-encode would do to it, good while its size, mtime and probe, the
+// calibration and what the queue has had of it are the same — so a job finishing doesn't re-read the whole library
+let assessed = new Map();
+let assessedRoots = null;
+const probeRow = db.prepare('SELECT * FROM media_probe WHERE path = ?');
+
+/** The file and its assessment for a media_probe row's path, size, mtime, probed_at and error: from the memo when it holds. */
+function assessRow(r) {
+  const sig = `${r.size}:${r.mtime}:${r.probed_at}:${r.error ? 1 : 0}|${calibration().factor}|${triedByQueue({ path: r.path, size: r.size }) || ''}`;
+  const hit = assessed.get(r.path);
+  if (hit && hit.sig === sig) return hit;
+  const f = toFile(r.streams !== undefined ? r : probeRow.get(r.path));
+  const x = { sig, f, a: assess(f) };
+  assessed.set(r.path, x);
+  return x;
+}
+
 const blank = () => ({ size: 0, files: 0, gain: 0, gainFiles: 0, queued: 0, unprobed: 0 });
 function add(x, f, a, active) {
   x.size += f.size || 0;
@@ -1328,7 +1404,8 @@ function add(x, f, a, active) {
 
 /**
  * Settings → Space: every performer (before and after filter) and content genre with its videos' size, what a
- * re-encode would save, and how many are queued. Kept half a minute.
+ * re-encode would save, and how many are queued. Kept half a minute; worked out again, only the files whose
+ * assessment can have changed are read and assessed again (assessRow).
  */
 function spaceReport() {
   if (spaceCache && Date.now() - spaceCache.at < 30000) return spaceCache.value;
@@ -1336,11 +1413,17 @@ function spaceReport() {
   const active = new Set(db.prepare(`SELECT source_path FROM encode_jobs WHERE status IN ${ACTIVE}`).all().map(r => r.source_path));
   const groups = new Map();
   const totals = blank();
-  for (const r of db.prepare('SELECT * FROM media_probe').all()) {
-    const place = placeOf(r.path, all);
+  const kept = new Map();
+  // a file's place is kept with its assessment, as long as the base folders are the same
+  const rootsSig = all.map(r => `${r.id}:${r.path}`).join('|');
+  if (rootsSig !== assessedRoots) { assessed = new Map(); assessedRoots = rootsSig; }
+  for (const r of db.prepare('SELECT path, size, mtime, probed_at, error FROM media_probe').all()) {
+    const x = assessRow(r);
+    if (x.place === undefined) x.place = placeOf(r.path, all);
+    const place = x.place;
     if (!place) continue;
-    const f = toFile(r);
-    const a = assess(f);
+    kept.set(r.path, x);
+    const { f, a } = x;
     let g = groups.get(place.key);
     if (!g) groups.set(place.key, (g = { key: place.key, top: place.top, name: place.name, folderId: place.root.id, ...blank() }));
     add(g, f, a, active.has(r.path));
@@ -1349,6 +1432,7 @@ function spaceReport() {
   const perf = new Map(db.prepare('SELECT id, name, folder_id, moved_to_after FROM performers').all().map(p => [`${p.folder_id}/${p.moved_to_after ? 'after' : 'before'}/${p.name}`, p.id]));
   const genre = new Map(db.prepare('SELECT id, name, folder_id FROM content_genres').all().map(g => [`${g.folder_id}/content/${g.name}`, g.id]));
   const list = [...groups.values()].map(g => ({ ...g, performerId: perf.get(g.key) ?? null, genreId: genre.get(g.key) ?? null }));
+  assessed = kept;   // files gone from the library drop out of the memo
   const jobs = db.prepare(`
     SELECT COALESCE(SUM(CASE WHEN held_path IS NULL THEN original_size_bytes - actual_size_bytes END), 0) AS freed,
            COALESCE(SUM(CASE WHEN held_path IS NOT NULL THEN original_size_bytes - actual_size_bytes END), 0) AS pending,
@@ -1374,14 +1458,22 @@ function spaceReport() {
 function groupReport(key) {
   const g = parseKey(key);
   if (!g) throw Object.assign(new Error('Unknown performer or genre'), { status: 404 });
-  const rows = db.prepare('SELECT * FROM media_probe WHERE substr(path, 1, length(@dir)) = @dir').all({ dir: g.dir + path.sep });
-  const lastJob = db.prepare('SELECT id, status, error_message, actual_size_bytes, held_until, held_path IS NOT NULL AS held FROM encode_jobs WHERE source_path = ? OR out_path = ? ORDER BY id DESC LIMIT 1');
+  const dir = g.dir + path.sep;
+  const rows = db.prepare('SELECT * FROM media_probe WHERE substr(path, 1, length(@dir)) = @dir').all({ dir });
+  // each file's last job, from one query: by its path, or the path a job gave it
+  const lastJob = new Map();
+  for (const j of db.prepare(`
+    SELECT id, source_path, out_path, status, error_message, actual_size_bytes, held_until, held_path IS NOT NULL AS held FROM encode_jobs
+    WHERE substr(source_path, 1, length(@dir)) = @dir OR substr(out_path, 1, length(@dir)) = @dir ORDER BY id
+  `).all({ dir })) {
+    lastJob.set(j.source_path, j);
+    if (j.out_path) lastJob.set(j.out_path, j);
+  }
   const folders = new Map();
   const files = rows.map(r => {
-    const f = toFile(r);
-    const a = assess(f);
+    const { f, a } = assessRow(r);
     const folder = path.relative(g.dir, path.dirname(r.path)).split(path.sep).filter(Boolean).join('/');
-    const j = lastJob.get(r.path, r.path);
+    const j = lastJob.get(r.path);
     const active = j && (j.status === 'queued' || j.status === 'running');
     let x = folders.get(folder);
     if (!x) folders.set(folder, (x = { folder, ...blank() }));
@@ -1400,8 +1492,8 @@ function groupReport(key) {
 }
 
 module.exports = {
-  HOLD_DAYS, CHUNK,
-  assess, estimateSize, calibration, fileRow, placeOf, parseKey, ffmpegArgs,
+  HOLD_DAYS, CHUNK, localEngine,
+  assess, estimateSize, calibration, fileRow, placeOf, parseKey, ffmpegArgs, verify,
   pathsFor, enqueue, removeJob, clearFinished, setPriority, bumpJob, retryJob, undoJob,
   start, pause, pauseJob, resumeJob, mode, setMode, isRunning, startQueue, cleanup, kick,
   addWorker, relinkWorker, removeWorker, setWorkerEnabled, workerForToken, listWorkers,

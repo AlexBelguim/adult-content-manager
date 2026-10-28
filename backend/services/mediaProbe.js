@@ -55,8 +55,8 @@ const COVER = new Set(['mjpeg', 'png', 'bmp', 'gif', 'webp']);
 
 /**
  * One file as the queue reads it: { container, duration, width, height (as shown: a rotated phone video is portrait),
- * bitrate (overall, b/s), video_codec, video_bitrate, fps, bit_depth, pix_fmt, streams: [{ index, type, codec,
- * channels, title, cover }] }.
+ * bitrate (overall, b/s), video_codec, video_bitrate, fps, bit_depth, pix_fmt, start (the timeline's), video_start
+ * (where the main video begins on it), streams: [{ index, type, codec, channels, title, cover, start }] }.
  */
 async function probeFile(file) {
   const j = await runProbe(file);
@@ -67,6 +67,7 @@ async function probeFile(file) {
     channels: s.channels || null,
     title: s.tags?.title || s.tags?.TITLE || null,
     cover: s.codec_type === 'video' && (s.disposition?.attached_pic === 1 || COVER.has(String(s.codec_name || '').toLowerCase())),
+    start: Number.isFinite(parseFloat(s.start_time)) ? parseFloat(s.start_time) : null,
   }));
   const raw = (j.streams || []).find(s => s.codec_type === 'video' && s.disposition?.attached_pic !== 1 && !COVER.has(String(s.codec_name || '').toLowerCase()));
   let width = raw?.width || null;
@@ -90,6 +91,8 @@ async function probeFile(file) {
     fps: rate(raw?.avg_frame_rate) || rate(raw?.r_frame_rate),
     bit_depth: depth,
     pix_fmt: raw?.pix_fmt || null,
+    start: Number.isFinite(parseFloat(j.format?.start_time)) ? parseFloat(j.format.start_time) : null,
+    video_start: raw && Number.isFinite(parseFloat(raw.start_time)) ? parseFloat(raw.start_time) : null,
     streams,
   };
 }

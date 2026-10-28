@@ -357,7 +357,7 @@ router.get('/services', async (req, res) => {
     funpipe: { online: !!queue.online, workerRunning: !!queue.running, url: queue.url },
     scenetest: { online: scenetest.ok, paused: !!scenetest.paused, url: scenetest.url, error: scenetest.ok ? null : scenetest.error },
     gpu: { warning: health.ok !== false ? (health.gpu_warning || null) : null },
-    ffmpeg: { available: encodeQueue.status().local.ok },
+    ffmpeg: { available: encodeQueue.localEngine().ok },
     ai: { online: training.ok || health.ok !== false, url: getAiServerUrl(), trainingActive: !!(training.ok && training.active) }
   });
 });
