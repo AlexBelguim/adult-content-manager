@@ -162,16 +162,19 @@ def model(C):
 class Data:
     """the page's performers and Alex's verdicts, duels and sorted lists on them; his app's performers that he did not also judge
     on the page"""
-    def __init__(self):
+    def __init__(self, test=None):
+        """test: a test's id, to learn from that test's selection instead of the one Training data picks now"""
         self.recs = records()
-        t = api("/training")
+        t = api("/training" + (f"?test={test}" if test is not None else ""))
         self.verdict = {k: t["verdicts"].get(f"{k[0]}/{k[1]}") for k in self.recs}
         self.duels, self.lists = t["duels"], t["lists"]
+        # what Training data picks (the rounds of each source, and whether his library counts); a new selection is retrained at once
+        self.selection, self.selection_text = t.get("selection"), t.get("selection_text", "all verdicts")
         self.judged = [k for k, v in self.verdict.items() if v in ("keep", "love", "delete")]   # love is a keep he likes a lot
         seen = {norm(self.recs[k]["name"]) for k in self.judged}
         kept = set(os.listdir(os.path.join(APP, "keep")))
         self.app = {}   # performer -> (picture keys, kept)
-        for folder in ("keep", "delete"):
+        for folder in ("keep", "delete") if t.get("app", True) else ():
             for p in os.listdir(os.path.join(APP, folder)):
                 if norm(p) not in seen and (folder == "keep" or p not in kept):
                     self.app[p] = ([("app", folder, p, f) for f in os.listdir(os.path.join(APP, folder, p))], folder == "keep")
@@ -188,8 +191,10 @@ class Data:
         page = [(v, y) for v, y in page if v is not None]
         app = [(emb.vector(keys), kept) for keys, kept in self.app.values()]
         app = [(v, y) for v, y in app if v is not None]
-        return (np.stack([v for v, _ in page]), np.array([y for _, y in page], int),
-                np.stack([v for v, _ in app]), np.array([y for _, y in app], int))
+        Xp = np.stack([v for v, _ in page])
+        # his library left out under Training data: no app rows (the fit and the cross-validation then use the page alone)
+        Xa = np.stack([v for v, _ in app]) if app else np.zeros((0, Xp.shape[1]), Xp.dtype)
+        return Xp, np.array([y for _, y in page], int), Xa, np.array([y for _, y in app], int)
 
     def duel_pairs(self, emb):
         """(winner vectors, loser vectors) of his decisive duels (draws and skips teach nothing)"""
@@ -216,25 +221,30 @@ def ranknet(diff, weight=None):
                                                                              sample_weight=w)
 
 
-def cross_validate(emb, d):
+def cross_validate(emb, d, report_file=REPORT):
     """5-fold on the page verdicts (the app's performers in every training fold) and on the app's performers (every page verdict
     in training), for a few C; and P2 on held-out duels, trained on the other duels only (the sorted lists are built from these same
-    duels, so they would leak the answers)"""
+    duels, so they would leak the answers). Without his library (Training data) only the page is cross-validated. A test writes
+    no report file (report_file None): its outcome goes back to the page instead"""
     Xp, yp, Xa, ya = d.training(emb)
     folds = lambda y: StratifiedKFold(5, shuffle=True, random_state=7).split(np.zeros(len(y)), y)
-    res = {"made": time.strftime("%Y-%m-%d %H:%M"), "judged": len(yp), "keep": int(yp.sum()), "app performers": len(ya),
-           "app kept": int(ya.sum()), "app weight": APP_WEIGHT, "cross-validated AUC": {}}
+    with_app = len(ya) >= 10 and len(set(ya.tolist())) == 2
+    res = {"made": time.strftime("%Y-%m-%d %H:%M"), "learned from": d.selection_text, "judged": len(yp), "keep": int(yp.sum()),
+           "app performers": len(ya), "app kept": int(ya.sum()), "app weight": APP_WEIGHT, "cross-validated AUC": {}}
     best = None
     for C in (0.3, 1.0, 3.0):
         pp, pa = np.zeros(len(yp)), np.zeros(len(ya))
         for tr, te in folds(yp):
             pp[te] = fit(C, Xp[tr], yp[tr], Xa, ya).decision_function(Xp[te])
-        for tr, te in folds(ya):
-            pa[te] = fit(C, Xp, yp, Xa[tr], ya[tr]).predict_proba(Xa[te])[:, 1]
+        if with_app:
+            for tr, te in folds(ya):
+                pa[te] = fit(C, Xp, yp, Xa[tr], ya[tr]).predict_proba(Xa[te])[:, 1]
         auc = roc_auc_score(yp, pp)
-        res["cross-validated AUC"][f"C={C}"] = {"page": round(auc, 3), "app": round(roc_auc_score(ya, pa), 3),
-                                                 "app kept over 50%": round(float((pa[ya == 1] >= 0.5).mean()), 3),
-                                                 "app deleted over 50%": round(float((pa[ya == 0] >= 0.5).mean()), 3)}
+        res["cross-validated AUC"][f"C={C}"] = {"page": round(auc, 3)}
+        if with_app:
+            res["cross-validated AUC"][f"C={C}"].update({"app": round(roc_auc_score(ya, pa), 3),
+                                                         "app kept over 50%": round(float((pa[ya == 1] >= 0.5).mean()), 3),
+                                                         "app deleted over 50%": round(float((pa[ya == 0] >= 0.5).mean()), 3)})
         if best is None or auc > best[0]:
             best = (auc, C)
     duels = d.duel_pairs(emb)
@@ -244,8 +254,9 @@ def cross_validate(emb, d):
         for tr, te in KFold(5, shuffle=True, random_state=7).split(diff):
             right[te] = ranknet(diff[tr]).decision_function(diff[te]) > 0
         res["P2 held-out duels right"] = round(float(right.mean()), 3)
-    res["best"] = {"C": best[1], "auc": round(best[0], 3), "app_auc": res["cross-validated AUC"][f"C={best[1]}"]["app"]}
-    json.dump(res, open(REPORT, "w"), indent=1)
+    res["best"] = {"C": best[1], "auc": round(best[0], 3), "app_auc": res["cross-validated AUC"][f"C={best[1]}"].get("app")}
+    if report_file:
+        json.dump(res, open(report_file, "w"), indent=1)
     print(f"P: cross-validated on {len(yp)} verdicts: page AUC {res['best']['auc']}, app {res['best']['app_auc']}; "
           f"P2 {res.get('P2 held-out duels right')} of {len(duels)} held-out duels", flush=True)
     return res
@@ -269,12 +280,14 @@ def predict(emb, d, report, write):
         v = emb.vector(pictures(r))
         if v is not None:
             out[f"{k[0]}/{k[1]}"] = round(float(final.predict_proba(v[None])[0, 1]), 3)
-    api("/predictions", {"model": {**best, "variant": f"pictures, page verdicts + app performers x{APP_WEIGHT}"},
+    api("/predictions", {"model": {**best, "variant": f"pictures, page verdicts + app performers x{APP_WEIGHT}" if len(ya) else "pictures, page verdicts",
+                                   "learned_from": d.selection_text},
                          "made": time.strftime("%Y-%m-%d %H:%M"), "judged": len(yp), "keep_chance": out})
     if write:
         save(P_FILE, {"model_type": "performer_keep", "backbone": BACKBONE, "coef": torch.tensor(final.coef_[0], dtype=torch.float32),
                       "intercept": float(final.intercept_[0]), "config": {"C": best["C"], "app_weight": APP_WEIGHT, "class_weight": "balanced"},
                       "samples": {"page judged": len(yp), "page keep": int(yp.sum()), "app performers": len(ya), "app kept": int(ya.sum())},
+                      "learned_from": d.selection_text,
                       "val_acc": best["auc"], "val_auc": report["cross-validated AUC"][f"C={best['C']}"], "created_at": time.strftime("%Y-%m-%dT%H:%M:%S")})
     return len(yp), len(out)
 
@@ -312,18 +325,55 @@ def train_p2(emb, d, report, write):
     return len(pairs)
 
 
+def claim_test():
+    """the oldest test queued under Training data (it is running from then on), or None; also None from a backend that has no tests
+    yet (404), so a follower updated before the app keeps training"""
+    try:
+        return api("/tests/claim", {}).get("test")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def run_test(emb, test):
+    """a test asked for under Training data: P cross-validated on exactly the rounds and sources that test picked (they may differ
+    from what is picked now), the outcome sent back to the page, where "Use this version" sets the toggles back to that selection"""
+    try:
+        d = Data(test=test["id"])
+        emb.embed([p for k in d.judged for p in pictures(d.recs[k])] + [p for keys, _ in d.app.values() for p in keys], quiet=True)
+        if len(d.judged) < 10 or len({d.verdict[k] in ("keep", "love") for k in d.judged}) < 2:
+            raise ValueError(f"too few verdicts to test: {len(d.judged)} (it needs keeps and deletes, 10 at least)")
+        r = cross_validate(emb, d, report_file=None)
+        result = {"made": r["made"], "learned from": r["learned from"], "judged": r["judged"], "keep": r["keep"],
+                  "app performers": r["app performers"], "auc": r["best"]["auc"], "app_auc": r["best"]["app_auc"], "C": r["best"]["C"],
+                  "cross-validated AUC": r["cross-validated AUC"]}
+        api(f"/tests/{test['id']}", {"status": "done", "result": result})
+        print(f"P: test #{test['id']} ({r['learned from']}): page AUC {result['auc']}, app {result['app_auc']}", flush=True)
+    except (urllib.error.URLError, TimeoutError):
+        raise
+    except Exception as e:   # a test that cannot run says why on the page, and the follower goes on
+        api(f"/tests/{test['id']}", {"status": "failed", "error": str(e)})
+        print(f"P: test #{test['id']} failed: {e}", flush=True)
+
+
 def follow():
-    """keeps going while Alex labels: retrains on every new verdict or duel (the cross-validation and the saved files again every 25),
-    and embeds the unjudged performers 20 at a time in the profile page's grid order (popular first) so the ones he sees next have a
-    keep chance on the page"""
-    emb, report, cv_at = Embedder(), None, None
+    """keeps going while Alex labels: retrains on every new verdict or duel (the cross-validation and the saved files again every 25,
+    or at once when Training data picks other rounds or sources), runs the tests asked for on the page, and embeds the unjudged
+    performers 20 at a time in the profile page's grid order (popular first) so the ones he sees next have a keep chance on the page"""
+    emb, report, cv_at, picked = Embedder(), None, None, None
     STATE.update(running=True, device=emb.device)
     while True:
         try:
+            test = claim_test()
+            if test:
+                run_test(emb, test)
             d = Data()
             emb.embed([p for k in d.judged for p in pictures(d.recs[k])] + [p for keys, _ in d.app.values() for p in keys], quiet=report is not None)
             now = len(d.judged) + len(d.duels)
-            write = cv_at is None or now - cv_at >= 25
+            selection = json.dumps(d.selection, sort_keys=True)
+            write = cv_at is None or now - cv_at >= 25 or selection != picked
+            picked = selection
             if write:
                 report, cv_at = cross_validate(emb, d), now
             ahead = [k for k in d.grid_order() if any("/".join(p) not in emb.cache for p in pictures(d.recs[k]))][:20]

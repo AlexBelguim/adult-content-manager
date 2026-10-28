@@ -12,7 +12,14 @@
  * - GET  /api/profile/duel/next    — the next two keeps to compare, and how far the sorting is
  * - POST /api/profile/duel         — { a, b, winner: a|b|draw|skip }, or { undo: true }
  * - GET  /api/profile/model        — how P was made
- * - GET  /api/profile/training     — the follower's input: { verdicts, duels, lists }
+ * - GET  /api/profile/training     — the follower's input: { verdicts, duels, lists, app, selection }: only the verdicts of the
+ *                                    rounds and sources picked under Training data (?test=: that test's), whether his library counts
+ * - GET  /api/profile/rounds       — Training data: per source (profile, discover) its current round, what is picked, every
+ *                                    round's verdicts by kind
+ * - PUT  /api/profile/rounds       — { include: { profile: { on, rounds }, discover: { on, rounds }, app } } picks what P learns
+ *                                    from; { start: 'profile' | 'discover' } begins that source's next round
+ * - POST /api/profile/tests, GET /tests, PUT /tests/claim, PUT /tests/:id, POST /tests/:id/use — tests of a selection and their
+ *                                    outcome (the follower runs them); use sets the toggles back to a test's selection
  * - PUT  /api/profile/predictions  — the follower's P
  * - PUT  /api/profile/ranking      — the follower's P2
  * - GET  /api/profile/thumb, /full — ?site=&slug=&file=: one of her pictures (thumbnails kept in .thumbnails)
@@ -32,6 +39,38 @@ const DUELS = path.join(DATA, 'alex_duels.json');
 const SORTING = path.join(DATA, 'alex_sorting.json');
 const PREDICTIONS = path.join(DATA, 'predictions.json');
 const RANKING = path.join(DATA, 'ranking.json');
+const ROUNDS = path.join(DATA, 'training_rounds.json');
+const TESTS = path.join(DATA, 'training_tests.json');
+
+// Training data (Alex, 2026-10-28). Every verdict has a source, 'profile' (this page) or 'discover' (the keep-scanner's Discover
+// page, through the app's discovery endpoint once it exists), and a round of that source: the round that was current when it was
+// given (the ones from before rounds existed are profile round 1). The two sources count their rounds apart. What P learns from is
+// picked per source (on / off, which rounds; rounds null = all) plus his library (the keep / delete folders, counted x10).
+// A test cross-validates P on a selection and keeps the selection with the outcome: a version. "Use this version" sets the toggles
+// back to its selection, and P retrains on it (a closed round does not change: a verdict given again moves to the current round).
+const SOURCES = ['profile', 'discover'];
+function roundsState() {
+  const st = readJson(ROUNDS, {}), inc = st.include || {};
+  return {
+    current: { profile: 1, discover: 1, ...st.current },
+    started: { profile: {}, discover: {}, ...st.started },
+    include: {
+      profile: { on: true, rounds: null, ...inc.profile },
+      discover: { on: true, rounds: null, ...inc.discover },
+      app: inc.app !== false,
+    },
+  };
+}
+const roundOf = (l) => l.round || 1;
+const sourceOf = (l) => (SOURCES.includes(l.source) ? l.source : 'profile');
+const picked = (l, inc) => {
+  const s = inc[sourceOf(l)];
+  return !!s && s.on !== false && (s.rounds === null || s.rounds.includes(roundOf(l)));
+};
+const tests = () => readJson(TESTS, []);
+// a selection in words, for the tests list: "profile rounds 1-2, discover off, library on"
+const roundsText = (s) => (!s.on ? 'off' : s.rounds === null ? 'all rounds' : !s.rounds.length ? 'no rounds' : `round${s.rounds.length > 1 ? 's' : ''} ${s.rounds.join(', ')}`);
+const selectionText = (inc) => `profile ${roundsText(inc.profile)}, discover ${roundsText(inc.discover)}, library ${inc.app ? 'on' : 'off'}`;
 
 const readJson = (file, empty) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : empty);
 const readLines = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
@@ -301,19 +340,124 @@ router.post('/label', (req, res) => {
   }
   const lab = readJson(LABELS, {});
   if (verdict === null) delete lab[key];
-  else lab[key] = { verdict, reasons: reasons.slice(0, 20).map((x) => String(x).slice(0, 40)), note: String(note).slice(0, 500), at: stamp() };
+  // a verdict given (or changed) now belongs to the current round
+  else lab[key] = { verdict, reasons: reasons.slice(0, 20).map((x) => String(x).slice(0, 40)), note: String(note).slice(0, 500), at: stamp(),
+    round: roundsState().current.profile, source: 'profile' };
   saveJson(LABELS, lab);
   res.json(lab[key] || null);
 });
 
-// the follower's input: his verdict per performer, his duels and his sorted lists
-router.get('/training', (req, res) => {
+// his verdicts on the records that a selection picks: { key: verdict }
+function pickedVerdicts(include) {
   const lab = readJson(LABELS, {}), verdicts = {};
   for (const [key, r] of records()) {
-    const v = (labelOf(r, lab) || {}).verdict;
-    if (v) verdicts[key] = v;
+    const l = labelOf(r, lab);
+    if (l && l.verdict && picked(l, include)) verdicts[key] = l.verdict;
   }
-  res.json({ verdicts, duels: readJson(DUELS, []), lists: sorting().lists });
+  return verdicts;
+}
+
+// the follower's input: his verdicts (only what Training data picks, or a test's selection with ?test=), his duels, his sorted
+// lists, whether his library counts, and the selection itself (a new one makes the follower train and save again)
+router.get('/training', (req, res) => {
+  let include = roundsState().include;
+  if (req.query.test) {
+    const t = tests().find((x) => String(x.id) === String(req.query.test));
+    if (!t) return res.status(404).json({ error: 'no such test' });
+    include = t.selection;
+  }
+  res.json({ verdicts: pickedVerdicts(include), duels: readJson(DUELS, []), lists: sorting().lists, app: include.app !== false, selection: include,
+    selection_text: selectionText(include) });
+});
+
+// Training data: per source its current round, what is picked, and every round's verdicts by kind
+router.get('/rounds', (req, res) => {
+  const st = roundsState(), lab = readJson(LABELS, {});
+  const rounds = { profile: {}, discover: {} };
+  const row = (src, n) => rounds[src][n] || (rounds[src][n] = { round: n, started: st.started[src][n] || null, keep: 0, love: 0, delete: 0, bad: 0 });
+  for (const l of Object.values(lab)) {
+    const r = row(sourceOf(l), roundOf(l));
+    if (l.verdict in r) r[l.verdict] += 1;
+  }
+  for (const src of SOURCES) for (let n = 1; n <= st.current[src]; n++) row(src, n);   // every round, an empty one too
+  res.json({
+    current: st.current, include: st.include, selection: selectionText(st.include),
+    rounds: Object.fromEntries(SOURCES.map((src) => [src, Object.values(rounds[src]).sort((a, b) => a.round - b.round)])),
+  });
+});
+
+// pick what P learns from ({ include: { profile: { on, rounds }, discover: { on, rounds }, app } }), or begin a source's next
+// round ({ start: 'profile' | 'discover' }): new verdicts of that source go into it
+router.put('/rounds', (req, res) => {
+  const st = roundsState(), { include, start } = req.body || {};
+  const cleanRounds = (x, was) => (x === null ? null : Array.isArray(x) ? [...new Set(x.map(Number).filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => a - b) : was);
+  if (include) {
+    for (const src of SOURCES) {
+      if (!include[src]) continue;
+      const was = st.include[src];
+      st.include[src] = { on: 'on' in include[src] ? !!include[src].on : was.on, rounds: cleanRounds(include[src].rounds, was.rounds) };
+    }
+    if ('app' in include) st.include.app = !!include.app;
+  }
+  if (start) {
+    if (!SOURCES.includes(start)) return res.status(400).json({ error: 'start: profile or discover' });
+    st.current[start] += 1;
+    st.started[start][st.current[start]] = stamp();
+    // rounds picked by number: the new one is picked too, so the new verdicts count until he unpicks it
+    if (st.include[start].rounds) st.include[start].rounds = [...st.include[start].rounds, st.current[start]];
+  }
+  saveJson(ROUNDS, st);
+  res.json({ ...st, selection: selectionText(st.include) });
+});
+
+// Tests: P cross-validated on a selection, each kept with what it learned from and how well it did: the versions.
+//   POST /tests            { note } queues a test of the current selection; the AI app's follower runs it within a minute
+//   GET  /tests            every test, newest first
+//   PUT  /tests/claim      the follower takes the oldest queued test (it is running then), or { test: null }
+//   PUT  /tests/:id        the follower's outcome: { status: done | failed, result, error }
+//   POST /tests/:id/use    set the toggles back to that test's selection (a rollback): P retrains on it
+router.post('/tests', (req, res) => {
+  const st = roundsState(), all = tests(), v = Object.values(pickedVerdicts(st.include));
+  const t = {
+    id: all.reduce((m, x) => Math.max(m, x.id), 0) + 1, created: stamp(), status: 'queued', note: String(req.body?.note || '').slice(0, 200),
+    selection: JSON.parse(JSON.stringify(st.include)), selection_text: selectionText(st.include), current: { ...st.current },
+    verdicts: { keep: v.filter((x) => x === 'keep').length, love: v.filter((x) => x === 'love').length, delete: v.filter((x) => x === 'delete').length },
+  };
+  all.push(t);
+  saveJson(TESTS, all);
+  res.json(t);
+});
+
+router.get('/tests', (req, res) => {
+  res.json({ tests: [...tests()].reverse(), selection: roundsState().include });
+});
+
+router.put('/tests/claim', (req, res) => {
+  const all = tests(), t = all.find((x) => x.status === 'queued');
+  if (!t) return res.json({ test: null });
+  t.status = 'running';
+  t.started = stamp();
+  saveJson(TESTS, all);
+  res.json({ test: t });
+});
+
+router.put('/tests/:id', (req, res) => {
+  const all = tests(), t = all.find((x) => String(x.id) === req.params.id);
+  if (!t) return res.status(404).json({ error: 'no such test' });
+  const { status, result = null, error = null } = req.body || {};
+  if (!['done', 'failed'].includes(status)) return res.status(400).json({ error: 'status: done or failed' });
+  Object.assign(t, { status, result, error: error && String(error).slice(0, 500), finished: stamp() });
+  saveJson(TESTS, all);
+  res.json(t);
+});
+
+router.post('/tests/:id/use', (req, res) => {
+  const t = tests().find((x) => String(x.id) === req.params.id);
+  if (!t) return res.status(404).json({ error: 'no such test' });
+  const st = roundsState();
+  st.include = JSON.parse(JSON.stringify(t.selection));
+  saveJson(ROUNDS, st);
+  res.json({ include: st.include, selection: selectionText(st.include) });
 });
 
 router.put('/predictions', (req, res) => {
