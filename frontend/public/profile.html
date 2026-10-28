@@ -15,7 +15,7 @@
   --scrim: rgba(16,16,18,0.72); --scrim-strong: rgba(16,16,18,0.88);
   --accent: #F0703A; --accent-quiet: rgba(240,112,58,0.14);
   --ok: #5FA97B; --ok-quiet: rgba(95,169,123,0.15); --warn: #C9922E; --info: #6E8CA8; --info-quiet: rgba(110,140,168,0.15);
-  --bad: #C9564B;
+  --bad: #C9564B; --bad-quiet: rgba(201,86,75,0.15);
   --radius: 6px; --radius-lg: 10px;
   color-scheme: dark;
 }
@@ -240,12 +240,22 @@ a { color: var(--accent); }
 .td-src { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 12px; display: grid; gap: 8px; }
 .td-src.off .td-rounds { opacity: .45; }
 .td-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .84rem; }
-.td-row .grow { flex: 1; min-width: 0; }
-.td-row input { accent-color: var(--accent); }
+.td-row .grow { flex: 1 1 240px; min-width: 0; }   /* the title takes its own line when the switch and button do not fit beside it */
+.td-src input[type=checkbox] { accent-color: var(--accent); }
 .td-rounds { display: grid; gap: 4px; }
 .td-round { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: var(--radius); background: var(--bg); font-size: .82rem; }
 .td-round label { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; font-weight: 600; min-width: 92px; }
-.td-round .cur { color: var(--accent); font-size: .72rem; font-weight: 600; }
+.td-round .cur { color: var(--accent); background: var(--accent-quiet); border-radius: 99px; padding: 1px 7px; font-size: .7rem; font-weight: 600; white-space: nowrap; }
+.td-tests .btn { white-space: nowrap; }
+.td-err { color: var(--bad); font-size: .82rem; }
+@media (max-width: 600px) {   /* the tests as cards: the table's five columns do not fit a phone */
+  .sheet { padding: 12px 8px; }
+  .sheet-in { padding: 12px; }
+  .td-tests thead { display: none; }
+  .td-tests, .td-tests tbody, .td-tests tr, .td-tests td { display: block; width: 100%; }
+  .td-tests tr { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin-bottom: 8px; }
+  .td-tests td { border: 0; padding: 2px 0; }
+}
 .td-tests { width: 100%; border-collapse: collapse; font-size: .8rem; }
 .td-tests th, .td-tests td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .td-tests th { color: var(--muted); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
@@ -664,13 +674,17 @@ $('filters').onclick = () => document.querySelector('.left').classList.toggle('i
 // ── Training data: what P learns from, per source its rounds (the profile page and Discover count their rounds apart), his
 // library; tests of a selection, each a version, and "Use this version" to set the toggles back to one ──
 const SRC = { profile: ['Profile page', 'your verdicts on this page'],
-              discover: ['Discover', 'the keep-scanner\'s Keep and Delete, through the app\'s discovery endpoint once it exists; counted apart'] };
+              discover: ['Discover', 'your Keep and Delete on the keep-scanner\'s Discover page; its rounds count apart from this page\'s'] };
 let td = null, tdPoll = null;
 const canon = s => JSON.stringify({ profile: { on: !!s.profile.on, rounds: s.profile.rounds }, discover: { on: !!s.discover.on, rounds: s.discover.rounds }, app: !!s.app });
 async function tdLoad() {
-  const [r, t] = await Promise.all([fetch('/api/profile/rounds').then(x => x.json()), fetch('/api/profile/tests').then(x => x.json())]);
-  td = { ...r, tests: t.tests };
-  tdRender();
+  try {
+    const [r, t] = await Promise.all(['/api/profile/rounds', '/api/profile/tests'].map(u => fetch(u).then(x => { if (!x.ok) throw new Error(`${u}: HTTP ${x.status}`); return x.json(); })));
+    td = { ...r, tests: t.tests };
+    tdRender();
+  } catch (err) {
+    $('tdsources').innerHTML = `<div class="td-err">Training data could not be loaded (${esc(err.message)}). Is the app running?</div>`;
+  }
 }
 function tdRender() {
   $('tdsel').textContent = `P learns from: ${td.selection}`;
@@ -685,33 +699,48 @@ function tdRender() {
         ${check(`data-all ${all ? 'checked' : ''}`, 'Every round, new ones too')}
         ${td.rounds[src].map(r => `<div class="td-round"><label><input type="checkbox" data-round="${r.round}" ${all || inc.rounds.includes(r.round) ? 'checked' : ''} ${all ? 'disabled' : ''}> Round ${r.round}</label>
           <span class="grow sub">${r.keep + r.love} keep${r.love ? ` (${r.love} love)` : ''} · ${r.delete} delete${r.bad ? ` · ${r.bad} bad data` : ''}${r.started ? ` · since ${esc(r.started)}` : ''}</span>
-          ${r.round === td.current[src] ? '<span class="cur">current: new verdicts go here</span>' : ''}</div>`).join('')}
+          ${r.round === td.current[src] ? '<span class="cur" title="New verdicts go into this round">current</span>' : ''}</div>`).join('')}
+        ${src === 'discover' && td.rounds.discover.every(r => !(r.keep + r.love + r.delete + r.bad)) ? '<span class="sub">No Discover verdicts yet: they arrive once the app is connected to the keep-scanner.</span>' : ''}
       </div></div>`;
   }).join('') + `<div class="td-src"><div class="td-row"><div class="grow"><h3 style="margin:0">Your library</h3><span class="sub">your app's performers: the keep folder as keep, the deleted ones as delete, each counted 10 times</span></div>
     ${check(`id="tdapp" ${td.include.app ? 'checked' : ''}`, 'Learn from it')}</div></div>`;
   const now = canon(td.include);
   $('tdtests').innerHTML = td.tests.length ? td.tests.map(t => {
-    const r = t.result || {}, isNow = canon(t.selection) === now;
+    const r = t.result || {}, isNow = canon(t.selection) === now || (t.frozen && canon(t.frozen) === now);
     return `<tr class="${isNow ? 'is-now' : ''}"><td class="num">#${t.id}</td>
       <td>${esc(t.created)}${t.note ? `<br><span class="sub">${esc(t.note)}</span>` : ''}</td>
       <td>${esc(t.selection_text)}</td>
       <td class="num">${t.verdicts.keep + t.verdicts.love} keep · ${t.verdicts.delete} delete</td>
       <td><span class="pill ${t.status}">${t.status}</span>${t.status === 'done' ? `<br><span class="num">page AUC ${r.auc}${r.app_auc != null ? ` · library ${r.app_auc}` : ''}</span>` : t.error ? `<br><span class="sub">${esc(t.error)}</span>` : ''}</td>
-      <td>${isNow ? '<span class="sub">the toggles now</span>' : `<button class="btn" data-use="${t.id}">Use this version</button>`}</td></tr>`;
+      <td>${isNow ? '<span class="sub">the toggles now</span>' : t.status === 'done' ? `<button class="btn" data-use="${t.id}">Use this version</button>` : ''}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="sub">No tests yet: Run test tries P on what is picked now.</td></tr>';
 }
+/** send a change and show the panel again; whether it went through */
 async function tdSend(method, url, body) {
-  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  if (!res.ok) alert((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  let ok = false;
+  try {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    ok = res.ok;
+    if (!ok) alert((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  } catch (err) { alert(`The app did not answer: ${err.message}`); }
   await tdLoad();
+  return ok;
 }
+// a modal: focus goes into it, Tab stays inside, and back to the Training data button when it closes
+const tdFocusable = () => [...$('td').querySelectorAll('button, input, [tabindex]')].filter(x => !x.disabled && x.offsetParent);
 function tdOpen() {
   $('td').hidden = false;
-  tdLoad();
+  tdLoad().then(() => $('tdclose').focus());
   clearInterval(tdPoll);
   tdPoll = setInterval(() => { if (td && td.tests.some(t => t.status === 'queued' || t.status === 'running')) tdLoad(); }, 5000);
 }
-function tdClose() { $('td').hidden = true; clearInterval(tdPoll); load(); }
+function tdClose() { $('td').hidden = true; clearInterval(tdPoll); load(); $('tdbtn').focus(); }
+$('td').addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const f = tdFocusable(), first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 $('tdbtn').onclick = tdOpen;
 $('tdclose').onclick = tdClose;
 $('td').onclick = e => { if (e.target === $('td')) tdClose(); };
@@ -733,7 +762,7 @@ $('tdsources').onclick = e => {
   const src = b.closest('[data-src]').dataset.src;
   if (confirm(`Start ${SRC[src][0]} round ${td.current[src] + 1}? Its new verdicts go into it from now on; round ${td.current[src]} stays as it is.`)) tdSend('PUT', '/api/profile/rounds', { start: src });
 };
-$('tdrun').onclick = async () => { await tdSend('POST', '/api/profile/tests', { note: $('tdnote').value }); $('tdnote').value = ''; };
+$('tdrun').onclick = async () => { if (await tdSend('POST', '/api/profile/tests', { note: $('tdnote').value })) $('tdnote').value = ''; };
 $('tdtests').onclick = e => {
   const b = e.target.closest('[data-use]');
   if (b && confirm(`Set the toggles back to test #${b.dataset.use}'s selection? P retrains on it.`)) tdSend('POST', `/api/profile/tests/${b.dataset.use}/use`);

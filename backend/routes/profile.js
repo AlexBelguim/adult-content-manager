@@ -62,11 +62,25 @@ function roundsState() {
   };
 }
 const roundOf = (l) => l.round || 1;
-const sourceOf = (l) => (SOURCES.includes(l.source) ? l.source : 'profile');
+// a verdict without a source is from this page (from before sources); one with a source this page does not know is left out
+const sourceOf = (l) => (!l.source ? 'profile' : SOURCES.includes(l.source) ? l.source : null);
 const picked = (l, inc) => {
   const s = inc[sourceOf(l)];
   return !!s && s.on !== false && (s.rounds === null || s.rounds.includes(roundOf(l)));
 };
+// his verdicts as training sees them: one per performer (labelOf: a Boobpedia twin's falls back on her Babepedia one), only for
+// the performers in the collection
+function verdictsOfRecords(lab = readJson(LABELS, {})) {
+  const out = [];
+  for (const [key, r] of records()) {
+    const l = labelOf(r, lab);
+    if (l && l.verdict) out.push([key, l]);
+  }
+  return out;
+}
+// a test's selection made exact: "every round" becomes the rounds there were then, so using the test later gives the same data
+const frozen = (inc, current) => Object.fromEntries(Object.entries(inc).map(([k, v]) => [k, SOURCES.includes(k) && v.rounds === null
+  ? { ...v, rounds: Array.from({ length: current[k] }, (_, i) => i + 1) } : v]));
 const tests = () => readJson(TESTS, []);
 // a selection in words, for the tests list: "profile rounds 1-2, discover off, library on"
 const roundsText = (s) => (!s.on ? 'off' : s.rounds === null ? 'all rounds' : !s.rounds.length ? 'no rounds' : `round${s.rounds.length > 1 ? 's' : ''} ${s.rounds.join(', ')}`);
@@ -340,21 +354,20 @@ router.post('/label', (req, res) => {
   }
   const lab = readJson(LABELS, {});
   if (verdict === null) delete lab[key];
-  // a verdict given (or changed) now belongs to the current round
-  else lab[key] = { verdict, reasons: reasons.slice(0, 20).map((x) => String(x).slice(0, 40)), note: String(note).slice(0, 500), at: stamp(),
-    round: roundsState().current.profile, source: 'profile' };
+  else {
+    // a new or changed verdict belongs to the current round; the same verdict with other reasons or a note stays where it was,
+    // so a closed round does not change
+    const old = lab[key], same = old && old.verdict === verdict;
+    lab[key] = { verdict, reasons: reasons.slice(0, 20).map((x) => String(x).slice(0, 40)), note: String(note).slice(0, 500), at: stamp(),
+      round: same ? roundOf(old) : roundsState().current.profile, source: same ? (old.source || 'profile') : 'profile' };
+  }
   saveJson(LABELS, lab);
   res.json(lab[key] || null);
 });
 
 // his verdicts on the records that a selection picks: { key: verdict }
 function pickedVerdicts(include) {
-  const lab = readJson(LABELS, {}), verdicts = {};
-  for (const [key, r] of records()) {
-    const l = labelOf(r, lab);
-    if (l && l.verdict && picked(l, include)) verdicts[key] = l.verdict;
-  }
-  return verdicts;
+  return Object.fromEntries(verdictsOfRecords().filter(([, l]) => picked(l, include)).map(([key, l]) => [key, l.verdict]));
 }
 
 // the follower's input: his verdicts (only what Training data picks, or a test's selection with ?test=), his duels, his sorted
@@ -364,18 +377,19 @@ router.get('/training', (req, res) => {
   if (req.query.test) {
     const t = tests().find((x) => String(x.id) === String(req.query.test));
     if (!t) return res.status(404).json({ error: 'no such test' });
-    include = t.selection;
+    include = t.frozen || t.selection;
   }
   res.json({ verdicts: pickedVerdicts(include), duels: readJson(DUELS, []), lists: sorting().lists, app: include.app !== false, selection: include,
     selection_text: selectionText(include) });
 });
 
-// Training data: per source its current round, what is picked, and every round's verdicts by kind
+// Training data: per source its current round, what is picked, and every round's verdicts by kind, counted as training sees them
 router.get('/rounds', (req, res) => {
-  const st = roundsState(), lab = readJson(LABELS, {});
+  const st = roundsState();
   const rounds = { profile: {}, discover: {} };
   const row = (src, n) => rounds[src][n] || (rounds[src][n] = { round: n, started: st.started[src][n] || null, keep: 0, love: 0, delete: 0, bad: 0 });
-  for (const l of Object.values(lab)) {
+  for (const [, l] of verdictsOfRecords()) {
+    if (!sourceOf(l)) continue;
     const r = row(sourceOf(l), roundOf(l));
     if (l.verdict in r) r[l.verdict] += 1;
   }
@@ -420,7 +434,9 @@ router.post('/tests', (req, res) => {
   const st = roundsState(), all = tests(), v = Object.values(pickedVerdicts(st.include));
   const t = {
     id: all.reduce((m, x) => Math.max(m, x.id), 0) + 1, created: stamp(), status: 'queued', note: String(req.body?.note || '').slice(0, 200),
-    selection: JSON.parse(JSON.stringify(st.include)), selection_text: selectionText(st.include), current: { ...st.current },
+    // selection: the toggles as they were; frozen: the same made exact, what the test learns from and Use this version sets back
+    selection: JSON.parse(JSON.stringify(st.include)), frozen: frozen(st.include, st.current),
+    selection_text: selectionText(frozen(st.include, st.current)), current: { ...st.current },
     verdicts: { keep: v.filter((x) => x === 'keep').length, love: v.filter((x) => x === 'love').length, delete: v.filter((x) => x === 'delete').length },
   };
   all.push(t);
@@ -432,8 +448,11 @@ router.get('/tests', (req, res) => {
   res.json({ tests: [...tests()].reverse(), selection: roundsState().include });
 });
 
+// a test left running for 30 minutes (the follower stopped mid-test, or could not send its outcome) is taken up again
+const STUCK_MS = 30 * 60 * 1000;
+const stuck = (x) => x.status === 'running' && Date.now() - new Date(String(x.started).replace(' ', 'T') + 'Z') > STUCK_MS;
 router.put('/tests/claim', (req, res) => {
-  const all = tests(), t = all.find((x) => x.status === 'queued');
+  const all = tests(), t = all.find((x) => x.status === 'queued') || all.find(stuck);
   if (!t) return res.json({ test: null });
   t.status = 'running';
   t.started = stamp();
@@ -454,8 +473,9 @@ router.put('/tests/:id', (req, res) => {
 router.post('/tests/:id/use', (req, res) => {
   const t = tests().find((x) => String(x.id) === req.params.id);
   if (!t) return res.status(404).json({ error: 'no such test' });
+  if (t.status !== 'done') return res.status(400).json({ error: 'only a finished test is a version to go back to' });
   const st = roundsState();
-  st.include = JSON.parse(JSON.stringify(t.selection));
+  st.include = JSON.parse(JSON.stringify(t.frozen || t.selection));
   saveJson(ROUNDS, st);
   res.json({ include: st.include, selection: selectionText(st.include) });
 });

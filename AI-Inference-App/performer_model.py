@@ -170,6 +170,8 @@ class Data:
         self.duels, self.lists = t["duels"], t["lists"]
         # what Training data picks (the rounds of each source, and whether his library counts); a new selection is retrained at once
         self.selection, self.selection_text = t.get("selection"), t.get("selection_text", "all verdicts")
+        # Discover verdicts (source "discover") count only for the performers in records(): the app's discovery endpoint, once
+        # built, has to add her to the collection with her pictures (as collect.py does) for P to learn from her
         self.judged = [k for k, v in self.verdict.items() if v in ("keep", "love", "delete")]   # love is a keep he likes a lot
         seen = {norm(self.recs[k]["name"]) for k in self.judged}
         kept = set(os.listdir(os.path.join(APP, "keep")))
@@ -325,6 +327,18 @@ def train_p2(emb, d, report, write):
     return len(pairs)
 
 
+MIN_EACH = 5   # keeps and deletes a selection needs at least: the 5-fold cross-validation needs 5 of each
+
+
+def too_few(d):
+    """why the verdicts of this selection cannot train P (too few keeps or deletes), or None"""
+    keep = sum(d.verdict[k] in ("keep", "love") for k in d.judged)
+    delete = len(d.judged) - keep
+    if min(keep, delete) < MIN_EACH:
+        return f"too few verdicts picked under Training data: {keep} keep, {delete} delete ({MIN_EACH} of each at least)"
+    return None
+
+
 def claim_test():
     """the oldest test queued under Training data (it is running from then on), or None; also None from a backend that has no tests
     yet (404), so a follower updated before the app keeps training"""
@@ -341,9 +355,9 @@ def run_test(emb, test):
     from what is picked now), the outcome sent back to the page, where "Use this version" sets the toggles back to that selection"""
     try:
         d = Data(test=test["id"])
+        if too_few(d):
+            raise ValueError(too_few(d))
         emb.embed([p for k in d.judged for p in pictures(d.recs[k])] + [p for keys, _ in d.app.values() for p in keys], quiet=True)
-        if len(d.judged) < 10 or len({d.verdict[k] in ("keep", "love") for k in d.judged}) < 2:
-            raise ValueError(f"too few verdicts to test: {len(d.judged)} (it needs keeps and deletes, 10 at least)")
         r = cross_validate(emb, d, report_file=None)
         result = {"made": r["made"], "learned from": r["learned from"], "judged": r["judged"], "keep": r["keep"],
                   "app performers": r["app performers"], "auc": r["best"]["auc"], "app_auc": r["best"]["app_auc"], "C": r["best"]["C"],
@@ -369,6 +383,12 @@ def follow():
             if test:
                 run_test(emb, test)
             d = Data()
+            if too_few(d):   # Training data picks (almost) nothing: P stays as it was until it picks enough
+                if STATE.get("error") != too_few(d):
+                    print(f"P: {time.strftime('%H:%M')} {too_few(d)}; P stays as it was", flush=True)
+                STATE.update(error=too_few(d))
+                time.sleep(60)
+                continue
             emb.embed([p for k in d.judged for p in pictures(d.recs[k])] + [p for keys, _ in d.app.values() for p in keys], quiet=report is not None)
             now = len(d.judged) + len(d.duels)
             selection = json.dumps(d.selection, sort_keys=True)
@@ -383,6 +403,11 @@ def follow():
         except (urllib.error.URLError, TimeoutError) as e:   # the app is restarting or the NAS is off
             print(f"P: {time.strftime('%H:%M')} the app is unreachable ({e}); trying again in a minute", flush=True)
             STATE.update(error=str(e))
+            time.sleep(60)
+            continue
+        except Exception as e:   # anything else (a selection sklearn cannot fit, a bad picture): logged, and the follower goes on
+            print(f"P: {time.strftime('%H:%M')} training failed ({type(e).__name__}: {e}); trying again in a minute", flush=True)
+            STATE.update(error=f"{type(e).__name__}: {e}")
             time.sleep(60)
             continue
         STATE.update(updated=time.strftime("%Y-%m-%d %H:%M"), judged=n, scored=m, p2_pairs=pair_count, device=emb.device, error=None)
