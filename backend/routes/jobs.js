@@ -26,7 +26,7 @@ const axios = require('axios');
 const db = require('../db');
 const { getQueueStatus } = require('../services/uploadQueue');
 const funpipeService = require('../services/funpipeService');
-const encodeService = require('../services/encodeService');
+const encodeQueue = require('../services/encodeQueue');
 const hashService = require('../services/hashService');
 const scenetestService = require('../services/scenetestService');
 const { getAiServerUrl } = require('../utils/aiUrl');
@@ -181,31 +181,42 @@ async function pipelineJobs(fresh) {
   });
 }
 
-const ENCODE_STATUS = { pending: 'queued', processing: 'running', completed: 'done', failed: 'failed' };
+const ENCODE_STATUS = { queued: 'queued', running: 'running', done: 'done', skipped: 'done', undone: 'done', failed: 'failed' };
+const ENCODE_PHASE = { downloading: 'downloading', encoding: 'encoding', uploading: 'uploading', paused: 'paused', waiting: 'waiting for the GPU', verifying: 'checking', swapping: 'swapping in' };
 
+function fmtBytes(bytes) {
+  if (!bytes) return '0 B';
+  const i = Math.min(4, Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024)));
+  return `${parseFloat((bytes / 1024 ** i).toFixed(i > 2 ? 2 : 0))} ${['B', 'KB', 'MB', 'GB', 'TB'][i]}`;
+}
+
+/** The re-encode queue (Settings → Space): its own actions are under /api/encode/jobs/:id. */
 function encodeJobs() {
-  // 'cancelled' is how the encode queue spells "the user removed it" — the row
-  // stays in the table until POST /api/encode/clear, but it is not a job any more.
-  return encodeService.getJobs(null, ENCODE_LIMIT).filter(j => j.status !== 'cancelled').map(j => {
+  const s = encodeQueue.status();
+  const rows = [
+    ...s.active.map(j => ({ ...j, status: 'running' })),
+    ...s.queued.map(j => ({ ...j, status: 'queued' })),
+    ...s.recent.filter(j => isRecent(j.finishedAt) || j.heldUntil)
+  ].slice(0, ENCODE_LIMIT);
+  return rows.map(j => {
     const status = ENCODE_STATUS[j.status] || 'queued';
-    const startedAt = toMs(j.started_at);
-    const finishedAt = toMs(j.completed_at);
-    const isVideo = j.target_format === 'h265';
-    const saved = j.actual_size_bytes != null && j.original_size_bytes
-      ? j.original_size_bytes - j.actual_size_bytes : null;
+    const saved = j.outSize && j.size ? j.size - j.outSize : null;
     return job({
-      type: 'encode', sourceId: j.id, title: path.basename(j.source_path),
-      subtitle: j.performer_name || performerFromPath(j.source_path), status,
-      progress: status === 'done' ? 1 : null,
-      currentFile: status === 'running' ? path.basename(j.source_path) : null,
-      startedAt, finishedAt, elapsedMs: elapsed(startedAt, finishedAt),
-      error: j.error_message || null,
-      result: status === 'done' && saved != null
-        ? `${encodeService.formatBytes(Math.max(0, saved))} saved` : null,
-      note: j.original_size_bytes ? encodeService.formatBytes(j.original_size_bytes) : null,
-      chips: [isVideo ? 'video → H.265' : 'image → WebP'],
-      thumbPath: isVideo ? j.source_path : null,
-      raw: j
+      type: 'encode', sourceId: j.id, title: j.label || path.basename(j.path), subtitle: performerFromPath(j.path), status,
+      progress: status === 'done' ? 1 : status === 'running' ? clamp01(j.progress) : null,
+      stage: status === 'running' ? [ENCODE_PHASE[j.phase] || j.phase, j.worker?.name].filter(Boolean).join(' · ') : (status === 'queued' && !s.running ? 'paused' : null),
+      currentFile: status === 'running' ? path.basename(j.path) : null,
+      startedAt: j.startedAt || null, finishedAt: j.finishedAt || null, elapsedMs: elapsed(j.startedAt, j.finishedAt),
+      error: status === 'failed' ? (j.error || 'failed') : null,
+      result: j.status === 'done' && saved != null
+        ? `${fmtBytes(Math.max(0, saved))} saved${j.heldUntil ? ` · original kept until ${new Date(j.heldUntil).toISOString().slice(0, 10)}` : ''}`
+        : j.status === 'skipped' ? (j.error || 'Not smaller: the original stays')
+          : j.status === 'undone' ? 'Undone: the original is back' : null,
+      note: j.size ? fmtBytes(j.size) : null,
+      chips: ['video → HEVC 10-bit', ...(j.priority ? [`priority ${j.priority}`] : [])],
+      thumbPath: j.path,
+      link: '/settings/space',
+      raw: { status: j.status, phase: j.phase || null, hold: j.hold || null, held: !!j.held, heldUntil: j.heldUntil || null, priority: j.priority || 0, local: !!j.worker?.local }
     });
   });
 }
@@ -339,7 +350,7 @@ router.get('/services', async (req, res) => {
     funpipe: { online: !!queue.online, workerRunning: !!queue.running, url: queue.url },
     scenetest: { online: scenetest.ok, paused: !!scenetest.paused, url: scenetest.url, error: scenetest.ok ? null : scenetest.error },
     gpu: { warning: health.ok !== false ? (health.gpu_warning || null) : null },
-    ffmpeg: { available: !!encodeService.ffmpegAvailable, ffprobe: !!encodeService.ffprobeAvailable },
+    ffmpeg: { available: encodeQueue.status().local.ok },
     ai: { online: training.ok || health.ok !== false, url: getAiServerUrl(), trainingActive: !!(training.ok && training.active) }
   });
 });

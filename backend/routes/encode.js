@@ -1,221 +1,83 @@
 /**
- * Encode Routes - API endpoints for media optimization
+ * Re-encoding for space (Settings → Space) and its queue (services/encodeQueue.js). The workers' side of the queue —
+ * claim, download, upload, complete — is in routes/workers.js.
+ *
+ *   GET    /space                     every performer and genre: videos' size, what a re-encode would save, totals
+ *   GET    /space/group?key=          one performer's or genre's folders and files
+ *   POST   /space/rescan              walk the library and probe what's new (in the background)
+ *   POST   /queue                     { all } | { group[, folder] } | { paths: [] } → { added, skipped: { reason: n } }
+ *   GET    /queue                     the queue: running, queued, recent, workers
+ *   POST   /queue/start | /queue/pause
+ *   PUT    /mode                      { mode: auto | local | remote } — who encodes
+ *   DELETE /jobs/:id                  a queued job dropped, a running one stopped
+ *   POST   /jobs/:id/pause | resume | retry | undo
+ *   POST   /jobs/:id/bump             { dir: up | down }
+ *   POST   /jobs/:id/priority         { priority }
+ *   POST   /clear                     finished jobs off the list (not those whose original is still held)
+ *   GET    /workers                   linked workers and this server
+ *   POST   /workers                   { name } → { id, name, link } (the link is shown once)
+ *   POST   /workers/:id/relink        a new link (the old one stops working)
+ *   PUT    /workers/:id               { enabled }
+ *   DELETE /workers/:id
  */
-
 const express = require('express');
 const router = express.Router();
-const encodeService = require('../services/encodeService');
+const q = require('../services/encodeQueue');
+const probe = require('../services/mediaProbe');
 
-/**
- * GET /api/encode/status
- * Get system status (FFmpeg availability, etc.)
- */
-router.get('/status', (req, res) => {
-    res.json({
-        ffmpegAvailable: encodeService.ffmpegAvailable,
-        ffprobeAvailable: encodeService.ffprobeAvailable,
-        settings: encodeService.getSettings()
-    });
-});
+const id = (req) => {
+  const n = Number(req.params.id);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
 
-/**
- * GET /api/encode/settings
- * Get encode settings
- */
-router.get('/settings', (req, res) => {
-    try {
-        const settings = encodeService.getSettings();
-        res.json(settings);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// every handler: a thrown error with a status is the answer; anything else is a 500
+const handle = (fn) => async (req, res) => {
+  try {
+    const out = await fn(req, res);
+    if (!res.headersSent) res.json(out ?? { ok: true });
+  } catch (err) {
+    if (!err.status) console.error('[encode]', err);
+    res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+};
 
-/**
- * PUT /api/encode/settings
- * Update encode settings
- */
-router.put('/settings', (req, res) => {
-    try {
-        const settings = encodeService.updateSettings(req.body);
-        res.json({ success: true, settings });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+const linkFor = (req, token) => `${req.protocol}://${req.get('host')}/api/workers/link/${token}`;
 
-/**
- * GET /api/encode/estimate/:performerId
- * Estimate space savings for a performer
- */
-router.get('/estimate/:performerId', async (req, res) => {
-    try {
-        const { performerId } = req.params;
-        const estimate = await encodeService.estimatePerformerSavings(parseInt(performerId, 10));
+router.get('/space', handle(() => q.spaceReport()));
+router.get('/space/group', handle((req) => q.groupReport(req.query.key)));
+router.post('/space/rescan', handle(() => probe.scanInBackground()));
 
-        // Format for display
-        estimate.formatted = {
-            total: {
-                originalSize: encodeService.formatBytes(estimate.total.originalSize),
-                estimatedSize: encodeService.formatBytes(estimate.total.estimatedSize),
-                savings: encodeService.formatBytes(estimate.total.savings)
-            },
-            videos: {
-                originalSize: encodeService.formatBytes(estimate.videos.originalSize),
-                estimatedSize: encodeService.formatBytes(estimate.videos.estimatedSize),
-                savings: encodeService.formatBytes(estimate.videos.savings)
-            },
-            images: {
-                originalSize: encodeService.formatBytes(estimate.images.originalSize),
-                estimatedSize: encodeService.formatBytes(estimate.images.estimatedSize),
-                savings: encodeService.formatBytes(estimate.images.savings)
-            }
-        };
+router.post('/queue', handle((req) => {
+  const b = req.body || {};
+  if (Array.isArray(b.paths)) {
+    if (!b.paths.length) throw Object.assign(new Error('No files given'), { status: 400 });
+    return q.enqueue(b.paths.map(String));
+  }
+  if (!b.all && !b.group) throw Object.assign(new Error('Say what to queue: all, a group, or paths'), { status: 400 });
+  return q.enqueue(q.pathsFor({ all: !!b.all, group: b.group, folder: b.folder }), { bulk: true });
+}));
 
-        res.json(estimate);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+router.get('/queue', handle(() => q.status()));
+router.post('/queue/start', handle(() => q.start()));
+router.post('/queue/pause', handle(() => q.pause()));
+router.put('/mode', handle((req) => { q.setMode(req.body?.mode); return { ok: true, mode: q.mode() }; }));
 
-/**
- * POST /api/encode/queue
- * Queue files for encoding
- */
-router.post('/queue', (req, res) => {
-    try {
-        const { performerId, files } = req.body;
+router.delete('/jobs/:id', handle((req) => { q.removeJob(id(req)); }));
+router.post('/jobs/:id/pause', handle((req) => q.pauseJob(id(req))));
+router.post('/jobs/:id/resume', handle((req) => q.resumeJob(id(req))));
+router.post('/jobs/:id/retry', handle((req) => { q.retryJob(id(req)); }));
+router.post('/jobs/:id/undo', handle((req) => { q.undoJob(id(req)); }));
+router.post('/jobs/:id/bump', handle((req) => { q.bumpJob(id(req), req.body?.dir); }));
+router.post('/jobs/:id/priority', handle((req) => { q.setPriority(id(req), Number(req.body?.priority)); }));
+router.post('/clear', handle(() => ({ ok: true, cleared: q.clearFinished() })));
 
-        if (!files || !Array.isArray(files) || files.length === 0) {
-            return res.status(400).json({ error: 'No files provided' });
-        }
-
-        const jobs = encodeService.queueFiles(files, performerId);
-
-        res.json({
-            success: true,
-            message: `Queued ${jobs.length} files for encoding`,
-            jobs
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * GET /api/encode/jobs
- * Get all jobs with optional status filter
- */
-router.get('/jobs', (req, res) => {
-    try {
-        const { status, limit = 100 } = req.query;
-        const jobs = encodeService.getJobs(status || null, parseInt(limit, 10));
-
-        // Format file sizes for display
-        for (const job of jobs) {
-            job.originalSizeFormatted = encodeService.formatBytes(job.original_size_bytes || 0);
-            job.estimatedSizeFormatted = encodeService.formatBytes(job.estimated_size_bytes || 0);
-            job.actualSizeFormatted = job.actual_size_bytes ? encodeService.formatBytes(job.actual_size_bytes) : null;
-        }
-
-        res.json(jobs);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * GET /api/encode/stats
- * Get queue statistics
- */
-router.get('/stats', (req, res) => {
-    try {
-        const stats = encodeService.getQueueStats();
-
-        // Format for display
-        stats.formatted = {
-            pending: {
-                originalSize: encodeService.formatBytes(stats.pending.originalBytes),
-                estimatedSize: encodeService.formatBytes(stats.pending.estimatedBytes)
-            },
-            completed: {
-                originalSize: encodeService.formatBytes(stats.completed.originalBytes),
-                savedSize: encodeService.formatBytes(stats.completed.savedBytes)
-            }
-        };
-
-        res.json(stats);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * DELETE /api/encode/jobs/:id
- * Cancel a pending job
- */
-router.delete('/jobs/:id', (req, res) => {
-    try {
-        const { id } = req.params;
-        const cancelled = encodeService.cancelJob(parseInt(id, 10));
-
-        if (cancelled) {
-            res.json({ success: true, message: 'Job cancelled' });
-        } else {
-            res.status(404).json({ error: 'Job not found or not in pending status' });
-        }
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * POST /api/encode/clear
- * Clear completed/cancelled/failed jobs
- */
-router.post('/clear', (req, res) => {
-    try {
-        const count = encodeService.clearFinishedJobs();
-        res.json({ success: true, cleared: count });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ===== Future: Remote Worker Endpoints =====
-// These are documented but will return 501 until worker_mode is implemented
-
-/**
- * GET /api/encode/worker/claim
- * (Future) Claim next pending job for processing
- */
-router.get('/worker/claim', (req, res) => {
-    const settings = encodeService.getSettings();
-    if (settings.worker_mode !== 'remote') {
-        return res.status(501).json({
-            error: 'Remote worker mode not enabled',
-            hint: 'Set worker_mode to "remote" in encode settings to enable worker API'
-        });
-    }
-
-    // TODO: Implement worker job claiming
-    res.status(501).json({ error: 'Not implemented yet' });
-});
-
-/**
- * POST /api/encode/worker/complete/:id
- * (Future) Mark job as complete and upload result
- */
-router.post('/worker/complete/:id', (req, res) => {
-    const settings = encodeService.getSettings();
-    if (settings.worker_mode !== 'remote') {
-        return res.status(501).json({
-            error: 'Remote worker mode not enabled'
-        });
-    }
-
-    // TODO: Implement worker job completion
-    res.status(501).json({ error: 'Not implemented yet' });
-});
+router.get('/workers', handle(() => q.listWorkers()));
+router.post('/workers', handle((req) => {
+  const w = q.addWorker(req.body?.name);
+  return { id: w.id, name: w.name, link: linkFor(req, w.token) };
+}));
+router.post('/workers/:id/relink', handle((req) => ({ link: linkFor(req, q.relinkWorker(id(req)).token) })));
+router.put('/workers/:id', handle((req) => { q.setWorkerEnabled(id(req), !!req.body?.enabled); }));
+router.delete('/workers/:id', handle((req) => { q.removeWorker(id(req)); }));
 
 module.exports = router;

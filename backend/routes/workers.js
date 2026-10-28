@@ -6,7 +6,7 @@
  *
  *   GET  /link                         { url, token } for a worker set up by hand (open like the rest of the app, which has no
  *                                      login: the token keeps out what is not a worker, not who can reach the app)
- *   POST /heartbeat                    { info } -> { paused }
+ *   POST /heartbeat                    { info } -> { paused }; an encode worker's: see below
  *   POST /funpipe/claim                { info } -> the next funpipe job { id, video, name, pose, stages, size, sidecars }, or 204
  *   POST /funpipe/jobs/:id/progress    { stage, phase, progress, windows_done, total_windows, gpu_warning, log } -> { action }
  *   POST /funpipe/jobs/:id/complete
@@ -16,6 +16,22 @@
  *   GET  /beside?video=&name=          a .funscript file beside it by name, read only (the editor's human ground truth)
  *   PUT  /sidecar?video=&ext=          write one (the body is the file, sent as application/octet-stream so the app's JSON
  *                                      parser leaves it alone): the job's results, and the review editor's saves
+ *
+ * Encode workers (the re-encode queue, services/encodeQueue.js) speak Hikari's worker protocol exactly, so Hikari's
+ * worker program (server/worker/hikari-worker.mjs) runs this app's jobs as it is, started with a link from
+ * Settings → Space (<this app>/api/workers/link/<token>). Each has a token of its own (encode_workers); the funpipe
+ * token above opens none of these, and theirs none of funpipe's.
+ *
+ *   GET  /link/:token                  is this link good? -> { ok, name, app }
+ *   POST /heartbeat                    { info, holding } -> { paused, enabled, cancel: [job ids to drop], actions: { id: pause | resume } }
+ *   POST /claim                        { info } -> the next job { id, label, kind, why, args ({in}/{out}), encoder, priority, size,
+ *                                      duration, fps, ext, chunk }, or 204
+ *   POST /jobs/:id/progress            { phase, progress, speed } -> { action: continue | pause | resume | cancel, cancel, priority }
+ *   GET  /jobs/:id/source              the original (Range requests)
+ *   GET  /jobs/:id/result              how much of the new file has arrived -> { received }
+ *   PUT  /jobs/:id/result?offset=n     one chunk of it (at most 32 MB)
+ *   POST /jobs/:id/complete            { size } — checked and swapped in
+ *   POST /jobs/:id/fail                { error }
  */
 const express = require('express');
 const router = express.Router();
@@ -23,6 +39,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
 const q = require('../services/funpipeQueue');
+const eq = require('../services/encodeQueue');
 
 const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -30,12 +47,28 @@ router.get('/link', (req, res) => {
   res.json({ url: `${req.protocol}://${req.get('host')}`, token: q.workerToken() });
 });
 
+router.get('/link/:token', (req, res) => {
+  const w = eq.workerForToken(req.params.token);
+  if (!w) return res.status(401).json({ error: "This link isn't valid any more: make a new one in Settings → Space" });
+  res.json({ ok: true, name: w.name, app: 'acm' });
+});
+
+// the bearer is an encode worker's token (req.encoder) or the funpipe worker's (req.worker)
 router.use((req, res, next) => {
   const m = /^Bearer\s+(\S+)$/i.exec(req.get('authorization') || '');
+  const enc = m ? eq.workerForToken(m[1]) : null;
+  if (enc) {
+    req.encoder = enc;
+    return next();
+  }
   if (!m || !same(m[1], q.workerToken())) return res.status(401).json({ error: 'Unknown worker: the app has another token now' });
   req.worker = String(req.get('x-worker') || 'worker').slice(0, 60);
   next();
 });
+
+// ── encode workers ───────────────────────────────────────────
+const encoderOnly = (req, res, next) => (req.encoder ? next() : res.status(401).json({ error: "Not an encode worker's token" }));
+const funpipeOnly = (req, res, next) => (req.worker ? next() : res.status(401).json({ error: "Not the funpipe worker's token" }));
 
 const jobId = (req) => {
   const n = Number(req.params.id);
@@ -43,9 +76,56 @@ const jobId = (req) => {
 };
 
 router.post('/heartbeat', (req, res) => {
-  q.heartbeat(req.worker, req.body?.info || null);
+  const b = req.body || {};
+  if (req.encoder) return res.json(eq.workerHeartbeat(req.encoder, { info: b.info || null, holding: Number(b.holding) || null }));
+  q.heartbeat(req.worker, b.info || null);
   res.json({ paused: q.list().paused });
 });
+
+router.post('/claim', encoderOnly, async (req, res) => {
+  const job = await eq.workerClaim(req.encoder, req.body?.info || null);
+  if (!job) return res.status(204).end();
+  res.json(job);
+});
+
+router.post('/jobs/:id/progress', encoderOnly, (req, res) => {
+  const b = req.body || {};
+  res.json(eq.workerProgress(req.encoder, jobId(req), { phase: b.phase, progress: Number(b.progress), speed: b.speed == null ? null : Number(b.speed) }));
+});
+
+router.get('/jobs/:id/source', encoderOnly, (req, res) => {
+  const p = eq.workerSource(req.encoder, jobId(req));
+  if (!p) return res.status(410).json({ error: "That job isn't yours any more" });
+  res.sendFile(p, { acceptRanges: true, dotfiles: 'allow' }, (e) => {
+    if (e && !res.headersSent) res.status(500).json({ error: e.message });
+  });
+});
+
+router.get('/jobs/:id/result', encoderOnly, (req, res) => {
+  const n = eq.workerReceived(req.encoder, jobId(req));
+  if (n == null) return res.status(410).json({ error: "That job isn't yours any more" });
+  res.json({ received: n });
+});
+
+router.put('/jobs/:id/result', encoderOnly, async (req, res) => {
+  const offset = Number(req.query.offset);
+  if (!Number.isInteger(offset) || offset < 0) return res.status(400).json({ error: 'offset is required' });
+  const r = await eq.workerUpload(req.encoder, jobId(req), offset, req);
+  if (r.status === 200) return res.json({ received: r.received });
+  res.status(r.status).json({ error: r.error || (r.status === 409 ? 'Out of step' : r.status === 410 ? "That job isn't yours any more" : 'Upload refused'), received: r.received });
+});
+
+router.post('/jobs/:id/complete', encoderOnly, async (req, res) => {
+  const r = await eq.workerComplete(req.encoder, jobId(req), { size: Number(req.body?.size) || null });
+  res.status(r.status).json(r);
+});
+
+router.post('/jobs/:id/fail', encoderOnly, (req, res) => {
+  res.json({ ok: eq.workerFail(req.encoder, jobId(req), req.body?.error) });
+});
+
+// ── the funpipe worker ───────────────────────────────────────
+router.use(['/funpipe', '/media', '/sidecar', '/beside'], funpipeOnly);
 
 router.post('/funpipe/claim', (req, res) => {
   const job = q.claim(req.worker, req.body?.info || null);
