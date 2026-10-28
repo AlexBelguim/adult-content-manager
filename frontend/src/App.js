@@ -39,6 +39,7 @@ import FunpipePage from './pages/FunpipePage';
 import VRPage from './pages/VRPage';
 import PlayerPage from './pages/PlayerPage';
 import JobsPage from './pages/JobsPage';
+import SpacePage from './pages/SpacePage';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
@@ -625,6 +626,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/pairwise-rank" element={<PairwiseRankPage />} />
             <Route path="/funpipe" element={shell(<FunpipePage />)} />
             <Route path="/jobs" element={shell(<JobsPage hashQueue={hashQueue} setHashQueue={setHashQueue} />)} />
+            <Route path="/settings/space" element={shell(<SpacePage />)} />
             {/* Chrome-free: replaces the fullscreen modal the gallery used to
                 open, so like the modal it takes the whole viewport. */}
             <Route path="/player" element={

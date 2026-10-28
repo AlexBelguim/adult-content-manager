@@ -5,7 +5,7 @@
  * codec, bitrate, fps, bit depth, height, length and its tracks — keyed by path, good while size and mtime match.
  * Filled by a background scan (services/mediaProbe.js); the Space page and the queue only ever read it.
  *
- * encode_jobs (004) becomes a real queue (services/encodeQueue.js): what the job is for (kind, plan, why), its place
+ * encode_jobs (004) is rebuilt as a real queue (services/encodeQueue.js): what the job is for (kind, plan, why), its place
  * (priority, position), who has it and how far (worker, phase, progress, speed, heartbeat), a pause (hold / held),
  * which file it was made from (src_fp) and where the original is held for 14 days (held_path, held_until) with the
  * new file's place and fingerprint (out_path, out_fp) for Undo. Times are ms. Status: queued | running | done |
@@ -51,17 +51,54 @@ module.exports = {
       );
     `);
 
+    // Rebuilt rather than altered: 004 declared the times TEXT (a ms number would be kept as "1793222868168.0"), and its
+    // performer foreign key cascaded — deleting a performer would have dropped the record of an original still held.
+    // Nothing references encode_jobs, so the plain rebuild is safe with foreign keys on.
+    db.exec(`
+      CREATE TABLE encode_jobs_new (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        performer_id         INTEGER,
+        source_path          TEXT NOT NULL,
+        target_format        TEXT NOT NULL,
+        status               TEXT DEFAULT 'queued',
+        priority             INTEGER DEFAULT 0,
+        position             INTEGER,
+        original_size_bytes  INTEGER,
+        estimated_size_bytes INTEGER,
+        actual_size_bytes    INTEGER,
+        worker_id            TEXT,
+        created_at           INTEGER,
+        started_at           INTEGER,
+        completed_at         INTEGER,
+        error_message        TEXT,
+        kind                 TEXT,
+        plan                 TEXT,
+        label                TEXT,
+        phase                TEXT,
+        progress             REAL,
+        speed                REAL,
+        heartbeat_at         INTEGER,
+        hold                 TEXT,
+        held                 INTEGER DEFAULT 0,
+        src_fp               TEXT,
+        out_path             TEXT,
+        out_fp               TEXT,
+        held_path            TEXT,
+        held_until           INTEGER
+      );
+    `);
     const have = new Set(db.prepare('PRAGMA table_info(encode_jobs)').all().map(c => c.name));
-    const add = [
-      ['kind', 'TEXT'], ['plan', 'TEXT'], ['label', 'TEXT'], ['position', 'INTEGER'],
-      ['phase', 'TEXT'], ['progress', 'REAL'], ['speed', 'REAL'], ['heartbeat_at', 'INTEGER'],
-      ['hold', 'TEXT'], ['held', 'INTEGER DEFAULT 0'], ['src_fp', 'TEXT'],
-      ['out_path', 'TEXT'], ['out_fp', 'TEXT'], ['held_path', 'TEXT'], ['held_until', 'INTEGER']
-    ];
-    for (const [col, type] of add) {
-      if (!have.has(col)) db.exec(`ALTER TABLE encode_jobs ADD COLUMN ${col} ${type}`);
-    }
-    db.exec('CREATE INDEX IF NOT EXISTS idx_encode_jobs_source ON encode_jobs(source_path)');
+    const cols = db.prepare('PRAGMA table_info(encode_jobs_new)').all().map(c => c.name).filter(c => have.has(c));
+    // a SQLite CURRENT_TIMESTAMP ("2026-10-28 12:00:00", UTC) becomes ms; a number stays one
+    const ms = (c) => `CASE WHEN ${c} IS NULL THEN NULL WHEN typeof(${c}) = 'text' AND ${c} GLOB '[0-9][0-9][0-9][0-9]-*' THEN CAST(strftime('%s', ${c}) AS INTEGER) * 1000 ELSE CAST(${c} AS INTEGER) END`;
+    const select = cols.map(c => (['created_at', 'started_at', 'completed_at'].includes(c) ? ms(c) : c)).join(', ');
+    db.exec(`INSERT INTO encode_jobs_new (${cols.join(', ')}) SELECT ${select} FROM encode_jobs`);
+    db.exec('DROP TABLE encode_jobs');
+    db.exec('ALTER TABLE encode_jobs_new RENAME TO encode_jobs');
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_encode_jobs_status ON encode_jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_encode_jobs_source ON encode_jobs(source_path);
+    `);
 
     // The estimate-only feature queued rows nothing ever ran. A video becomes a job of the real queue (planned again
     // when it's claimed, skipped when a re-encode wouldn't help); a picture to WebP isn't something the queue does.

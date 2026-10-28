@@ -38,7 +38,8 @@ const SECTIONS = [
 const START_LINKS = [
   ['import', 'Import a folder', '/local-import'],
   ['funpipe', 'Queue funscripts', '/funpipe'],
-  ['hash', 'Build hash DB', '/performer-management']
+  ['hash', 'Build hash DB', '/performer-management'],
+  ['encode', 'Re-encode for space', '/settings/space']
 ];
 
 // ── formatting ───────────────────────────────────────────────
@@ -117,10 +118,10 @@ function capabilities(j) {
       }
       break;
     case 'encode':
+      cap.cancel = j.status === 'running';
       cap.remove = j.status === 'queued';
-      cap.why = j.status === 'running'
-        ? 'The encode queue can only cancel jobs that have not started'
-        : 'Finished encodes are removed together — use Clear finished';
+      cap.retry = j.raw?.status === 'failed';
+      cap.why = 'Finished re-encodes are cleared together (Clear finished); Undo is in Settings → Space';
       break;
     case 'cleanup':
       cap.remove = finished;
@@ -257,7 +258,7 @@ function JobRow({ job, open, busy, onToggle, onCancel, onRemove, onRetry, onFron
         )}
         {job.link && (
           <SmallButton onClick={onLink} endIcon={<OpenInNewIcon sx={{ fontSize: '13px !important' }} />}>
-            Training Hub
+            {job.linkLabel || 'Training Hub'}
           </SmallButton>
         )}
         {cap.retry && <SmallButton disabled={busy} onClick={onRetry}>Retry</SmallButton>}
@@ -388,7 +389,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
     if (j.type === 'pipeline') return pipelineJob(j, j.status === 'running' ? 'cancel' : 'remove');
     if (j.type === 'import') return send('DELETE', `/api/upload-queue/${encodeURIComponent(j.sourceId)}`);
     if (j.type === 'funpipe') return post('/api/funpipe/queue/remove', { id: j.sourceId });
-    if (j.type === 'encode') return send('DELETE', `/api/encode/jobs/${j.sourceId}`);
+    if (j.type === 'encode') return send('DELETE', `/api/encode/jobs/${j.sourceId}`);   // a running one is stopped
     if (j.type === 'hash' && j.local) return dropLocalHash([j.sourceId]);
     return post('/api/jobs/dismiss', { ids: [j.id] });
   };
@@ -403,6 +404,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
         : q)));
       return;
     }
+    if (j.type === 'encode') return post(`/api/encode/jobs/${j.sourceId}/retry`);
     if (j.type === 'import') {
       const r = j.raw;
       await post('/api/folders/local-import', {

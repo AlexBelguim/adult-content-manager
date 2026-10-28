@@ -11,7 +11,8 @@
  *           TS, MPEG …) becomes an .mp4 next to where it was, and every record of the old path follows it.
  *
  * Which files: everything but HEVC (HEVC only far above the cap); AV1, VP9 and the old codecs count. Never the
- * queue's own output, or a file it already failed to shrink, or a VR video (it would lose its resolution). A file is
+ * queue's own output, a file it already failed to shrink, one whose re-encode was undone, or a VR video (scaled to
+ * 1080p it would lose its resolution). A file is
  * queued only when the estimate says it comes out at least a fifth smaller, and the new file is thrown away when it
  * isn't really at least 5% smaller. The estimate is from the file's length, bitrate and height, kept with each job and
  * corrected by the median of new size / estimate over the last 40 jobs, from 3 on.

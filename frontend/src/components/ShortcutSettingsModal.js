@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -30,6 +31,7 @@ import { DEFAULT_SHORTCUTS, loadShortcuts, saveShortcuts } from '../utils/settin
 import { themes } from '../theme';
 
 const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, onFolderDeleted = null, onThemeChange = null, currentThemeId = 'default' }) => {
+  const navigate = useNavigate();
   const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
   const [originalShortcuts, setOriginalShortcuts] = useState(DEFAULT_SHORTCUTS);
   const [message, setMessage] = useState('');
@@ -382,6 +384,21 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
                   </Box>
                 );
               })}
+            </Box>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Space: its own page (the lists are long) */}
+          <Box sx={{ mb: 3 }}>
+            <SectionTitle>💾 Space</SectionTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1.5, bgcolor: 'var(--raised)', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+              <Typography sx={{ flex: 1, fontSize: '0.9rem', color: 'text.secondary' }}>
+                What the videos take up, which performers a re-encode to HEVC would save the most on, and the queue that does it.
+              </Typography>
+              <Button variant="outlined" size="small" onClick={() => { if (onClose) onClose(); navigate('/settings/space'); }}>
+                Open Space
+              </Button>
             </Box>
           </Box>
 

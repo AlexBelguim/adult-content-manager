@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useHashActions from '../components/hash/useHashActions';
-import MediaOptimizationPanel from '../components/MediaOptimizationPanel';
+import { Link as RouterLink } from 'react-router-dom';
 import PipelineDialog from '../components/PipelineDialog';
 import PipelineQuickButton from '../components/PipelineQuickButton';
 import {
@@ -2363,7 +2363,12 @@ function PerformerManagementPage({ basePath, hashQueue, setHashQueue }) {
         </Panel>
       )}
 
-      <MediaOptimizationPanel />
+      <Panel sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+        <Typography variant="body2" sx={{ flex: 1, color: 'var(--dim)' }}>
+          Re-encoding videos to HEVC to save room — per performer, folder or file, with every original kept 14 days — is in Settings → Space.
+        </Typography>
+        <Button component={RouterLink} to="/settings/space" variant="outlined" size="small">Open Space</Button>
+      </Panel>
       {hash.modals}
 
       <PipelineDialog

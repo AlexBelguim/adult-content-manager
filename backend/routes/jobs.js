@@ -96,6 +96,13 @@ function performerFromPath(p) {
   return i >= 0 && parts[i + 1] ? parts[i + 1] : null;
 }
 
+/** A content genre from a library path: …/content/<genre>/… */
+function genreFromPath(p) {
+  const parts = String(p || '').split(/[\\/]+/);
+  const i = parts.lastIndexOf('content');
+  return i >= 0 && parts[i + 2] ? parts[i + 1] : null;
+}
+
 const job = (fields) => ({
   subtitle: null, progress: null, done: null, total: null, unit: null, stage: null,
   currentFile: null, note: null, elapsedMs: null, startedAt: null, finishedAt: null,
@@ -202,7 +209,7 @@ function encodeJobs() {
     const status = ENCODE_STATUS[j.status] || 'queued';
     const saved = j.outSize && j.size ? j.size - j.outSize : null;
     return job({
-      type: 'encode', sourceId: j.id, title: j.label || path.basename(j.path), subtitle: performerFromPath(j.path), status,
+      type: 'encode', sourceId: j.id, title: j.label || path.basename(j.path), subtitle: performerFromPath(j.path) || genreFromPath(j.path), status,
       progress: status === 'done' ? 1 : status === 'running' ? clamp01(j.progress) : null,
       stage: status === 'running' ? [ENCODE_PHASE[j.phase] || j.phase, j.worker?.name].filter(Boolean).join(' · ') : (status === 'queued' && !s.running ? 'paused' : null),
       currentFile: status === 'running' ? path.basename(j.path) : null,
@@ -215,7 +222,7 @@ function encodeJobs() {
       note: j.size ? fmtBytes(j.size) : null,
       chips: ['video → HEVC 10-bit', ...(j.priority ? [`priority ${j.priority}`] : [])],
       thumbPath: j.path,
-      link: '/settings/space',
+      link: '/settings/space', linkLabel: 'Space',
       raw: { status: j.status, phase: j.phase || null, hold: j.hold || null, held: !!j.held, heldUntil: j.heldUntil || null, priority: j.priority || 0, local: !!j.worker?.local }
     });
   });
