@@ -170,9 +170,12 @@ class Data:
         self.duels, self.lists = t["duels"], t["lists"]
         # what Training data picks (the rounds of each source, and whether his library counts); a new selection is retrained at once
         self.selection, self.selection_text = t.get("selection"), t.get("selection_text", "all verdicts")
+        # what love and super wrong count for (Training data's weights; 1 when off, or from a backend without weights)
+        self.weights = {"love": 1, "superwrong": 1, **(t.get("weights") or {})}
         # Discover verdicts (source "discover") count only for the performers in records(): the app's discovery endpoint, once
         # built, has to add her to the collection with her pictures (as collect.py does) for P to learn from her
-        self.judged = [k for k, v in self.verdict.items() if v in ("keep", "love", "delete")]   # love is a keep he likes a lot
+        # love is a keep he likes a lot, super wrong a delete P got badly wrong
+        self.judged = [k for k, v in self.verdict.items() if v in ("keep", "love", "delete", "superwrong")]
         seen = {norm(self.recs[k]["name"]) for k in self.judged}
         kept = set(os.listdir(os.path.join(APP, "keep")))
         self.app = {}   # performer -> (picture keys, kept)
@@ -188,15 +191,16 @@ class Data:
         return sorted((k for k in keys if self.verdict[k] is None), key=lambda k: (r(k) or 1e9, -keys.index(k)))
 
     def training(self, emb):
-        """(page vectors, their verdicts, app vectors, kept or not)"""
-        page = [(emb.vector(pictures(self.recs[k])), self.verdict[k] in ("keep", "love")) for k in self.judged]
-        page = [(v, y) for v, y in page if v is not None]
+        """(page vectors, their verdicts, app vectors, kept or not, what each page verdict counts for)"""
+        page = [(emb.vector(pictures(self.recs[k])), self.verdict[k] in ("keep", "love"), self.weights.get(self.verdict[k], 1)) for k in self.judged]
+        page = [(v, y, w) for v, y, w in page if v is not None]
         app = [(emb.vector(keys), kept) for keys, kept in self.app.values()]
         app = [(v, y) for v, y in app if v is not None]
-        Xp = np.stack([v for v, _ in page])
+        Xp = np.stack([v for v, _, _ in page])
         # his library left out under Training data: no app rows (the fit and the cross-validation then use the page alone)
         Xa = np.stack([v for v, _ in app]) if app else np.zeros((0, Xp.shape[1]), Xp.dtype)
-        return Xp, np.array([y for _, y in page], int), Xa, np.array([y for _, y in app], int)
+        return (Xp, np.array([y for _, y, _ in page], int), Xa, np.array([y for _, y in app], int),
+                np.array([w for _, _, w in page], float))
 
     def duel_pairs(self, emb):
         """(winner vectors, loser vectors) of his decisive duels (draws and skips teach nothing)"""
@@ -211,9 +215,10 @@ class Data:
         return pairs
 
 
-def fit(C, Xp, yp, Xa, ya):
+def fit(C, Xp, yp, Xa, ya, wp=None):
+    """wp: what each page verdict counts for (love and super wrong may count heavier), 1 each by default"""
     return model(C).fit(np.vstack([Xp, Xa]), np.concatenate([yp, ya]),
-                        sample_weight=np.concatenate([np.ones(len(yp)), np.full(len(ya), APP_WEIGHT)]))
+                        sample_weight=np.concatenate([np.ones(len(yp)) if wp is None else wp, np.full(len(ya), APP_WEIGHT)]))
 
 
 def ranknet(diff, weight=None):
@@ -227,20 +232,21 @@ def cross_validate(emb, d, report_file=REPORT):
     """5-fold on the page verdicts (the app's performers in every training fold) and on the app's performers (every page verdict
     in training), for a few C; and P2 on held-out duels, trained on the other duels only (the sorted lists are built from these same
     duels, so they would leak the answers). Without his library (Training data) only the page is cross-validated. A test writes
-    no report file (report_file None): its outcome goes back to the page instead"""
-    Xp, yp, Xa, ya = d.training(emb)
+    no report file (report_file None): its outcome goes back to the page instead. Love and super wrong count heavier in the
+    training folds only; the held-out AUC counts every performer once, so tests with other weights compare fairly"""
+    Xp, yp, Xa, ya, wp = d.training(emb)
     folds = lambda y: StratifiedKFold(5, shuffle=True, random_state=7).split(np.zeros(len(y)), y)
     with_app = len(ya) >= 10 and len(set(ya.tolist())) == 2
     res = {"made": time.strftime("%Y-%m-%d %H:%M"), "learned from": d.selection_text, "judged": len(yp), "keep": int(yp.sum()),
-           "app performers": len(ya), "app kept": int(ya.sum()), "app weight": APP_WEIGHT, "cross-validated AUC": {}}
+           "app performers": len(ya), "app kept": int(ya.sum()), "app weight": APP_WEIGHT, "weights": d.weights, "cross-validated AUC": {}}
     best = None
     for C in (0.3, 1.0, 3.0):
         pp, pa = np.zeros(len(yp)), np.zeros(len(ya))
         for tr, te in folds(yp):
-            pp[te] = fit(C, Xp[tr], yp[tr], Xa, ya).decision_function(Xp[te])
+            pp[te] = fit(C, Xp[tr], yp[tr], Xa, ya, wp[tr]).decision_function(Xp[te])
         if with_app:
             for tr, te in folds(ya):
-                pa[te] = fit(C, Xp, yp, Xa[tr], ya[tr]).predict_proba(Xa[te])[:, 1]
+                pa[te] = fit(C, Xp, yp, Xa[tr], ya[tr], wp).predict_proba(Xa[te])[:, 1]
         auc = roc_auc_score(yp, pp)
         res["cross-validated AUC"][f"C={C}"] = {"page": round(auc, 3)}
         if with_app:
@@ -275,8 +281,8 @@ def predict(emb, d, report, write):
     """the model on every page verdict and app performer; its keep chance for every page performer with an embedded picture; saved
     to P_FILE when write"""
     best = report["best"]
-    Xp, yp, Xa, ya = d.training(emb)
-    final = fit(best["C"], Xp, yp, Xa, ya)
+    Xp, yp, Xa, ya, wp = d.training(emb)
+    final = fit(best["C"], Xp, yp, Xa, ya, wp)
     out = {}
     for k, r in d.recs.items():
         v = emb.vector(pictures(r))
@@ -287,7 +293,7 @@ def predict(emb, d, report, write):
                          "made": time.strftime("%Y-%m-%d %H:%M"), "judged": len(yp), "keep_chance": out})
     if write:
         save(P_FILE, {"model_type": "performer_keep", "backbone": BACKBONE, "coef": torch.tensor(final.coef_[0], dtype=torch.float32),
-                      "intercept": float(final.intercept_[0]), "config": {"C": best["C"], "app_weight": APP_WEIGHT, "class_weight": "balanced"},
+                      "intercept": float(final.intercept_[0]), "config": {"C": best["C"], "app_weight": APP_WEIGHT, "class_weight": "balanced", "weights": d.weights},
                       "samples": {"page judged": len(yp), "page keep": int(yp.sum()), "app performers": len(ya), "app kept": int(ya.sum())},
                       "learned_from": d.selection_text,
                       "val_acc": best["auc"], "val_auc": report["cross-validated AUC"][f"C={best['C']}"], "created_at": time.strftime("%Y-%m-%dT%H:%M:%S")})
@@ -360,7 +366,7 @@ def run_test(emb, test):
         emb.embed([p for k in d.judged for p in pictures(d.recs[k])] + [p for keys, _ in d.app.values() for p in keys], quiet=True)
         r = cross_validate(emb, d, report_file=None)
         result = {"made": r["made"], "learned from": r["learned from"], "judged": r["judged"], "keep": r["keep"],
-                  "app performers": r["app performers"], "auc": r["best"]["auc"], "app_auc": r["best"]["app_auc"], "C": r["best"]["C"],
+                  "app performers": r["app performers"], "weights": r["weights"], "auc": r["best"]["auc"], "app_auc": r["best"]["app_auc"], "C": r["best"]["C"],
                   "cross-validated AUC": r["cross-validated AUC"]}
         api(f"/tests/{test['id']}", {"status": "done", "result": result})
         print(f"P: test #{test['id']} ({r['learned from']}): page AUC {result['auc']}, app {result['app_auc']}", flush=True)

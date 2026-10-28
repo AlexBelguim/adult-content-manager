@@ -89,6 +89,10 @@ h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 650; text-transform: upper
 .dscore { margin-left: auto; background: none; border: 0; padding: 0; font-size: .82rem; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--dim); cursor: pointer; }
 .dscore .y { color: var(--ok); } .dscore .n { color: var(--bad); }
 .vrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 0 6px; }
+.side-wrong { width: 100%; height: 34px; margin-bottom: 6px; font-size: .84rem; color: var(--bad); }
+.vbtn.superwrong.is-on { background: var(--bad); border-color: var(--bad); color: var(--bg); }
+.card b.v.superwrong { background: var(--bad); outline: 2px solid var(--text); outline-offset: -2px; }
+.dround.superwrong { color: var(--bad); border: 2px solid var(--bad); font-size: 1rem; letter-spacing: -2px; }
 .vbtn.love.is-on { background: var(--accent-quiet); border-color: var(--accent); color: var(--accent); }
 .vbad { width: 100%; margin-bottom: 10px; height: 30px; border-radius: var(--radius); border: 1px dashed var(--line-strong); background: none; cursor: pointer; color: var(--dim); font-size: .8rem; }
 .vbad.is-on { border-style: solid; border-color: var(--warn); color: var(--warn); }
@@ -192,6 +196,13 @@ kbd { font: 600 .7rem ui-monospace, Consolas, monospace; border: 1px solid curre
 .dround.keep { color: var(--ok); border-color: var(--ok); }
 .dround.bad { color: var(--warn); border-color: var(--warn); }
 .dround.back { color: var(--dim); }
+.dround { flex-shrink: 0; }
+@media (max-width: 420px) {   /* six round buttons on a phone: smaller, closer, still round */
+  .dbtns { gap: 10px; }
+  .dround { width: 44px; height: 44px; font-size: 1.1rem; }
+  .dround.nope, .dround.keep { width: 58px; height: 58px; font-size: 1.5rem; }
+  .dround.superwrong { font-size: .9rem; }
+}
 .note { width: 100%; margin-top: 8px; background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 5px 8px; font-size: .8rem; }
 .nav { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; font-size: .8rem; }
@@ -224,10 +235,10 @@ a { color: var(--accent); }
   .lb-strip { padding: 6px 8px; }
   .lb-strip img { height: 52px; }
   .lb-side { flex: 1 1 0; min-height: 0; border-left: 0; border-top: 1px solid var(--line); padding: 0 12px 16px; }
-  .mbar { display: grid; grid-template-columns: 44px 1fr 1fr 64px 44px; gap: 6px; position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 8px 0; margin: 0 0 4px; }
+  .mbar { display: grid; grid-template-columns: 44px 1fr 1fr 48px 64px 44px; gap: 6px; position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 8px 0; margin: 0 0 4px; }
   .mbar button { height: 46px; border-radius: var(--radius-lg); border: 1px solid var(--line-strong); background: var(--raised); font-weight: 650; font-size: .9rem; padding: 0; }
   .mbar .vbad { margin: 0; height: 46px; font-size: .78rem; }
-  .vrow, .side-bad, .nav .step { display: none; }
+  .vrow, .side-bad, .side-wrong, .nav .step { display: none; }
   .chip { padding: 4px 11px; font-size: .84rem; }
   .rrow { gap: 6px; }
 }
@@ -310,7 +321,7 @@ a { color: var(--accent); }
     <b class="dstamp keep" id="dyes">KEEP</b><b class="dstamp nope" id="dno">NOPE</b><b class="dstamp love" id="dlove">LOVE</b>
     <div class="dinfo"><div class="dname" id="dname"></div><div class="dtags" id="dtags"></div><span class="dmine" id="dmine" hidden></span></div></div>
   <div class="dwhy" id="dwhy"></div>
-  <div class="dbtns"><button class="dround back" id="dback" title="Back (←)">↺</button><button class="dround nope" id="dnope" title="Delete (D)">✕</button><button class="dround love" id="dstar" title="Love: a keep you like a lot (R, or swipe up)">★</button><button class="dround keep" id="dkeep" title="Keep (F)">♥</button><button class="dround bad" id="dbad" title="Bad data: no usable picture (Q)">!</button></div>
+  <div class="dbtns"><button class="dround back" id="dback" title="Back (←)">↺</button><button class="dround superwrong" id="dwrong" title="Super wrong: a delete P got badly wrong, can count heavier (E)">✕✕</button><button class="dround nope" id="dnope" title="Delete (D)">✕</button><button class="dround love" id="dstar" title="Love: a keep you like a lot (R, or swipe up)">★</button><button class="dround keep" id="dkeep" title="Keep (F)">♥</button><button class="dround bad" id="dbad" title="Bad data: no usable picture (Q)">!</button></div>
 </div>
 <div class="duel" id="duel" hidden>
   <div class="duhead">
@@ -336,6 +347,7 @@ a { color: var(--accent); }
   </div>
 </div>
 <script>
+const vname = v => v === 'superwrong' ? 'super wrong' : v;   // a verdict as the page says it
 const FACETS = [['label', 'Your verdict'], ['inapp', 'In your app'], ['site', 'Site'], ['ethnicity', 'Ethnicity'], ['hair', 'Hair'], ['body', 'Body type'], ['cup', 'Cup'],
                 ['natural', 'Breasts'], ['eyes', 'Eyes'], ['tattoos', 'Tattoos'], ['ageband', 'Age']];
 const PARTS = {
@@ -384,13 +396,13 @@ function render() {
   $('sub').textContent = `Babepedia ${bySite('babepedia')} · Boobpedia ${bySite('boobpedia')} · ${all.reduce((n, p) => n + p.pictures, 0).toLocaleString()} pictures`;
   $('grid').innerHTML = shown.slice(0, 600).map((p, j) => {
     const tags = [p.rank && `#${p.rank}`, p.age && `${p.age}`, p.ethnicity, p.hair, p.body, p.cup && `${p.cup}${p.natural === 'enhanced' ? ' (enh.)' : ''}`].filter(Boolean).join(' · ');
-    return `<button class="card" data-j="${j}"><img loading="lazy" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}" alt=""><em class="${p.site}">${p.site === 'babepedia' ? 'BP' : 'BB'}</em>${p.label !== 'not yet' ? `<b class="v ${p.label}">${p.label}</b>` : ''}${p.in_app ? '<b class="v app">in your app</b>' : ''}${$('guess').checked && p.pred != null ? `<b class="v guess ${p.pred >= 0.5 ? 'keep' : 'delete'}">model ${Math.round(p.pred * 100)}%</b>` : ''}<div class="info"><div class="nm">${esc(p.name)}</div><div class="tags">${esc(tags)}</div></div></button>`;
+    return `<button class="card" data-j="${j}"><img loading="lazy" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}" alt=""><em class="${p.site}">${p.site === 'babepedia' ? 'BP' : 'BB'}</em>${p.label !== 'not yet' ? `<b class="v ${p.label}">${vname(p.label)}</b>` : ''}${p.in_app ? '<b class="v app">in your app</b>' : ''}${$('guess').checked && p.pred != null ? `<b class="v guess ${p.pred >= 0.5 ? 'keep' : 'delete'}">model ${Math.round(p.pred * 100)}%</b>` : ''}<div class="info"><div class="nm">${esc(p.name)}</div><div class="tags">${esc(tags)}</div></div></button>`;
   }).join('') + (shown.length > 600 ? `<p class="hint" style="grid-column:1/-1">Showing the first 600; filter to see the rest.</p>` : '');
   $('facets').innerHTML = FACETS.map(([k, label]) => {
     const counts = {};
     all.filter(p => match(p, k)).forEach(p => { const v = String(p[k] ?? 'unknown'); counts[v] = (counts[v] || 0) + 1; });
     const vals = [...new Set(all.map(p => String(p[k] ?? 'unknown')))].sort((a, b) => (counts[b] || 0) - (counts[a] || 0));
-    return `<div class="facet"><h3>${label}</h3>${vals.map(v => `<button data-k="${k}" data-v="${esc(v)}" class="${on[k]?.has(v) ? 'is-on' : ''}${counts[v] ? '' : ' zero'}">${esc(v)}<span>${counts[v] || 0}</span></button>`).join('')}</div>`;
+    return `<div class="facet"><h3>${label}</h3>${vals.map(v => `<button data-k="${k}" data-v="${esc(v)}" class="${on[k]?.has(v) ? 'is-on' : ''}${counts[v] ? '' : ' zero'}">${esc(k === 'label' ? vname(v) : v)}<span>${counts[v] || 0}</span></button>`).join('')}</div>`;
   }).join('');
   $('dists').innerHTML = '<h3>Variety in the current selection</h3>' + DIST.map(([k, label]) => {
     const c = {}; shown.forEach(p => { if (p[k] != null) c[p[k]] = (c[p[k]] || 0) + 1; });
@@ -399,7 +411,7 @@ function render() {
   }).join('');
   const n = v => all.filter(p => p.label === v).length;
   const m = modelInfo?.model;
-  $('mine').innerHTML = `<h3>Your verdicts</h3><div class="sub">${n('love')} love · ${n('keep')} keep · ${n('delete')} delete · ${n('bad')} bad data · ${n('not yet')} not yet</div>`
+  $('mine').innerHTML = `<h3>Your verdicts</h3><div class="sub">${n('love')} love · ${n('keep')} keep · ${n('delete')} delete · ${n('superwrong')} super wrong · ${n('bad')} bad data · ${n('not yet')} not yet</div>`
     + (m ? `<h3 style="margin-top:12px">The model</h3><div class="sub">${esc(m.variant)}${m.learned_from ? ` (${esc(m.learned_from)}: Training data)` : ''}, learned from ${modelInfo.judged} verdicts; on performers it did not learn from it ranks a keep above a delete ${Math.round(m.auc * 100)}% of the time (AUC ${m.auc}). Guesses for ${all.filter(p => p.pred != null).length} performers, updated ${esc(modelInfo.made)}.</div>` : '');
 }
 
@@ -464,9 +476,10 @@ async function open(j) {
   $('strip').onclick = e => e.target.dataset.f && show(e.target.dataset.f);
   const f = r.fields;
   const rows = Object.entries(f).filter(([k]) => k !== 'categories').map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('');
-  $('side').innerHTML = `<div class="mbar"><button class="mprev">‹</button><button class="vbtn keep" data-v="keep">Keep</button><button class="vbtn delete" data-v="delete">Delete</button><button class="vbad" data-v="bad">Bad data</button><button class="mnext">›</button></div>
+  $('side').innerHTML = `<div class="mbar"><button class="mprev">‹</button><button class="vbtn keep" data-v="keep">Keep</button><button class="vbtn delete" data-v="delete">Delete</button><button class="vbtn superwrong" data-v="superwrong" title="Super wrong" aria-label="Super wrong">✕✕</button><button class="vbad" data-v="bad">Bad data</button><button class="mnext">›</button></div>
     <h2>${esc(r.name)}</h2><span class="sub">${j + 1} of ${order.length} · ${r.site} · <a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></span>
     <div class="vrow"><button class="vbtn keep" data-v="keep">Keep <kbd>F</kbd></button><button class="vbtn love" data-v="love">★ Love <kbd>R</kbd></button><button class="vbtn delete" data-v="delete">Delete <kbd>D</kbd></button></div>
+    <button class="vbtn superwrong side-wrong" data-v="superwrong" title="A delete P got badly wrong; can count heavier (Training data)">✕✕ Super wrong <kbd>E</kbd></button>
     <button class="vbad side-bad" data-v="bad">Bad data: no usable picture <kbd>Q</kbd></button>
     <div class="reasons" id="reasons"></div>
     <input class="note" id="note" placeholder="Note (optional)" value="${esc(cur.note)}">
@@ -532,7 +545,7 @@ async function deck(j) {
   $('dtags').textContent = [p.rank && `#${p.rank}`, p.ethnicity, p.hair, p.body, p.cup && p.cup + (p.natural === 'enhanced' ? ' (enhanced)' : ''),
                             p.tattoos === 'yes' && 'tattoos', p.in_app && 'in your app'].filter(Boolean).join(' · ');
   $('dmine').hidden = !cur.verdict;
-  if (cur.verdict) { $('dmine').textContent = `you said ${cur.verdict}`; $('dmine').style.background = `var(--${{ keep: 'ok', love: 'accent', delete: 'bad', bad: 'warn' }[cur.verdict]})`; }
+  if (cur.verdict) { $('dmine').textContent = `you said ${vname(cur.verdict)}`; $('dmine').style.background = `var(--${{ keep: 'ok', love: 'accent', delete: 'bad', superwrong: 'bad', bad: 'warn' }[cur.verdict]})`; }
   $('dcount').textContent = `${order.filter(x => x.label === 'not yet').length} without a verdict`;
   $('dwhy').innerHTML = reasonsHTML(cur.reasons);
   const next = order.find((x, i) => i > j && x.label === 'not yet');
@@ -568,7 +581,7 @@ function dverdict(v) {
   }
   const card = $('dcard');
   card.classList.add('fly');
-  card.style.transform = v === 'love' ? 'translateY(-130%)' : v === 'bad' ? 'translateY(120%)'
+  card.style.transform = v === 'love' ? 'translateY(-130%)' : v === 'bad' ? 'translateY(120%)' : v === 'superwrong' ? 'translateX(-160%) rotate(-32deg)'
     : `translateX(${v === 'keep' ? 130 : -130}%) rotate(${v === 'keep' ? 16 : -16}deg)`;
   card.style.opacity = '0';
   setTimeout(dnext, 220);
@@ -603,6 +616,7 @@ $('dcard').addEventListener('pointercancel', dend);
 $('dkeep').onclick = () => dverdict('keep');
 $('dstar').onclick = () => dverdict('love');
 $('dnope').onclick = () => dverdict('delete');
+$('dwrong').onclick = () => dverdict('superwrong');
 $('dbad').onclick = () => dverdict('bad');
 $('dback').onclick = () => deck(at - 1);
 $('dgrid').onclick = () => { $('deck').hidden = true; render(); };
@@ -676,7 +690,11 @@ $('filters').onclick = () => document.querySelector('.left').classList.toggle('i
 const SRC = { profile: ['Profile page', 'your verdicts on this page'],
               discover: ['Discover', 'your Keep and Delete on the keep-scanner\'s Discover page; its rounds count apart from this page\'s'] };
 let td = null, tdPoll = null;
-const canon = s => JSON.stringify({ profile: { on: !!s.profile.on, rounds: s.profile.rounds }, discover: { on: !!s.discover.on, rounds: s.discover.rounds }, app: !!s.app });
+// love and super wrong: what they count for in training (a test from before weights had them at 1, as with the switch off)
+const WEIGHTS = { love: ['★ Love counts heavier', 'a keep you like a lot'], superwrong: ['✕✕ Super wrong counts heavier', 'a delete P got badly wrong'] };
+const weightOf = (s, v) => s.weights?.[v]?.on ? s.weights[v].weight : 1;
+const canon = s => JSON.stringify({ profile: { on: !!s.profile.on, rounds: s.profile.rounds }, discover: { on: !!s.discover.on, rounds: s.discover.rounds }, app: !!s.app,
+  weights: Object.keys(WEIGHTS).map(v => weightOf(s, v)) });
 async function tdLoad() {
   try {
     const [r, t] = await Promise.all(['/api/profile/rounds', '/api/profile/tests'].map(u => fetch(u).then(x => { if (!x.ok) throw new Error(`${u}: HTTP ${x.status}`); return x.json(); })));
@@ -698,19 +716,26 @@ function tdRender() {
       <div class="td-rounds">
         ${check(`data-all ${all ? 'checked' : ''}`, 'Every round, new ones too')}
         ${td.rounds[src].map(r => `<div class="td-round"><label><input type="checkbox" data-round="${r.round}" ${all || inc.rounds.includes(r.round) ? 'checked' : ''} ${all ? 'disabled' : ''}> Round ${r.round}</label>
-          <span class="grow sub">${r.keep + r.love} keep${r.love ? ` (${r.love} love)` : ''} · ${r.delete} delete${r.bad ? ` · ${r.bad} bad data` : ''}${r.started ? ` · since ${esc(r.started)}` : ''}</span>
+          <span class="grow sub">${r.keep + r.love} keep${r.love ? ` (${r.love} love)` : ''} · ${r.delete + (r.superwrong || 0)} delete${r.superwrong ? ` (${r.superwrong} super wrong)` : ''}${r.bad ? ` · ${r.bad} bad data` : ''}${r.started ? ` · since ${esc(r.started)}` : ''}</span>
           ${r.round === td.current[src] ? '<span class="cur" title="New verdicts go into this round">current</span>' : ''}</div>`).join('')}
-        ${src === 'discover' && td.rounds.discover.every(r => !(r.keep + r.love + r.delete + r.bad)) ? '<span class="sub">No Discover verdicts yet: they arrive once the app is connected to the keep-scanner.</span>' : ''}
+        ${src === 'discover' && td.rounds.discover.every(r => !(r.keep + r.love + r.delete + (r.superwrong || 0) + r.bad)) ? '<span class="sub">No Discover verdicts yet: they arrive once the app is connected to the keep-scanner.</span>' : ''}
       </div></div>`;
   }).join('') + `<div class="td-src"><div class="td-row"><div class="grow"><h3 style="margin:0">Your library</h3><span class="sub">your app's performers: the keep folder as keep, the deleted ones as delete, each counted 10 times</span></div>
-    ${check(`id="tdapp" ${td.include.app ? 'checked' : ''}`, 'Learn from it')}</div></div>`;
+    ${check(`id="tdapp" ${td.include.app ? 'checked' : ''}`, 'Learn from it')}</div></div>`
+    + `<div class="td-src" style="margin-top:10px"><div class="td-row"><div class="grow"><h3 style="margin:0">Weights</h3><span class="sub">how much a love or a super wrong counts against a normal keep or delete (1 to 10). The test score counts everyone once, so Run test shows whether a weight helps.</span></div></div>
+      <div class="td-rounds">${Object.entries(WEIGHTS).map(([v, [label, what]]) => {
+        const w = td.include.weights?.[v] || { on: false, weight: 3 };
+        return `<div class="td-round" data-weight="${v}"><label><input type="checkbox" data-won ${w.on ? 'checked' : ''}> ${label}</label>
+          <span class="grow sub">${what}</span>
+          <label class="sub" style="min-width:0;font-weight:500">counts as <input type="number" class="select" data-wval min="1" max="10" step="0.5" value="${w.weight}" ${w.on ? '' : 'disabled'} style="width:62px;height:28px" aria-label="${esc(label)}: weight"> ${v === 'love' ? 'keeps' : 'deletes'}</label></div>`;
+      }).join('')}</div></div>`;
   const now = canon(td.include);
   $('tdtests').innerHTML = td.tests.length ? td.tests.map(t => {
     const r = t.result || {}, isNow = canon(t.selection) === now || (t.frozen && canon(t.frozen) === now);
     return `<tr class="${isNow ? 'is-now' : ''}"><td class="num">#${t.id}</td>
       <td>${esc(t.created)}${t.note ? `<br><span class="sub">${esc(t.note)}</span>` : ''}</td>
       <td>${esc(t.selection_text)}</td>
-      <td class="num">${t.verdicts.keep + t.verdicts.love} keep · ${t.verdicts.delete} delete</td>
+      <td class="num">${t.verdicts.keep + t.verdicts.love} keep · ${t.verdicts.delete + (t.verdicts.superwrong || 0)} delete${t.verdicts.love || t.verdicts.superwrong ? `<br><span class="sub">${t.verdicts.love} love · ${t.verdicts.superwrong || 0} super wrong</span>` : ''}</td>
       <td><span class="pill ${t.status}">${t.status}</span>${t.status === 'done' ? `<br><span class="num">page AUC ${r.auc}${r.app_auc != null ? ` · library ${r.app_auc}` : ''}</span>` : t.error ? `<br><span class="sub">${esc(t.error)}</span>` : ''}</td>
       <td>${isNow ? '<span class="sub">the toggles now</span>' : t.status === 'done' ? `<button class="btn" data-use="${t.id}">Use this version</button>` : ''}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="sub">No tests yet: Run test tries P on what is picked now.</td></tr>';
@@ -746,6 +771,13 @@ $('tdclose').onclick = tdClose;
 $('td').onclick = e => { if (e.target === $('td')) tdClose(); };
 $('tdsources').onchange = e => {
   if (e.target.id === 'tdapp') return tdSend('PUT', '/api/profile/rounds', { include: { app: e.target.checked } });
+  const wrow = e.target.closest('[data-weight]');
+  if (wrow) {
+    const v = wrow.dataset.weight;
+    if ('won' in e.target.dataset) return tdSend('PUT', '/api/profile/rounds', { include: { weights: { [v]: { on: e.target.checked } } } });
+    if ('wval' in e.target.dataset) return tdSend('PUT', '/api/profile/rounds', { include: { weights: { [v]: { weight: Number(e.target.value) } } } });
+    return;
+  }
   const box = e.target.closest('[data-src]');
   if (!box) return;
   const src = box.dataset.src;
@@ -772,7 +804,7 @@ document.onkeydown = e => {
   if (!$('td').hidden) { if (e.key === 'Escape') tdClose(); return; }   // Training data open: Esc closes it, no other key acts
   if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
   // the left hand only, the right hand on the mouse for reasons (Alex, Moonlander AZERTY): F keep, D delete, Q bad data on the
-  // home row, the arrows of the left half to move: → next unlabelled, ← back
+  // home row, R love and E super wrong above them, the arrows of the left half to move: → next unlabelled, ← back
   const k = e.key.toLowerCase();
   if (!$('duel').hidden) {   // duels, the app's Smart Compare keys: ← / A left, → / D right, X draw, S skip, Z undo
     if (k === 'escape') $('dugrid').click();
@@ -788,6 +820,7 @@ document.onkeydown = e => {
     else if (k === 'r') dverdict('love');
     else if (k === 'f') dverdict('keep');
     else if (k === 'd') dverdict('delete');
+    else if (k === 'e') dverdict('superwrong');
     else if (k === 'q') dverdict('bad');
     else if (k === 'arrowright') dnext();
     else if (k === 'arrowleft') deck(at - 1);
@@ -798,6 +831,7 @@ document.onkeydown = e => {
   else if (k === 'r') setVerdict('love');
   else if (k === 'f') setVerdict('keep');
   else if (k === 'd') setVerdict('delete');
+  else if (k === 'e') setVerdict('superwrong');
   else if (k === 'q') setVerdict('bad');
   else if (k === 'arrowright') nextNew();
   else if (k === 'arrowleft') open(at - 1);

@@ -16,8 +16,9 @@
  *                                    rounds and sources picked under Training data (?test=: that test's), whether his library counts
  * - GET  /api/profile/rounds       — Training data: per source (profile, discover) its current round, what is picked, every
  *                                    round's verdicts by kind
- * - PUT  /api/profile/rounds       — { include: { profile: { on, rounds }, discover: { on, rounds }, app } } picks what P learns
- *                                    from; { start: 'profile' | 'discover' } begins that source's next round
+ * - PUT  /api/profile/rounds       — { include: { profile: { on, rounds }, discover: { on, rounds }, app, weights } } picks what P
+ *                                    learns from and how much love / super wrong count; { start: 'profile' | 'discover' } begins
+ *                                    that source's next round
  * - POST /api/profile/tests, GET /tests, PUT /tests/claim, PUT /tests/:id, POST /tests/:id/use — tests of a selection and their
  *                                    outcome (the follower runs them); use sets the toggles back to a test's selection
  * - PUT  /api/profile/predictions  — the follower's P
@@ -48,7 +49,12 @@ const TESTS = path.join(DATA, 'training_tests.json');
 // picked per source (on / off, which rounds; rounds null = all) plus his library (the keep / delete folders, counted x10).
 // A test cross-validates P on a selection and keeps the selection with the outcome: a version. "Use this version" sets the toggles
 // back to its selection, and P retrains on it (a closed round does not change: a verdict given again moves to the current round).
+// Weights (Alex, 2026-10-28): love (a keep he likes a lot) and super wrong (a delete P got badly wrong) can count heavier, each
+// with a switch and a weight under Training data. A weight, not copies: a copy would sit in the training and the held-out part of
+// the same test and make its score look better than it is.
 const SOURCES = ['profile', 'discover'];
+const WEIGHTED = ['love', 'superwrong'];
+const NO_WEIGHTS = { love: { on: false, weight: 3 }, superwrong: { on: false, weight: 3 } };   // a test from before weights
 function roundsState() {
   const st = readJson(ROUNDS, {}), inc = st.include || {};
   return {
@@ -58,9 +64,15 @@ function roundsState() {
       profile: { on: true, rounds: null, ...inc.profile },
       discover: { on: true, rounds: null, ...inc.discover },
       app: inc.app !== false,
+      weights: Object.fromEntries(WEIGHTED.map((v) => [v, { on: true, weight: 3, ...inc.weights?.[v] }])),
     },
   };
 }
+// what each verdict counts for in training: 1, or its weight while its switch is on
+const weightsOf = (inc) => Object.fromEntries(WEIGHTED.map((v) => {
+  const w = (inc.weights || NO_WEIGHTS)[v];
+  return [v, w && w.on ? w.weight : 1];
+}));
 const roundOf = (l) => l.round || 1;
 // a verdict without a source is from this page (from before sources); one with a source this page does not know is left out
 const sourceOf = (l) => (!l.source ? 'profile' : SOURCES.includes(l.source) ? l.source : null);
@@ -84,7 +96,11 @@ const frozen = (inc, current) => Object.fromEntries(Object.entries(inc).map(([k,
 const tests = () => readJson(TESTS, []);
 // a selection in words, for the tests list: "profile rounds 1-2, discover off, library on"
 const roundsText = (s) => (!s.on ? 'off' : s.rounds === null ? 'all rounds' : !s.rounds.length ? 'no rounds' : `round${s.rounds.length > 1 ? 's' : ''} ${s.rounds.join(', ')}`);
-const selectionText = (inc) => `profile ${roundsText(inc.profile)}, discover ${roundsText(inc.discover)}, library ${inc.app ? 'on' : 'off'}`;
+const weightsText = (inc) => {
+  const w = weightsOf(inc), on = [w.love > 1 && `love x${w.love}`, w.superwrong > 1 && `super wrong x${w.superwrong}`].filter(Boolean);
+  return on.length ? on.join(', ') : 'no extra weight';
+};
+const selectionText = (inc) => `profile ${roundsText(inc.profile)}, discover ${roundsText(inc.discover)}, library ${inc.app ? 'on' : 'off'}, ${weightsText(inc)}`;
 
 const readJson = (file, empty) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : empty);
 const readLines = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
@@ -344,12 +360,12 @@ router.get('/performer', (req, res) => {
   res.json({ ...r, label: labelOf(r, readJson(LABELS, {})), pred: readJson(PREDICTIONS, { keep_chance: {} }).keep_chance[key] ?? null });
 });
 
-// Alex's verdict on one performer: keep, love (a keep he likes a lot) or delete (null clears it), the deciding traits, a note;
-// bad = no usable picture, left out of any training
+// Alex's verdict on one performer: keep, love (a keep he likes a lot), delete or superwrong (a delete P got badly wrong; null
+// clears it), the deciding traits, a note; bad = no usable picture, left out of any training
 router.post('/label', (req, res) => {
   const { site, slug, verdict = null, reasons = [], note = '' } = req.body;
   const key = `${site}/${slug}`;
-  if (!records().has(key) || !['keep', 'love', 'delete', 'bad', null].includes(verdict)) {
+  if (!records().has(key) || !['keep', 'love', 'delete', 'superwrong', 'bad', null].includes(verdict)) {
     return res.status(400).json({ error: 'unknown performer or verdict' });
   }
   const lab = readJson(LABELS, {});
@@ -380,14 +396,14 @@ router.get('/training', (req, res) => {
     include = t.frozen || t.selection;
   }
   res.json({ verdicts: pickedVerdicts(include), duels: readJson(DUELS, []), lists: sorting().lists, app: include.app !== false, selection: include,
-    selection_text: selectionText(include) });
+    selection_text: selectionText(include), weights: weightsOf(include) });
 });
 
 // Training data: per source its current round, what is picked, and every round's verdicts by kind, counted as training sees them
 router.get('/rounds', (req, res) => {
   const st = roundsState();
   const rounds = { profile: {}, discover: {} };
-  const row = (src, n) => rounds[src][n] || (rounds[src][n] = { round: n, started: st.started[src][n] || null, keep: 0, love: 0, delete: 0, bad: 0 });
+  const row = (src, n) => rounds[src][n] || (rounds[src][n] = { round: n, started: st.started[src][n] || null, keep: 0, love: 0, delete: 0, superwrong: 0, bad: 0 });
   for (const [, l] of verdictsOfRecords()) {
     if (!sourceOf(l)) continue;
     const r = row(sourceOf(l), roundOf(l));
@@ -412,6 +428,13 @@ router.put('/rounds', (req, res) => {
       st.include[src] = { on: 'on' in include[src] ? !!include[src].on : was.on, rounds: cleanRounds(include[src].rounds, was.rounds) };
     }
     if ('app' in include) st.include.app = !!include.app;
+    // { weights: { love: { on, weight }, superwrong: { on, weight } } }: a weight of 1 to 10
+    for (const v of WEIGHTED) {
+      const w = include.weights?.[v];
+      if (!w) continue;
+      const was = st.include.weights[v], n = Number(w.weight);
+      st.include.weights[v] = { on: 'on' in w ? !!w.on : was.on, weight: Number.isFinite(n) ? Math.min(10, Math.max(1, Math.round(n * 2) / 2)) : was.weight };
+    }
   }
   if (start) {
     if (!SOURCES.includes(start)) return res.status(400).json({ error: 'start: profile or discover' });
@@ -437,7 +460,7 @@ router.post('/tests', (req, res) => {
     // selection: the toggles as they were; frozen: the same made exact, what the test learns from and Use this version sets back
     selection: JSON.parse(JSON.stringify(st.include)), frozen: frozen(st.include, st.current),
     selection_text: selectionText(frozen(st.include, st.current)), current: { ...st.current },
-    verdicts: { keep: v.filter((x) => x === 'keep').length, love: v.filter((x) => x === 'love').length, delete: v.filter((x) => x === 'delete').length },
+    verdicts: Object.fromEntries(['keep', 'love', 'delete', 'superwrong'].map((k) => [k, v.filter((x) => x === k).length])),
   };
   all.push(t);
   saveJson(TESTS, all);
@@ -476,6 +499,7 @@ router.post('/tests/:id/use', (req, res) => {
   if (t.status !== 'done') return res.status(400).json({ error: 'only a finished test is a version to go back to' });
   const st = roundsState();
   st.include = JSON.parse(JSON.stringify(t.frozen || t.selection));
+  st.include.weights ||= JSON.parse(JSON.stringify(NO_WEIGHTS));   // a test from before weights learned with love and super wrong at 1
   saveJson(ROUNDS, st);
   res.json({ include: st.include, selection: selectionText(st.include) });
 });
