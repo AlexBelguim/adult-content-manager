@@ -90,16 +90,27 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-def map_path(path):
-    """Maps remote paths (TrueNAS) to local paths (Windows)."""
-    if not path:
-        return path
-    # Normalize slashes to Windows-style for consistency
-    p = str(path).replace('/', '\\')
-    # If it starts with \media
-    if p.startswith('\\media'):
-        return 'Z:\\Apps\\adultManager' + p
-    return p
+# The library is read over the Adult Content Manager's HTTP API only (acm_client.py), never through a mapped drive.
+import acm_client
+from pathlib import PurePosixPath
+HERE = Path(__file__).resolve().parent   # this app's own storage: the only files it opens itself
+
+
+@app.before_request
+def _learn_acm_address():
+    """a request that says where ACM is (app_base_url) tells this app, until ACM pairs with it (POST /acm/link)"""
+    if request.is_json:
+        acm_client.remember((request.get_json(silent=True) or {}).get('app_base_url'))
+
+
+@app.route('/acm/link', methods=['POST'])
+def acm_link():
+    """ACM pairs with this app: its address and the worker token (its Jobs and Funpipe pages send this by themselves)"""
+    data = request.get_json(silent=True) or {}
+    if not data.get('url'):
+        return jsonify({'ok': False, 'error': 'url is required'}), 400
+    acm_client.link(data['url'], data.get('token'))
+    return jsonify({'ok': True, **acm_client.linked()})
 
 # Enhanced device logging
 log(f"🚀 INITIALIZING AI SERVER")
@@ -255,6 +266,7 @@ def health():
         'ranker_loaded': RANKER_MODEL is not None,
         'ranker_model': RANKER_MODEL_ID,
         'performer_model': performer_model.STATE,
+        'acm': acm_client.linked(),
         'vram_allocated': f"{torch.cuda.memory_allocated(DEVICE)/1024**2:.2f} MB" if torch.cuda.is_available() else "0 MB"
     })
 
@@ -534,7 +546,7 @@ def api_test_model():
                     img_data = base64.b64decode(sample_obj['data'].split(',')[-1])
                     return Image.open(io.BytesIO(img_data)).convert('RGB')
                 else:
-                    return Image.open(sample_obj['path']).convert('RGB')
+                    return _load_image(sample_obj['path'], data.get('app_base_url'))
 
             # Extract performer name from a sample (caller may have set it, or we derive from path)
             def get_performer(sample):
@@ -747,22 +759,15 @@ def predict_batch():
         return jsonify({"success": False, "error": str(e)}), 500
 
 def _load_image(p, app_base_url=None):
-    """Load an image from local path or remote URL. Returns PIL Image or None."""
+    """A picture as a PIL Image, or None: a library path (/media/...) from ACM over HTTP (app_base_url, else the address
+    ACM paired with), or a file in this app's own storage (training_data)."""
     try:
-        mapped_p = map_path(p)
-        if os.path.exists(mapped_p):
-            return Image.open(mapped_p).convert('RGB')
-        elif app_base_url:
-            clean_path = p.replace('\\', '/')
-            if not clean_path.startswith('/'): clean_path = '/' + clean_path
-            encoded_path = quote(clean_path, safe='/')
-            url = f"{app_base_url.rstrip('/')}/api/files/raw?path={encoded_path}"
-            resp = requests.get(url, timeout=5)
-            if resp.status_code == 200:
-                return Image.open(io.BytesIO(resp.content)).convert('RGB')
-    except Exception:
+        own = Path(p).resolve()
+        if own.is_relative_to(HERE) and own.is_file():
+            return Image.open(own).convert('RGB')
+    except (OSError, ValueError):
         pass
-    return None
+    return acm_client.image(p, app_base_url)
 
 def _get_performer_name(image_path):
     """Extract performer name from folder structure."""
@@ -772,34 +777,16 @@ def _get_performer_name(image_path):
         name = p.parent.parent.name
     return name
 
-def _get_performer_images_for_rank(image_path, max_images=300):
-    """Find up to 300 images for the same performer to get a better rank average."""
-    mapped_p = map_path(image_path)
-    p = Path(mapped_p)
-    
-    # Try to find the 'pics' folder or performer root
-    dir_to_scan = None
-    if p.parent.name == 'pics':
-        dir_to_scan = p.parent
-    elif (p.parent / 'pics').exists() and (p.parent / 'pics').is_dir():
-        dir_to_scan = p.parent / 'pics'
-    else:
-        dir_to_scan = p.parent
-        
-    if not dir_to_scan or not dir_to_scan.exists():
-        return [image_path]
-        
-    valid_exts = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
-    img_paths = []
+def _get_performer_images_for_rank(image_path, max_images=300, app_base_url=None):
+    """Find up to 300 images for the same performer to get a better rank average: the pictures of her folder (its pics/
+    folder when it has one), as ACM lists them."""
+    folder = PurePosixPath(str(image_path).replace('\\', '/')).parent
     try:
-        # Shallow scan for speed
-        for f in dir_to_scan.iterdir():
-            if f.is_file() and f.suffix.lower() in valid_exts:
-                img_paths.append(str(f))
+        img_paths = acm_client.list_pictures(folder, app_base_url)
     except Exception as e:
-        log(f"⚠️ Error scanning performer images for rank: {e}")
+        log(f"⚠️ Error listing performer images for rank: {e}")
         return [image_path]
-        
+
     if not img_paths:
         return [image_path]
         
@@ -920,7 +907,7 @@ def classify_batch():
         for perf, sample_path in performers_to_rank.items():
             if perf in CONTEXT_STAR_CACHE:
                 continue  # another request may have filled it in the meantime
-            performer_img_paths = _get_performer_images_for_rank(sample_path, max_images=200)
+            performer_img_paths = _get_performer_images_for_rank(sample_path, max_images=200, app_base_url=app_base_url)
             rank_preds = []
             for ri in range(0, len(performer_img_paths), 8):
                 chunk_paths = performer_img_paths[ri:ri+8]
@@ -960,7 +947,7 @@ def classify_batch():
                     if RANKER_MODEL is not None:
                         # NEW: Load up to 300 images for this performer to get a robust rank
                         log(f"  🔍 Gathering images for {perf} to establish robust rank...")
-                        performer_img_paths = _get_performer_images_for_rank(items[0][0], max_images=300)
+                        performer_img_paths = _get_performer_images_for_rank(items[0][0], max_images=300, app_base_url=app_base_url)
                         log(f"  🔍 Running ranker on {len(performer_img_paths)} images for {perf}...")
                         
                         rank_preds = []
@@ -1095,7 +1082,7 @@ def predict_rank():
     # 1. LOAD IMAGES
     loaded_imgs = []
     for p in image_paths:
-        img = _load_image(p)
+        img = _load_image(p, data.get('app_base_url'))
         if img: loaded_imgs.append(img)
             
     if not loaded_imgs:
@@ -1182,11 +1169,11 @@ def classify_single():
         image_path = data.get('image')
         threshold = data.get('threshold', 50.0)
         
-        if not image_path or not os.path.exists(image_path):
+        img = _load_image(image_path, data.get('app_base_url')) if image_path else None
+        if img is None:
             return jsonify({'error': 'Invalid image path'}), 400
-            
+
         try:
-            img = Image.open(image_path).convert('RGB')
             with torch.no_grad():
                 inputs = PROCESSOR(images=[img], return_tensors="pt")
                 pixel_values = inputs['pixel_values'].to(DEVICE)
@@ -1422,18 +1409,18 @@ def api_train():
         MODEL_NAME = None
         torch.cuda.empty_cache()
 
-    # If base_path is provided but doesn't exist locally, use cached training data
+    # The library's base_path is never read here: training uses the copy ACM pushed (/upload_training) into
+    # training_data, which has keep/ and delete/ subdirs
     base_path = data.get('base_path', '')
-    if base_path and not Path(base_path).exists():
+    if base_path:
         cached_keep = TRAINING_DATA_DIR / 'keep'
         cached_delete = TRAINING_DATA_DIR / 'delete'
         if cached_keep.exists() and cached_delete.exists():
-            log(f"📂 base_path '{base_path}' not local — using cached training data")
-            # Override: point to training_data dir which has keep/ and delete/ subdirs
+            log(f"📂 training on the pushed copy of '{base_path}'")
             data['base_path'] = str(TRAINING_DATA_DIR)
             data['use_cached'] = True
         else:
-            return jsonify({'success': False, 'message': 'base_path not accessible and no cached training data. Push data first.'}), 400
+            return jsonify({'success': False, 'message': 'No pushed training data yet. Push data first.'}), 400
 
     ok, msg = start_training(data)
     status_code = 200 if ok else 409

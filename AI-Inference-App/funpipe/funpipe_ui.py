@@ -73,7 +73,93 @@ _VID_TTL = 120.0
 _SIG_EXT = ".signal.json"
 
 
+# ------------------------------------------------------------------ ACM mode
+# ACM change (2026-10-28): with --acm the editor never reads the library. ROOT is the AI app's own storage
+# (data/cache/editor); the list of videos is ACM's (those funpipe made a signal for), a video and its sidecars are pulled
+# into ROOT/<performer>/<folder>/ the first time it is opened in this run, and .edits.json and the .funscript are
+# uploaded to ACM whenever they are saved here. The copies are a cache: the oldest are deleted beyond ACM_CACHE_GB.
+ACM = {"on": False, "root": None, "src": {}, "info": {}, "pulled": set()}
+ACM_CACHE_GB = float(os.environ.get("FUNPIPE_EDITOR_CACHE_GB", "40"))
+_ACM_LOCK = __import__("threading").Lock()
+_PULL_EXTS = (".scenes.json", ".tracks.npz", ".pose.json", ".signal.json", ".edits.json", ".funscript")
+_SAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _acm_local(row) -> Path:
+    """where a library video's copy lives in ROOT (its performer and folder, made safe as Windows names)"""
+    return ROOT / _SAFE.sub("_", row["performer"]) / _SAFE.sub("_", row["folderName"]) / row["name"]
+
+
+def _acm_scan():
+    import acm_client
+    lib = acm_client.api("GET", "/api/funpipe/library", timeout=600) or {}
+    root = (ACM["root"] or "").replace("\\", "/").rstrip("/")
+    vids = []
+    for row in lib.get("videos", []):
+        if not row.get("sidecars", {}).get("signal"):
+            continue
+        if root and not row["path"].replace("\\", "/").startswith(root + "/"):
+            continue
+        v = _acm_local(row)
+        ACM["src"][v], ACM["info"][v] = row["path"], row
+        vids.append(v)
+    return sorted(vids)
+
+
+def _acm_file(v: Path, ext: str) -> Path:
+    return v.with_suffix(".funscript") if ext == ".funscript" else sidecar(v, ext)
+
+
+def _acm_evict(keep: Path):
+    """the least recently opened copies go once the cache is over ACM_CACHE_GB"""
+    dirs = [d for d in ROOT.glob("*/*") if d.is_dir() and d != keep.parent]
+    size = lambda d: sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+    total = sum(size(d) for d in dirs) + (size(keep.parent) if keep.parent.exists() else 0)
+    for d in sorted(dirs, key=lambda d: d.stat().st_mtime):
+        if total <= ACM_CACHE_GB * 2**30:
+            break
+        total -= size(d)
+        __import__("shutil").rmtree(d, ignore_errors=True)
+        ACM["pulled"] = {p for p in ACM["pulled"] if p.parent != d}
+
+
+def _acm_pull(v: Path):
+    """the video and every sidecar ACM has, the first time it is opened in this run (ACM's copy is the real one)"""
+    if v in ACM["pulled"] and v.exists():
+        return
+    import acm_client
+    with _ACM_LOCK:
+        if v in ACM["pulled"] and v.exists():
+            return
+        src = ACM["src"][v]
+        _acm_evict(keep=v)
+        if not v.exists():
+            print(f"pulling {v.name} from the app ...", flush=True)
+            acm_client.worker_download(src, v)
+        for ext in _PULL_EXTS:
+            target = _acm_file(v, ext)
+            if not acm_client.get_sidecar(src, ext, target) and target.exists():
+                target.unlink()   # gone in the app: not here either
+        for name in (v.name + ".human.funscript", v.stem + ".human.funscript", "og.funscript", "human.funscript"):
+            acm_client.get_beside(src, name, v.parent / name)
+        os.utime(v.parent)   # opened now: the last to be evicted
+        ACM["pulled"].add(v)
+
+
+def _acm_push(v: Path, *exts):
+    """saved here: the same file to ACM, next to the real video"""
+    if not ACM["on"]:
+        return
+    import acm_client
+    for ext in exts:
+        f = _acm_file(v, ext)
+        if f.exists():
+            acm_client.put_sidecar(ACM["src"][v], ext, f)
+
+
 def _scan_videos():
+    if ACM["on"]:
+        return _acm_scan()
     vids = []
     for sig in ROOT.rglob("*" + _SIG_EXT):
         v = sig.with_name(sig.name[:-len(_SIG_EXT)])
@@ -126,6 +212,8 @@ def vid_by_id(vid_id: str) -> Path:
     for refresh in (False, True):
         for v in find_videos(refresh=refresh):
             if v.stem == vid_id or v.name == vid_id:
+                if ACM["on"]:
+                    _acm_pull(v)
                 return v
         if _VID_CACHE["scanning"]:
             break
@@ -139,11 +227,12 @@ def vid_by_id(vid_id: str) -> Path:
 def api_videos():
     out = []
     for v in find_videos():
+        info = ACM["info"].get(v) or {}   # ACM mode: what the app has, as the copy may not be pulled yet
         out.append({
             "id": v.stem,
             "name": v.name,
-            "has_edits": sidecar(v, ".edits.json").exists(),
-            "has_funscript": v.with_suffix(".funscript").exists(),
+            "has_edits": sidecar(v, ".edits.json").exists() or bool(info.get("sidecars", {}).get("edits")),
+            "has_funscript": v.with_suffix(".funscript").exists() or bool(info.get("funscripts")),
         })
     return out
 
@@ -168,6 +257,7 @@ async def api_save_edits(vid_id: str, request: Request):
     v = vid_by_id(vid_id)
     edits = await request.json()
     sidecar(v, ".edits.json").write_text(json.dumps(edits, indent=1))
+    _acm_push(v, ".edits.json")
     return {"ok": True}
 
 
@@ -178,6 +268,7 @@ async def api_export(vid_id: str, request: Request):
     sidecar(v, ".edits.json").write_text(json.dumps(edits, indent=1))
     fs_path = v.with_suffix(".funscript")
     _export_to_path(v, edits, fs_path)
+    _acm_push(v, ".edits.json", ".funscript")
     dedup = json.loads(fs_path.read_text())["actions"]
     return {"ok": True, "actions": len(dedup), "funscript": fs_path.name}
 
@@ -227,6 +318,7 @@ async def api_compare(vid_id: str, request: Request):
     if body.get("edits"):
         # reuse the export pipeline by calling it directly with the edits
         _export_to_path(v, body["edits"], pipe_path)
+        _acm_push(v, ".funscript")
 
     if not pipe_path.exists():
         raise HTTPException(404, f"no pipeline funscript at {pipe_path.name} "
@@ -1398,9 +1490,13 @@ def main():
     ap.add_argument("folder", type=Path)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8420)
+    ap.add_argument("--acm", action="store_true",
+                    help="ACM mode: list ACM's videos, pull one into folder when it is opened, upload saves (no library reads)")
+    ap.add_argument("--acm-root", default=None, help="ACM mode: only the videos under this library folder")
     args = ap.parse_args()
     if not args.folder.is_dir():
         sys.exit(f"not a folder: {args.folder}")
+    ACM.update(on=args.acm, root=args.acm_root)
     # resolve BEFORE chdir: ROOT is used with rglob for the rest of the
     # process, so a relative folder would re-resolve against the new cwd
     # ("test4" -> "test4/test4") and find zero videos.

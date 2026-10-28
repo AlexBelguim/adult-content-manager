@@ -1,17 +1,18 @@
 /**
  * funpipe routes — funscript auto-generation pipeline integration.
  *
- * funpipe runs on the GPU machine; this backend usually runs on the NAS. We hand
- * it paths (never bytes) and it writes .funscript back next to the video.
+ * funpipe runs on the GPU machine as a worker of this backend (routes/workers.js):
+ * the queue is ours (services/funpipeQueue.js), the AI app claims a job, downloads
+ * the video and uploads the sidecars and the .funscript, written here next to it.
  *
  * Endpoints:
  * - GET  /api/funpipe/health        — is funpipe reachable
  * - GET  /api/funpipe/config        — server url + media root as configured
  * - POST /api/funpipe/config        — update those settings
- * - GET  /api/funpipe/queue         — live funpipe queue (proxied)
- * - POST /api/funpipe/queue/add     — queue videos (ACM paths in, translated out)
- * - POST /api/funpipe/queue/start   — start the worker
- * - POST /api/funpipe/queue/stop    — stop after the current job
+ * - GET  /api/funpipe/queue         — the queue (funpipe_jobs)
+ * - POST /api/funpipe/queue/add     — queue videos (library paths)
+ * - POST /api/funpipe/queue/start   — let workers claim jobs
+ * - POST /api/funpipe/queue/stop    — the running job finishes, nothing new is claimed
  * - POST /api/funpipe/queue/remove  — drop a job
  * - POST /api/funpipe/queue/clear-done — clear finished jobs
  * - GET  /api/funpipe/library       — every video in a funscript folder + its script state
@@ -22,6 +23,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
 const funpipeService = require('../services/funpipeService');
+const funpipeQueue = require('../services/funpipeQueue');
 const { getAiServerUrl } = require('../utils/aiUrl');
 
 const VIDEO_EXTS = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts'];
@@ -34,6 +36,14 @@ const scriptPath = (videoPath) => videoPath.slice(0, -path.extname(videoPath).le
 // The library walk hits SMB — cache it.
 const libraryCache = { data: null, time: 0 };
 const LIBRARY_TTL = 60 * 1000;
+// a job finished or the editor saved: the sidecars changed, so the next listing walks the folders again
+funpipeQueue.events.on('changed', () => { libraryCache.time = 0; });
+
+// every page that uses funpipe also tells the AI app where this app is and the worker token (funpipeService.pair)
+router.use((req, res, next) => {
+  funpipeService.pair(`${req.protocol}://${req.get('host')}`, req.query.url || req.body?.url);
+  next();
+});
 
 // ── config ───────────────────────────────────────────────────
 
@@ -78,18 +88,11 @@ router.post('/queue/remove', async (req, res) => {
 router.get('/ui/status', async (req, res) => res.json(await funpipeService.uiStatus(req.query.url)));
 router.post('/ui/stop', async (req, res) => res.json(await funpipeService.uiStop(req.body?.url)));
 
-// Launch the editor over the media library so every funscript folder is
-// reachable. Scanning is rglob over the share, so a narrower root is faster —
-// callers may pass one (e.g. a single performer's funscript folder).
+// Launch the editor. It lists the videos with a signal from /library below and
+// pulls one to the AI app when it is opened; root narrows it to one folder.
 router.post('/ui/start', async (req, res) => {
   const { root, url } = req.body || {};
-  let target = root;
-  if (!target) {
-    const folder = db.prepare('SELECT path FROM folders ORDER BY id LIMIT 1').get();
-    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
-    target = folder.path;
-  }
-  res.json(await funpipeService.uiStart(target, url));
+  res.json(await funpipeService.uiStart(root || null, url));
 });
 
 // ── library inventory ────────────────────────────────────────
@@ -221,15 +224,10 @@ router.get('/library', async (req, res) => {
     }
 
     // Overlay live queue state — in-flight beats whatever is on disk.
-    // Jobs are keyed by `src`, the path we originally sent, which the pipeline
-    // echoes back untouched; `video` is its own remapped view and won't match.
     const queue = await funpipeService.getQueue();
     const key = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
     const byPath = new Map();
-    for (const job of queue.jobs || []) {
-      byPath.set(key(job.src || job.video), job);
-      if (job.src) byPath.set(key(job.video), job); // tolerate either side
-    }
+    for (const job of queue.jobs || []) if (job.status !== 'cancelled') byPath.set(key(job.video), job);
 
     const rows = videos.map(v => {
       const job = byPath.get(key(v.path));
@@ -245,7 +243,7 @@ router.get('/library', async (req, res) => {
     res.json({
       total: rows.length,
       counts,
-      funpipeOnline: queue.ok !== false,
+      funpipeOnline: queue.online,
       cached: videos === libraryCache.data && now - libraryCache.time > 0 && !refresh,
       videos: rows
     });

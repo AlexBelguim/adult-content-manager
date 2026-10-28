@@ -639,7 +639,7 @@ router.post('/predict-performer-rank', async (req, res) => {
 
     // Send to AI server
     const response = await axios.post(`${aiUrl}/predict_rank`, {
-      images: imagePaths
+      images: imagePaths, app_base_url: `${req.protocol}://${req.get('host')}`
     }, { timeout: 60000 });
 
     res.json(response.data);
@@ -1273,7 +1273,7 @@ router.post('/predict-ranks-batch', async (req, res) => {
         const imagePaths = files.map(f => path.join(perfPath, f));
         
         const response = await axios.post(`${aiUrl}/predict_rank`, {
-          images: imagePaths
+          images: imagePaths, app_base_url: `${req.protocol}://${req.get('host')}`
         }, { timeout: 30000 });
         
         if (response.data.success) {

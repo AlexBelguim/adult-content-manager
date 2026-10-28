@@ -8,18 +8,19 @@ app_train_cv.py, 2026-10-25). The site fields (ethnicity, hair, body, cup...) ne
 have none, so the model uses pictures only.
 P2, how much he likes a performer, learns from his duels (see train_p2).
 App pictures are the synced copy in training_data (the keep/delete folders the trainer uses). CLIP runs on the GPU when no scenetest
-GPU job holds its lock and 3 GB are free, else on the CPU; embeddings are cached in D:\\profile_data\\clip_feats.pt, so only new
-pictures are embedded.
+GPU job holds its lock and 3 GB are free, else on the CPU; embeddings are cached in data/profile_feats.pt, so only new pictures are
+embedded.
 The profile page lives in the app (/profile.html, backend/routes/profile.js): Alex's verdicts, duels and sorted lists come from there,
-and the keep chance and P2's ranking go back there. The pictures and the <site>.jsonl index are read from the collection in
-D:\\profile_data (extra/profile-data/collect.py); the app holds a copy of them.
+and the keep chance and P2's ranking go back there. The collection is read from there too, over HTTP like everything of the library
+(acm_client.py, 2026-10-28): the performers and their picture files (GET /api/profile/collection) and each picture still to embed
+(GET /api/profile/full). Nothing is read from a drive; the app's copy of the collection is the only one.
 server.py starts follow() when it starts: P and P2 are retrained on every new verdict or duel while the AI app runs, cross-validated
 again every 25, and then saved to models/performer_keep/performer_keep.pt and models/performer_rank/performer_rank.pt.
 
     venv\\Scripts\\python.exe -X utf8 performer_model.py [--before N]
       once:     the cross-validation -> data/performer_model.json
       --before: the keep chance of every performer in the app's "before filter performer" folder, from N random pictures each
-                (their embeddings in a cache of their own, clip_feats_before.pt) -> D:\\profile_data\\before_ranking.json, which
+                (their embeddings in a cache of their own, data/profile_feats_before.pt) -> data/before_ranking.json, which
                 extra/taste-preview shows next to each performer"""
 import argparse
 import json
@@ -29,6 +30,7 @@ import re
 import subprocess
 import threading
 import time
+import io
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -40,16 +42,15 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import KFold, StratifiedKFold
 
+import acm_client
 from model_dinov2 import ClipPreferenceModel, image_processor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DATA = r"D:\profile_data"
-PROFILE = "http://192.168.1.125:4069/api/profile"   # the app's backend
-SITES = ("babepedia", "boobpedia")
+DATA = os.path.join(HERE, "data")   # this app's own storage: the embedding caches and the --before ranking
 APP = os.path.join(HERE, "training_data")
-BEFORE = r"Z:\Apps\adultManager\media\before filter performer"
+BEFORE = "/media/before filter performer"   # the library folder as the app's backend sees it (read over HTTP)
 APP_WEIGHT = 10
-CACHE = os.path.join(DATA, "clip_feats.pt")
+CACHE = os.path.join(DATA, "profile_feats.pt")
 BACKBONE = "openai/clip-vit-large-patch14-336"
 REPORT = os.path.join(HERE, "data", "performer_model.json")
 P_FILE = os.path.join(HERE, "models", "performer_keep", "performer_keep.pt")
@@ -67,10 +68,19 @@ def gpu_ok():
     return int(out.split()[0]) * 2**20 > 3 * 2**30
 
 
-def path_of(key):
-    """a picture key: (site, slug, file) of the profile data, ("app", keep|delete, performer, file), or ("before", performer, path
-    inside her folder)"""
-    return os.path.join(APP, *key[1:]) if key[0] == "app" else os.path.join(BEFORE, *key[1:]) if key[0] == "before" else os.path.join(DATA, *key)
+def picture(key):
+    """a picture key as a PIL image: ("app", keep|delete, performer, file) from training_data (this app's copy of his library);
+    ("before", performer, path inside her folder) and (site, slug, file) of the profile collection from the app over HTTP"""
+    if key[0] == "app":
+        return Image.open(os.path.join(APP, *key[1:]))
+    if key[0] == "before":
+        data = acm_client.fetch("/".join([BEFORE, *key[1:]]).replace("\\", "/"), timeout=60)
+    else:
+        r = acm_client._SESSION.get(f"{acm_client.server()}/api/profile/full", params={"site": key[0], "slug": key[1], "file": key[2]}, timeout=60)
+        data = r.content if r.status_code == 200 else None
+    if not data:
+        raise FileNotFoundError("/".join(key))
+    return Image.open(io.BytesIO(data))
 
 
 class Embedder:
@@ -84,7 +94,7 @@ class Embedder:
 
     def pixels(self, key):
         try:
-            return self.processor(images=[Image.open(path_of(key)).convert("RGB")], return_tensors="pt")["pixel_values"][0]
+            return self.processor(images=[picture(key).convert("RGB")], return_tensors="pt")["pixel_values"][0]
         except Exception:
             return None
 
@@ -116,42 +126,18 @@ def pictures(r):
     return [(r["site"], r["slug"], f) for f in r["pictures"]]
 
 
-def records():
-    """every performer once, as the page lists her (backend/routes/profile.js records()): a Boobpedia performer gets the Babepedia
-    pictures collect.py enrich found for her (b1.jpg ...), and her own Babepedia record, when the collection has one too, is left out"""
-    out = {}
-    for site in SITES:
-        path = os.path.join(DATA, f"{site}.jsonl")
-        if os.path.exists(path):
-            for line in open(path, encoding="utf-8"):
-                r = json.loads(line)
-                out[(site, r["slug"])] = r
-    path = os.path.join(DATA, "boobpedia_extra.jsonl")
-    if os.path.exists(path):
-        for line in open(path, encoding="utf-8"):
-            x = json.loads(line)
-            r = out.get(("boobpedia", x["slug"]))
-            if r and x["pictures"]:
-                out[("boobpedia", x["slug"])] = {**r, "pictures": r["pictures"] + x["pictures"], "babepedia_slug": x["babepedia"]}
-                out.pop(("babepedia", x["babepedia"]), None)
-    return out
-
-
-def popularity():
-    """slug -> her best rank on Babepedia's popularity lists (collect.py BP_POPULAR), 1 the most popular"""
-    path = os.path.join(DATA, "babepedia_popular.json")
-    best = {}
-    if os.path.exists(path):
-        for slugs in json.load(open(path, encoding="utf-8")).values():
-            for i, s in enumerate(slugs, 1):
-                best[s] = min(best.get(s, i), i)
-    return best
+def collection():
+    """the profile collection as the page lists it (backend/routes/profile.js records()): every performer once (a Boobpedia
+    performer with the Babepedia pictures collect.py enrich found for her, b1.jpg ..., her own Babepedia record left out), keyed
+    (site, slug); and slug -> her best rank on Babepedia's popularity lists, 1 the most popular"""
+    c = api("/collection")
+    return {(r["site"], r["slug"]): r for r in c["records"]}, c["popularity"]
 
 
 def api(path, body=None):
-    """GET from the app's profile API, or PUT body to it"""
-    req = urllib.request.Request(PROFILE + path, None if body is None else json.dumps(body).encode(), {"Content-Type": "application/json"},
-                                 method="GET" if body is None else "PUT")
+    """GET from the app's profile API, or PUT body to it (the app's address: where it paired with this AI app, acm_client)"""
+    req = urllib.request.Request(f"{acm_client.server()}/api/profile{path}", None if body is None else json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"}, method="GET" if body is None else "PUT")
     return json.loads(urllib.request.urlopen(req, timeout=60).read())
 
 
@@ -164,7 +150,7 @@ class Data:
     on the page"""
     def __init__(self, test=None):
         """test: a test's id, to learn from that test's selection instead of the one Training data picks now"""
-        self.recs = records()
+        self.recs, self.popularity = collection()
         t = api("/training" + (f"?test={test}" if test is not None else ""))
         self.verdict = {k: t["verdicts"].get(f"{k[0]}/{k[1]}") for k in self.recs}
         self.duels, self.lists = t["duels"], t["lists"]
@@ -172,7 +158,7 @@ class Data:
         self.selection, self.selection_text = t.get("selection"), t.get("selection_text", "all verdicts")
         # what love and super wrong count for (Training data's weights; 1 when off, or from a backend without weights)
         self.weights = {"love": 1, "superwrong": 1, **(t.get("weights") or {})}
-        # Discover verdicts (source "discover") count only for the performers in records(): the app's discovery endpoint, once
+        # Discover verdicts (source "discover") count only for the performers in the collection: the app's discovery endpoint, once
         # built, has to add her to the collection with her pictures (as collect.py does) for P to learn from her
         # love is a keep he likes a lot, super wrong a delete P got badly wrong
         self.judged = [k for k, v in self.verdict.items() if v in ("keep", "love", "delete", "superwrong")]
@@ -186,7 +172,7 @@ class Data:
 
     def grid_order(self):
         """the unjudged performers as the page's grid sorts them by default: best popularity rank first, the newest first after"""
-        rank, keys = popularity(), list(self.recs)
+        rank, keys = self.popularity, list(self.recs)
         r = lambda k: rank.get(k[1] if k[0] == "babepedia" else self.recs[k].get("babepedia_slug"))
         return sorted((k for k in keys if self.verdict[k] is None), key=lambda k: (r(k) or 1e9, -keys.index(k)))
 
@@ -439,14 +425,16 @@ def start():
 def rank_before(n):
     """every "before filter performer" performer's keep chance from n random pictures (seeded by her name), by the model trained
     as predict() trains it"""
-    emb = Embedder(cache=os.path.join(DATA, "clip_feats_before.pt"))
+    emb = Embedder(cache=os.path.join(DATA, "profile_feats_before.pt"))
     picked = {}
-    for p in sorted(os.listdir(BEFORE)):
-        d = os.path.join(BEFORE, p, "pics") if os.path.isdir(os.path.join(BEFORE, p, "pics")) else os.path.join(BEFORE, p)
-        if p.startswith(".") or not os.path.isdir(d):
+    # the folder and her pictures (in pics/ when she has that) as the app lists them over HTTP
+    for folder in sorted(acm_client.list_folders(BEFORE)):
+        p = os.path.basename(folder.replace("\\", "/"))
+        found = acm_client.list_pictures(folder)
+        if not found:
             continue
-        files = sorted(f for f in os.listdir(d) if os.path.splitext(f)[1].lower() in (".jpg", ".jpeg", ".png", ".webp", ".bmp"))
-        sub = os.path.relpath(d, os.path.join(BEFORE, p))
+        sub = "pics" if os.path.basename(os.path.dirname(found[0].replace("\\", "/"))) == "pics" else "."
+        files = sorted(os.path.basename(f.replace("\\", "/")) for f in found if os.path.splitext(f)[1].lower() in (".jpg", ".jpeg", ".png", ".webp", ".bmp"))
         picked[p] = [("before", p, os.path.normpath(os.path.join(sub, f))) for f in random.Random(p).sample(files, min(n, len(files)))]
     print(f"{len(picked)} performers, {sum(map(len, picked.values()))} pictures", flush=True)
     emb.embed([k for ks in picked.values() for k in ks])

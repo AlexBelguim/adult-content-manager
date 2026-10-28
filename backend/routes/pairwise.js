@@ -507,7 +507,7 @@ router.post('/run-inference', async (req, res) => {
 
     for (let i = 0; i < allImages.length; i += chunkSize) {
       const chunk = allImages.slice(i, i + chunkSize);
-      const response = await axios.post(`${aiUrl}/score`, { images: chunk });
+      const response = await axios.post(`${aiUrl}/score`, { images: chunk, app_base_url: `${req.protocol}://${req.get('host')}` });
 
       const results = response.data.results || [];
       allResults = allResults.concat(results);

@@ -7,34 +7,35 @@ called as functions (not subprocesses) so they share this server's GPU lock:
 funscript tracking and DINOv2 inference must never fight over VRAM on a 12 GB
 card.
 
-Stages, each writing a sidecar next to the video:
+This app is a worker of ACM (2026-10-28): the queue is ACM's, and this app claims a job, downloads the video into its own
+storage, runs the stages there and uploads the files (see the worker section below). It never reads or writes the library.
+
+Stages, each writing a sidecar next to (this app's copy of) the video, uploaded to ACM next to the real one:
     scenes  -> <video>.scenes.json    (CPU only, no GPU lock taken)
     track   -> <video>.tracks.npz     (CoTracker3, GPU)
     pose    -> <video>.pose.json      (YOLO pose, GPU, optional)
     extract -> <video>.signal.json + <video>.funscript   (CPU)
 
 Endpoints (registered at /funpipe):
-    GET  /funpipe/health
-    GET  /funpipe/queue
-    POST /funpipe/queue/add          {videos:[paths], pose=true}
-    POST /funpipe/queue/start
-    POST /funpipe/queue/stop
-    POST /funpipe/queue/remove       {id}
-    POST /funpipe/queue/clear_done
+    GET  /funpipe/health             the worker (paired with ACM? claiming? the job it runs) and the GPU
+    GET  /funpipe/gpu
+    GET  /funpipe/ui/status, POST /funpipe/ui/start {root?}, POST /funpipe/ui/stop   the review editor
 """
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 import threading
-import itertools
 import collections
 import contextlib
 from pathlib import Path
 
 from flask import Blueprint, request, jsonify
+
+import acm_client
 
 funpipe_bp = Blueprint('funpipe', __name__)
 
@@ -42,22 +43,11 @@ HERE = Path(__file__).parent
 PIPELINE_DIR = HERE / 'funpipe'
 sys.path.insert(0, str(PIPELINE_DIR))
 
-VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.webm', '.m4v', '.ts'}
-QUEUE_FILE = HERE / 'funpipe_queue.json'
+QUEUE_FILE = HERE / 'funpipe_queue.json'   # the old queue of this app's own: moved to ACM once (_migrate_old_queue)
 
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] [Funpipe] {msg}", flush=True)
-
-
-# ── Path Mapping ──────────────────────────────────────────────────────────────
-# Same convention as video_analyzer.py — ACM sends its own container paths.
-def map_path(p):
-    if not p:
-        return p
-    if str(p).startswith('/media'):
-        return 'Z:\\Apps\\adultManager' + str(p)
-    return str(p)
 
 
 # ── GPU contention ────────────────────────────────────────────────────────────
@@ -149,10 +139,10 @@ def init_funpipe(model_loaded_probe=None):
     """Called by server.py at startup."""
     global _model_loaded_probe
     _model_loaded_probe = model_loaded_probe
-    _load_queue()
+    _start_claiming()
     st = gpu_status()
-    vram = f", {st['free_mb']}/{st['total_mb']} MB VRAM free" if st else ''
-    log(f"pipeline ready ({len(_QUEUE)} job(s) restored{vram})")
+    vram = f" ({st['free_mb']}/{st['total_mb']} MB VRAM free)" if st else ''
+    log(f"pipeline ready: claiming jobs from the app's queue{vram}")
 
 
 # ── args shim ─────────────────────────────────────────────────────────────────
@@ -177,6 +167,7 @@ class _Args:
         self.prominence = 0.10
         self.group = None
         self.idle_threshold = 0.08
+        self.prefer = None        # --prefer <body part> (d88be7f): none here, as on the CLI by default
         # pose
         self.samples = 3
         self.batch = 16
@@ -198,20 +189,6 @@ def script_path(video: Path) -> Path:
     return video.with_suffix('.funscript')
 
 
-def plan_stages(video: Path, pose: bool = True):
-    """Only the stages whose sidecars are missing — resume is free."""
-    stages = []
-    if not sidecar(video, '.scenes.json').exists():
-        stages.append('scenes')
-    if not sidecar(video, '.tracks.npz').exists():
-        stages.append('track')
-    if pose and not sidecar(video, '.pose.json').exists():
-        stages.append('pose')
-    if not sidecar(video, '.signal.json').exists() or stages:
-        stages.append('extract')
-    return stages
-
-
 # ── log capture ───────────────────────────────────────────────────────────────
 class _JobLog(io.TextIOBase):
     """
@@ -227,6 +204,8 @@ class _JobLog(io.TextIOBase):
         self._partial = ''
 
     def write(self, s):
+        if self.job.get('cancel'):   # cancelled in ACM: every stage prints, so this stops it at its next line
+            raise _Cancelled('cancelled in the app')
         self._partial += s
         while '\n' in self._partial:
             line, self._partial = self._partial.split('\n', 1)
@@ -264,36 +243,157 @@ def _estimate_windows(video: Path):
         return None
 
 
-# ── queue state ───────────────────────────────────────────────────────────────
-_QLOCK = threading.Lock()
-_QUEUE = []
-_QSTATE = {'running': False, 'stop_after': False}
-_QID = itertools.count(1)
+# ── the worker: claims jobs from ACM's queue ─────────────────────────────────
+# The queue is ACM's (backend/services/funpipeQueue.js, 2026-10-28). This app claims the next job, downloads the video
+# into its own storage (data/cache/funpipe/<job>), fetches the sidecars ACM already has (so an interrupted job resumes),
+# runs the stages there, uploads each stage's files as soon as it is done, and deletes its copy. It never reads or
+# writes the library. Start / Stop is ACM's: a stopped queue answers the claim with nothing.
+CLAIM_EVERY = 10            # seconds between claims while the queue is empty
+REPORT_EVERY = 5            # seconds between progress reports while a job runs
+STAGE_FILES = {'scenes': ['.scenes.json'], 'track': ['.tracks.npz'], 'pose': ['.pose.json'],
+               'extract': ['.signal.json', '.funscript']}
+_W = {'running': False, 'job': None, 'error': None, 'claimed': 0}
 
 
-def _persist():
+class _Cancelled(Exception):
+    """ACM cancelled the running job (removed in the Jobs page): raised from the job's log, which every stage prints to"""
+
+
+def _local_file(video: Path, ext: str) -> Path:
+    return script_path(video) if ext == '.funscript' else sidecar(video, ext)
+
+
+def _report(job, final=False):
+    """send the job's state and its new log lines; ACM answers cancel when the job was removed"""
+    lines = list(job['log'])
+    new = lines[job['sent']:] if job['sent'] <= len(lines) else lines
+    job['sent'] = len(lines)
     try:
-        slim = [{k: v for k, v in j.items() if k != 'log'} for j in _QUEUE]
-        QUEUE_FILE.write_text(json.dumps(slim, indent=1))
+        r = acm_client.worker('POST', f"funpipe/jobs/{job['id']}/progress", timeout=30, json={
+            'stage': job.get('stage'), 'phase': job.get('phase'), 'progress': job.get('progress'),
+            'windows_done': job.get('windows_done'), 'total_windows': job.get('total_windows'),
+            'gpu_warning': job.get('gpu_warning'), 'log': new})
+        if r.ok and r.json().get('action') == 'cancel' and not final:
+            job['cancel'] = True
+    except Exception as e:   # ACM unreachable for a moment: the job goes on, the next report catches up
+        log(f"progress report failed: {e}")
+
+
+def _reporter(job, done):
+    while not done.wait(REPORT_EVERY):
+        _report(job)
+
+
+def _upload(job, video_src, local, exts):
+    for ext in exts:
+        f = _local_file(local, ext)
+        if f.exists():
+            acm_client.put_sidecar(video_src, ext, f)
+            job['log'].append(f"uploaded {f.name}")
+
+
+def _run_claimed(c):
+    """one claimed job, start to end: download, stages (each uploaded when done), complete or fail"""
+    work = acm_client.CACHE / 'funpipe' / str(c['id'])
+    local = work / c['name']
+    job = {'id': c['id'], 'name': c['name'], 'video': c['video'], 'stages': c['stages'], 'stage': None,
+           'phase': 'downloading', 'progress': 0.0, 'log': collections.deque(maxlen=200), 'sent': 0, 'cancel': False,
+           'started': time.time()}
+    _W['job'] = job
+    done = threading.Event()
+    threading.Thread(target=_reporter, args=(job, done), daemon=True, name='funpipe-report').start()
+    ok, error = False, None
+    try:
+        size = c.get('size') or 0
+
+        def got(have, total):
+            job['progress'] = min(0.99, have / (total or size or 1))
+            if job['cancel']:
+                raise _Cancelled('cancelled in the app')
+        acm_client.worker_download(c['video'], local, progress=got)
+        for ext in c.get('sidecars', []):
+            acm_client.get_sidecar(c['video'], ext, _local_file(local, ext))
+        job['log'].append(f"downloaded {c['name']} ({local.stat().st_size / 1e6:.0f} MB) and {len(c.get('sidecars', []))} sidecar(s)")
+        job['phase'] = 'running'
+        ok = True
+        for stage in c['stages']:
+            if job['cancel']:
+                raise _Cancelled('cancelled in the app')
+            ok = _run_stage(job, stage, local)
+            if ok:
+                job['phase'] = 'uploading'
+                _upload(job, c['video'], local, STAGE_FILES[stage])
+                job['phase'] = 'running'
+            elif stage == 'pose':   # pose is optional enrichment: losing labels shouldn't kill the job
+                job['log'].append('pose failed - continuing without labels')
+                ok = True
+            else:
+                break
+        if job['cancel']:
+            raise _Cancelled('cancelled in the app')
+        if not ok:
+            error = next((line for line in reversed(job['log']) if 'failed' in line), 'a stage failed')
+    except _Cancelled:
+        ok, error = False, 'cancelled'
+        job['log'].append('cancelled in the app')
     except Exception as e:
-        log(f"could not persist queue: {e}")
+        ok, error = False, f"{type(e).__name__}: {e}"
+        job['log'].append(error)
+    finally:
+        done.set()
+        job['stage'], job['phase'] = None, None
+        _report(job, final=True)
+        try:
+            if ok:
+                acm_client.worker('POST', f"funpipe/jobs/{c['id']}/complete", timeout=30)
+            else:
+                acm_client.worker('POST', f"funpipe/jobs/{c['id']}/fail", json={'error': error}, timeout=30)
+        except Exception as e:
+            log(f"could not tell the app how {c['name']} ended: {e} (it puts the job back after 10 minutes)")
+        shutil.rmtree(work, ignore_errors=True)
+        _W['job'] = None
+    log(f"{c['name']} {'done' if ok else 'failed: ' + str(error)} in {time.time() - job['started']:.0f}s")
 
 
-def _load_queue():
-    """Restore jobs across restarts. Anything mid-flight is re-queued."""
+def _migrate_old_queue():
+    """jobs still queued in this app's own old queue file (before the queue moved to ACM) are queued in ACM once"""
     if not QUEUE_FILE.exists():
         return
     try:
-        for j in json.loads(QUEUE_FILE.read_text()):
-            j['log'] = collections.deque(maxlen=60)
-            if j.get('status') == 'running':
-                j['status'] = 'queued'   # it died with the process
-                j['stage'] = None
-            _QUEUE.append(j)
-        if _QUEUE:
-            next(itertools.islice(_QID, max(j['id'] for j in _QUEUE), None), None)
+        old = [j.get('src') or j.get('video') for j in json.loads(QUEUE_FILE.read_text())
+               if j.get('status') in ('queued', 'running')]
+        if old:
+            acm_client.api('POST', '/api/funpipe/queue/add', json={'videos': old, 'autoStart': False})
+            log(f"moved {len(old)} queued job(s) to the app's queue")
+        QUEUE_FILE.rename(QUEUE_FILE.with_suffix('.json.moved'))
+    except acm_client.NotLinked:
+        pass
     except Exception as e:
-        log(f"could not restore queue: {e}")
+        log(f"could not move the old queue to the app: {e}")
+
+
+def _claim_loop():
+    _W['running'] = True
+    info = {'app': 'AI-Inference-App', 'host': acm_client.WORKER_NAME}
+    while True:
+        try:
+            _migrate_old_queue()
+            r = acm_client.worker('POST', 'funpipe/claim', json={'info': info}, timeout=30)
+            if r.status_code == 200:
+                _W['claimed'] += 1
+                _W['error'] = None
+                _run_claimed(r.json())
+                continue
+            _W['error'] = None if r.status_code == 204 else f"claim: HTTP {r.status_code} {r.text[:200]}"
+        except acm_client.NotLinked as e:
+            _W['error'] = str(e)
+        except Exception as e:   # the app is restarting or the NAS is off
+            _W['error'] = f"{type(e).__name__}: {e}"
+        time.sleep(CLAIM_EVERY)
+
+
+def _start_claiming():
+    threading.Thread(target=_claim_loop, daemon=True, name='funpipe-worker').start()
 
 
 # ── stage runners (in-process) ────────────────────────────────────────────────
@@ -348,7 +448,6 @@ def _run_stage(job, stage, video):
         if warning:
             job['log'].append(f"WARNING: {warning}")
             log(f"{job['name']} {stage}: {warning}")
-    _persist()
     log(f"{job['name']} -> {stage}")
 
     sink = _JobLog(job, sys.stdout)
@@ -365,58 +464,16 @@ def _run_stage(job, stage, video):
         return False
 
 
-def _worker():
-    while True:
-        with _QLOCK:
-            if _QSTATE['stop_after']:
-                _QSTATE.update(running=False, stop_after=False)
-                _persist()
-                return
-            job = next((j for j in _QUEUE if j['status'] == 'queued'), None)
-            if job is None:
-                _QSTATE['running'] = False
-                _persist()
-                return
-            job['status'] = 'running'
-            job['started'] = time.time()
-
-        video = Path(job['video'])
-        ok = video.exists()
-        if not ok:
-            job['log'].append(f"video not found: {video}")
-
-        for stage in (job['stages'] if ok else []):
-            ok = _run_stage(job, stage, video)
-            if not ok:
-                # Pose is optional enrichment — losing labels shouldn't kill the job.
-                if stage == 'pose':
-                    job['log'].append('pose failed - continuing without labels')
-                    ok = True
-                    continue
-                break
-
-        job['status'] = 'done' if ok else 'failed'
-        job['stage'] = None
-        job['progress'] = 1.0 if ok else None
-        job['elapsed'] = round(time.time() - job['started'], 1)
-        log(f"{job['name']} {job['status']} in {job['elapsed']}s")
-        _persist()
-
-
-def _start_worker_locked():
-    if not _QSTATE['running']:
-        _QSTATE.update(running=True, stop_after=False)
-        threading.Thread(target=_worker, daemon=True, name='funpipe-worker').start()
-
-
 # ── endpoints ─────────────────────────────────────────────────────────────────
 @funpipe_bp.route('/health', methods=['GET'])
 def health():
     import torch
+    job = _W['job']
     return jsonify({
         'ok': True,
-        'running': _QSTATE['running'],
-        'jobs': len(_QUEUE),
+        # the worker: claiming from ACM's queue (linked: it knows where ACM is and has the worker token)
+        'worker': {'claiming': _W['running'], 'linked': acm_client.linked(), 'error': _W['error'], 'claimed': _W['claimed'],
+                   'job': {'id': job['id'], 'name': job['name'], 'stage': job['stage'], 'phase': job['phase']} if job else None},
         'cuda': torch.cuda.is_available(),
         'pipeline_dir': str(PIPELINE_DIR),
         'gpu': gpu_status(),
@@ -425,87 +482,6 @@ def health():
                       'url': (f"http://localhost:{_UI['port']}"
                               if _ui_alive() and _ui_listening() else None)},
     })
-
-
-@funpipe_bp.route('/queue', methods=['GET'])
-def queue():
-    with _QLOCK:
-        return jsonify({
-            'ok': True,
-            'running': _QSTATE['running'],
-            'jobs': [{**{k: v for k, v in j.items() if k != 'log'},
-                      'log_tail': list(j['log'])[-6:]} for j in _QUEUE]
-        })
-
-
-@funpipe_bp.route('/queue/add', methods=['POST'])
-def queue_add():
-    data = request.get_json(force=True) or {}
-    pose = data.get('pose', True)
-    auto_start = data.get('autoStart', True)
-
-    added, skipped = 0, []
-    with _QLOCK:
-        queued = {j['video'] for j in _QUEUE if j['status'] in ('queued', 'running')}
-        for raw in data.get('videos', []):
-            video = Path(map_path(raw))
-            if not video.exists():
-                skipped.append({'video': raw, 'reason': 'not found on this machine'})
-                continue
-            if str(video) in queued:
-                skipped.append({'video': raw, 'reason': 'already queued'})
-                continue
-            stages = plan_stages(video, pose)
-            if not stages:
-                skipped.append({'video': raw, 'reason': 'already processed'})
-                continue
-            _QUEUE.append({
-                # `src` is the caller's own path, echoed back untouched so ACM can
-                # join jobs to its library rows without reversing map_path().
-                'id': next(_QID), 'video': str(video), 'src': str(raw),
-                'name': video.name,
-                'stages': stages, 'status': 'queued', 'stage': None,
-                'progress': None, 'log': collections.deque(maxlen=60)
-            })
-            added += 1
-        if added and auto_start:
-            _start_worker_locked()
-        _persist()
-
-    log(f"queued {added} video(s)" + (f", skipped {len(skipped)}" if skipped else ''))
-    return jsonify({'added': added, 'skipped': skipped, 'running': _QSTATE['running']})
-
-
-@funpipe_bp.route('/queue/start', methods=['POST'])
-def queue_start():
-    with _QLOCK:
-        _start_worker_locked()
-    return jsonify({'ok': True, 'running': True})
-
-
-@funpipe_bp.route('/queue/stop', methods=['POST'])
-def queue_stop():
-    with _QLOCK:
-        _QSTATE['stop_after'] = True
-    return jsonify({'ok': True, 'stopping': True})
-
-
-@funpipe_bp.route('/queue/remove', methods=['POST'])
-def queue_remove():
-    data = request.get_json(force=True) or {}
-    with _QLOCK:
-        _QUEUE[:] = [j for j in _QUEUE
-                     if j['id'] != data.get('id') or j['status'] == 'running']
-        _persist()
-    return jsonify({'ok': True})
-
-
-@funpipe_bp.route('/queue/clear_done', methods=['POST'])
-def queue_clear_done():
-    with _QLOCK:
-        _QUEUE[:] = [j for j in _QUEUE if j['status'] in ('queued', 'running')]
-        _persist()
-    return jsonify({'ok': True})
 
 
 @funpipe_bp.route('/gpu', methods=['GET'])
@@ -573,22 +549,25 @@ def ui_status():
 
 @funpipe_bp.route('/ui/start', methods=['POST'])
 def ui_start():
+    # The editor works on copies (2026-10-28): it lists the videos with a signal from ACM, pulls a video and its sidecars
+    # into this app's storage (data/cache/editor) when it is opened, and uploads .edits.json and the .funscript when they
+    # are saved. root (a library folder, optional) narrows its list.
     data = request.get_json(silent=True) or {}
-    root = map_path(data.get('root') or '')
+    root = data.get('root') or None
     port = int(data.get('port') or _UI['port'])
-
-    if not root:
-        return jsonify({'ok': False, 'error': 'root is required '
-                                              '(the folder the editor should scan)'}), 400
-    if not Path(root).is_dir():
-        return jsonify({'ok': False, 'error': f'not a folder on this machine: {root}'}), 400
+    try:
+        acm_client.server()
+    except acm_client.NotLinked as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    work = acm_client.CACHE / 'editor'
+    work.mkdir(parents=True, exist_ok=True)
 
     with _UI_LOCK:
         if _ui_alive():
             return jsonify({'ok': True, 'running': True, 'already': True,
                             'url': f"http://localhost:{_UI['port']}", 'root': _UI['root']})
-        cmd = [sys.executable, str(PIPELINE_DIR / 'funpipe_ui.py'), root,
-               '--host', '0.0.0.0', '--port', str(port)]
+        cmd = [sys.executable, str(PIPELINE_DIR / 'funpipe_ui.py'), str(work), '--acm',
+               '--host', '0.0.0.0', '--port', str(port)] + (['--acm-root', root] if root else [])
         try:
             # Keep the output: when the editor dies on startup this file is the
             # only evidence, and it takes ~20s to boot (torch import) so "not
@@ -596,6 +575,7 @@ def ui_start():
             _UI['log'] = HERE / 'funpipe_ui.log'
             _UI['proc'] = subprocess.Popen(
                 cmd, cwd=str(PIPELINE_DIR),
+                env={**os.environ, 'PYTHONPATH': os.pathsep.join(filter(None, [str(HERE), os.environ.get('PYTHONPATH')]))},
                 stdout=open(_UI['log'], 'w', encoding='utf-8', errors='replace'),
                 stderr=subprocess.STDOUT,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

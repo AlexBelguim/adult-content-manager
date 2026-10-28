@@ -7,6 +7,7 @@
  * the follower on the GPU PC (performer_model.py --follow) sends them.
  *
  * - GET  /api/profile/performers   — every performer as a card: fields, verdict, in the app, popularity, P, P2, list place
+ * - GET  /api/profile/collection   — every performer's picture files and Babepedia's popularity ranks, for the AI app
  * - GET  /api/profile/performer    — ?site=&slug=: her record, verdict and P
  * - POST /api/profile/label        — { site, slug, verdict, reasons, note }: his verdict (verdict null clears it)
  * - GET  /api/profile/duel/next    — the next two keeps to compare, and how far the sorting is
@@ -352,6 +353,15 @@ router.get('/performers', (req, res) => {
     rank: rank[r.site === 'babepedia' ? r.slug : r.babepedia_slug] ?? null,
     pred: pred[key] ?? null, p2: p2[key] ?? null, lpos: lpos[key] ?? null,
   })));
+});
+
+// the collection as the AI app's P and P2 read it: every performer once (records(), a Boobpedia one with her Babepedia
+// pictures), her picture files (GET /full serves them) and Babepedia's popularity ranks. They read nothing else from disk.
+router.get('/collection', (req, res) => {
+  res.json({
+    records: [...records().values()].map((r) => ({ site: r.site, slug: r.slug, name: r.name, pictures: r.pictures, babepedia_slug: r.babepedia_slug || null })),
+    popularity: popularity(),
+  });
 });
 
 router.get('/performer', (req, res) => {

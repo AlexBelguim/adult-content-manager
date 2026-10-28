@@ -165,11 +165,21 @@ class BinaryClassifier(nn.Module):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+def own_file(p):
+    """p when it is a file in this app's own storage (training_data and the like), else None: the library itself is
+    never read from a drive, only the copy the app pushed (acm_client.py)"""
+    try:
+        q = Path(p).resolve()
+        return str(q) if q.is_relative_to(Path(__file__).resolve().parent) and q.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
 def resolve_path(p):
-    """Attempt to find an image path, falling back to local training_data if absolute path fails."""
+    """Find a picture in the local training_data folder (the pushed copy of the library)."""
     if not p: return None
     pth = Path(p)
-    if pth.exists(): return str(pth)
+    if own_file(pth): return own_file(pth)
     
     # Fallback: try to find it in the local training_data folder
     # Usually images are pushed as training_data/keep/performer/file.jpg 
@@ -478,7 +488,7 @@ def train_pairwise(config):
 
     def resolve(p):
         if not p: return p
-        if Path(p).exists(): return str(p)
+        if own_file(p): return own_file(p)
         if base_path:
             # Try direct relative to base_path
             alt = Path(base_path) / p

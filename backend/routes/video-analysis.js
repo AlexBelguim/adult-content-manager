@@ -13,6 +13,9 @@ const { spawn, exec } = require('child_process');
 const { getAiServerUrl } = require('../utils/aiUrl');
 
 // Video analysis URL - derived from AI server URL (same server, /video prefix)
+// this app's address as the browser reached it: the AI app fetches the video from here (it reads no drive)
+const appBase = (req) => `${req.protocol}://${req.get('host')}`;
+
 function getVideoUrl() {
   const base = process.env.VISION_VIDEO_URL || (getAiServerUrl() + '/video');
   return base;
@@ -321,7 +324,7 @@ router.post('/analyze', async (req, res) => {
     const response = await axios.post(
       `${getVideoUrl()}/analyze`,
       {
-        video_path: videoPath,
+        video_path: videoPath, app_base_url: appBase(req),
         sample_interval: sampleInterval,
         min_segment: minSegment
       },
@@ -366,7 +369,7 @@ router.post('/analyze-frame', async (req, res) => {
     const response = await axios.post(
       `${getVideoUrl()}/analyze-frame`,
       {
-        video_path: videoPath,
+        video_path: videoPath, app_base_url: appBase(req),
         time: time
       },
       { timeout: 30000 }
@@ -423,7 +426,7 @@ router.post('/find-action', async (req, res) => {
     const response = await axios.post(
       `${getVideoUrl()}/find-action`,
       {
-        video_path: videoPath,
+        video_path: videoPath, app_base_url: appBase(req),
         action: action,
         existing_segments: allExistingSegments,
         min_duration: minDuration
@@ -478,7 +481,7 @@ router.post('/find-action-and-create-scenes', async (req, res) => {
     const response = await axios.post(
       `${getVideoUrl()}/find-action`,
       {
-        video_path: videoPath,
+        video_path: videoPath, app_base_url: appBase(req),
         action: action,
         existing_segments: existingScenes,
         min_duration: minDuration
@@ -577,7 +580,7 @@ router.post('/analyze-and-create-scenes', async (req, res) => {
     // Choose endpoint based on mode
     const endpoint = mode === 'advanced' ? '/analyze-advanced' : '/analyze';
     const payload = mode === 'advanced' ? {
-      video_path: videoPath,
+      video_path: videoPath, app_base_url: appBase(req),
       segment_duration: sampleInterval,
       min_segment: minSegment,
       allowed_actions: allowedActions,
@@ -586,7 +589,7 @@ router.post('/analyze-and-create-scenes', async (req, res) => {
       macro_interval: macroInterval,
       action_interval: actionInterval
     } : {
-      video_path: videoPath,
+      video_path: videoPath, app_base_url: appBase(req),
       segment_duration: sampleInterval,
       min_segment: minSegment,
       allowed_actions: allowedActions,
@@ -843,7 +846,7 @@ router.post('/find-transition-point', async (req, res) => {
     const response = await axios.post(
       `${getVideoUrl()}/find-transition-point`,
       {
-        video_path: videoPath,
+        video_path: videoPath, app_base_url: appBase(req),
         start_time: startTime,
         end_time: endTime,
         label_1: label1,

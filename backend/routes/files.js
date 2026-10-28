@@ -1109,6 +1109,36 @@ router.post('/open-folder', async (req, res) => {
   }
 });
 
+// The pictures directly in a folder (or in its pics/ folder when it has one): for the AI app, which reads the library
+// over HTTP (its performer rank averages up to 300 of a performer's pictures)
+router.get('/list-pictures', async (req, res) => {
+  const { folder } = req.query;
+  if (!folder) return res.status(400).send({ error: 'Folder path is required' });
+  try {
+    let dir = folder;
+    if (await fs.pathExists(path.join(dir, 'pics'))) dir = path.join(dir, 'pics');
+    if (!await fs.pathExists(dir)) return res.status(404).send({ error: 'Folder not found' });
+    const exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'];
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    res.send({ folder: dir, pictures: entries.filter(e => e.isFile() && exts.includes(path.extname(e.name).toLowerCase())).map(e => path.join(dir, e.name)) });
+  } catch (error) {
+    res.status(500).send({ error: error.message });
+  }
+});
+
+// The folders directly in a folder (no hidden ones): for the AI app, which reads the library over HTTP
+router.get('/list-folders', async (req, res) => {
+  const { folder } = req.query;
+  if (!folder) return res.status(400).send({ error: 'Folder path is required' });
+  try {
+    if (!await fs.pathExists(folder)) return res.status(404).send({ error: 'Folder not found' });
+    const entries = await fs.readdir(folder, { withFileTypes: true });
+    res.send({ folders: entries.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => path.join(folder, e.name)) });
+  } catch (error) {
+    res.status(500).send({ error: error.message });
+  }
+});
+
 // List video files in a folder (recursive)
 router.get('/list-videos', async (req, res) => {
   const { folder } = req.query;

@@ -111,13 +111,21 @@ img {{ border: 1px solid #333; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,
 _debug = DebugLogger()  # disabled by default, activated per-analysis
 
 
-# ── Path Mapping ──────────────────────────────────────────────────────────────
-def map_path(p):
-    if not p: return p
-    # Map TrueNAS /media to local Z: drive
-    if p.startswith('/media'):
-        return 'Z:\\Apps\\adultManager' + p
-    return p
+# ── The video, from ACM ───────────────────────────────────────────────────────
+import acm_client
+
+
+def _video_source(data):
+    """the request's video as a URL on ACM that ffmpeg and ffprobe read like a file (the backend answers Range requests,
+    so a seek downloads nothing else), or None when ACM does not have it. No drive is read."""
+    p = data.get('video_path')
+    if not p:
+        return None
+    try:
+        url = acm_client.media_url(p, data.get('app_base_url'))
+        return url if requests.head(url, timeout=10).status_code == 200 else None
+    except Exception:
+        return None
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
@@ -992,8 +1000,8 @@ def analyze_video_advanced(video_path, segment_duration=12, min_segment=10,
 @video_bp.route('/analyze', methods=['POST'])
 def video_analyze():
     data = request.json or {}
-    video_path = map_path(data.get('video_path'))
-    if not video_path or not os.path.exists(video_path): return jsonify({"success": False, "error": "Invalid video path"}), 400
+    video_path = _video_source(data)
+    if not video_path: return jsonify({"success": False, "error": "Invalid video path"}), 400
     if not _analysis_lock.acquire(blocking=False): return jsonify({"success": False, "error": "Busy"}), 409
     try:
         raw_actions = data.get('allowed_actions', [])
@@ -1007,8 +1015,8 @@ def video_analyze_advanced():
     """Advanced multi-resolution state machine analysis with Florence-2 pre-pass."""
     global _debug
     data = request.json or {}
-    video_path = map_path(data.get('video_path'))
-    if not video_path or not os.path.exists(video_path):
+    video_path = _video_source(data)
+    if not video_path:
         return jsonify({"success": False, "error": "Invalid video path"}), 400
     if not _analysis_lock.acquire(blocking=False):
         return jsonify({"success": False, "error": "Busy"}), 409

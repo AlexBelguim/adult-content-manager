@@ -131,7 +131,7 @@ function importJobs() {
 
 async function funpipeJobs(fresh) {
   const queue = await getFunpipeQueue(fresh);
-  return (queue.jobs || []).map(j => {
+  return (queue.jobs || []).filter(j => j.status !== 'cancelled').map(j => {
     const status = ['running', 'queued', 'done', 'failed'].includes(j.status) ? j.status : 'queued';
     const total = j.total_windows > 0 ? j.total_windows : null;
     const done = total ? (j.windows_done || 0) : null;
@@ -330,15 +330,17 @@ router.get('/', async (req, res) => {
 
 router.get('/services', async (req, res) => {
   const fresh = req.query.fresh === '1';
+  funpipeService.pair(`${req.protocol}://${req.get('host')}`);   // the Jobs page keeps the AI app paired as a worker
   const [queue, health, training, scenetest] = await Promise.all([
     getFunpipeQueue(fresh), getFunpipeHealth(fresh), getTraining(fresh), getScenetest(fresh)
   ]);
   res.json({
-    funpipe: { online: queue.ok !== false, workerRunning: !!queue.running, url: queue.url },
+    // online: a worker (the AI app) has asked for jobs in the last 90 s; workerRunning: and the queue is not stopped
+    funpipe: { online: !!queue.online, workerRunning: !!queue.running, url: queue.url },
     scenetest: { online: scenetest.ok, paused: !!scenetest.paused, url: scenetest.url, error: scenetest.ok ? null : scenetest.error },
     gpu: { warning: health.ok !== false ? (health.gpu_warning || null) : null },
     ffmpeg: { available: !!encodeService.ffmpegAvailable, ffprobe: !!encodeService.ffprobeAvailable },
-    ai: { online: training.ok || queue.ok !== false, url: getAiServerUrl(), trainingActive: !!(training.ok && training.active) }
+    ai: { online: training.ok || health.ok !== false, url: getAiServerUrl(), trainingActive: !!(training.ok && training.active) }
   });
 });
 
