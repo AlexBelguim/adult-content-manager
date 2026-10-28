@@ -1340,7 +1340,8 @@ function ModelArsenal({
                    {m.val_acc != null && <Chip label={`${['clip_taste', 'clip_keepdelete', 'performer_keep'].includes(m.type) ? 'AUC' : 'Val'}:${(m.val_acc * 100).toFixed(1)}%`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }} />}
                   {m.val_mae != null && <Chip label={`MAE: ${m.val_mae.toFixed(3)}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(255,111,0,0.1)', color: 'var(--chart-1)' }} />}
                   {m.rank_conditioned && <Chip label="Rank-Conditioned" size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(0,191,165,0.1)', color: 'var(--chart-3)', fontWeight: 700 }} />}
-                  {m.samples && <Chip label={`${m.samples} samples`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }} />}
+                  {/* P and P2 save their samples by kind ({ 'page judged': 2329, ... }), the trainer's models one count */}
+                  {m.samples && <Chip label={typeof m.samples === 'object' ? Object.entries(m.samples).map(([k, n]) => `${n} ${k}`).join(' · ') : `${m.samples} samples`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--warn-quiet)', color: 'var(--warn)' }} />}
                   {m.epochs && <Chip label={`${m.epochs} ep`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--surface)', color: 'var(--dim)' }} />}
                 </Box>
                 

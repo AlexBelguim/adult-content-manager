@@ -432,7 +432,8 @@ router.put('/rounds', (req, res) => {
     for (const v of WEIGHTED) {
       const w = include.weights?.[v];
       if (!w) continue;
-      const was = st.include.weights[v], n = Number(w.weight);
+      // no number (left out, empty, not a number) keeps the weight as it was; Number('') would be 0, so 1
+      const was = st.include.weights[v], n = w.weight === '' || w.weight == null ? NaN : Number(w.weight);
       st.include.weights[v] = { on: 'on' in w ? !!w.on : was.on, weight: Number.isFinite(n) ? Math.min(10, Math.max(1, Math.round(n * 2) / 2)) : was.weight };
     }
   }

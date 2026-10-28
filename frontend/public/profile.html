@@ -4,22 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Profile data</title>
+<script>try { if (localStorage.getItem('appTheme') === 'instrument') document.documentElement.dataset.tokens = 'instrument'; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* the app's darkroom tokens (frontend/src/styles/tokens.js), as in extra/taste-preview */
+/* the app's tokens (frontend/src/styles/tokens.js): Darkroom, or Instrument when the app is set to it (the script below reads
+   the app's appTheme, as this page shares its origin) */
 :root {
   --bg: #0B0B0C; --surface: #141416; --raised: #1C1C1F; --overlay: #242428;
   --text: #EDEDEF; --dim: #A1A1A6; --muted: #6E6E76; --faint: #4A4A52;
   --line: rgba(255,255,255,0.08); --line-strong: rgba(255,255,255,0.14);
   --scrim: rgba(16,16,18,0.72); --scrim-strong: rgba(16,16,18,0.88);
-  --accent: #F0703A; --accent-quiet: rgba(240,112,58,0.14);
-  --ok: #5FA97B; --ok-quiet: rgba(95,169,123,0.15); --warn: #C9922E; --info: #6E8CA8; --info-quiet: rgba(110,140,168,0.15);
-  --bad: #C9564B; --bad-quiet: rgba(201,86,75,0.15);
-  --radius: 6px; --radius-lg: 10px;
+  --accent: #F0703A; --accent-hover: #FF8552; --accent-quiet: rgba(240,112,58,0.14); --on-accent: #1A0E08;
+  --ok: #5FA97B; --ok-quiet: rgba(95,169,123,0.15); --warn: #C9922E; --warn-quiet: rgba(201,146,46,0.15);
+  --info: #6E8CA8; --info-quiet: rgba(110,140,168,0.15); --bad: #C9564B; --bad-quiet: rgba(201,86,75,0.15);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.55);
+  --radius: 6px; --radius-sm: 4px; --radius-lg: 10px;
   color-scheme: dark;
 }
+:root[data-tokens="instrument"] {
+  --bg: #0E1116; --surface: #151A21; --raised: #1D242E; --overlay: #252E3A;
+  --text: #E6EAF0; --dim: #98A2B3; --muted: #667085; --faint: #475467;
+  --line: rgba(255,255,255,0.07); --line-strong: rgba(255,255,255,0.13);
+  --scrim: rgba(12,15,20,0.74); --scrim-strong: rgba(12,15,20,0.9);
+  --accent: #5CC8FF; --accent-hover: #7FD6FF; --accent-quiet: rgba(92,200,255,0.14); --on-accent: #04121C;
+  --ok: #3DBE8B; --ok-quiet: rgba(61,190,139,0.15); --warn: #D8A13A; --warn-quiet: rgba(216,161,58,0.15);
+  --info: #7C93B8; --info-quiet: rgba(124,147,184,0.15); --bad: #E56A6A; --bad-quiet: rgba(229,106,106,0.15);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.6);
+  --radius: 3px; --radius-sm: 2px; --radius-lg: 6px;
+}
 * { box-sizing: border-box; }
+/* as the app (App.css): thin scrollbars on the surface ramp, the accent around what has focus */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--raised); }
+::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 Inter, Roboto, "Segoe UI", Arial, sans-serif; }
 button, select, input { font: inherit; color: inherit; }
 h2 { margin: 0; font-size: 1.05rem; font-weight: 640; letter-spacing: -.01em; }
@@ -98,19 +117,20 @@ h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 650; text-transform: upper
 .vbad.is-on { border-style: solid; border-color: var(--warn); color: var(--warn); }
 .vbtn { display: flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border-radius: var(--radius-lg); border: 1px solid var(--line-strong); background: var(--raised); cursor: pointer; font-weight: 650; }
 .vbtn.keep.is-on { background: var(--ok-quiet); border-color: var(--ok); color: var(--ok); }
-.vbtn.delete.is-on { background: rgba(201,86,75,0.15); border-color: var(--bad); color: var(--bad); }
+.vbtn.delete.is-on { background: var(--bad-quiet); border-color: var(--bad); color: var(--bad); }
 kbd { font: 600 .7rem ui-monospace, Consolas, monospace; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; opacity: .7; }
 .reasons { display: grid; gap: 5px; }
 .reasons.off { opacity: .35; pointer-events: none; }
 .rrow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .chip { border: 1px solid var(--line-strong); background: none; border-radius: 99px; padding: 1px 9px; font-size: .76rem; cursor: pointer; color: var(--dim); }
 .chip.part { color: var(--text); font-weight: 600; }
-.chip.is-on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+.chip.is-on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .rparts { display: flex; flex-wrap: wrap; gap: 5px; }
 .rlab { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; min-width: 54px; }
 
 /* the swipe deck: one performer at a time, Tinder-like (the phone's start screen) */
-.deck { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 12px; max-width: 560px; margin: 0 auto; }
+/* the whole screen, so the grid never shows beside it; its column 540 px wide at most, in the middle */
+.deck { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; gap: 8px; padding: 8px max(10px, calc((100% - 540px) / 2)) 12px; }
 .deck[hidden] { display: none; }
 .dtop { display: flex; align-items: center; gap: 10px; }
 .dcard { position: relative; flex: 1 1 0; min-height: 0; border-radius: 14px; overflow: hidden; background: var(--raised); touch-action: none; user-select: none; cursor: grab; overscroll-behavior: contain; }
@@ -128,7 +148,7 @@ kbd { font: 600 .7rem ui-monospace, Consolas, monospace; border: 1px solid curre
 .dstamp.nope { right: 18px; color: var(--bad); transform: rotate(12deg); }
 .dstamp.love { left: 50%; top: auto; bottom: 110px; color: var(--accent); transform: translateX(-50%) rotate(-6deg); }
 .dround.love { color: var(--accent); border-color: var(--accent); }
-.card b.v.love { background: var(--accent); }
+.card b.v.love { background: var(--accent); color: var(--on-accent); }
 
 /* duels, laid out like the app's Smart Compare (frontend/src/pages/SmartComparePage.js): a header, two performer columns with
    their photo grids and a VS between them, and Undo / Draw / Skip in a bar at the bottom, or a middle column on a phone held
@@ -157,7 +177,7 @@ kbd { font: 600 .7rem ui-monospace, Consolas, monospace; border: 1px solid curre
 .ducol:hover .pickhint { opacity: 1; }
 .duwin { position: absolute; inset: 0; pointer-events: none; z-index: 2; box-shadow: inset 0 0 0 3px var(--ok), inset 0 0 70px var(--ok); animation: duwin .3s ease-out forwards; }
 @keyframes duwin { from { opacity: 1; } to { opacity: 0; } }
-.vs { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); border: 1px solid var(--accent); color: var(--accent); font-size: .68rem; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.55); pointer-events: none; }
+.vs { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); border: 1px solid var(--accent); color: var(--accent); font-size: .68rem; font-weight: 700; box-shadow: var(--shadow-md); pointer-events: none; }
 .dumid { display: none; flex-direction: column; justify-content: center; gap: 8px; padding: 0 6px; background: var(--surface); border-left: 1px solid var(--line); border-right: 1px solid var(--line); flex: none; z-index: 3; }
 .dubar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; flex: none; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
 .act { display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; font-size: .88rem; white-space: nowrap; cursor: pointer; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); height: 46px; border-radius: 8px; padding: 0 8px; }
@@ -212,7 +232,7 @@ a { color: var(--accent); }
 
 .phone { display: none; }
 .mbar { display: none; }
-.fab { position: fixed; right: 16px; bottom: 18px; z-index: 5; width: 62px; height: 62px; border-radius: 50%; border: 1px solid var(--ok); background: var(--surface); color: var(--ok); font-size: 1.6rem; box-shadow: 0 4px 12px rgba(0,0,0,.55); cursor: pointer; }
+.fab { position: fixed; right: 16px; bottom: 18px; z-index: 5; width: 62px; height: 62px; border-radius: 50%; border: 1px solid var(--ok); background: var(--surface); color: var(--ok); font-size: 1.6rem; box-shadow: var(--shadow-md); cursor: pointer; }
 
 @media (max-width: 1100px) { .fv { grid-template-columns: 220px minmax(0, 1fr); } .right { display: none; } }
 /* phone: filters behind a button, the detail view as picture on top and a sticky action bar over the reasons; swipe the
@@ -235,9 +255,9 @@ a { color: var(--accent); }
   .lb-strip { padding: 6px 8px; }
   .lb-strip img { height: 52px; }
   .lb-side { flex: 1 1 0; min-height: 0; border-left: 0; border-top: 1px solid var(--line); padding: 0 12px 16px; }
-  .mbar { display: grid; grid-template-columns: 44px 1fr 1fr 48px 64px 44px; gap: 6px; position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 8px 0; margin: 0 0 4px; }
+  .mbar { display: grid; grid-template-columns: 38px 1fr 42px 1fr 42px 38px 38px; gap: 6px; position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 8px 0; margin: 0 0 4px; }
   .mbar button { height: 46px; border-radius: var(--radius-lg); border: 1px solid var(--line-strong); background: var(--raised); font-weight: 650; font-size: .9rem; padding: 0; }
-  .mbar .vbad { margin: 0; height: 46px; font-size: .78rem; }
+  .mbar .vbad { margin: 0; height: 46px; font-size: 1.05rem; font-weight: 700; }
   .vrow, .side-bad, .side-wrong, .nav .step { display: none; }
   .chip { padding: 4px 11px; font-size: .84rem; }
   .rrow { gap: 6px; }
@@ -259,6 +279,13 @@ a { color: var(--accent); }
 .td-round .cur { color: var(--accent); background: var(--accent-quiet); border-radius: 99px; padding: 1px 7px; font-size: .7rem; font-weight: 600; white-space: nowrap; }
 .td-tests .btn { white-space: nowrap; }
 .td-err { color: var(--bad); font-size: .82rem; }
+.td-err[hidden] { display: none; }
+/* a question before a change that is hard to take back, in the page's colours instead of the browser's confirm() */
+.ask { width: min(420px, calc(100% - 32px)); background: var(--surface); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-md); }
+.ask::backdrop { background: var(--scrim-strong); }
+.ask p { margin: 0 0 16px; line-height: 1.5; }
+.ask form { display: flex; justify-content: flex-end; gap: 8px; margin: 0; }
+.ask .ok { border-color: var(--accent); color: var(--accent); }
 @media (max-width: 600px) {   /* the tests as cards: the table's five columns do not fit a phone */
   .sheet { padding: 12px 8px; }
   .sheet-in { padding: 12px; }
@@ -338,6 +365,7 @@ a { color: var(--accent); }
       <div class="grow"><h2 id="tdtitle">Training data</h2><span class="sub" id="tdsel"></span></div>
       <button class="btn" id="tdclose" title="Close (Esc)">Close</button>
     </div>
+    <div class="td-err" id="tderr" role="alert" hidden></div>
     <div id="tdsources"></div>
     <div class="td-src">
       <div class="td-row"><div class="grow"><h3 style="margin:0">Tests</h3><span class="sub">P cross-validated on what is picked now, kept with its selection: a version. Use this version sets the toggles back to it, and P retrains on that. The AI app runs a test within a minute.</span></div></div>
@@ -346,8 +374,9 @@ a { color: var(--accent); }
     </div>
   </div>
 </div>
+<dialog class="ask" id="ask"><p id="askmsg"></p><form method="dialog"><button class="btn" value="no">Cancel</button><button class="btn ok" id="askok" value="yes">OK</button></form></dialog>
 <script>
-const vname = v => v === 'superwrong' ? 'super wrong' : v;   // a verdict as the page says it
+const vname =v => v === 'superwrong' ? 'super wrong' : v;   // a verdict as the page says it
 const FACETS = [['label', 'Your verdict'], ['inapp', 'In your app'], ['site', 'Site'], ['ethnicity', 'Ethnicity'], ['hair', 'Hair'], ['body', 'Body type'], ['cup', 'Cup'],
                 ['natural', 'Breasts'], ['eyes', 'Eyes'], ['tattoos', 'Tattoos'], ['ageband', 'Age']];
 const PARTS = {
@@ -476,7 +505,7 @@ async function open(j) {
   $('strip').onclick = e => e.target.dataset.f && show(e.target.dataset.f);
   const f = r.fields;
   const rows = Object.entries(f).filter(([k]) => k !== 'categories').map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('');
-  $('side').innerHTML = `<div class="mbar"><button class="mprev">‹</button><button class="vbtn keep" data-v="keep">Keep</button><button class="vbtn delete" data-v="delete">Delete</button><button class="vbtn superwrong" data-v="superwrong" title="Super wrong" aria-label="Super wrong">✕✕</button><button class="vbad" data-v="bad">Bad data</button><button class="mnext">›</button></div>
+  $('side').innerHTML = `<div class="mbar"><button class="mprev" aria-label="Back">‹</button><button class="vbtn keep" data-v="keep">Keep</button><button class="vbtn love" data-v="love" title="Love" aria-label="Love">★</button><button class="vbtn delete" data-v="delete">Delete</button><button class="vbtn superwrong" data-v="superwrong" title="Super wrong" aria-label="Super wrong">✕✕</button><button class="vbad" data-v="bad" title="Bad data: no usable picture" aria-label="Bad data">!</button><button class="mnext" aria-label="Next unlabelled">›</button></div>
     <h2>${esc(r.name)}</h2><span class="sub">${j + 1} of ${order.length} · ${r.site} · <a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></span>
     <div class="vrow"><button class="vbtn keep" data-v="keep">Keep <kbd>F</kbd></button><button class="vbtn love" data-v="love">★ Love <kbd>R</kbd></button><button class="vbtn delete" data-v="delete">Delete <kbd>D</kbd></button></div>
     <button class="vbtn superwrong side-wrong" data-v="superwrong" title="A delete P got badly wrong; can count heavier (Training data)">✕✕ Super wrong <kbd>E</kbd></button>
@@ -693,8 +722,11 @@ let td = null, tdPoll = null;
 // love and super wrong: what they count for in training (a test from before weights had them at 1, as with the switch off)
 const WEIGHTS = { love: ['★ Love counts heavier', 'a keep you like a lot'], superwrong: ['✕✕ Super wrong counts heavier', 'a delete P got badly wrong'] };
 const weightOf = (s, v) => s.weights?.[v]?.on ? s.weights[v].weight : 1;
-const canon = s => JSON.stringify({ profile: { on: !!s.profile.on, rounds: s.profile.rounds }, discover: { on: !!s.discover.on, rounds: s.discover.rounds }, app: !!s.app,
-  weights: Object.keys(WEIGHTS).map(v => weightOf(s, v)) });
+// a selection made exact, as the backend freezes a test's: "every round" becomes the rounds there were (current), so a test of
+// every round back when there was one is not "the toggles now" once round 2 began
+const exact = (s, current) => (src => (s[src].rounds === null ? Array.from({ length: current[src] }, (_, i) => i + 1) : s[src].rounds));
+const canon = (s, current) => JSON.stringify({ profile: { on: !!s.profile.on, rounds: exact(s, current)('profile') }, discover: { on: !!s.discover.on, rounds: exact(s, current)('discover') },
+  app: !!s.app, weights: Object.keys(WEIGHTS).map(v => weightOf(s, v)) });
 async function tdLoad() {
   try {
     const [r, t] = await Promise.all(['/api/profile/rounds', '/api/profile/tests'].map(u => fetch(u).then(x => { if (!x.ok) throw new Error(`${u}: HTTP ${x.status}`); return x.json(); })));
@@ -704,7 +736,18 @@ async function tdLoad() {
     $('tdsources').innerHTML = `<div class="td-err">Training data could not be loaded (${esc(err.message)}). Is the app running?</div>`;
   }
 }
+// the control that has focus, as a selector, so a redraw of the panel (after each change, and the tests' poll) puts it back
+function tdFocusKey() {
+  const el = document.activeElement;
+  if (!el || !$('tdsources').contains(el)) return null;
+  if (el.id) return `#${el.id}`;
+  const row = el.closest('[data-weight]') || el.closest('[data-src]');
+  const own = ['on', 'all', 'start', 'won', 'wval'].find(k => k in el.dataset);
+  const at = row && (row.dataset.weight ? `[data-weight="${row.dataset.weight}"]` : `[data-src="${row.dataset.src}"]`);
+  return at && (el.dataset.round ? `${at} [data-round="${el.dataset.round}"]` : own ? `${at} [data-${own}]` : null);
+}
 function tdRender() {
+  const focus = tdFocusKey();
   $('tdsel').textContent = `P learns from: ${td.selection}`;
   const check = (attrs, label) => `<label class="sub" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${attrs}> ${label}</label>`;
   $('tdsources').innerHTML = Object.keys(SRC).map(src => {
@@ -729,9 +772,10 @@ function tdRender() {
           <span class="grow sub">${what}</span>
           <label class="sub" style="min-width:0;font-weight:500">counts as <input type="number" class="select" data-wval min="1" max="10" step="0.5" value="${w.weight}" ${w.on ? '' : 'disabled'} style="width:62px;height:28px" aria-label="${esc(label)}: weight"> ${v === 'love' ? 'keeps' : 'deletes'}</label></div>`;
       }).join('')}</div></div>`;
-  const now = canon(td.include);
+  if (focus) $('tdsources').querySelector(focus)?.focus();
+  const now = canon(td.include, td.current);
   $('tdtests').innerHTML = td.tests.length ? td.tests.map(t => {
-    const r = t.result || {}, isNow = canon(t.selection) === now || (t.frozen && canon(t.frozen) === now);
+    const r = t.result || {}, isNow = canon(t.frozen || t.selection, t.current || td.current) === now;
     return `<tr class="${isNow ? 'is-now' : ''}"><td class="num">#${t.id}</td>
       <td>${esc(t.created)}${t.note ? `<br><span class="sub">${esc(t.note)}</span>` : ''}</td>
       <td>${esc(t.selection_text)}</td>
@@ -740,24 +784,38 @@ function tdRender() {
       <td>${isNow ? '<span class="sub">the toggles now</span>' : t.status === 'done' ? `<button class="btn" data-use="${t.id}">Use this version</button>` : ''}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="sub">No tests yet: Run test tries P on what is picked now.</td></tr>';
 }
-/** send a change and show the panel again; whether it went through */
+/** send a change and show the panel again; whether it went through (if not, why, at the top of the panel) */
 async function tdSend(method, url, body) {
-  let ok = false;
+  let ok = false, why = '';
   try {
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     ok = res.ok;
-    if (!ok) alert((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-  } catch (err) { alert(`The app did not answer: ${err.message}`); }
+    if (!ok) why = (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
+  } catch (err) { why = `The app did not answer: ${err.message}`; }
+  $('tderr').textContent = why ? `That did not go through: ${why}` : '';
+  $('tderr').hidden = !why;
   await tdLoad();
   return ok;
+}
+/** the page's own confirm(): resolves true for OK, false for Cancel or Esc */
+function ask(message, okLabel) {
+  const d = $('ask');
+  $('askmsg').textContent = message;
+  $('askok').textContent = okLabel;
+  d.returnValue = '';
+  d.showModal();
+  $('askok').focus();
+  return new Promise(done => d.addEventListener('close', () => done(d.returnValue === 'yes'), { once: true }));
 }
 // a modal: focus goes into it, Tab stays inside, and back to the Training data button when it closes
 const tdFocusable = () => [...$('td').querySelectorAll('button, input, [tabindex]')].filter(x => !x.disabled && x.offsetParent);
 function tdOpen() {
   $('td').hidden = false;
+  $('tderr').hidden = true;
   tdLoad().then(() => $('tdclose').focus());
   clearInterval(tdPoll);
-  tdPoll = setInterval(() => { if (td && td.tests.some(t => t.status === 'queued' || t.status === 'running')) tdLoad(); }, 5000);
+  // while a weight is being typed the poll waits, so the redraw does not take the half-typed number
+  tdPoll = setInterval(() => { if (td && td.tests.some(t => t.status === 'queued' || t.status === 'running') && !document.activeElement?.matches('[data-wval]')) tdLoad(); }, 5000);
 }
 function tdClose() { $('td').hidden = true; clearInterval(tdPoll); load(); $('tdbtn').focus(); }
 $('td').addEventListener('keydown', e => {
@@ -775,7 +833,10 @@ $('tdsources').onchange = e => {
   if (wrow) {
     const v = wrow.dataset.weight;
     if ('won' in e.target.dataset) return tdSend('PUT', '/api/profile/rounds', { include: { weights: { [v]: { on: e.target.checked } } } });
-    if ('wval' in e.target.dataset) return tdSend('PUT', '/api/profile/rounds', { include: { weights: { [v]: { weight: Number(e.target.value) } } } });
+    if ('wval' in e.target.dataset) {
+      if (e.target.value === '' || !Number.isFinite(+e.target.value)) return tdRender();   // emptied: the weight stays as it was
+      return tdSend('PUT', '/api/profile/rounds', { include: { weights: { [v]: { weight: Number(e.target.value) } } } });
+    }
     return;
   }
   const box = e.target.closest('[data-src]');
@@ -788,19 +849,20 @@ $('tdsources').onchange = e => {
     return tdSend('PUT', '/api/profile/rounds', { include: { [src]: { rounds } } });
   }
 };
-$('tdsources').onclick = e => {
+$('tdsources').onclick = async e => {
   const b = e.target.closest('[data-start]');
   if (!b) return;
   const src = b.closest('[data-src]').dataset.src;
-  if (confirm(`Start ${SRC[src][0]} round ${td.current[src] + 1}? Its new verdicts go into it from now on; round ${td.current[src]} stays as it is.`)) tdSend('PUT', '/api/profile/rounds', { start: src });
+  if (await ask(`Start ${SRC[src][0]} round ${td.current[src] + 1}? Its new verdicts go into it from now on; round ${td.current[src]} stays as it is.`, `Start round ${td.current[src] + 1}`)) tdSend('PUT', '/api/profile/rounds', { start: src });
 };
 $('tdrun').onclick = async () => { if (await tdSend('POST', '/api/profile/tests', { note: $('tdnote').value })) $('tdnote').value = ''; };
-$('tdtests').onclick = e => {
+$('tdtests').onclick = async e => {
   const b = e.target.closest('[data-use]');
-  if (b && confirm(`Set the toggles back to test #${b.dataset.use}'s selection? P retrains on it.`)) tdSend('POST', `/api/profile/tests/${b.dataset.use}/use`);
+  if (b && await ask(`Set the toggles back to test #${b.dataset.use}'s selection? P retrains on it.`, 'Use this version')) tdSend('POST', `/api/profile/tests/${b.dataset.use}/use`);
 };
 
 document.onkeydown = e => {
+  if ($('ask').open) return;   // the question's own keys: Esc cancels it, Enter answers
   if (!$('td').hidden) { if (e.key === 'Escape') tdClose(); return; }   // Training data open: Esc closes it, no other key acts
   if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
   // the left hand only, the right hand on the mouse for reasons (Alex, Moonlander AZERTY): F keep, D delete, Q bad data on the

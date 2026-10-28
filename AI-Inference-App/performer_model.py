@@ -381,10 +381,13 @@ def follow():
     """keeps going while Alex labels: retrains on every new verdict or duel (the cross-validation and the saved files again every 25,
     or at once when Training data picks other rounds or sources), runs the tests asked for on the page, and embeds the unjudged
     performers 20 at a time in the profile page's grid order (popular first) so the ones he sees next have a keep chance on the page"""
-    emb, report, cv_at, picked = Embedder(), None, None, None
-    STATE.update(running=True, device=emb.device)
+    emb, report, cv_at, picked = None, None, None, None
+    STATE.update(running=True)
     while True:
         try:
+            if emb is None:   # at the start, and after CLIP moved off or onto the GPU (a failure here is logged like any other)
+                emb = Embedder()
+                STATE.update(device=emb.device)
             test = claim_test()
             if test:
                 run_test(emb, test)
@@ -406,6 +409,10 @@ def follow():
             emb.embed([p for k in ahead for p in pictures(d.recs[k])], quiet=True)
             n, m = predict(emb, d, report, write)
             pair_count = train_p2(emb, d, report, write)
+            STATE.update(updated=time.strftime("%Y-%m-%d %H:%M"), judged=n, scored=m, p2_pairs=pair_count, device=emb.device, error=None)
+            if (emb.device == "cuda") != gpu_ok():   # a labelmaster training started or ended: CLIP moves off or onto the GPU
+                emb = None
+                torch.cuda.empty_cache()
         except (urllib.error.URLError, TimeoutError) as e:   # the app is restarting or the NAS is off
             print(f"P: {time.strftime('%H:%M')} the app is unreachable ({e}); trying again in a minute", flush=True)
             STATE.update(error=str(e))
@@ -416,17 +423,17 @@ def follow():
             STATE.update(error=f"{type(e).__name__}: {e}")
             time.sleep(60)
             continue
-        STATE.update(updated=time.strftime("%Y-%m-%d %H:%M"), judged=n, scored=m, p2_pairs=pair_count, device=emb.device, error=None)
-        if (emb.device == "cuda") != gpu_ok():   # a labelmaster training started or ended: CLIP moves off or onto the GPU
-            emb = None
-            torch.cuda.empty_cache()
-            emb = Embedder()
         if not ahead:
             time.sleep(60)
 
 
 def start():
-    threading.Thread(target=follow, name="performer_model", daemon=True).start()
+    def run():
+        try:
+            follow()
+        finally:   # follow() only ends on something it cannot go on from: /health then says so instead of "running"
+            STATE.update(running=False)
+    threading.Thread(target=run, name="performer_model", daemon=True).start()
 
 
 def rank_before(n):
