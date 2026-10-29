@@ -31,6 +31,9 @@
  *
  *   GET  /link/:token                  is this link good? -> { ok, name, app }
  *   POST /heartbeat                    { info, holding } -> { paused, enabled, cancel: [job ids to drop], actions: { id: pause | resume } }
+ *                                      holding: a job id, or a list of them (a control panel holds one per machine at work)
+ *   GET  /queue                        what's waiting, in order -> { running, enabled, jobs: [{ id, label, kind, why, size, priority }] }
+ *                                      (POST /claim takes { jobId } too: that job, or 204)
  *   POST /claim                        { info } -> the next job { id, label, kind, why, args ({in}/{out}), encoder, priority, size,
  *                                      duration, fps, ext, chunk }, or 204
  *   POST /jobs/:id/progress            { phase, progress, speed } -> { action: continue | pause | resume | cancel, cancel, priority }
@@ -85,13 +88,17 @@ const jobId = (req) => {
 
 router.post('/heartbeat', (req, res) => {
   const b = req.body || {};
-  if (req.encoder) return res.json(eq.workerHeartbeat(req.encoder, { info: b.info || null, holding: Number(b.holding) || null }));
+  const holding = Array.isArray(b.holding) ? b.holding.map(Number).filter(n => Number.isInteger(n) && n > 0) : Number(b.holding) || null;
+  if (req.encoder) return res.json(eq.workerHeartbeat(req.encoder, { info: b.info || null, holding }));
   q.heartbeat(req.worker, b.info || null);
   res.json({ paused: q.list().paused });
 });
 
+router.get('/queue', encoderOnly, (req, res) => res.json(eq.workerQueue(req.encoder)));
+
 router.post('/claim', encoderOnly, async (req, res) => {
-  const job = await eq.workerClaim(req.encoder, req.body?.info || null);
+  const want = Number(req.body?.jobId);
+  const job = await eq.workerClaim(req.encoder, req.body?.info || null, { jobId: Number.isInteger(want) && want > 0 ? want : null });
   if (!job) return res.status(204).end();
   res.json(job);
 });

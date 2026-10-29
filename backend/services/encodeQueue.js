@@ -532,9 +532,12 @@ function kick() {
 }
 
 /** The next job — highest priority, then queue order — taken by one worker atomically, so two never take the same one. */
-function claimNext(workerKey) {
+// with wantId (a control panel that orders every app's queue itself): that job, if it's still waiting
+function claimNext(workerKey, wantId = null) {
   return db.transaction(() => {
-    const job = db.prepare("SELECT * FROM encode_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 1").get();
+    const job = wantId
+      ? db.prepare("SELECT * FROM encode_jobs WHERE status = 'queued' AND id = ?").get(wantId)
+      : db.prepare("SELECT * FROM encode_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 1").get();
     if (!job) return null;
     const now = Date.now();
     db.prepare(`
@@ -1150,29 +1153,40 @@ const heldBy = (w, jobId) => {
 /** A worker calling in: told to drop a job that isn't its any more, and to pause or resume the one it has. */
 function workerHeartbeat(w, { info, holding } = {}) {
   seen(w, info);
-  let cancel = [];
+  const cancel = [];
   const actions = {};
-  if (holding) {
-    const job = heldBy(w, holding);
-    if (!job) cancel = [holding];
-    else {
-      setJob(job.id, { heartbeat_at: Date.now() });
-      const a = actionFor(job);
-      if (a !== 'continue') actions[job.id] = a;
-    }
+  // a worker holds one job; a control panel can hold several (one for each machine at work)
+  for (const id of [].concat(holding || [])) {
+    const job = heldBy(w, id);
+    if (!job) { cancel.push(id); continue; }
+    setJob(job.id, { heartbeat_at: Date.now() });
+    const a = actionFor(job);
+    if (a !== 'continue') actions[job.id] = a;
   }
   return { paused: !isRunning(), enabled: !!w.enabled, cancel, actions };
 }
 
+/** What's waiting, in the order it would be handed out: for a control panel, which orders every app's queue and claims the job it picks. */
+function workerQueue(w) {
+  seen(w);
+  const rows = db.prepare("SELECT id, label, kind, plan, original_size_bytes, priority FROM encode_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 500").all();
+  const why = (p) => { try { return JSON.parse(p || '{}').why || []; } catch { return []; } };
+  return {
+    running: isRunning(), enabled: !!w.enabled, room: null,
+    jobs: rows.map(j => ({ id: j.id, label: j.label, kind: j.kind, why: why(j.plan), size: j.original_size_bytes, priority: j.priority || 0 })),
+  };
+}
+
 /** The next job with its exact ffmpeg arguments ({in}, {out}), on the card when the worker has a working NVENC. */
-async function workerClaim(w, info) {
+async function workerClaim(w, info, { jobId = null } = {}) {
   seen(w, info);
   if (!isRunning() || !w.enabled) return null;
   for (let tries = 0; tries < 10; tries++) {
-    const job = claimNext(keyOf(w));
+    // a control panel asks for one job by id: that one or nothing
+    const job = claimNext(keyOf(w), jobId);
     if (!job) return null;
     const prep = await prepareJob(job);
-    if (!prep) continue;
+    if (!prep) { if (jobId) return null; continue; }
     fs.rmSync(prep.tmp, { force: true });
     const encoder = info?.nvenc && !info?.cpuOnly ? 'nvenc' : 'cpu';
     const { args } = ffmpegArgs('{in}', '{out}', prep.f, prep.plan, { encoder });
@@ -1305,8 +1319,9 @@ function workerFail(w, jobId, error) {
   seen(w);
   const job = heldBy(w, jobId);
   if (!job) return false;
+  // its half-made new file: a worker writing on the share may still have it open (the cleanup clears it later)
   const tmp = tmpOf(job);
-  if (tmp) fs.rmSync(tmp, { force: true });
+  try { if (tmp) fs.rmSync(tmp, { force: true }); } catch { /* in use */ }
   failJob(job, `${String(error || 'failed').slice(0, 400)} (on ${w.name})`);
   return true;
 }
@@ -1500,6 +1515,6 @@ module.exports = {
   pathsFor, enqueue, removeJob, clearFinished, setPriority, bumpJob, retryJob, undoJob,
   start, pause, pauseJob, resumeJob, mode, setMode, isRunning, startQueue, cleanup, kick,
   addWorker, relinkWorker, removeWorker, setWorkerEnabled, workerForToken, listWorkers,
-  workerHeartbeat, workerClaim, workerProgress, workerSource, workerReceived, workerUpload, workerComplete, workerFail,
+  workerHeartbeat, workerQueue, workerClaim, workerProgress, workerSource, workerReceived, workerUpload, workerComplete, workerFail,
   status, spaceReport, groupReport, forget,
 };
