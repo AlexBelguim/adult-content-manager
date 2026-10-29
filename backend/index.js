@@ -7,6 +7,9 @@ const app = express();
 // Use PORT environment variable or default to 3000
 const port = process.env.PORT || 4069;
 
+// LAN and Tailscale only: a request from anywhere else is refused before anything else sees it
+app.use(require('./middleware/lanOnly'));
+
 // Debug request timing
 app.use((req, res, next) => {
   const start = Date.now();
