@@ -272,7 +272,7 @@ export default function FunpipePage() {
             </IconButton>
           </Tooltip>
         )}
-        <Tooltip title="Runs on the AI Inference App — change its address in the Training Hub">
+        <Tooltip title="Runs on acm-gpu, ACM's GPU worker — its address is in Settings → Workers">
           <IconButton onClick={() => navigate('/taste-dashboard')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
         </Tooltip>
         <Tooltip title="Rescan funscript folders">
@@ -284,8 +284,8 @@ export default function FunpipePage() {
 
       {!online && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          Can't reach the AI Inference App at <strong>{config.aiServerUrl}</strong>. Start it on
-          the GPU machine with <code>Run_AI.bat</code>. Moving videos to a funscript folder still
+          Can't reach acm-gpu, ACM's GPU worker, at <strong>{config.aiServerUrl}</strong>. Start it from
+          the host agent on the GPU machine (tray → acm-gpu → Start). Moving videos to a funscript folder still
           works — they just won't be queued.
         </Alert>
       )}

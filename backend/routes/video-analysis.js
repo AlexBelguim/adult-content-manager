@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const { getAiServerUrl } = require('../utils/aiUrl');
 
 // Video analysis URL - derived from AI server URL (same server, /video prefix)
-// this app's address as the browser reached it: the AI app fetches the video from here (it reads no drive)
+// this app's address as the browser reached it: acm-gpu fetches the video from here (it reads no drive)
 const appBase = (req) => `${req.protocol}://${req.get('host')}`;
 
 function getVideoUrl() {
@@ -26,7 +26,7 @@ let serviceProcess = null;
 let serviceLogs = [];
 const MAX_LOGS = 2000;
 
-// Where the AI app is when it runs on this machine: its own repo beside this one (F:\git\ai-inference-app), or AI_APP_DIR
+// Where acm-gpu is when it runs on this machine: its own repo beside this one (F:\git\ai-inference-app), or AI_APP_DIR
 const AI_APP_DIR = process.env.AI_APP_DIR || path.join(__dirname, '..', '..', '..', 'ai-inference-app');
 const servicePath = AI_APP_DIR;
 const logFile = path.join(servicePath, 'service.log');
@@ -223,7 +223,7 @@ router.post('/start-service', async (req, res) => {
       // Not running, continue to start
     }
 
-    // the AI app's own repo (see AI_APP_DIR above)
+    // acm-gpu's own repo (see AI_APP_DIR above)
     const batFile = path.join(servicePath, 'Run_AI.bat');
     
     console.log(`[Video Analysis] Starting service from: ${servicePath}`);
@@ -772,7 +772,7 @@ router.post('/cancel-analysis', async (req, res) => {
  * Stop the video analysis service
  */
 router.post('/stop-service', async (req, res) => {
-  // Video analysis is now integrated into the AI Inference App.
+  // Video analysis is now integrated into the acm-gpu.
   // "Stop" means cancel any running analysis, NOT kill the server
   // (killing port 3344 would also kill image inference, training, etc.)
   try {

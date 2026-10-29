@@ -1,8 +1,8 @@
 /**
- * The workers' side: the AI app on the GPU PC (or any machine) works for this app over HTTP alone, so it never needs
+ * The workers' side: acm-gpu on the GPU PC (or any machine) works for this app over HTTP alone, so it never needs
  * the NAS share mapped. Modelled on Hikari's worker protocol (link, heartbeat, claim, progress, complete / fail).
  * Every call but /link carries the worker token as a bearer (Authorization: Bearer <token>, plus X-Worker: <name>).
- * The app hands its address and the token to the AI app by itself (funpipeService.pair).
+ * The app hands its address and the token to acm-gpu by itself (funpipeService.pair).
  *
  *   GET  /link                         { url, token } for a worker set up by hand (open like the rest of the app, which has no
  *                                      login: the token keeps out what is not a worker, not who can reach the app)
@@ -19,7 +19,10 @@
  *
  * The same token claims training runs (the training queue, services/trainingQueue.js):
  *
- *   POST /training/claim               -> the next run { id, label, payload }, or 204 (never a second while one runs)
+ *   POST /training/claim               { jobId? } -> the next run (or that one) { id, label, payload }, or 204 (never a second
+ *                                      while one runs)
+ *   GET  /training/queue               what's waiting, in order -> { jobs: [{ id, label, kind, priority }] } (the control panel)
+ *   GET  /funpipe/queue                the same for funscripts -> { paused, jobs }; POST /funpipe/claim takes { jobId } too
  *   POST /training/jobs/:id/progress   { state: the run's training_status } -> { action: continue | cancel }
  *   POST /training/jobs/:id/complete   { result }
  *   POST /training/jobs/:id/fail       { error } ('cancelled' when it was stopped)
@@ -143,9 +146,13 @@ router.post('/jobs/:id/fail', encoderOnly, (req, res) => {
 router.use(['/funpipe', '/media', '/sidecar', '/beside', '/training'], funpipeOnly);
 
 // ── training runs (the same worker) ──────────────────────────
+const wanted = (req) => { const n = Number(req.body?.jobId); return Number.isInteger(n) && n > 0 ? n : null; };
+router.get('/training/queue', (req, res) => res.json({ jobs: tq.queued() }));
+router.get('/funpipe/queue', (req, res) => res.json({ paused: q.paused(), jobs: q.paused() ? [] : q.queued() }));
+
 router.post('/training/claim', (req, res) => {
   q.heartbeat(req.worker, req.body?.info || null);
-  const job = tq.claim(req.worker);
+  const job = tq.claim(req.worker, wanted(req));
   if (!job) return res.status(204).end();
   res.json(job);
 });
@@ -154,7 +161,7 @@ router.post('/training/jobs/:id/complete', (req, res) => res.json({ ok: tq.finis
 router.post('/training/jobs/:id/fail', (req, res) => res.json({ ok: tq.finish(req.worker, jobId(req), { ok: false, error: req.body?.error }) }));
 
 router.post('/funpipe/claim', (req, res) => {
-  const job = q.claim(req.worker, req.body?.info || null);
+  const job = q.claim(req.worker, req.body?.info || null, wanted(req));
   if (!job) return res.status(204).end();
   res.json(job);
 });

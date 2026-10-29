@@ -3,7 +3,7 @@
  *
  * Absorbed from the standalone backend-pairwise service.
  * Data lives in app.db (pairwise_pairs, pairwise_image_scores, etc.)
- * Training/inference calls are proxied to the AI Inference App.
+ * Training/inference calls are proxied to the acm-gpu.
  */
 const express = require('express');
 const router = express.Router();
@@ -458,7 +458,7 @@ router.get('/stats', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// AI INFERENCE PROXY (delegates to AI Inference App)
+// AI INFERENCE PROXY (delegates to acm-gpu)
 // ═══════════════════════════════════════════════════════════════
 
 // Check AI server health

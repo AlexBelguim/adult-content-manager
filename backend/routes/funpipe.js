@@ -2,7 +2,7 @@
  * funpipe routes — funscript auto-generation pipeline integration.
  *
  * funpipe runs on the GPU machine as a worker of this backend (routes/workers.js):
- * the queue is ours (services/funpipeQueue.js), the AI app claims a job, downloads
+ * the queue is ours (services/funpipeQueue.js), acm-gpu claims a job, downloads
  * the video and uploads the sidecars and the .funscript, written here next to it.
  *
  * Endpoints:
@@ -39,7 +39,7 @@ const LIBRARY_TTL = 60 * 1000;
 // a job finished or the editor saved: the sidecars changed, so the next listing walks the folders again
 funpipeQueue.events.on('changed', () => { libraryCache.time = 0; });
 
-// every page that uses funpipe also tells the AI app where this app is and the worker token (funpipeService.pair)
+// every page that uses funpipe also tells acm-gpu where this app is and the worker token (funpipeService.pair)
 router.use((req, res, next) => {
   funpipeService.pair(`${req.protocol}://${req.get('host')}`, req.query.url || req.body?.url);
   next();
@@ -89,7 +89,7 @@ router.get('/ui/status', async (req, res) => res.json(await funpipeService.uiSta
 router.post('/ui/stop', async (req, res) => res.json(await funpipeService.uiStop(req.body?.url)));
 
 // Launch the editor. It lists the videos with a signal from /library below and
-// pulls one to the AI app when it is opened; root narrows it to one folder.
+// pulls one to acm-gpu when it is opened; root narrows it to one folder.
 router.post('/ui/start', async (req, res) => {
   const { root, url } = req.body || {};
   res.json(await funpipeService.uiStart(root || null, url));

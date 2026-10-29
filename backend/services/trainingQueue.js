@@ -1,9 +1,9 @@
 /**
  * The training queue, kept in the app (training_jobs, migration 017).
  *
- * The Taste Dashboard's Start puts a run here (with everything the AI app trains with, collected now). The AI app on
+ * The Taste Dashboard's Start puts a run here (with everything acm-gpu trains with, collected now). acm-gpu on
  * the GPU PC is a worker (routes/workers.js, the funpipe worker's token): it claims the next run, trains it in a process
- * of its own, sends its state every few seconds and the result at the end. One run at a time: the AI app claims the
+ * of its own, sends its state every few seconds and the result at the end. One run at a time: acm-gpu claims the
  * next only when the last has ended. Cancel stops a waiting run at once and a running one on its next report.
  *
  * A running run whose worker hasn't reported for STALE_MS failed (training can't pick up where it stopped): Retry puts
@@ -33,7 +33,7 @@ function enqueue(payload) {
 }
 
 function failStale() {
-  db.prepare("UPDATE training_jobs SET status = 'failed', error = 'The AI app stopped reporting (restarted or switched off): Retry runs it again', finished_at = ?, phase = NULL WHERE status = 'running' AND heartbeat_at < ?")
+  db.prepare("UPDATE training_jobs SET status = 'failed', error = 'acm-gpu stopped reporting (restarted or switched off): Retry runs it again', finished_at = ?, phase = NULL WHERE status = 'running' AND heartbeat_at < ?")
     .run(Date.now(), Date.now() - STALE_MS);
 }
 
@@ -97,18 +97,29 @@ function bump(id, dir) {
 
 // ── the worker's side (routes/workers.js) ──────────────────────
 
-/** the next waiting run for the AI app: { id, label, payload }, or null — never a second while one of its runs is running */
-function claim(name) {
+/**
+ * the next waiting run for a worker: { id, label, payload }, or null — never a second while one of its runs is
+ * running; with wantId (the control panel, which orders every app's jobs in one list) that run, if it's still waiting
+ */
+function claim(name, wantId = null) {
   failStale();
   return db.transaction(() => {
     if (db.prepare("SELECT 1 FROM training_jobs WHERE status = 'running' AND worker = ?").get(name)) return null;
-    const r = db.prepare("SELECT * FROM training_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 1").get();
+    const r = wantId
+      ? db.prepare("SELECT * FROM training_jobs WHERE status = 'queued' AND id = ?").get(wantId)
+      : db.prepare("SELECT * FROM training_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 1").get();
     if (!r) return null;
     const now = Date.now();
     db.prepare("UPDATE training_jobs SET status = 'running', worker = ?, started_at = ?, heartbeat_at = ?, phase = 'claimed', progress = 0 WHERE id = ?")
       .run(name, now, now, r.id);
     return { id: r.id, label: r.label, payload: parse(r.payload) };
   })();
+}
+
+/** what's waiting, in the order it would be handed out (for the control panel) */
+function queued() {
+  return db.prepare("SELECT id, label, priority FROM training_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 200").all()
+    .map(r => ({ id: r.id, label: r.label, kind: 'training', priority: r.priority || 0 }));
 }
 
 const own = (name, id) => db.prepare("SELECT * FROM training_jobs WHERE id = ? AND worker = ? AND status = 'running'").get(id, name);
@@ -136,4 +147,4 @@ function finish(name, id, { ok, result, error }) {
   return true;
 }
 
-module.exports = { enqueue, list, cancel, remove, retry, bump, claim, progress, finish, titleOf };
+module.exports = { enqueue, list, cancel, remove, retry, bump, claim, queued, progress, finish, titleOf };

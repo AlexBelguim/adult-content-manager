@@ -1,7 +1,7 @@
 /**
  * Settings → Workers: every machine that works for this app (GET /api/jobs/workers), each with its host agent.
  *
- *   AI app      the AI Inference App on the GPU PC: its address (saved with the dialog's Save), whether it answers,
+ *   acm-gpu     acm-gpu, ACM's GPU worker on the GPU PC: its address (saved with the dialog's Save), whether it answers,
  *               whether it's claiming funpipe and training work, and the host agent's lanes for it (training,
  *               funpipe, P and P2)
  *   scenetest   labels and funscripts from scenes: its address and the share root it sees the library under
@@ -24,7 +24,7 @@ const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - t) / 
 
 /** what a worker's host agent is doing, in words */
 function agentWords(a) {
-  if (!a) return 'host agent: not reported (an older worker, or the AI app not running)';
+  if (!a) return 'host agent: not reported (an older worker, or acm-gpu not running)';
   if (a.url === null) return 'started without a host agent (--no-agent)';
   if (a.up === true) {
     const lanes = a.lanes ? Object.entries(a.lanes) : [];
@@ -70,11 +70,11 @@ export default function WorkersSettings({ aiServerUrl, setAiServerUrl }) {
       </Typography>
       {error && <Typography sx={{ ...meta, color: 'var(--bad)' }}>{error}</Typography>}
 
-      {/* the AI app */}
+      {/* acm-gpu */}
       <Box sx={rowSx}>
         <Box component="span" sx={{ ...dot(!ai ? 'off' : ai.online ? (ai.claiming ? 'ok' : 'warn') : 'off'), mt: 0.75 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 800, fontSize: '0.9rem' }}>AI app</Typography>
+          <Typography sx={{ fontWeight: 800, fontSize: '0.9rem' }}>GPU worker (acm-gpu)</Typography>
           <Typography sx={meta}>
             {!ai ? '…' : ai.online
               ? [ai.device ? `running on the ${ai.device}` : 'running', ai.claiming ? 'claiming funscripts and training runs' : 'not claiming work yet (pairs when this page or the Jobs page is open)'].join(' · ')
@@ -97,7 +97,7 @@ export default function WorkersSettings({ aiServerUrl, setAiServerUrl }) {
           </Typography>
           <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr auto' }, mt: 1, alignItems: 'start' }}>
             <TextField size="small" label="Address" value={st.url} onChange={(e) => { setSt({ ...st, url: e.target.value }); setSaved(null); }}
-              placeholder="the AI app's host, port 8199" InputProps={{ sx: { fontFamily: 'monospace' } }} />
+              placeholder="acm-gpu's host, port 8199" InputProps={{ sx: { fontFamily: 'monospace' } }} />
             <TextField size="small" label="Library on its share" value={st.root} onChange={(e) => { setSt({ ...st, root: e.target.value }); setSaved(null); }}
               placeholder="Z:\Apps\adultManager\media\" InputProps={{ sx: { fontFamily: 'monospace' } }} />
             <Button variant="outlined" size="small" onClick={saveScenetest} sx={{ height: 40 }}>Save</Button>

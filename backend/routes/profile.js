@@ -7,7 +7,7 @@
  * the follower on the GPU PC (performer_model.py --follow) sends them.
  *
  * - GET  /api/profile/performers   — every performer as a card: fields, verdict, in the app, popularity, P, P2, list place
- * - GET  /api/profile/collection   — every performer's picture files and Babepedia's popularity ranks, for the AI app
+ * - GET  /api/profile/collection   — every performer's picture files and Babepedia's popularity ranks, for acm-gpu
  * - GET  /api/profile/performer    — ?site=&slug=: her record, verdict and P
  * - POST /api/profile/label        — { site, slug, verdict, reasons, note }: his verdict (verdict null clears it)
  * - GET  /api/profile/duel/next    — the next two keeps to compare, and how far the sorting is
@@ -334,7 +334,7 @@ router.post('/duel', (req, res) => {
   res.json({ done: done.length });
 });
 
-// P's and P2's latest numbers (the AI app's performer_model.py), for the page and the Taste Dashboard
+// P's and P2's latest numbers (acm-gpu's performer_model.py), for the page and the Taste Dashboard
 router.get('/model', (req, res) => {
   const p = readJson(PREDICTIONS, {}), r = readJson(RANKING, {});
   res.json({
@@ -355,7 +355,7 @@ router.get('/performers', (req, res) => {
   })));
 });
 
-// the collection as the AI app's P and P2 read it: every performer once (records(), a Boobpedia one with her Babepedia
+// the collection as acm-gpu's P and P2 read it: every performer once (records(), a Boobpedia one with her Babepedia
 // pictures), her picture files (GET /full serves them) and Babepedia's popularity ranks. They read nothing else from disk.
 router.get('/collection', (req, res) => {
   res.json({
@@ -459,7 +459,7 @@ router.put('/rounds', (req, res) => {
 });
 
 // Tests: P cross-validated on a selection, each kept with what it learned from and how well it did: the versions.
-//   POST /tests            { note } queues a test of the current selection; the AI app's follower runs it within a minute
+//   POST /tests            { note } queues a test of the current selection; acm-gpu's follower runs it within a minute
 //   GET  /tests            every test, newest first
 //   PUT  /tests/claim      the follower takes the oldest queued test (it is running then), or { test: null }
 //   PUT  /tests/:id        the follower's outcome: { status: done | failed, result, error }

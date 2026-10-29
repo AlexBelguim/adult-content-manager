@@ -1,12 +1,12 @@
 /**
- * funpipe client — funscript generation runs inside the AI Inference App, as a worker of this app.
+ * funpipe client — funscript generation runs inside the acm-gpu, as a worker of this app.
  *
- * The queue is this app's own (services/funpipeQueue.js, funpipe_jobs): the AI app claims a job, downloads the video,
+ * The queue is this app's own (services/funpipeQueue.js, funpipe_jobs): acm-gpu claims a job, downloads the video,
  * runs the stages on its own copy and uploads the sidecars and the funscript, which are written here next to the
- * video (routes/workers.js). The AI app never reads the NAS share. What still goes to the AI app is its health and
+ * video (routes/workers.js). acm-gpu never reads the NAS share. What still goes to acm-gpu is its health and
  * the review editor, which runs there (it tracks points on the GPU) on copies it pulls when a video is opened.
  *
- * pair() hands the AI app this app's address and the worker token, so nothing has to be set up on the GPU PC.
+ * pair() hands acm-gpu this app's address and the worker token, so nothing has to be set up on the GPU PC.
  *
  * Every method resolves rather than throws: the GPU box is often off, and that must never break a file operation here.
  */
@@ -25,9 +25,9 @@ function fail(err) {
 }
 
 // ── pairing ──────────────────────────────────────────────────
-// The AI app needs this app's address and the worker token to claim jobs and fetch files. The address is the one a
-// page of this app was opened at (the AI app is on the same network as that browser), sent again every PAIR_MS so
-// a restarted AI app, or a new token, is picked up.
+// acm-gpu needs this app's address and the worker token to claim jobs and fetch files. The address is the one a
+// page of this app was opened at (acm-gpu is on the same network as that browser), sent again every PAIR_MS so
+// a restarted acm-gpu, or a new token, is picked up.
 const PAIR_MS = 5 * 60 * 1000;
 let paired = { url: null, at: 0 };
 
@@ -107,7 +107,7 @@ async function uiStatus(urlOverride) {
 
 /**
  * Start the editor. It lists the videos funpipe has made a signal for (GET /api/funpipe/library here) and pulls a
- * video and its sidecars to the AI app when one is opened; root narrows the list to one folder.
+ * video and its sidecars to acm-gpu when one is opened; root narrows the list to one folder.
  * @param {string} root folder to list, as THIS backend sees it (optional)
  */
 async function uiStart(root, urlOverride) {

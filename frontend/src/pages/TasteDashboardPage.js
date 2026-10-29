@@ -92,17 +92,17 @@ const MODEL_NOTES = [
     ],
   },
   {
-    name: 'Qwen keep/delete and Qwen Taste', status: 'Removed', tone: 'bad', where: 'scenetest test, then the AI app',
+    name: 'Qwen keep/delete and Qwen Taste', status: 'Removed', tone: 'bad', where: 'scenetest test, then acm-gpu',
     result: 'Keep vs delete AUC 0.65–0.69 on 16 performers; Qwen Taste over 46 performers (5 folds, 2026-10-26): 0.724 inside one performer, against K 0.779 and CLIP Taste 0.730',
     data: 'Keep and delete pictures of 16, then 46 performers.',
     how: 'Qwen3.5-9B with a LoRA reads one picture and answers keep or delete. A two-step version (performer score from 8 pictures, then picture + score) collapsed to the average.',
-    better: ['No higher than the CLIP models and 0.25 s a picture on the GPU, so it was taken out of the AI app on 2026-10-26; K is the keep/delete model'],
+    better: ['No higher than the CLIP models and 0.25 s a picture on the GPU, so it was taken out of acm-gpu on 2026-10-26; K is the keep/delete model'],
   },
   {
-    name: 'P and P2 — performers (profile page)', status: 'Live', tone: 'ok', where: 'AI app, by itself', live: 'profile',
-    result: 'No numbers yet: P and P2 retrain while the AI app runs',
+    name: 'P and P2 — performers (profile page)', status: 'Live', tone: 'ok', where: 'acm-gpu, by itself', live: 'profile',
+    result: 'No numbers yet: P and P2 retrain while acm-gpu runs',
     data: 'P: your keep / love / delete on the profile page, plus this app\'s performers (keep folder = keep, delete-only = delete) counted 10x. P2: your profile duels, plus your sorted lists at half weight.',
-    how: 'A performer is the mean CLIP ViT-L/14-336 embedding of her pictures. P: a class-balanced logistic regression on it, her keep chance. P2: a score learned from who wins your duels. The AI app retrains both on every new verdict or duel, cross-validates every 25 and saves models/performer_keep/performer_keep.pt and models/performer_rank/performer_rank.pt.',
+    how: 'A performer is the mean CLIP ViT-L/14-336 embedding of her pictures. P: a class-balanced logistic regression on it, her keep chance. P2: a score learned from who wins your duels. acm-gpu retrains both on every new verdict or duel, cross-validates every 25 and saves models/performer_keep/performer_keep.pt and models/performer_rank/performer_rank.pt.',
     better: ['More duels: P2 learns slowly from about 270', 'Pictures only: the site fields (hair, cup, ethnicity) never beat them'],
   },
   {
@@ -309,7 +309,7 @@ function TasteDashboardPage() {
       });
       const result = await res.json();
       if (result.success) {
-        // queued in the app (the AI app claims it when it's free): a run already going keeps its status on show
+        // queued in the app (acm-gpu claims it when it's free): a run already going keeps its status on show
         if (!trainingStatus?.active) setTrainingStatus({ active: true, type: selectedType, epoch: 0, total_epochs: epochs, phase: 'queued', message: result.message });
         setQueueVersion(v => v + 1);
       } else { alert(`Failed: ${result.error || result.message}`); }
@@ -886,7 +886,7 @@ function TasteDashboardPage() {
                 <Button variant="contained" startIcon={<PlayArrow />}
                   disabled={startingTraining}
                   onClick={handleStartTraining}
-                  title={aiHealth ? '' : 'The AI app is offline: the run waits in the queue until it is back'}
+                  title={aiHealth ? '' : 'acm-gpu is offline: the run waits in the queue until it is back'}
                   sx={{ flex: 1, py: 1, fontWeight: 900,
                     background: 'linear-gradient(135deg, var(--accent), var(--accent))',
                     '&:disabled': { bgcolor: 'rgba(255,255,255,0.08)', color: 'var(--muted)' } }}>
@@ -1171,7 +1171,7 @@ function TasteDashboardPage() {
 
 // Collapsible section component matching Hash Management style
 /**
- * The training queue (GET /api/training/queue): the run going on the AI app, the ones waiting (in the order they run),
+ * The training queue (GET /api/training/queue): the run going on acm-gpu, the ones waiting (in the order they run),
  * and the last that ended. Cancel stops a waiting run at once and a running one within seconds; ▲▼ reorder the waiting.
  */
 function TrainingQueue({ version }) {
@@ -1204,7 +1204,7 @@ function TrainingQueue({ version }) {
               <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
                 {j.status === 'running'
                   ? [j.state?.phase || j.phase, j.state?.epoch ? `epoch ${j.state.epoch}/${j.state.total_epochs}` : null, j.progress != null ? `${Math.round(j.progress * 100)}%` : null, j.state?.val_acc ? `val ${pct(j.state.val_acc)}` : null].filter(Boolean).join(' · ')
-                  : j.status === 'queued' ? 'waits for the AI app to be free'
+                  : j.status === 'queued' ? 'waits for acm-gpu to be free'
                     : j.status === 'done' ? `best ${pct(j.result?.best_val_acc)}${j.result?.model ? ` · ${j.result.model}` : ''}`
                       : j.status === 'failed' ? (j.error || 'failed') : 'cancelled'}
               </Typography>
@@ -1258,7 +1258,7 @@ function CollapsibleSection({ title, count, defaultOpen = false, color, children
 
 // One card per model: best result on unseen data, what it learned from, how it works, what could improve it
 function ModelNotes() {
-  // P and P2 report their own cross-validation to the profile API each time the AI app retrains them
+  // P and P2 report their own cross-validation to the profile API each time acm-gpu retrains them
   const [profile, setProfile] = useState(null);
   useEffect(() => { fetch('/api/profile/model').then(r => r.json()).then(setProfile).catch(() => {}); }, []);
   const pct = x => `${(x * 100).toFixed(1)}%`;
@@ -1480,7 +1480,7 @@ function ModelArsenal({
                 )}
                 {result?.error && <Alert severity="error" sx={{ py: 0, mb: 1, fontSize: '0.7rem' }}>{result.error}</Alert>}
                 {tInfo.alone ? (
-                  <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.65rem' }}>Runs by itself in the AI app; saved again every 25 verdicts or duels</Typography>
+                  <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.65rem' }}>Runs by itself in acm-gpu; saved again every 25 verdicts or duels</Typography>
                 ) : (
                 <Box sx={{ display: 'flex', gap: 0.5 }}>
                   <Button size="small" variant={isLoaded ? 'contained' : 'outlined'} disabled={isLoaded || isLoadingThis || !aiHealth}

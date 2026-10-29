@@ -1,9 +1,9 @@
 /**
  * The funpipe queue, kept in the app (funpipe_jobs, migration 015).
  *
- * The AI app on the GPU PC is a worker (routes/workers.js): it claims the next job, downloads the video, runs the stages
+ * acm-gpu on the GPU PC is a worker (routes/workers.js): it claims the next job, downloads the video, runs the stages
  * on its own copy, sends progress and uploads the sidecars and the funscript, which are written here next to the video.
- * It never reads or writes the library itself. This replaces the queue that lived in the AI app, which read and wrote
+ * It never reads or writes the library itself. This replaces the queue that lived in acm-gpu, which read and wrote
  * the video's folder on the NAS share.
  *
  * running: the queue is open (Start; Stop lets the running job finish and claims nothing more) and a worker has been
@@ -91,7 +91,7 @@ function requeueStale() {
     .run(Date.now() - STALE_MS);
 }
 
-/** a job as the Jobs page and the Funpipe page read it (the shape the AI app's queue had) */
+/** a job as the Jobs page and the Funpipe page read it (the shape acm-gpu's queue had) */
 function view(r) {
   const log = r.log ? JSON.parse(r.log) : [];
   return {
@@ -137,13 +137,18 @@ function heartbeat(name, info) {
   workers.set(name, { name, lastSeen: Date.now(), info: info || workers.get(name)?.info || null });
 }
 
-/** the next queued job for this worker, or null; with the sidecars already next to the video (it downloads those) */
-function claim(name, info) {
+/**
+ * the next queued job for this worker, or null; with the sidecars already next to the video (it downloads those);
+ * with wantId (the control panel, which orders every app's jobs in one list) that job, if it's still waiting
+ */
+function claim(name, info, wantId = null) {
   heartbeat(name, info);
   requeueStale();
   if (paused()) return null;
   const take = db.transaction(() => {
-    const r = db.prepare("SELECT * FROM funpipe_jobs WHERE status = 'queued' ORDER BY id LIMIT 1").get();
+    const r = wantId
+      ? db.prepare("SELECT * FROM funpipe_jobs WHERE status = 'queued' AND id = ?").get(wantId)
+      : db.prepare("SELECT * FROM funpipe_jobs WHERE status = 'queued' ORDER BY id LIMIT 1").get();
     if (!r) return null;
     const now = Date.now();
     db.prepare("UPDATE funpipe_jobs SET status = 'running', worker = ?, started_at = ?, heartbeat_at = ?, stage = NULL, phase = 'claimed', progress = NULL, error = NULL, finished_at = NULL WHERE id = ?")
@@ -154,7 +159,7 @@ function claim(name, info) {
   if (!r) return null;
   if (!libraryVideo(r.video_path)) {   // moved or deleted since it was queued
     fail(name, r.id, 'the video is no longer in the library');
-    return claim(name, info);
+    return wantId ? null : claim(name, info);
   }
   // planned again now: a sidecar may have arrived since it was queued
   const stages = planStages(r.video_path, !!r.pose);
@@ -164,6 +169,12 @@ function claim(name, info) {
     size: fs.statSync(r.video_path).size,
     sidecars: SIDECARS.filter(ext => fs.existsSync(sidecarPath(r.video_path, ext))),
   };
+}
+
+/** what's waiting, in the order it would be handed out (for the control panel); none while the queue is paused */
+function queued() {
+  return db.prepare("SELECT id, video_path, pose FROM funpipe_jobs WHERE status = 'queued' ORDER BY id LIMIT 200").all()
+    .map(r => ({ id: r.id, label: path.basename(r.video_path), kind: 'funscript', why: r.pose ? ['with poses'] : [], priority: 0 }));
 }
 
 const own = (name, id) => db.prepare("SELECT * FROM funpipe_jobs WHERE id = ? AND worker = ?").get(id, name);
@@ -222,5 +233,5 @@ async function writeSidecar(video, ext, stream) {
 module.exports = {
   VIDEO_EXTS, SIDECARS, events, workerToken, libraryVideo, sidecarPath,
   enqueue, list, start, stop, remove, clearDone,
-  heartbeat, claim, progress, complete, fail, sidecarFile, writeSidecar,
+  heartbeat, claim, queued, paused, progress, complete, fail, sidecarFile, writeSidecar,
 };

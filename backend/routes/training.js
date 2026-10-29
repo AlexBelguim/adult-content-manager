@@ -1,15 +1,15 @@
 /**
  * AI Training Hub Routes
  *
- * Proxies training requests to the AI Inference App.
+ * Proxies training requests to the acm-gpu.
  * Collects training data from the local DB and sends it to the GPU machine.
  *
  * Endpoints:
- * - GET  /api/training/status       — Current training job status (the AI app's live run, or the queue's waiting one)
+ * - GET  /api/training/status       — Current training job status (acm-gpu's live run, or the queue's waiting one)
  * - GET  /api/training/data-summary — How much training data is available
  * - POST /api/training/export-pairs — Export pairwise data for training
  * - POST /api/training/export-binary — Export binary (keep/delete) data
- * - POST /api/training/start        — Put a training run in the queue (services/trainingQueue.js): the AI app claims it
+ * - POST /api/training/start        — Put a training run in the queue (services/trainingQueue.js): acm-gpu claims it
  * - GET  /api/training/queue        — The training queue: running, waiting, the last that ended
  * - POST /api/training/jobs/:id/cancel | /retry | /bump { dir }, DELETE /api/training/jobs/:id
  * - GET  /api/training/models       — List available models on AI server
@@ -382,7 +382,7 @@ router.post('/export-binary', async (req, res) => {
 });
 
 // ── POST /api/training/start ─────────────────────────────────
-// A training run into the queue, with everything it trains with collected now. The AI app claims it when it's free
+// A training run into the queue, with everything it trains with collected now. acm-gpu claims it when it's free
 // (routes/workers.js), so a second run waits instead of being turned away, and a run asked for while the PC is off
 // starts when it's back.
 router.post('/start', async (req, res) => {
@@ -462,7 +462,7 @@ router.post('/start', async (req, res) => {
       queued: true,
       id: q.id,
       ahead: q.ahead,
-      message: q.ahead ? `Queued: ${q.label}, after ${q.ahead} other run${q.ahead === 1 ? '' : 's'}` : `Queued: ${q.label}; the AI app starts it when it's free`
+      message: q.ahead ? `Queued: ${q.label}, after ${q.ahead} other run${q.ahead === 1 ? '' : 's'}` : `Queued: ${q.label}; acm-gpu starts it when it's free`
     });
   } catch (err) {
     console.error('[Training] Start error:', err.message);
@@ -495,7 +495,7 @@ router.get('/models', async (req, res) => {
 
 // ── GET /api/training/status ─────────────────────────────────
 // Check if training is running on AI server
-// The AI app's live run when it's training; otherwise a run waiting in the queue reads as active (phase 'queued'), so the
+// acm-gpu's live run when it's training; otherwise a run waiting in the queue reads as active (phase 'queued'), so the
 // dashboard keeps showing it until it has run.
 router.get('/status', async (req, res) => {
   const aiUrl = req.query.url || getAiServerUrl();
@@ -510,11 +510,11 @@ router.get('/status', async (req, res) => {
     live = { training: false, error: err.response?.status === 404 ? null : err.message };
   }
   if (live?.active) return res.json({ ...live, queue });
-  if (running) return res.json({ ...(running.state || {}), active: true, type: running.type, phase: running.phase || 'starting', message: running.message || 'Starting on the AI app', queue });
+  if (running) return res.json({ ...(running.state || {}), active: true, type: running.type, phase: running.phase || 'starting', message: running.message || 'Starting on acm-gpu', queue });
   if (waiting.length) {
     const next = waiting[0];
     return res.json({ active: true, type: next.type, phase: 'queued', epoch: 0, total_epochs: next.epochs || 0,
-      message: `Waiting in the training queue${waiting.length > 1 ? ` (${waiting.length} runs)` : ''}: the AI app starts it when it's free`, queue });
+      message: `Waiting in the training queue${waiting.length > 1 ? ` (${waiting.length} runs)` : ''}: acm-gpu starts it when it's free`, queue });
   }
   res.json({ ...live, queue });
 });

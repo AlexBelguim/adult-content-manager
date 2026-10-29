@@ -1109,7 +1109,7 @@ router.post('/open-folder', async (req, res) => {
   }
 });
 
-// The pictures directly in a folder (or in its pics/ folder when it has one): for the AI app, which reads the library
+// The pictures directly in a folder (or in its pics/ folder when it has one): for acm-gpu, which reads the library
 // over HTTP (its performer rank averages up to 300 of a performer's pictures)
 router.get('/list-pictures', async (req, res) => {
   const { folder } = req.query;
@@ -1126,7 +1126,7 @@ router.get('/list-pictures', async (req, res) => {
   }
 });
 
-// The folders directly in a folder (no hidden ones): for the AI app, which reads the library over HTTP
+// The folders directly in a folder (no hidden ones): for acm-gpu, which reads the library over HTTP
 router.get('/list-folders', async (req, res) => {
   const { folder } = req.query;
   if (!folder) return res.status(400).send({ error: 'Folder path is required' });
