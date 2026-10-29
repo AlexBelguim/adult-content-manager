@@ -1181,6 +1181,9 @@ async function workerClaim(w, info) {
     return {
       id: job.id, label: job.label, kind: prep.plan.kind, why: prep.plan.why, args, encoder, priority: job.priority || 0,
       size: prep.f.size, duration: prep.f.duration, fps: prep.f.fps, ext: path.extname(job.source_path).toLowerCase() || '.mp4', chunk: CHUNK,
+      // the original and where the new file goes, as this server sees them: a worker that sees the share
+      // (its --map, e.g. /media=Z:/Apps/adultManager/media) reads and writes them there instead of the download and upload
+      share: { src: job.source_path, out: prep.tmp },
     };
   }
   return null;
