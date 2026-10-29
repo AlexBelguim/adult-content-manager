@@ -26,8 +26,8 @@ let serviceProcess = null;
 let serviceLogs = [];
 const MAX_LOGS = 2000;
 
-// Where acm-gpu is when it runs on this machine: its own repo beside this one (F:\git\ai-inference-app), or AI_APP_DIR
-const AI_APP_DIR = process.env.AI_APP_DIR || path.join(__dirname, '..', '..', '..', 'ai-inference-app');
+// Where acm-gpu is when it runs on this machine: its own repo beside this one (F:\git\acm-gpu), or AI_APP_DIR
+const AI_APP_DIR = process.env.AI_APP_DIR || path.join(__dirname, '..', '..', '..', 'acm-gpu');
 const servicePath = AI_APP_DIR;
 const logFile = path.join(servicePath, 'service.log');
 
