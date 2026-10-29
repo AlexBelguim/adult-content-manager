@@ -71,7 +71,6 @@ extra/
 *.safetensors
 backend/ml-datasets/
 backend-pairwise/models/
-AI-Inference-App/models/qwen/
 
 # ===========================================
 # Standalone ML / vision projects (separate repos)
@@ -79,11 +78,8 @@ AI-Inference-App/models/qwen/
 vision-llm-pairwise/
 
 # AI training data (large binary files)
-AI-Inference-App/training_data/
 
 # Local Scene Manager - test data and debug outputs
-AI-Inference-App/localscene/test/
-AI-Inference-App/localscene/debug/
 *.mp4
 
 # TLS certs/keys — self-signed per machine, regenerated on first run
@@ -103,8 +99,6 @@ demo/narration.wav
 demo/page-text.txt
 
 # funpipe runtime state (queue + review editor log), regenerated at run time
-AI-Inference-App/funpipe_queue.json*
-AI-Inference-App/funpipe_ui.log
 
 # Moved-out models and code waiting for deletion
 _archive/
