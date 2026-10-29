@@ -41,8 +41,8 @@
 # for VR set ENABLE_HTTPS=1 and TLS_SAN below, then trust the cert on the headset.
 #
 # The container self-signs into /app/data (persisted, so it survives restarts and
-# stays trusted). It only sees its own bridge IP — 172.x — which is never the
-# address a client dials, so TLS_SAN must name the real ones. Change TLS_SAN later
+# stays trusted). TLS_SAN must name every address a client dials (the NAS's LAN
+# IP, its hostname). Change TLS_SAN later
 # and the cert regenerates to cover it, which means re-trusting it.
 #
 # To trust it: open https://<NAS-IP>:4069, install ./data/tls-cert.pem as a CA
@@ -61,8 +61,14 @@ services:
     image: adult-content-manager:latest
     container_name: adult-content-manager
     restart: unless-stopped
-    ports:
-      - "4069:4069"
+    # The NAS's own network rather than a published port (the same as Hikari). Docker
+    # publishes a port through a helper process (its "userland proxy"), and on TrueNAS
+    # that one sometimes keeps the port after a rebuild: "failed to bind port
+    # 0.0.0.0:4069/tcp: ... address already in use", and the container doesn't start.
+    # On the host's network the app listens on 4069 itself: nothing for Docker to set
+    # up, and it sees each caller's real address (its LAN-and-Tailscale-only rule needs
+    # that). Another port: PORT below.
+    network_mode: host
     environment:
       - NODE_ENV=production
       - PORT=4069
@@ -94,7 +100,8 @@ services:
       - ../media:/media
 
     healthcheck:
-      test: ["CMD", "node", "-e", "const https=require('https');const r=https.get('https://localhost:4069/health',{rejectUnauthorized:false},res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
+      # the way the app runs: plain HTTP (ENABLE_HTTPS=0, the default) or its own TLS
+      test: ["CMD", "node", "-e", "const s=process.env.ENABLE_HTTPS==='1';const r=require(s?'https':'http').get((s?'https':'http')+'://localhost:'+(process.env.PORT||4069)+'/health',{rejectUnauthorized:false},res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       start_period: 15s
