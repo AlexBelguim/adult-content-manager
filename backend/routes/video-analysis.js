@@ -26,8 +26,9 @@ let serviceProcess = null;
 let serviceLogs = [];
 const MAX_LOGS = 2000;
 
-// Log file path
-const servicePath = path.join(__dirname, '..', '..', 'AI-Inference-App');
+// Where the AI app is when it runs on this machine: its own repo beside this one (F:\git\ai-inference-app), or AI_APP_DIR
+const AI_APP_DIR = process.env.AI_APP_DIR || path.join(__dirname, '..', '..', '..', 'ai-inference-app');
+const servicePath = AI_APP_DIR;
 const logFile = path.join(servicePath, 'service.log');
 
 function addLog(data, type = 'info') {
@@ -222,8 +223,7 @@ router.post('/start-service', async (req, res) => {
       // Not running, continue to start
     }
 
-    // Path to the AI-Inference-App directory
-    const servicePath = path.join(__dirname, '..', '..', 'AI-Inference-App');
+    // the AI app's own repo (see AI_APP_DIR above)
     const batFile = path.join(servicePath, 'Run_AI.bat');
     
     console.log(`[Video Analysis] Starting service from: ${servicePath}`);

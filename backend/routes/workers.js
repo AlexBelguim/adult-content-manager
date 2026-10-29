@@ -17,6 +17,13 @@
  *   PUT  /sidecar?video=&ext=          write one (the body is the file, sent as application/octet-stream so the app's JSON
  *                                      parser leaves it alone): the job's results, and the review editor's saves
  *
+ * The same token claims training runs (the training queue, services/trainingQueue.js):
+ *
+ *   POST /training/claim               -> the next run { id, label, payload }, or 204 (never a second while one runs)
+ *   POST /training/jobs/:id/progress   { state: the run's training_status } -> { action: continue | cancel }
+ *   POST /training/jobs/:id/complete   { result }
+ *   POST /training/jobs/:id/fail       { error } ('cancelled' when it was stopped)
+ *
  * Encode workers (the re-encode queue, services/encodeQueue.js) speak Hikari's worker protocol exactly, so Hikari's
  * worker program (server/worker/hikari-worker.mjs) runs this app's jobs as it is, started with a link from
  * Settings → Space (<this app>/api/workers/link/<token>). Each has a token of its own (encode_workers); the funpipe
@@ -40,6 +47,7 @@ const path = require('path');
 const crypto = require('crypto');
 const q = require('../services/funpipeQueue');
 const eq = require('../services/encodeQueue');
+const tq = require('../services/trainingQueue');
 
 const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -125,7 +133,18 @@ router.post('/jobs/:id/fail', encoderOnly, (req, res) => {
 });
 
 // ── the funpipe worker ───────────────────────────────────────
-router.use(['/funpipe', '/media', '/sidecar', '/beside'], funpipeOnly);
+router.use(['/funpipe', '/media', '/sidecar', '/beside', '/training'], funpipeOnly);
+
+// ── training runs (the same worker) ──────────────────────────
+router.post('/training/claim', (req, res) => {
+  q.heartbeat(req.worker, req.body?.info || null);
+  const job = tq.claim(req.worker);
+  if (!job) return res.status(204).end();
+  res.json(job);
+});
+router.post('/training/jobs/:id/progress', (req, res) => res.json(tq.progress(req.worker, jobId(req), req.body?.state || {})));
+router.post('/training/jobs/:id/complete', (req, res) => res.json({ ok: tq.finish(req.worker, jobId(req), { ok: true, result: req.body?.result || null }) }));
+router.post('/training/jobs/:id/fail', (req, res) => res.json({ ok: tq.finish(req.worker, jobId(req), { ok: false, error: req.body?.error }) }));
 
 router.post('/funpipe/claim', (req, res) => {
   const job = q.claim(req.worker, req.body?.info || null);

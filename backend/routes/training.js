@@ -5,11 +5,13 @@
  * Collects training data from the local DB and sends it to the GPU machine.
  *
  * Endpoints:
- * - GET  /api/training/status       — Current training job status
+ * - GET  /api/training/status       — Current training job status (the AI app's live run, or the queue's waiting one)
  * - GET  /api/training/data-summary — How much training data is available
  * - POST /api/training/export-pairs — Export pairwise data for training
  * - POST /api/training/export-binary — Export binary (keep/delete) data
- * - POST /api/training/start        — Trigger training on AI server
+ * - POST /api/training/start        — Put a training run in the queue (services/trainingQueue.js): the AI app claims it
+ * - GET  /api/training/queue        — The training queue: running, waiting, the last that ended
+ * - POST /api/training/jobs/:id/cancel | /retry | /bump { dir }, DELETE /api/training/jobs/:id
  * - GET  /api/training/models       — List available models on AI server
  * - GET  /api/training/export-zip   — Download training data as ZIP
  * - POST /api/training/push-data    — Push training data to AI server
@@ -24,6 +26,7 @@ const archiver = require('archiver');
 const os = require('os');
 
 const { getAiServerUrl } = require('../utils/aiUrl');
+const trainingQueue = require('../services/trainingQueue');
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'];
 
@@ -379,18 +382,13 @@ router.post('/export-binary', async (req, res) => {
 });
 
 // ── POST /api/training/start ─────────────────────────────────
-// Trigger training on the AI Inference App
+// A training run into the queue, with everything it trains with collected now. The AI app claims it when it's free
+// (routes/workers.js), so a second run waits instead of being turned away, and a run asked for while the PC is off
+// starts when it's back.
 router.post('/start', async (req, res) => {
-  const { type = 'pairwise', epochs = 10, batch_size = 16, backbone = 'facebook/dinov2-large', learning_rate, ai_server_url, use_legacy = true } = req.body;
-  const aiUrl = ai_server_url || getAiServerUrl();
+  const { type = 'pairwise', epochs = 10, batch_size = 16, backbone = 'facebook/dinov2-large', learning_rate, use_legacy = true } = req.body;
 
   try {
-    // Check AI server is online
-    const healthRes = await axios.get(`${aiUrl}/health`, { timeout: 5000 });
-    if (healthRes.data.status !== 'ok') {
-      return res.status(503).json({ error: 'AI server is not healthy' });
-    }
-
     // Collect training data
     let trainingPayload;
     if (type === 'pairwise') {
@@ -458,24 +456,30 @@ router.post('/start', async (req, res) => {
       trainingPayload.synthetic_pairs_per_epoch = req.body.synthetic_pairs_per_epoch;
     }
 
-    // Send to AI server
-    const response = await axios.post(`${aiUrl}/train`, trainingPayload, {
-      timeout: 300000 // 5 minute timeout for training
-    });
-
+    const q = trainingQueue.enqueue(trainingPayload);
     res.json({
       success: true,
-      message: `Training job started (${type})`,
-      aiResponse: response.data
+      queued: true,
+      id: q.id,
+      ahead: q.ahead,
+      message: q.ahead ? `Queued: ${q.label}, after ${q.ahead} other run${q.ahead === 1 ? '' : 's'}` : `Queued: ${q.label}; the AI app starts it when it's free`
     });
   } catch (err) {
-    if (err.code === 'ECONNREFUSED') {
-      return res.status(503).json({ error: 'AI server is offline', url: aiUrl });
-    }
     console.error('[Training] Start error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── the training queue ───────────────────────────────────────
+const queueRoute = (fn) => (req, res) => {
+  try { res.json(fn(req) ?? { ok: true }); } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message }); }
+};
+const jobId = (req) => Number(req.params.id);
+router.get('/queue', queueRoute(() => trainingQueue.list()));
+router.post('/jobs/:id/cancel', queueRoute((req) => trainingQueue.cancel(jobId(req))));
+router.post('/jobs/:id/retry', queueRoute((req) => { trainingQueue.retry(jobId(req)); }));
+router.post('/jobs/:id/bump', queueRoute((req) => { trainingQueue.bump(jobId(req), req.body?.dir); }));
+router.delete('/jobs/:id', queueRoute((req) => { trainingQueue.remove(jobId(req)); }));
 
 // ── GET /api/training/models ─────────────────────────────────
 // List available models on the AI server
@@ -491,17 +495,28 @@ router.get('/models', async (req, res) => {
 
 // ── GET /api/training/status ─────────────────────────────────
 // Check if training is running on AI server
+// The AI app's live run when it's training; otherwise a run waiting in the queue reads as active (phase 'queued'), so the
+// dashboard keeps showing it until it has run.
 router.get('/status', async (req, res) => {
   const aiUrl = req.query.url || getAiServerUrl();
+  const jobs = trainingQueue.list().jobs;
+  const waiting = jobs.filter(j => j.status === 'queued');
+  const running = jobs.find(j => j.status === 'running');
+  const queue = { waiting: waiting.length, running: running ? running.id : null };
+  let live = null;
   try {
-    const response = await axios.get(`${aiUrl}/training_status`, { timeout: 5000 });
-    res.json(response.data);
+    live = (await axios.get(`${aiUrl}/training_status`, { timeout: 5000 })).data;
   } catch (err) {
-    if (err.response?.status === 404) {
-      return res.json({ training: false, message: 'No training endpoint (idle)' });
-    }
-    res.json({ training: false, error: err.message });
+    live = { training: false, error: err.response?.status === 404 ? null : err.message };
   }
+  if (live?.active) return res.json({ ...live, queue });
+  if (running) return res.json({ ...(running.state || {}), active: true, type: running.type, phase: running.phase || 'starting', message: running.message || 'Starting on the AI app', queue });
+  if (waiting.length) {
+    const next = waiting[0];
+    return res.json({ active: true, type: next.type, phase: 'queued', epoch: 0, total_epochs: next.epochs || 0,
+      message: `Waiting in the training queue${waiting.length > 1 ? ` (${waiting.length} runs)` : ''}: the AI app starts it when it's free`, queue });
+  }
+  res.json({ ...live, queue });
 });
 
 // ── POST /api/training/test-model ────────────────────────────

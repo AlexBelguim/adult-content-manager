@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import WorkersSettings from './WorkersSettings';
 import {
   Box,
   Typography,
@@ -509,18 +510,10 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
 
           <Divider sx={{ my: 2 }} />
 
-          {/* AI Server URL */}
+          {/* Workers: the AI app (its address), scenetest, the re-encode workers, and their host agents */}
           <Box sx={{ mb: 3 }}>
-            <SectionTitle>🤖 AI Inference Server</SectionTitle>
-            <TextField
-              fullWidth
-              size="small"
-              value={aiServerUrl}
-              onChange={(e) => setAiServerUrl(e.target.value)}
-              placeholder="http://localhost:3344"
-              helperText="URL of your AI server (for training, smart filtering, and scoring). Saved when you click Save."
-              InputProps={{ sx: { fontFamily: 'monospace' } }}
-            />
+            <SectionTitle>🖥️ Workers</SectionTitle>
+            <WorkersSettings aiServerUrl={aiServerUrl} setAiServerUrl={setAiServerUrl} />
           </Box>
 
           <Divider sx={{ my: 2 }} />

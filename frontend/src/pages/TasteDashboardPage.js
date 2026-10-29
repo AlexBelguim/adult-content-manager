@@ -11,7 +11,7 @@ import {
   TrendingUp, Psychology, Storage, CloudOff, CloudDone,
   Warning, CheckCircle, ArrowBack, Refresh, Delete as DeleteIcon,
   Star, Speed, Autorenew, Save, Dns,
-  FilterAlt, Compare, Tune, PlayArrow, Stop,
+  FilterAlt, Compare, Tune, PlayArrow,
   ExpandMore, ExpandLess, Person, Science, RocketLaunch, DeleteOutline,
   School, ModelTraining, AutoAwesome
 } from '@mui/icons-material';
@@ -157,6 +157,7 @@ function TasteDashboardPage() {
   const [backbone, setBackbone] = useState('facebook/dinov2-large');
   const [startingTraining, setStartingTraining] = useState(false);
   const [trainingStatus, setTrainingStatus] = useState(null);
+  const [queueVersion, setQueueVersion] = useState(0);   // bumped when a run is queued: the queue list loads again
   const [aiHealth, setAiHealth] = useState(null);
   const [modelList, setModelList] = useState([]);
   const [perfStats, setPerfStats] = useState(null);
@@ -308,7 +309,9 @@ function TasteDashboardPage() {
       });
       const result = await res.json();
       if (result.success) {
-        setTrainingStatus({ active: true, type: selectedType, epoch: 0, total_epochs: epochs, phase: 'starting' });
+        // queued in the app (the AI app claims it when it's free): a run already going keeps its status on show
+        if (!trainingStatus?.active) setTrainingStatus({ active: true, type: selectedType, epoch: 0, total_epochs: epochs, phase: 'queued', message: result.message });
+        setQueueVersion(v => v + 1);
       } else { alert(`Failed: ${result.error || result.message}`); }
     } catch (err) { alert(`Error: ${err.message}`); }
     setStartingTraining(false);
@@ -879,13 +882,15 @@ function TasteDashboardPage() {
                     </MenuItem>
                   </Select>
                 </FormControl>}
-                <Button variant="contained" startIcon={trainingStatus?.active ? <Stop /> : <PlayArrow />}
-                  disabled={!aiHealth || trainingStatus?.active || startingTraining}
+                {/* a run goes into the app's training queue: it can wait for one that's going, or for the PC to be on */}
+                <Button variant="contained" startIcon={<PlayArrow />}
+                  disabled={startingTraining}
                   onClick={handleStartTraining}
+                  title={aiHealth ? '' : 'The AI app is offline: the run waits in the queue until it is back'}
                   sx={{ flex: 1, py: 1, fontWeight: 900,
-                    background: trainingStatus?.active ? 'linear-gradient(135deg, var(--bad), var(--bad))' : 'linear-gradient(135deg, var(--accent), var(--accent))',
+                    background: 'linear-gradient(135deg, var(--accent), var(--accent))',
                     '&:disabled': { bgcolor: 'rgba(255,255,255,0.08)', color: 'var(--muted)' } }}>
-                  {startingTraining ? 'Starting...' : trainingStatus?.active ? 'Training...' : `Start ${selectedModel?.name}`}
+                  {startingTraining ? 'Queueing...' : trainingStatus?.active ? `Queue ${selectedModel?.name} after it` : `Start ${selectedModel?.name}`}
                 </Button>
               </Box>
 
@@ -1120,6 +1125,8 @@ function TasteDashboardPage() {
             </CollapsibleSection>
           )}
 
+          <TrainingQueue version={queueVersion} />
+
           {/* Model Arsenal */}
           <CollapsibleSection title="Model Arsenal"count={`${modelList.length} models`}>
             <Box sx={{ p: 2 }}>
@@ -1163,6 +1170,64 @@ function TasteDashboardPage() {
 }
 
 // Collapsible section component matching Hash Management style
+/**
+ * The training queue (GET /api/training/queue): the run going on the AI app, the ones waiting (in the order they run),
+ * and the last that ended. Cancel stops a waiting run at once and a running one within seconds; ▲▼ reorder the waiting.
+ */
+function TrainingQueue({ version }) {
+  const [q, setQ] = useState(null);
+  const [error, setError] = useState(null);
+  const load = useCallback(() => fetch('/api/training/queue').then(r => r.json()).then(d => { setQ(d); setError(null); }).catch(e => setError(e.message)), []);
+  useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, [load, version]);
+  const act = async (url, method = 'POST', body) => {
+    try {
+      const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) setError(d.error || `HTTP ${r.status}`);
+    } catch (e) { setError(e.message); }
+    load();
+  };
+  const jobs = q?.jobs || [];
+  if (!jobs.length && !error) return null;
+  const waiting = jobs.filter(j => j.status === 'queued');
+  const tone = { running: 'var(--accent)', queued: 'var(--warn)', done: 'var(--ok)', failed: 'var(--bad)', cancelled: 'var(--muted)' };
+  const pct = (n) => `${((n || 0) * 100).toFixed(1)}%`;
+  return (
+    <CollapsibleSection title="Training queue" count={`${jobs.filter(j => j.status === 'running').length ? 'running · ' : ''}${waiting.length} waiting`} defaultOpen color="var(--accent)">
+      <Box sx={{ p: 2, display: 'grid', gap: 1 }}>
+        {error && <Alert severity="error" sx={{ bgcolor: 'var(--bad-quiet)', color: 'var(--bad)' }}>{error}</Alert>}
+        {jobs.map((j) => (
+          <Box key={j.id} sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', p: 1.25, borderRadius: 2, bgcolor: 'var(--raised)', border: '1px solid var(--line)' }}>
+            <Chip label={j.cancelling ? 'cancelling' : j.status} size="small" sx={{ color: tone[j.status], bgcolor: 'transparent', border: `1px solid ${tone[j.status]}`, fontWeight: 700 }} />
+            <Box sx={{ flex: '1 1 240px', minWidth: 0 }}>
+              <Typography variant="body2" sx={{ fontWeight: 800 }}>{j.label || j.title}</Typography>
+              <Typography variant="caption" sx={{ color: 'var(--dim)' }}>
+                {j.status === 'running'
+                  ? [j.state?.phase || j.phase, j.state?.epoch ? `epoch ${j.state.epoch}/${j.state.total_epochs}` : null, j.progress != null ? `${Math.round(j.progress * 100)}%` : null, j.state?.val_acc ? `val ${pct(j.state.val_acc)}` : null].filter(Boolean).join(' · ')
+                  : j.status === 'queued' ? 'waits for the AI app to be free'
+                    : j.status === 'done' ? `best ${pct(j.result?.best_val_acc)}${j.result?.model ? ` · ${j.result.model}` : ''}`
+                      : j.status === 'failed' ? (j.error || 'failed') : 'cancelled'}
+              </Typography>
+              {j.status === 'running' && j.progress != null && <LinearProgress variant="determinate" value={Math.round(j.progress * 100)} sx={{ mt: 0.75, height: 4, borderRadius: 2 }} />}
+            </Box>
+            {j.status === 'queued' && (
+              <>
+                <Button size="small" onClick={() => act(`/api/training/jobs/${j.id}/bump`, 'POST', { dir: 'up' })} sx={{ minWidth: 0 }}>▲</Button>
+                <Button size="small" onClick={() => act(`/api/training/jobs/${j.id}/bump`, 'POST', { dir: 'down' })} sx={{ minWidth: 0 }}>▼</Button>
+              </>
+            )}
+            {(j.status === 'queued' || j.status === 'running') && (
+              <Button size="small" color="error" variant="outlined" disabled={j.cancelling} onClick={() => act(`/api/training/jobs/${j.id}/cancel`)}>Cancel</Button>
+            )}
+            {(j.status === 'failed' || j.status === 'cancelled') && <Button size="small" variant="outlined" onClick={() => act(`/api/training/jobs/${j.id}/retry`)}>Run again</Button>}
+            {!['queued', 'running'].includes(j.status) && <Button size="small" onClick={() => act(`/api/training/jobs/${j.id}`, 'DELETE')} sx={{ color: 'var(--dim)' }}>Remove</Button>}
+          </Box>
+        ))}
+      </Box>
+    </CollapsibleSection>
+  );
+}
+
 function CollapsibleSection({ title, count, defaultOpen = false, color, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (

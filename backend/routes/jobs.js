@@ -28,6 +28,7 @@ const { getQueueStatus } = require('../services/uploadQueue');
 const funpipeService = require('../services/funpipeService');
 const encodeQueue = require('../services/encodeQueue');
 const hashService = require('../services/hashService');
+const trainingQueue = require('../services/trainingQueue');
 const scenetestService = require('../services/scenetestService');
 const { getAiServerUrl } = require('../utils/aiUrl');
 
@@ -303,25 +304,27 @@ const TRAIN_TITLE = {
   performer_ranker: 'Performer ranker'
 };
 
-async function trainJobs(fresh) {
-  const t = await getTraining(fresh);
-  // Only a live run is a job. Offline or idle is simply "no row" — never an error.
-  if (!t.ok || !t.active) return [];
-  const totalEpochs = t.total_epochs || 0;
-  const batchFrac = t.total_batches > 0 ? (t.batch || 0) / t.total_batches : 0;
-  const startedAt = toMs(t.started_at);
+/** The training queue (services/trainingQueue.js): the running run with its state as the AI app last sent it, the waiting ones, and the recent ends. */
+async function trainJobs() {
+  const STATUS = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', cancelled: 'done' };
   const pct = (n) => `${(n * 100).toFixed(1)}%`;
-  return [job({
-    type: 'train', sourceId: 'current', title: TRAIN_TITLE[t.type] || `Training — ${t.type || 'model'}`,
-    status: 'running',
-    progress: totalEpochs > 0 ? clamp01((Math.max(0, (t.epoch || 1) - 1) + batchFrac) / totalEpochs) : null,
-    done: t.epoch || 0, total: totalEpochs || null, unit: 'epochs',
-    stage: t.phase && t.phase !== 'idle' ? t.phase : null,
-    note: t.val_acc ? `val acc ${pct(t.val_acc)}${t.best_val_acc ? ` · best ${pct(t.best_val_acc)}` : ''}` : (t.message || null),
-    startedAt, elapsedMs: elapsed(startedAt, null),
-    link: '/training-hub',
-    raw: { type: t.type, phase: t.phase, epoch: t.epoch, total_epochs: t.total_epochs, batch: t.batch, total_batches: t.total_batches, val_acc: t.val_acc, best_val_acc: t.best_val_acc }
-  })];
+  return trainingQueue.list().jobs.filter(j => j.status === 'queued' || j.status === 'running' || isRecent(j.finishedAt)).map(j => {
+    const t = j.state || {};
+    const status = STATUS[j.status] || 'queued';
+    return job({
+      type: 'train', sourceId: j.id, title: TRAIN_TITLE[j.type] || `Training — ${j.type || 'model'}`, subtitle: j.label,
+      status,
+      progress: status === 'done' && j.status === 'done' ? 1 : status === 'running' ? clamp01(j.progress) : null,
+      done: t.epoch || 0, total: t.total_epochs || j.epochs || null, unit: 'epochs',
+      stage: status === 'running' ? (j.cancelling ? 'cancelling' : t.phase && t.phase !== 'idle' ? t.phase : j.phase) : null,
+      note: t.val_acc ? `val acc ${pct(t.val_acc)}${t.best_val_acc ? ` · best ${pct(t.best_val_acc)}` : ''}` : (j.message || null),
+      startedAt: j.startedAt || null, finishedAt: j.finishedAt || null, elapsedMs: elapsed(j.startedAt, j.finishedAt),
+      error: j.status === 'failed' ? j.error || 'failed' : null,
+      result: j.status === 'done' && j.result ? `best ${pct(j.result.best_val_acc || 0)}${j.result.model ? ` · ${j.result.model}` : ''}` : j.status === 'cancelled' ? 'Cancelled' : null,
+      link: '/training-hub',
+      raw: { status: j.status, type: j.type, phase: t.phase || j.phase, epoch: t.epoch, total_epochs: t.total_epochs, val_acc: t.val_acc, best_val_acc: t.best_val_acc }
+    });
+  });
 }
 
 // ── routes ───────────────────────────────────────────────────
@@ -359,6 +362,40 @@ router.get('/services', async (req, res) => {
     gpu: { warning: health.ok !== false ? (health.gpu_warning || null) : null },
     ffmpeg: { available: encodeQueue.localEngine().ok },
     ai: { online: training.ok || health.ok !== false, url: getAiServerUrl(), trainingActive: !!(training.ok && training.active) }
+  });
+});
+
+// Settings → Workers: every machine that works for this app, in one answer — the AI app (its address, whether it's
+// paired and claiming, its host agent and lanes), scenetest, and the re-encode workers with their host agents.
+const getAiHealth = (fresh) => remote('aiHealth', async () => {
+  try {
+    const base = String(getAiServerUrl()).replace(/\/+$/, '');
+    return { ok: true, ...(await axios.get(`${base}/health`, { timeout: 5000 })).data };
+  } catch (e) {
+    return { ok: false, error: e.code === 'ECONNREFUSED' ? 'not running' : e.message };
+  }
+}, v => v.ok, fresh);
+const settingOf = (key) => db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key)?.value ?? null;
+
+router.get('/workers', async (req, res) => {
+  const fresh = req.query.fresh === '1';
+  funpipeService.pair(`${req.protocol}://${req.get('host')}`);   // opening Settings keeps the AI app paired too
+  const [queue, ai, scenetest] = await Promise.all([getFunpipeQueue(fresh), getAiHealth(fresh), getScenetest(fresh)]);
+  res.json({
+    ai: {
+      url: getAiServerUrl(), online: !!ai.ok, error: ai.ok ? null : ai.error, device: ai.device || null,
+      // claiming: it has asked for funpipe or training work in the last 90 s (paired, with the worker token)
+      claiming: !!queue.online, agent: ai.ok ? ai.host_agent || null : null,
+    },
+    scenetest: {
+      url: scenetest.url || settingOf('scenetest_url'), online: !!scenetest.ok, paused: !!scenetest.paused, error: scenetest.ok ? null : scenetest.error,
+      ownUrl: settingOf('scenetest_url'), mediaRoot: settingOf('scenetest_media_root'),
+    },
+    encode: encodeQueue.listWorkers().map(w => ({
+      id: w.id, name: w.name, local: !!w.local, online: !!w.online, enabled: !!w.enabled, lastSeen: w.lastSeen || null, note: w.note || null,
+      job: w.job ? { label: w.job.label, phase: w.job.phase, progress: w.job.progress } : null,
+      agent: w.info?.agent || null, encoder: w.info ? (w.info.nvenc ? `${w.info.gpu || 'NVIDIA'} · NVENC` : w.info.encoder || (w.info.threads ? `CPU · ${w.info.threads} threads` : null)) : null,
+    })),
   });
 });
 

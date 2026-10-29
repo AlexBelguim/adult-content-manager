@@ -127,8 +127,11 @@ function capabilities(j) {
       cap.remove = finished;
       cap.why = 'File operations run to the end once started';
       break;
-    default: // train
-      cap.why = 'Training is controlled from the Training Hub';
+    default: // train: the training queue (Cancel stops a running run on its next report)
+      cap.cancel = j.status === 'running';
+      cap.remove = j.status === 'queued' || finished;
+      cap.retry = j.raw?.status === 'failed' || j.raw?.status === 'cancelled';
+      cap.why = 'Training runs one at a time; the settings for a new run are on the Training Hub';
   }
   return cap;
 }
@@ -390,6 +393,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
     if (j.type === 'import') return send('DELETE', `/api/upload-queue/${encodeURIComponent(j.sourceId)}`);
     if (j.type === 'funpipe') return post('/api/funpipe/queue/remove', { id: j.sourceId });
     if (j.type === 'encode') return send('DELETE', `/api/encode/jobs/${j.sourceId}`);   // a running one is stopped
+    if (j.type === 'train') return j.status === 'queued' || j.status === 'running' ? post(`/api/training/jobs/${j.sourceId}/cancel`) : send('DELETE', `/api/training/jobs/${j.sourceId}`);
     if (j.type === 'hash' && j.local) return dropLocalHash([j.sourceId]);
     return post('/api/jobs/dismiss', { ids: [j.id] });
   };
@@ -405,6 +409,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
       return;
     }
     if (j.type === 'encode') return post(`/api/encode/jobs/${j.sourceId}/retry`);
+    if (j.type === 'train') return post(`/api/training/jobs/${j.sourceId}/retry`);
     if (j.type === 'import') {
       const r = j.raw;
       await post('/api/folders/local-import', {
