@@ -583,8 +583,10 @@ function ffmpegArgs(src, out, f, plan, { encoder = 'cpu' } = {}) {
     if (s.type === 'video' && s.index === plan.videoIndex) {
       const v = `v:${i}`;
       if (encoder === 'nvenc') {
-        // constant quality held under the cap; NVDEC can't decode every source (10-bit H.264), so the CPU decodes
+        // constant quality held under the cap; NVDEC can't decode every source (10-bit H.264), so the CPU decodes.
+        // AQ, lookahead and a full-res second pass: a few % smaller at the same quality, about a quarter slower
         args.push(`-c:${v}`, 'hevc_nvenc', `-preset:${v}`, 'p6', `-tune:${v}`, 'hq', `-rc:${v}`, 'vbr', `-b:${v}`, '0',
+          `-spatial-aq:${v}`, '1', `-temporal-aq:${v}`, '1', `-rc-lookahead:${v}`, '32', `-multipass:${v}`, 'fullres',
           `-cq:${v}`, '22', `-pix_fmt:${v}`, 'p010le', `-profile:${v}`, 'main10');
       } else {
         args.push(`-c:${v}`, 'libx265', `-preset:${v}`, 'medium', `-crf:${v}`, '20',
