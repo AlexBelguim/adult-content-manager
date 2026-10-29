@@ -510,9 +510,9 @@ const ShortcutSettingsModal = ({ open = false, onClose = null, basePath = null, 
 
           <Divider sx={{ my: 2 }} />
 
-          {/* Workers: acm-gpu (its address), scenetest, the re-encode workers, and their host agents */}
+          {/* Coordinator: the coordinator this app is connected to, acm-gpu (its address), scenetest, re-encodes */}
           <Box sx={{ mb: 3 }}>
-            <SectionTitle>🖥️ Workers</SectionTitle>
+            <SectionTitle>🖥️ Coordinator</SectionTitle>
             <WorkersSettings aiServerUrl={aiServerUrl} setAiServerUrl={setAiServerUrl} />
           </Box>
 

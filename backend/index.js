@@ -90,6 +90,7 @@ app.use('/api/performer-management', require('./routes/performer-management')); 
 app.use('/api/video-analysis', require('./routes/video-analysis')); // Video action timeline analysis
 app.use('/api/ranking', require('./routes/ranking')); // ELO ranking for preference learning
 app.use('/api/upload-queue', require('./routes/uploadQueue')); // Upload queue management
+app.use('/api/coordinator', require('./routes/coordinator')); // Settings → Coordinator: the coordinator hands this app's work to the worker nodes
 app.use('/api/encode', require('./routes/encode')); // Settings → Space: re-encoding to HEVC for space, and its queue
 app.use('/api/jobs', require('./routes/jobs')); // Unified read-only view over every background queue
 app.use('/api/pairwise', require('./routes/pairwise')); // Pairwise image comparison & AI labeling

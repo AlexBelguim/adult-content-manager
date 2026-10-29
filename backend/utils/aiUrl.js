@@ -3,9 +3,10 @@
  *
  * Priority order:
  * 1. Per-request override (passed in request body/query)
- * 2. Database setting (app_settings.ai_server_url) — configurable from UI
- * 3. Environment variable (AI_SERVER_URL)
- * 4. Default (http://localhost:3344)
+ * 2. The coordinator, once this app is connected to it: where it says acm-gpu is (services/coordinator.js)
+ * 3. Database setting (app_settings.ai_server_url) — configurable from UI
+ * 4. Environment variable (AI_SERVER_URL)
+ * 5. Default (http://localhost:3344)
  */
 const db = require('../db');
 
@@ -19,7 +20,11 @@ function getAiServerUrl(requestOverride) {
   // 1. Per-request override always wins
   if (requestOverride) return requestOverride;
 
-  // 2. Check DB (with caching)
+  // 2. The coordinator's answer (required here, not at the top: services/coordinator needs the db first)
+  const fromCoordinator = require('../services/coordinator').gpuUrl();
+  if (fromCoordinator) return fromCoordinator;
+
+  // 3. Check DB (with caching)
   const now = Date.now();
   if (!cachedUrl || now - cacheTime > CACHE_TTL) {
     try {
@@ -32,10 +37,10 @@ function getAiServerUrl(requestOverride) {
   }
   if (cachedUrl) return cachedUrl;
 
-  // 3. Environment variable
+  // 4. Environment variable
   if (process.env.AI_SERVER_URL) return process.env.AI_SERVER_URL;
 
-  // 4. Default
+  // 5. Default
   return DEFAULT_URL;
 }
 
