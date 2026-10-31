@@ -228,15 +228,19 @@ function QueuePanel({ q, act, onMode }) {
           onClick={() => act(`/api/encode/queue/${q.running ? 'pause' : 'start'}`)}>
           {q.running ? 'Pause all' : 'Start'}
         </Button>
-        <Tooltip title="Who encodes: a linked worker (the GPU PC) takes the next job whenever it's free">
-          <Select size="small" value={q.mode} onChange={(e) => onMode(e.target.value)} sx={{ fontSize: '.78rem', height: 28 }}>
-            <MenuItem value="auto">This server too, while no worker is online</MenuItem>
-            <MenuItem value="local">This server always, beside workers</MenuItem>
-            <MenuItem value="remote">Only linked workers</MenuItem>
-          </Select>
-        </Tooltip>
+        {q.coordinated ? (
+          <Typography sx={meta}>The coordinator decides who encodes</Typography>
+        ) : (
+          <Tooltip title="Who encodes: a linked worker (the GPU PC) takes the next job whenever it's free">
+            <Select size="small" value={q.mode} onChange={(e) => onMode(e.target.value)} sx={{ fontSize: '.78rem', height: 28 }}>
+              <MenuItem value="auto">This server too, while no worker is online</MenuItem>
+              <MenuItem value="local">This server always, beside workers</MenuItem>
+              <MenuItem value="remote">Only linked workers</MenuItem>
+            </Select>
+          </Tooltip>
+        )}
       </Box>
-      {!q.local.ok && <Alert severity="warning" sx={{ mb: 1 }}>This server can't encode: {q.local.error}. Link a worker below.</Alert>}
+      {!q.local.ok && !q.coordinated && <Alert severity="warning" sx={{ mb: 1 }}>This server can't encode: {q.local.error}. Link a worker below.</Alert>}
       {q.active.map(j => <ActiveJob key={j.id} j={j} act={act} />)}
       {queued.map((j, i) => (
         <Box key={j.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: '1px solid var(--line)' }}>

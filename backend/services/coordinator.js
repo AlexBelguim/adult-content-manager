@@ -8,14 +8,17 @@
  * Where acm-gpu is: once connected, the coordinator says (GET /api/panel/services/acm-gpu, asked every minute), and
  * utils/aiUrl.js uses that before the address saved by hand.
  *
+ * While connected, the coordinator alone decides who encodes: this server's own encoder claims nothing (encodeQueue.js,
+ * "Who encodes"). Disconnected, it goes by worker_mode again, as it was set.
+ *
  * Kept in app_settings: coordinator_url, coordinator_worker_id.
  */
 const os = require('os');
 const db = require('../db');
 const eq = require('./encodeQueue');
 
-const URL_KEY = 'coordinator_url';
-const WORKER_KEY = 'coordinator_worker_id';
+const URL_KEY = eq.COORDINATOR_URL_KEY;
+const WORKER_KEY = eq.COORDINATOR_WORKER_KEY;
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
 const clean = (u) => String(u || '').trim().replace(/\/+$/, '');
 
@@ -66,7 +69,7 @@ function status() {
   const url = getSetting(URL_KEY);
   const id = Number(getSetting(WORKER_KEY)) || null;
   const worker = id ? eq.listWorkers().find((w) => w.id === id) || null : null;
-  return { url, workerId: worker ? id : null, worker, connected: !!(url && worker), gpu };
+  return { url, workerId: worker ? id : null, worker, connected: eq.coordinated(), gpu };
 }
 
 async function connect(rawUrl, req) {

@@ -105,7 +105,7 @@ export default function WorkersSettings({ aiServerUrl, setAiServerUrl }) {
               <Typography sx={meta}>It hands ACM's re-encodes, training runs and funscripts to its worker nodes, in the order and on the machines set there.</Typography>
               <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                 <Button size="small" variant="outlined" component="a" href={co.url} target="_blank" rel="noopener noreferrer">Open it</Button>
-                <Button size="small" variant="outlined" disabled={busy} onClick={() => window.confirm("Disconnect from the coordinator? Its jobs go back to ACM; only this server encodes, and acm-gpu is found at the address under \"Without the coordinator\".") && coordinator('DELETE')}>Disconnect</Button>
+                <Button size="small" variant="outlined" disabled={busy} onClick={() => window.confirm("Disconnect from the coordinator? Its jobs go back to ACM; Settings → Space says who encodes them, and acm-gpu is found at the address under \"Without the coordinator\".") && coordinator('DELETE')}>Disconnect</Button>
               </Box>
             </>
           ) : (

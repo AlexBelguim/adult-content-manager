@@ -8,7 +8,7 @@
  *   POST   /queue                     { all } | { group[, folder] } | { paths: [] } → { added, skipped: { reason: n } }
  *   GET    /queue                     the queue: running, queued, recent, workers
  *   POST   /queue/start | /queue/pause
- *   PUT    /mode                      { mode: auto | local | remote } — who encodes
+ *   PUT    /mode                      { mode: auto | local | remote } — who encodes (409 while a coordinator decides)
  *   DELETE /jobs/:id                  a queued job dropped, a running one stopped
  *   POST   /jobs/:id/pause | resume | retry | undo
  *   POST   /jobs/:id/bump             { dir: up | down }

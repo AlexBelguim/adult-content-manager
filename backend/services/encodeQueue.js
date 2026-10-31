@@ -19,7 +19,10 @@
  *
  * Who encodes: a worker on another machine (the GPU PC) that took a link from Settings → Space and calls in over
  * HTTP (routes/workers.js, Hikari's worker protocol: one worker program serves both apps), or this server's own
- * ffmpeg on the CPU — by default only while no linked worker is online (worker_mode auto | local | remote).
+ * ffmpeg on the CPU — by default only while no linked worker is online (worker_mode auto | local | remote). Connected
+ * to a coordinator (services/coordinator.js), it decides who encodes and this server's ffmpeg claims nothing, whatever
+ * worker_mode says and even while the coordinator is away: the jobs wait for it. A job it's already at when the app
+ * connects finishes and is swapped in as usual. worker_mode isn't touched, so disconnecting brings it back as it was.
  *
  * The new file is written to <base folder>/.originals/tmp, on the same share, checked — as long as the original,
  * every track there — and only then swapped in. The original is held in <base folder>/.originals/<job id>/… for 14
@@ -56,6 +59,9 @@ const ONLINE_MS = 60000;
 const STALE_MS = 30 * 60 * 1000;
 // the chunks a worker uploads in: small enough for a Cloudflare tunnel's 100 MB limit
 const CHUNK = 32 * 1024 * 1024;
+// where services/coordinator.js keeps the connection, in app_settings
+const COORDINATOR_URL_KEY = 'coordinator_url';
+const COORDINATOR_WORKER_KEY = 'coordinator_worker_id';
 
 const CODEC_NAME = {
   eac3: 'E-AC3', ac3: 'AC3', truehd: 'TrueHD', dts: 'DTS', mp2: 'MP2', wmav2: 'WMA', wmav1: 'WMA', wmapro: 'WMA Pro',
@@ -79,6 +85,7 @@ const MODES = ['auto', 'local', 'remote'];
 const mode = () => (MODES.includes(setting('worker_mode')) ? setting('worker_mode') : 'auto');
 function setMode(m) {
   if (!MODES.includes(m)) throw Object.assign(new Error('mode must be auto, local or remote'), { status: 400 });
+  if (coordinated()) throw Object.assign(new Error('The coordinator decides who encodes while this app is connected to it'), { status: 409 });
   setSetting('worker_mode', m);
   if (!localWanted()) stopLocal();
   kick();
@@ -98,7 +105,11 @@ function localEngine() {
 }
 
 const onlineWorkers = () => db.prepare('SELECT COUNT(*) AS n FROM encode_workers WHERE enabled = 1 AND last_seen > ?').get(Date.now() - ONLINE_MS).n;
-const localWanted = () => localEngine().ok && (mode() === 'local' || (mode() === 'auto' && onlineWorkers() === 0));
+const appSetting = (key) => db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key)?.value || null;
+/** Connected to a coordinator: its address kept, and its worker still here. */
+const coordinated = () => !!appSetting(COORDINATOR_URL_KEY)
+  && !!db.prepare('SELECT 1 FROM encode_workers WHERE id = ?').get(Number(appSetting(COORDINATOR_WORKER_KEY)));
+const localWanted = () => !coordinated() && localEngine().ok && (mode() === 'local' || (mode() === 'auto' && onlineWorkers() === 0));
 
 // ---------------------------------------------------------------- the library
 
@@ -1336,7 +1347,7 @@ function listWorkers() {
   const eng = localEngine();
   const self = {
     id: 'local', name: 'This server', local: true, online: true, enabled: localWanted(),
-    note: !eng.ok ? eng.error : mode() === 'remote' ? 'Off: only linked workers encode' : mode() === 'auto' ? (onlineWorkers() ? 'Waiting: a linked worker is online' : 'Encoding while no linked worker is online') : 'Always encoding',
+    note: coordinated() ? (jobOf('local') ? 'Finishing its job, then left to the coordinator' : 'Left to the coordinator') : !eng.ok ? eng.error : mode() === 'remote' ? 'Off: only linked workers encode' : mode() === 'auto' ? (onlineWorkers() ? 'Waiting: a linked worker is online' : 'Encoding while no linked worker is online') : 'Always encoding',
     info: { encoder: `CPU · ${cpus.length} threads`, cpu: cpus[0]?.model?.trim() || null },
     job: jobOf('local'),
   };
@@ -1374,7 +1385,7 @@ function status() {
   `).all();
   const eng = localEngine();
   return {
-    running: isRunning(), mode: mode(), local: { ok: eng.ok, error: eng.error || null, active: localWanted() },
+    running: isRunning(), mode: mode(), coordinated: coordinated(), local: { ok: eng.ok, error: eng.error || null, active: localWanted() },
     active, workers,
     counts: { queued: counts.queued || 0, running: counts.running || 0, done: counts.done || 0, failed: counts.failed || 0, skipped: counts.skipped || 0 },
     queuedSize: db.prepare("SELECT COALESCE(SUM(original_size_bytes), 0) AS n FROM encode_jobs WHERE status = 'queued'").get().n,
@@ -1512,10 +1523,10 @@ function groupReport(key) {
 }
 
 module.exports = {
-  HOLD_DAYS, CHUNK, localEngine,
+  HOLD_DAYS, CHUNK, COORDINATOR_URL_KEY, COORDINATOR_WORKER_KEY, localEngine,
   assess, estimateSize, calibration, fileRow, placeOf, parseKey, ffmpegArgs, verify,
   pathsFor, enqueue, removeJob, clearFinished, setPriority, bumpJob, retryJob, undoJob,
-  start, pause, pauseJob, resumeJob, mode, setMode, isRunning, startQueue, cleanup, kick,
+  start, pause, pauseJob, resumeJob, mode, setMode, coordinated, isRunning, startQueue, cleanup, kick,
   addWorker, relinkWorker, removeWorker, setWorkerEnabled, workerForToken, listWorkers,
   workerHeartbeat, workerQueue, workerClaim, workerProgress, workerSource, workerReceived, workerUpload, workerComplete, workerFail,
   status, spaceReport, groupReport, forget,
