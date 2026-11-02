@@ -108,6 +108,42 @@ services:
       retries: 3
 
   # -------------------------------------------------------------------------
+  # Discover: FlareSolverr, for the sites behind a Cloudflare check (Fapello). It
+  # passes the check in a real browser, so it runs here, on the same connection
+  # as the scan. On the NAS's network like the app, listening on this machine only.
+  # -------------------------------------------------------------------------
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: acm-flaresolverr
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 1g
+    environment:
+      - HOST=127.0.0.1
+      - PORT=8191
+      - LOG_LEVEL=info
+
+  # -------------------------------------------------------------------------
+  # Discover: P on the NAS's CPU, for when the GPU PC is off. It only loads torch
+  # and CLIP (about 2 GB of memory) while it judges, and leaves memory after five
+  # idle minutes. CLIP (1.7 GB) is downloaded once, into ../data/p-cpu, on the
+  # first picture it judges.
+  # -------------------------------------------------------------------------
+  p-cpu:
+    build: ./p-cpu
+    image: acm-p-cpu:latest
+    container_name: acm-p-cpu
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 4g
+    environment:
+      - P_CPU_HOST=127.0.0.1
+      - P_CPU_PORT=3345
+      - P_CPU_THREADS=4
+    volumes:
+      - ../data/p-cpu:/cache
+
+  # -------------------------------------------------------------------------
   # Optional: Pairwise ranking service (uncomment to enable)
   # Adds ML-based preference learning — requires ~4 GB extra for PyTorch
   # -------------------------------------------------------------------------
