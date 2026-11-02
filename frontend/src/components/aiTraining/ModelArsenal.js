@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import {
-  Box, Typography, Chip, Button, Alert, CircularProgress, IconButton, Tooltip, FormControlLabel, Checkbox
+  Box, Typography, Chip, Button, Alert, CircularProgress, IconButton, Tooltip
 } from '@mui/material';
-import { Psychology, CheckCircle, Star, FilterAlt, Compare, Science, DeleteOutline, AutoAwesome } from '@mui/icons-material';
+import { Psychology, CheckCircle, FilterAlt, Science, DeleteOutline, AutoAwesome } from '@mui/icons-material';
 import { Panel, EmptyState } from '../layout';
 import { PREFERRED_KEYS } from './modelInfo';
 
@@ -12,20 +12,20 @@ export default function ModelArsenal({
   preferred, onSetPreferred
 }) {
   const [loadingModel, setLoadingModel] = useState(null);
-  const [quantizeLoad, setQuantizeLoad] = useState(false);
   const typeLabels = {
     clip_siamese: { label: 'CLIP Siamese', color: 'var(--accent)' },
     clip_taste: { label: 'CLIP Taste', color: 'var(--chart-5)' },
     clip_keepdelete: { label: 'K (keep / delete)', color: 'var(--ok)' },
-    binary: { label: 'Binary', color: 'var(--ok)' },
-    ranked_binary: { label: 'Ranked Binary', color: 'var(--chart-3)' },
-    pairwise: { label: 'Pairwise', color: 'var(--info)' },
-    performer_ranker: { label: 'Performer Ranker', color: 'var(--chart-1)' },
+    // removed: acm-gpu no longer loads these; their old files only show here to be deleted
+    binary: { label: 'Simple Binary', color: 'var(--muted)', removed: true },
+    ranked_binary: { label: 'Ranked Binary', color: 'var(--muted)', removed: true },
+    pairwise: { label: 'DINO Pairwise', color: 'var(--muted)', removed: true },
+    performer_ranker: { label: 'Performer Ranker', color: 'var(--muted)', removed: true },
     performer_keep: { label: 'P (performer keep %)', color: 'var(--chart-2)', alone: true },
     performer_rank: { label: 'P2 (performer ranking)', color: 'var(--chart-4)', alone: true },
     unknown: { label: 'Unknown', color: 'var(--muted)' },
   };
-  const typeIcons = { clip_siamese: <AutoAwesome />, clip_taste: <Psychology />, clip_keepdelete: <FilterAlt />, binary: <FilterAlt />, ranked_binary: <FilterAlt />, pairwise: <Compare />, performer_ranker: <Star /> };
+  const typeIcons = { clip_siamese: <AutoAwesome />, clip_taste: <Psychology />, clip_keepdelete: <FilterAlt /> };
   const grouped = {};
   models.forEach(m => { const t = m.type || 'unknown'; if (!grouped[t]) grouped[t] = []; grouped[t].push(m); });
   const handleTest = async (model) => {
@@ -44,7 +44,7 @@ export default function ModelArsenal({
       await fetch('/api/training/ai-load-model', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ model_id: model.filename, quantize: quantizeLoad }) 
+        body: JSON.stringify({ model_id: model.filename })
       }); 
       if (onModelLoaded) onModelLoaded(); 
     } catch (_) {}
@@ -52,14 +52,16 @@ export default function ModelArsenal({
   };
   const handleDelete = async (model) => {
     if (!window.confirm(`Delete model ${model.filename}?`)) return;
-    try { 
-      await fetch('/api/training/ai-delete-model', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ model_id: model.filename }) 
-      }); 
-      if (onModelLoaded) onModelLoaded(); 
-    } catch (_) {}
+    try {
+      const res = await fetch('/api/training/ai-delete-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: model.filename })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      if (onModelLoaded) onModelLoaded();
+    } catch (e) { setTestResults(prev => ({ ...prev, [model.filename]: { error: `Could not delete: ${e.message}` } })); }
   };
   const formatDate = (ts) => !ts ? '—' : new Date(ts * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -67,13 +69,6 @@ export default function ModelArsenal({
   
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <Typography variant="body2" sx={{ color: 'var(--dim)', flex: 1 }}>Load mode</Typography>
-        <FormControlLabel
-          control={<Checkbox size="small" checked={quantizeLoad} onChange={e => setQuantizeLoad(e.target.checked)} sx={{ color: 'var(--accent)', '&.Mui-checked': { color: 'var(--accent)' } }} />}
-          label={<Typography variant="caption" sx={{ color: quantizeLoad ? 'var(--accent)' : 'var(--muted)', fontWeight: 700 }}>8-bit Quantization (Low VRAM)</Typography>}
-        />
-      </Box>
       {Object.entries(grouped).map(([type, typeModels]) => {
     const tInfo = typeLabels[type] || typeLabels.unknown;
     return (
@@ -81,6 +76,7 @@ export default function ModelArsenal({
         <Typography variant="subtitle2" sx={{ color: 'var(--text)', fontWeight: 620, mb: 1 }}>
           {tInfo.label}
           <Chip label={typeModels.length} size="small" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: `${tInfo.color}15`, color: tInfo.color }} />
+          {tInfo.removed && <Chip label="Removed" size="small" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: 'var(--bad-quiet)', color: 'var(--bad)' }} />}
         </Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 1.5 }}>
           {typeModels.map(m => {
@@ -88,6 +84,11 @@ export default function ModelArsenal({
             const result = testResults[m.filename];
             const isTesting = testingModel === m.filename;
             const isLoadingThis = loadingModel === m.filename;
+            const deleteButton = (
+              <IconButton size="small" aria-label={`Delete ${m.filename}`} onClick={() => handleDelete(m)} sx={{ color: 'var(--faint)', '&:hover': { color: 'var(--bad)' } }}>
+                <DeleteOutline sx={{ fontSize: 16 }} />
+              </IconButton>
+            );
             return (
               <Panel key={m.filename} sx={{ bgcolor: isLoaded ? 'var(--ok-quiet)' : 'var(--surface)',
                 borderColor: isLoaded ? 'var(--ok)' : 'var(--line)' }}>
@@ -134,22 +135,6 @@ export default function ModelArsenal({
                 )}
                 {result && !result.error && (
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 1, p: 1, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
-                    {result.metric_type === 'regression' ? (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                        <Box sx={{ textAlign: 'center', minWidth: 50 }}>
-                          <CircularProgress variant="determinate" value={(result.within_half_star || 0) * 100} size={40}
-                            sx={{ color: result.within_half_star >= 0.7 ? 'var(--ok)' : result.within_half_star >= 0.5 ? 'var(--warn)' : 'var(--bad)' }} />
-                          <Typography variant="caption" sx={{ display: 'block', color: 'var(--dim)', fontSize: '0.6rem' }}>±0.5★</Typography>
-                        </Box>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="caption" sx={{ display: 'block', color: 'var(--text)', fontSize: '0.7rem' }}>MAE: <b>{result.mae?.toFixed(3)}</b></Typography>
-                          {result.spearman_rho != null && (
-                            <Typography variant="caption" sx={{ display: 'block', color: 'var(--dim)', fontSize: '0.65rem' }}>ρ: {result.spearman_rho.toFixed(2)}</Typography>
-                          )}
-                          {result.total_tested != null && <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.6rem' }}>{result.total_tested} perfs</Typography>}
-                        </Box>
-                      </Box>
-                    ) : (
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                         <Box sx={{ textAlign: 'center', minWidth: 50 }}>
                           <CircularProgress variant="determinate" value={(result.accuracy || 0) * 100} size={40}
@@ -165,7 +150,6 @@ export default function ModelArsenal({
                           )}
                         </Box>
                       </Box>
-                    )}
                     {result.in_distribution && (
                       <Tooltip title="This checkpoint has no held-out performers — test images came from the same performers it trained on. Result is optimistic, not a true generalization measurement.">
                         <Chip label="in-distribution"size="small"sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'var(--warn-quiet)', color: 'var(--warn)', fontWeight: 700 }} />
@@ -179,6 +163,11 @@ export default function ModelArsenal({
                 {result?.error && <Alert severity="error" sx={{ py: 0, mb: 1, fontSize: '0.7rem' }}>{result.error}</Alert>}
                 {tInfo.alone ? (
                   <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.65rem' }}>Runs by itself in acm-gpu; saved again every 25 verdicts or duels</Typography>
+                ) : tInfo.removed ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="caption" sx={{ flex: 1, color: 'var(--muted)', fontSize: '0.65rem' }}>Type removed on 2026-11-02: this file can only be deleted</Typography>
+                    {deleteButton}
+                  </Box>
                 ) : (
                 <Box sx={{ display: 'flex', gap: 0.5 }}>
                   <Button size="small" variant={isLoaded ? 'contained' : 'outlined'} disabled={isLoaded || isLoadingThis || !aiHealth}
@@ -189,15 +178,14 @@ export default function ModelArsenal({
                     sx={{ flex: 1, fontSize: '0.65rem', textTransform: 'none', borderColor: 'var(--line-strong)', color: 'var(--dim)' }}>
                     {isTesting ? <CircularProgress size={14} /> : <><Science sx={{ fontSize: 14, mr: 0.5 }} />Test</>}
                   </Button>
-                  <IconButton size="small" onClick={() => handleDelete(m)} sx={{ color: 'var(--faint)', '&:hover': { color: 'var(--bad)' } }}>
-                    <DeleteOutline sx={{ fontSize: 16 }} />
-                  </IconButton>
+                  {deleteButton}
                 </Box>
                 )}
 
                 {/* Preferred Selection Button */}
+                {PREFERRED_KEYS[type] && (
                 <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid var(--line)' }}>
-                  {PREFERRED_KEYS[type] && (() => {
+                  {(() => {
                     const isDefault = preferred[type] === m.filename;
                     return (
                       <Button
@@ -220,6 +208,7 @@ export default function ModelArsenal({
                     );
                   })()}
                 </Box>
+                )}
               </Panel>
             );
           })}

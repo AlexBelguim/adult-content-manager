@@ -2,13 +2,16 @@
 
 This document defines the implementation plan for the **Agent of Taste** system — a multi-level AI architecture that evolves from simple image filtering into a personalized curator that understands your visual preferences at an abstract level.
 
+
+**Note (2026-11-02):** the Level 1 Binary Classifier below was removed: CLIP Siamese, CLIP Taste and K do its work (see MODELS.md). This roadmap has not been redrawn around them, so where it builds on Level 1 or on a DINOv2 backbone, read it as history.
+
 ---
 
 ## Overview: The Three Levels
 
 | | Level 1: Binary | Level 2: Agent of Taste v1 | Level 3: Agent of Taste v2 |
 |:---|:---|:---|:---|
-| **Status** | ✅ Implemented | 🔧 Architecture exists, training not implemented | 📋 Design phase |
+| **Status** | Removed 2026-11-02 | 🔧 Architecture exists, training not implemented | 📋 Design phase |
 | **Role** | Quick quality filter | Per-performer preference engine | Abstract taste profiler |
 | **Learns** | Keep vs delete patterns | "I like Performer X's photos that look like this" | "I prefer natural expressions over posed ones" |
 | **New performer?** | Generic score | ❌ Needs labeled data first | ✅ Can predict from appearance alone |
@@ -18,13 +21,11 @@ This document defines the implementation plan for the **Agent of Taste** system 
 
 ---
 
-## Level 1: Binary Classifier (Implemented)
+## Level 1: Binary Classifier (removed 2026-11-02)
 
-Already in production. A blunt instrument that learns "this looks like something you'd keep" vs "this looks like something you'd delete." Works well for obvious cases (blur, bad lighting, clearly good photos) but cannot reason about taste, performer context, or subjective preference.
+Was in production. A blunt instrument that learned "this looks like something you'd keep" vs "this looks like something you'd delete." Works well for obvious cases (blur, bad lighting, clearly good photos) but cannot reason about taste, performer context, or subjective preference.
 
-**File:** `trainer.py` → `train_binary()`, `BinaryClassifier`
-
-No changes needed. This model continues to serve as the fast first-pass filter.
+It was taken out of `trainer.py` on 2026-11-02: CLIP Siamese beat it on keep vs delete, and K is the keep/delete model now.
 
 ---
 
@@ -884,7 +885,7 @@ Each level produces training data for the next, and user corrections improve all
 
 The Agent of Taste system evolves through five distinct levels:
 
-- **Level 1 (Binary)** catches the obvious cases — already working.
+- **Level 1 (Binary)** caught the obvious cases — removed on 2026-11-02, K does this now.
 - **Level 2 (Agent of Taste v1)** learns your per-performer preferences — architecture exists, needs training implementation.
 - **Level 3 (Agent of Taste v2)** understands your abstract taste and can evaluate anyone — powered by VLM reasoning during training.
 - **Level 4 (Personal VLM)** can explain, discuss, and reason about your taste in natural language — fine-tuned on Level 3's reasoning outputs.

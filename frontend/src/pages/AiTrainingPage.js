@@ -33,16 +33,14 @@ function Overview({ health, training, trainingData, aiChecking, aiOnline, useLeg
   const ratings = health?.ratings || {};
   const ratingBuckets = ratings.distribution || [];
   const maxBucket = Math.max(...ratingBuckets.map(b => b.count), 1);
-  const tp = training?.pairwise || {};
   const pairSources = pairSourcesOf(training, trainingData);
   const usedSources = pairSources.filter(s => useLegacy || !s.legacy);
-  const dinoPairs = sumPairs(usedSources, 'db');
-  const ready = training?.readyForTraining?.binary;
+  const ready = training?.readyForTraining?.pictures;
 
   const suggestions = [];
   if (health && p.ratingCoverage < 50) suggestions.push({ icon: <Star />, text: `Only ${p.ratingCoverage}% of performers are rated. Rate more performers for better AI predictions.`, action: 'Rate performers', onClick: () => navigate('/smart-compare') });
-  if (health && pw.totalPairs === 0) suggestions.push({ icon: <Psychology />, text: 'No pairwise comparisons yet. Start labeling to train the preference model.', action: 'Start labeling', onClick: () => navigate('/pairwise') });
-  if (ready && !aiChecking && !aiOnline) suggestions.push({ icon: <Autorenew />, text: `${training.binary.keep + training.binary.delete} training images available but acm-gpu is offline. Start it to train.` });
+  if (health && pw.totalPairs === 0) suggestions.push({ icon: <Psychology />, text: 'No pairwise comparisons yet. Start labeling: your pairs train the CLIP models.', action: 'Start labeling', onClick: () => navigate('/pairwise') });
+  if (ready && !aiChecking && !aiOnline) suggestions.push({ icon: <Autorenew />, text: `${training.pictures.keep + training.pictures.delete} training images available but acm-gpu is offline. Start it to train.` });
   if (p.inBefore > p.inAfter * 2 && p.inBefore > 20) suggestions.push({ icon: <Speed />, text: `${p.inBefore} performers still need filtering vs ${p.inAfter} done. Keep filtering!` });
   if (health?.issues?.some(i => i.type === 'orphan')) {
     const orphans = Object.values(db.orphanedRecords || {}).reduce((a, b) => a + b, 0);
@@ -104,21 +102,11 @@ function Overview({ health, training, trainingData, aiChecking, aiOnline, useLeg
       <Section title="Training data" description={training ? (ready ? 'Ready to train' : 'Needs more data') : 'Loading…'}>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 1 }}>
           <Panel>
-            <Typography variant="body2" sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>Binary classification</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>Keep and delete pictures</Typography>
             <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-              {count(training?.binary?.keep)} keep · {count(training?.binary?.delete)} delete
-              {training?.hardExamples?.binary > 0 && ` · ${training.hardExamples.binary} corrected`}
+              {count(training?.pictures?.keep)} keep · {count(training?.pictures?.delete)} delete
             </Typography>
             <Chip label={ready ? 'Ready' : 'Need more data'} size="small" sx={{ mt: 1, height: 20, bgcolor: ready ? 'var(--ok-quiet)' : 'var(--warn-quiet)', color: ready ? 'var(--ok)' : 'var(--warn)' }} />
-          </Panel>
-          <Panel>
-            <Typography variant="body2" sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>Pairwise preference</Typography>
-            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-              {dinoPairs} labeled pairs from {pw.performersLabeled || 0} performers
-              {training?.hardExamples?.pairwise > 0 && ` · ${training.hardExamples.pairwise} corrected`}
-            </Typography>
-            <Typography variant="caption" sx={{ color: 'var(--muted)', display: 'block' }}>Rank images {tp.rankPairs || 0} · legacy pairwise.db {useLegacy ? tp.importedPairs || 0 : 'off'}</Typography>
-            <Chip label={dinoPairs >= 50 ? 'Ready' : `Need ${50 - dinoPairs}+ pairs`} size="small" sx={{ mt: 1, height: 20, bgcolor: dinoPairs >= 50 ? 'var(--ok-quiet)' : 'var(--warn-quiet)', color: dinoPairs >= 50 ? 'var(--ok)' : 'var(--warn)' }} />
           </Panel>
           <Panel>
             <Typography variant="body2" sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>CLIP Siamese hand pairs</Typography>
@@ -309,7 +297,7 @@ export default function AiTrainingPage() {
       )}
 
       {tab === 'performers' && (
-        <Section title="Training data per performer" description={summary ? `${summary.withData} of ${summary.total} have data · average quality ${summary.avgQuality}% · ${summary.readyForBinary} binary-ready · ${summary.readyForPairwise} pairwise-ready` : undefined}>
+        <Section title="Training data per performer" description={summary ? `${summary.withData} of ${summary.total} have data · average quality ${summary.avgQuality}% · ${summary.readyForKeepDelete} with keep and delete pictures · ${summary.readyForPairwise} with hand pairs` : undefined}>
           {perfStats?.performers?.length > 0
             ? <Panel><PerformerTrainingTable performers={perfStats.performers} /></Panel>
             : perfStats ? <EmptyState title="No performer data yet" /> : <LoadingState />}

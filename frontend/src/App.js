@@ -29,8 +29,6 @@ import LocalImportPage from './pages/LocalImportPage';
 import TinderSortingPage from './pages/TinderSortingPage';
 import PairwiseMobilePage from './pages/PairwiseMobilePage';
 import RankingInsightPage from './pages/RankingInsightPage';
-import PairwiseRefinePage from './pages/PairwiseRefinePage';
-import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
 import GroupRatePage from './pages/GroupRatePage';
 import SmartComparePage from './pages/SmartComparePage';
 import AiTrainingPage from './pages/AiTrainingPage';
@@ -608,13 +606,6 @@ function AppContent({ onThemeChange, currentThemeId }) {
               <PairwiseMobilePage />
             } />
             <Route path="/ranking-insight" element={shell(<RankingInsightPage />)} />
-            {/* Kept top level rather than inside the Pairwise tabs, for now. */}
-            <Route path="/active-learning" element={shell(
-              <PairwiseRefinePage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
-            )} />
-            <Route path="/auto-label" element={shell(
-              <PairwiseAutoLabelPage serverUrl={localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334'} />
-            )} />
             <Route path="/group-rate" element={shell(<GroupRatePage />)} />
             {/* Phones never get the desktop app bar — it's reached from the
                 phone shell's Score tab, which has no bar to match. */}

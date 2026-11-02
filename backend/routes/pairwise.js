@@ -3,7 +3,7 @@
  *
  * Absorbed from the standalone backend-pairwise service.
  * Data lives in app.db (pairwise_pairs, pairwise_image_scores, etc.)
- * Training/inference calls are proxied to the acm-gpu.
+ * The models that train on these pairs are started from the AI & Training page.
  */
 const express = require('express');
 const router = express.Router();
@@ -44,14 +44,6 @@ const queries = {
     VALUES (?, ?, ?, ?)
   `),
 
-  upsertInferenceResult: db.prepare(`
-    INSERT INTO pairwise_inference_results (performer_id, data, timestamp)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(performer_id) DO UPDATE SET
-      data = excluded.data,
-      timestamp = CURRENT_TIMESTAMP
-  `),
-  getInferenceResult: db.prepare(`SELECT * FROM pairwise_inference_results WHERE performer_id = ?`),
 
   getSelectedPerformers: db.prepare(`SELECT performer_id FROM pairwise_selected_performers`),
   clearSelectedPerformers: db.prepare(`DELETE FROM pairwise_selected_performers`),
@@ -458,7 +450,7 @@ router.get('/stats', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// AI INFERENCE PROXY (delegates to acm-gpu)
+// AI SERVER
 // ═══════════════════════════════════════════════════════════════
 
 // Check AI server health
@@ -469,87 +461,6 @@ router.get('/ai-health', async (req, res) => {
     res.json({ online: true, url: aiUrl, ...response.data });
   } catch (err) {
     res.json({ online: false, url: aiUrl, error: err.message });
-  }
-});
-
-// Run inference on a performer's images
-router.post('/run-inference', async (req, res) => {
-  const { performer_id, model } = req.body;
-  if (!performer_id) return res.status(400).json({ error: 'performer_id required' });
-
-  const info = getPerformerPicsPath(parseInt(performer_id));
-  if (!info) return res.status(404).json({ error: 'Performer not found' });
-
-  const allImages = scanForImages(info.picsPath);
-  if (allImages.length === 0) return res.status(400).json({ error: 'No images found' });
-
-  const aiUrl = req.body.ai_server_url || AI_SERVER_URL;
-
-  // SSE streaming response
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  res.write(`data: ${JSON.stringify({ type: 'start', total: allImages.length })}\n\n`);
-
-  const chunkSize = 32;
-  let allResults = [];
-
-  try {
-    // Auto-load model if needed
-    try {
-      const healthRes = await axios.get(`${aiUrl}/health`, { timeout: 5000 });
-      if (!healthRes.data.model_loaded) {
-        res.write(`data: ${JSON.stringify({ type: 'loading', message: 'Loading model...' })}\n\n`);
-        await axios.post(`${aiUrl}/load`, { path: model || undefined });
-      }
-    } catch (_) { /* server might not support /health */ }
-
-    for (let i = 0; i < allImages.length; i += chunkSize) {
-      const chunk = allImages.slice(i, i + chunkSize);
-      const response = await axios.post(`${aiUrl}/score`, { images: chunk, app_base_url: `${req.protocol}://${req.get('host')}` });
-
-      const results = response.data.results || [];
-      allResults = allResults.concat(results);
-
-      res.write(`data: ${JSON.stringify({ type: 'progress', current: Math.min(i + chunkSize, allImages.length), total: allImages.length })}\n\n`);
-    }
-
-    // Cache results
-    queries.upsertInferenceResult.run(parseInt(performer_id), JSON.stringify(allResults));
-
-    allResults.sort((a, b) => (b.score || 0) - (a.score || 0));
-    res.write(`data: ${JSON.stringify({ type: 'done', results: allResults, total: allImages.length })}\n\n`);
-    res.end();
-  } catch (err) {
-    console.error('[Pairwise] Inference error:', err.message);
-    res.write(`data: ${JSON.stringify({ error: `Inference failed: ${err.message}` })}\n\n`);
-    res.end();
-  }
-});
-
-// Load model on AI server
-router.post('/load-model', async (req, res) => {
-  const { modelName, ai_server_url } = req.body;
-  if (!modelName) return res.status(400).json({ error: 'modelName required' });
-
-  const aiUrl = ai_server_url || AI_SERVER_URL;
-  try {
-    const response = await axios.post(`${aiUrl}/load`, { path: modelName });
-    res.json(response.data);
-  } catch (err) {
-    res.status(500).json({ error: `Failed to load model: ${err.message}` });
-  }
-});
-
-// List available models from AI server
-router.get('/models', async (req, res) => {
-  const aiUrl = req.query.url || AI_SERVER_URL;
-  try {
-    const response = await axios.get(`${aiUrl}/models`, { timeout: 5000 });
-    res.json(response.data);
-  } catch (err) {
-    res.json({ models: [], error: err.message });
   }
 });
 

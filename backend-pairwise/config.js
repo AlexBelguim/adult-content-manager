@@ -7,9 +7,6 @@ module.exports = {
     // Database path
     dbPath: process.env.PAIRWISE_DB_PATH || path.join(__dirname, 'pairwise.db'),
 
-    // Python inference server URL (can be remote)
-    inferenceServerUrl: process.env.INFERENCE_SERVER_URL || 'http://localhost:3344',
-
     // Main app base path (for accessing performer folders)
     mainAppBasePath: process.env.MAIN_APP_BASE_PATH || path.join(__dirname, '..'),
 

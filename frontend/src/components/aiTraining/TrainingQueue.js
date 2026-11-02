@@ -52,7 +52,7 @@ export default function TrainingQueue({ version }) {
             {(j.status === 'queued' || j.status === 'running') && (
               <Button size="small" color="error" variant="outlined" disabled={j.cancelling} onClick={() => act(`/api/training/jobs/${j.id}/cancel`)}>Cancel</Button>
             )}
-            {(j.status === 'failed' || j.status === 'cancelled') && <Button size="small" variant="outlined" onClick={() => act(`/api/training/jobs/${j.id}/retry`)}>Run again</Button>}
+            {j.trainable && (j.status === 'failed' || j.status === 'cancelled') && <Button size="small" variant="outlined" onClick={() => act(`/api/training/jobs/${j.id}/retry`)}>Run again</Button>}
             {!['queued', 'running'].includes(j.status) && <Button size="small" onClick={() => act(`/api/training/jobs/${j.id}`, 'DELETE')} sx={{ color: 'var(--dim)' }}>Remove</Button>}
           </Panel>
         ))}

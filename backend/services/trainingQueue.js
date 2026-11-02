@@ -14,6 +14,10 @@ const db = require('../db');
 const STALE_MS = 10 * 60 * 1000;
 const ACTIVE = "('queued','running')";
 
+// What can still be trained. Runs of the types taken out on 2026-11-02 stay in the history under their labels (TITLE),
+// but can't run again.
+const TRAINABLE = ['clip_siamese', 'clip_taste', 'clip_keepdelete'];
+
 const TITLE = {
   binary: 'Keep / delete classifier', ranked_binary: 'Ranked keep / delete classifier',
   pairwise: 'Pairwise ranker', clip_siamese: 'CLIP siamese picture ranker', clip_taste: 'CLIP taste keep / delete model',
@@ -39,7 +43,7 @@ function failStale() {
 
 function view(r) {
   return {
-    id: r.id, type: r.type, title: titleOf(r.type), label: r.label, status: r.status, priority: r.priority, worker: r.worker,
+    id: r.id, type: r.type, trainable: TRAINABLE.includes(r.type), title: titleOf(r.type), label: r.label, status: r.status, priority: r.priority, worker: r.worker,
     phase: r.phase, progress: r.progress, message: r.message, state: parse(r.state), result: parse(r.result), error: r.error,
     cancelling: !!r.cancel, createdAt: r.created_at, startedAt: r.started_at, heartbeatAt: r.heartbeat_at, finishedAt: r.finished_at,
     epochs: parse(r.payload)?.epochs ?? null,
@@ -78,6 +82,8 @@ function remove(id) {
 }
 
 function retry(id) {
+  const job = db.prepare('SELECT type FROM training_jobs WHERE id = ?').get(id);
+  if (job && !TRAINABLE.includes(job.type)) throw err(409, 'That model type was removed: this run can\'t run again');
   const pos = db.prepare(`SELECT COALESCE(MAX(position), 0) AS p FROM training_jobs WHERE status IN ${ACTIVE}`).get().p + 1;
   const r = db.prepare(`UPDATE training_jobs SET status = 'queued', position = ?, worker = NULL, phase = NULL, progress = NULL, message = NULL,
     state = NULL, result = NULL, error = NULL, cancel = 0, started_at = NULL, heartbeat_at = NULL, finished_at = NULL
@@ -147,4 +153,4 @@ function finish(name, id, { ok, result, error }) {
   return true;
 }
 
-module.exports = { enqueue, list, cancel, remove, retry, bump, claim, queued, progress, finish, titleOf };
+module.exports = { TRAINABLE, enqueue, list, cancel, remove, retry, bump, claim, queued, progress, finish, titleOf };

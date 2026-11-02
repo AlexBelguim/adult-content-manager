@@ -1,26 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
     Box, Tabs, Tab, Paper, TextField, Button, Typography, Alert,
     CircularProgress, IconButton, Tooltip, Chip
 } from '@mui/material';
 import {
-    CompareArrows, School, Psychology, TuneRounded, HealthAndSafety, AutoFixHigh, SmartToy,
-    Settings, Refresh, CheckCircle, Error as ErrorIcon, FilterAlt, Science,
+    CompareArrows, TuneRounded, HealthAndSafety,
+    Settings, Refresh, CheckCircle, Error as ErrorIcon,
     Insights, ArrowBack
 } from '@mui/icons-material';
 import { LoadingState } from '../components/layout';
 
 // Sub-pages (will create these next)
 import PairwiseLabelerPage from './PairwiseLabelerPage';
-import PairwiseTrainingPage from './PairwiseTrainingPage';
-import PairwiseInferencePage from './PairwiseInferencePage';
 import PairwiseThresholdPage from './PairwiseThresholdPage';
 import PairwiseHealthPage from './PairwiseHealthPage';
-import PairwiseRefinePage from './PairwiseRefinePage';
-import PairwiseAutoLabelPage from './PairwiseAutoLabelPage';
-import PairwiseFilterPage from './PairwiseFilterPage';
-import PairwiseBinaryPage from './PairwiseBinaryPage';
 
 const PAIRWISE_API = 'http://localhost:3334/api';
 
@@ -31,7 +25,6 @@ function PairwisePage() {
     // Initialize from LocalStorage if available
     const [serverUrl, setServerUrl] = useState(localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334');
     const [serverUrlInput, setServerUrlInput] = useState(localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334');
-    const [inferenceUrl, setInferenceUrl] = useState(localStorage.getItem('pairwiseInferenceUrl') || 'http://localhost:3344');
 
     const [showSettings, setShowSettings] = useState(false);
     const [status, setStatus] = useState(null);
@@ -42,14 +35,8 @@ function PairwisePage() {
     // Determine current tab from path
     const getTabFromPath = () => {
         const path = location.pathname;
-        if (path.includes('/training')) return 1;
-        if (path.includes('/inference')) return 2;
-        if (path.includes('/threshold')) return 3;
-        if (path.includes('/filter')) return 4;
-        if (path.includes('/binary')) return 5;
-        if (path.includes('/refine')) return 6;
-        if (path.includes('/auto')) return 7;
-        if (path.includes('/health')) return 8;
+        if (path.includes('/threshold')) return 1;
+        if (path.includes('/health')) return 2;
         return 0;
     };
 
@@ -84,7 +71,6 @@ function PairwisePage() {
 
                 const health = await healthRes.json();
                 setServerHealthy(true);
-                setInferenceUrl(health.inferenceServerUrl || 'http://localhost:3344');
                 setBasePath(health.basePath || '');
                 // Only update input if it hasn't been touched? Or sync it?
                 // setServerUrlInput(serverUrl); 
@@ -113,14 +99,8 @@ function PairwisePage() {
     const handleTabChange = (event, newValue) => {
         setTabValue(newValue);
         const paths = [
-            '/pairwise', 
-            '/pairwise/training', 
-            '/pairwise/inference', 
-            '/pairwise/threshold', 
-            '/pairwise/filter',
-            '/pairwise/binary',
-            '/pairwise/refine',
-            '/pairwise/auto',
+            '/pairwise',
+            '/pairwise/threshold',
             '/pairwise/health'
         ];
         navigate(paths[newValue]);
@@ -145,15 +125,6 @@ function PairwisePage() {
                 setServerUrl(serverUrlInput);
                 localStorage.setItem('pairwiseServerUrl', serverUrlInput);
             }
-
-            // Save Inference URL (using input url)
-            localStorage.setItem('pairwiseInferenceUrl', inferenceUrl);
-
-            await fetch(`${serverUrlInput}/api/set-inference-url`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: inferenceUrl })
-            });
 
             // Base Path is managed by backend (Main DB sync), so we don't save it.
             /*
@@ -296,19 +267,6 @@ function PairwisePage() {
                                     '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' }
                                 }}
                             />
-                            <TextField
-                                label="Inference Server URL"
-                                value={inferenceUrl}
-                                onChange={(e) => setInferenceUrl(e.target.value)}
-                                size="small"
-                                sx={{
-                                    width: 300,
-                                    '& .MuiInputBase-root': { bgcolor: 'var(--surface)', color: 'var(--text)' },
-                                    '& .MuiInputLabel-root': { color: 'var(--dim)' },
-                                    '& .MuiInputLabel-root.Mui-focused': { color: 'var(--accent)' },
-                                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' }
-                                }}
-                            />
                             <Button variant="contained" onClick={handleSaveSettings} sx={{ bgcolor: 'var(--accent)', height: 40 }}>
                                 Save & Rescan
                             </Button>
@@ -353,13 +311,7 @@ function PairwisePage() {
                     }}
                 >
                     <Tab icon={<CompareArrows />} iconPosition="start" label="Labeler" />
-                    <Tab icon={<School />} iconPosition="start" label="Training" />
-                    <Tab icon={<Psychology />} iconPosition="start" label="Inference" />
                     <Tab icon={<TuneRounded />} iconPosition="start" label="Threshold" />
-                    <Tab icon={<FilterAlt />} iconPosition="start" label="Filter" />
-                    <Tab icon={<Science />} iconPosition="start" label="Binary" />
-                    <Tab icon={<AutoFixHigh />} iconPosition="start" label="Refine" />
-                    <Tab icon={<SmartToy />} iconPosition="start" label="Auto" />
                     <Tab icon={<HealthAndSafety />} iconPosition="start" label="Health" />
                 </Tabs>
             </Paper>
@@ -368,14 +320,10 @@ function PairwisePage() {
             <Box sx={{ flex: 1, overflow: 'auto' }}>
                 <Routes>
                     <Route index element={<PairwiseLabelerPage serverUrl={serverUrl} />} />
-                    <Route path="training" element={<PairwiseTrainingPage serverUrl={serverUrl} />} />
-                    <Route path="inference" element={<PairwiseInferencePage serverUrl={serverUrl} />} />
                     <Route path="threshold" element={<PairwiseThresholdPage serverUrl={serverUrl} />} />
-                    <Route path="filter" element={<PairwiseFilterPage serverUrl={serverUrl} />} />
-                    <Route path="binary" element={<PairwiseBinaryPage serverUrl={serverUrl} />} />
-                    <Route path="refine" element={<PairwiseRefinePage serverUrl={serverUrl} />} />
-                    <Route path="auto" element={<PairwiseAutoLabelPage serverUrl={serverUrl} />} />
                     <Route path="health" element={<PairwiseHealthPage serverUrl={serverUrl} />} />
+                    {/* the tabs of the removed models, from an old bookmark */}
+                    <Route path="*" element={<Navigate to="/pairwise" replace />} />
                 </Routes>
             </Box>
         </Box>

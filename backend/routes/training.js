@@ -7,8 +7,6 @@
  * Endpoints:
  * - GET  /api/training/status       — Current training job status (acm-gpu's live run, or the queue's waiting one)
  * - GET  /api/training/data-summary — How much training data is available
- * - POST /api/training/export-pairs — Export pairwise data for training
- * - POST /api/training/export-binary — Export binary (keep/delete) data
  * - POST /api/training/start        — Put a training run in the queue (services/trainingQueue.js): acm-gpu claims it
  * - GET  /api/training/queue        — The training queue: running, waiting, the last that ended
  * - POST /api/training/jobs/:id/cancel | /retry | /bump { dir }, DELETE /api/training/jobs/:id
@@ -47,10 +45,10 @@ router.get('/data-summary', (req, res) => {
       FROM pairwise_pairs
     `).get();
 
-    // Binary data: count files in the keep (after filter) and delete (training) folders, per performer too.
+    // Pictures: count files in the keep (after filter) and delete (training) folders, per performer too.
     // CLIP taste levels: kept performers with their deleted pictures, and delete-only performers, which
     // are disliked or blacklisted. No names: the page only counts them.
-    let binaryData = { keep: 0, delete: 0, performers: 0 };
+    let pictures = { keep: 0, delete: 0, performers: 0 };
     let tastePerformers = [];
     try {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
@@ -71,7 +69,7 @@ router.get('/data-summary', (req, res) => {
         const deleted = countPics(path.join(folder.path, 'deleted keep for training'));
         const kept = countPics(path.join(folder.path, 'after filter performer'));
         const sum = counts => Object.values(counts).reduce((a, b) => a + b, 0);
-        binaryData = { keep: sum(kept), delete: sum(deleted), performers: Object.keys(deleted).length };
+        pictures = { keep: sum(kept), delete: sum(deleted), performers: Object.keys(deleted).length };
 
         const blacklisted = new Set(db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name));
         const stars = collectPerformerRatings();
@@ -112,19 +110,15 @@ router.get('/data-summary', (req, res) => {
         importedIntra: pairwise.imported_intra,
         scoredImages
       },
-      binary: binaryData,
+      pictures,
       taste: { performers: tastePerformers },
       ranking: {
         rankedImages,
       },
       performerComparisons,
+      // the CLIP models and K train on the keep and delete pictures, the hand pairs come on top
       readyForTraining: {
-        pairwise: pairwise.total_pairs >= 50,
-        binary: binaryData.keep >= 20 && binaryData.delete >= 20
-      },
-      hardExamples: {
-        binary: (db.prepare(`SELECT COUNT(*) as c FROM hard_examples WHERE model_type = 'binary' OR model_type IS NULL`).get() || {c:0}).c,
-        pairwise: (db.prepare(`SELECT COUNT(*) as c FROM hard_examples WHERE model_type = 'pairwise'`).get() || {c:0}).c
+        pictures: pictures.keep >= 20 && pictures.delete >= 20
       }
     });
   } catch (err) {
@@ -275,7 +269,7 @@ router.get('/performer-stats', (req, res) => {
       summary: {
         total: result.length,
         withData: result.filter(p => p.quality > 0).length,
-        readyForBinary: result.filter(p => p.disk.keep > 0 && p.disk.delete > 0).length,
+        readyForKeepDelete: result.filter(p => p.disk.keep > 0 && p.disk.delete > 0).length,
         readyForPairwise: result.filter(p => p.pairwise.total >= 10).length,
         avgQuality: result.length > 0 ? Math.round(result.reduce((s, p) => s + p.quality, 0) / result.length) : 0
       }
@@ -286,170 +280,34 @@ router.get('/performer-stats', (req, res) => {
   }
 });
 
-// ── POST /api/training/export-pairs ──────────────────────────
-// Export pairwise training data (winner/loser paths)
-router.post('/export-pairs', (req, res) => {
-  try {
-    const { performer_ids } = req.body;
-
-    let pairs;
-    if (performer_ids && performer_ids.length > 0) {
-      const placeholders = performer_ids.map(() => '?').join(',');
-      pairs = db.prepare(`
-        SELECT winner, loser, performer_id, type
-        FROM pairwise_pairs
-        WHERE performer_id IN (${placeholders})
-        ORDER BY created_at DESC
-      `).all(...performer_ids);
-    } else {
-      pairs = db.prepare(`
-        SELECT winner, loser, performer_id, type
-        FROM pairwise_pairs
-        ORDER BY created_at DESC
-      `).all();
-    }
-
-    // Transform to training format
-    const trainingData = pairs
-      .filter(p => p.type !== 'both_bad') // Exclude "both bad" for preference training
-      .map(p => ({
-        winner: p.winner,
-        loser: p.loser,
-        performer_id: p.performer_id
-      }));
-
-    res.json({
-      success: true,
-      totalPairs: trainingData.length,
-      pairs: trainingData
-    });
-  } catch (err) {
-    console.error('[Training] Export pairs error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── POST /api/training/export-binary ─────────────────────────
-// Export binary classification data (keep/delete paths)
-router.post('/export-binary', async (req, res) => {
-  try {
-    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
-    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
-
-    const basePath = folder.path;
-    const trainingPath = path.join(basePath, 'deleted keep for training');
-    const afterPath = path.join(basePath, 'after filter performer');
-    const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
-
-    const scanImages = (dir) => {
-      const images = [];
-      if (!fs.existsSync(dir)) return images;
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          images.push(...scanImages(full));
-        } else if (entry.isFile() && imageExts.includes(path.extname(entry.name).toLowerCase())) {
-          images.push(full);
-        }
-      }
-      return images;
-    };
-
-    const keepImages = fs.existsSync(afterPath)
-      ? fs.readdirSync(afterPath, { withFileTypes: true })
-        .filter(d => d.isDirectory() && !d.name.startsWith('.'))
-        .flatMap(d => scanImages(path.join(afterPath, d.name, 'pics')).map(p => ({ path: p, label: 'keep', performer: d.name })))
-      : [];
-
-    const deleteImages = fs.existsSync(trainingPath)
-      ? fs.readdirSync(trainingPath, { withFileTypes: true })
-        .filter(d => d.isDirectory() && !d.name.startsWith('.'))
-        .flatMap(d => scanImages(path.join(trainingPath, d.name, 'pics')).map(p => ({ path: p, label: 'delete', performer: d.name })))
-      : [];
-
-    res.json({
-      success: true,
-      keep: keepImages.length,
-      delete: deleteImages.length,
-      total: keepImages.length + deleteImages.length,
-      data: [...keepImages, ...deleteImages]
-    });
-  } catch (err) {
-    console.error('[Training] Export binary error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── POST /api/training/start ─────────────────────────────────
 // A training run into the queue, with everything it trains with collected now. acm-gpu claims it when it's free
 // (routes/workers.js), so a second run waits instead of being turned away, and a run asked for while the PC is off
 // starts when it's back.
 router.post('/start', async (req, res) => {
-  const { type = 'pairwise', epochs = 10, batch_size = 16, backbone = 'facebook/dinov2-large', learning_rate, use_legacy = true } = req.body;
+  const { type = 'clip_siamese', epochs = 10, batch_size = 16, use_legacy = true } = req.body;
+  if (!trainingQueue.TRAINABLE.includes(type)) return res.status(400).json({ error: `Unknown training type: ${type}` });
 
   try {
-    // Collect training data
-    let trainingPayload;
-    if (type === 'pairwise') {
-      // "Use legacy pairs" off: only pairs made with Rank images, not the pairwise.db import
-      const pairs = db.prepare(`
-        SELECT winner, loser, performer_id FROM pairwise_pairs WHERE type != 'both_bad' ${use_legacy ? '' : 'AND source IS NULL'}
-      `).all();
-      trainingPayload = { type: 'pairwise', pairs, epochs, batch_size, backbone, learning_rate };
-      
-      if (req.body.use_hard_examples) {
-        try {
-          const hard = db.prepare(`SELECT * FROM hard_examples WHERE model_type = 'pairwise'`).all();
-          trainingPayload.hard_examples = hard;
-        } catch (e) {}
-      }
+    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
+    if (!folder) return res.status(400).json({ error: 'No base folder configured' });
+    const trainingPayload = { type, base_path: folder.path, epochs, batch_size };
 
-    } else if (['binary', 'clip_siamese', 'clip_taste', 'clip_keepdelete', 'performer_ranker', 'ranked_binary'].includes(type)) {
-      const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
-      if (!folder) return res.status(400).json({ error: 'No base folder configured' });
-      trainingPayload = {
-        type,
-        base_path: folder.path,
-        epochs,
-        batch_size,
-        backbone,
-        learning_rate,
-        performer_ratings: collectPerformerRatings()
-      };
-
-      if (req.body.use_hard_examples) {
-        try {
-          const hard = db.prepare(`SELECT * FROM hard_examples WHERE model_type = 'binary' OR model_type IS NULL`).all();
-          trainingPayload.hard_examples = hard;
-        } catch (e) {}
-      }
-
-      // CLIP siamese (1st order) also learns from the same-performer hand pairs: Rank images and the pairwise.db import.
-      // The trainer drops the legacy sources (this import and its own old labeller file) when use_legacy is off.
-      if (type === 'clip_siamese') {
-        trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type = 'intra'`).all();
-        trainingPayload.use_legacy = use_legacy;
-      }
-
-      // CLIP taste (2nd order) takes the hand pairs across performers too, and splits the delete-only
-      // performers into disliked and blacklisted
-      if (type === 'clip_taste') {
-        trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type != 'both_bad'`).all();
-        trainingPayload.blacklisted_performers = db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name);
-        trainingPayload.use_legacy = use_legacy;
-      }
-
-    } else {
-      return res.status(400).json({ error: `Unknown training type: ${type}` });
+    // CLIP siamese (1st order) also learns from the same-performer hand pairs: Rank images and the pairwise.db import.
+    // The trainer drops the legacy sources (this import and its own old labeller file) when use_legacy is off.
+    if (type === 'clip_siamese') {
+      trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type = 'intra'`).all();
+      trainingPayload.use_legacy = use_legacy;
     }
 
-    // Add mining/dedupe flags from body
-    trainingPayload.enable_mining = req.body.enable_mining;
-    trainingPayload.quantize = req.body.quantize;
-    trainingPayload.mining_multiplier = req.body.mining_multiplier || 4;
-    trainingPayload.deduplicate = req.body.deduplicate;
-    trainingPayload.finetune_start_epoch = req.body.finetune_start_epoch;
+    // CLIP taste (2nd order) takes the hand pairs across performers too, and splits the delete-only
+    // performers into disliked and blacklisted
+    if (type === 'clip_taste') {
+      trainingPayload.pairs = db.prepare(`SELECT winner, loser, source FROM pairwise_pairs WHERE type != 'both_bad'`).all();
+      trainingPayload.performer_ratings = collectPerformerRatings();
+      trainingPayload.blacklisted_performers = db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name);
+      trainingPayload.use_legacy = use_legacy;
+    }
 
     // Automatic pairs per performer per epoch for the CLIP models
     if (req.body.synthetic_pairs_per_epoch) {
@@ -606,64 +464,6 @@ router.post('/test-model', async (req, res) => {
   }
 });
 
-// ── POST /api/training/predict-performer-rank ────────────────
-// Gather images for a performer and ask AI to predict their star rating
-router.post('/predict-performer-rank', async (req, res) => {
-  const { performerId, sample_size = 200 } = req.body;
-  const aiUrl = getAiServerUrl();
-
-  try {
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performerId);
-    if (!performer) return res.status(404).json({ error: 'Performer not found' });
-
-    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
-    const basePath = folder?.path || '';
-    if (!basePath) return res.status(400).json({ error: 'Base path not set' });
-
-    // Find images for this performer
-    let perfPath = path.join(basePath, 'before filter performer', performer.name, 'pics');
-    if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name, 'pics');
-    if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'before filter performer', performer.name);
-    if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name);
-
-    if (!fs.existsSync(perfPath)) {
-      return res.status(404).json({ error: 'Performer images directory not found' });
-    }
-
-    const files = fs.readdirSync(perfPath)
-      .filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f))
-      .sort(() => 0.5 - Math.random())
-      .slice(0, sample_size);
-
-    if (files.length === 0) {
-      return res.status(400).json({ error: 'No images found for this performer' });
-    }
-
-    const imagePaths = files.map(f => path.join(perfPath, f));
-
-    // Auto-load ranker if not loaded (consistent with Smart Filtering)
-    try {
-      const healthRes = await axios.get(`${aiUrl}/health`, { timeout: 5000 });
-      if (!healthRes.data.ranker_loaded) {
-        console.log(`[Training] Ranker not loaded, auto-loading performer_ranker.pt...`);
-        await axios.post(`${aiUrl}/load_model`, { model_id: 'performer_ranker.pt' }, { timeout: 60000 });
-      }
-    } catch (healthErr) {
-      console.warn(`[Training] Ranker health check/load failed: ${healthErr.message}`);
-    }
-
-    // Send to AI server
-    const response = await axios.post(`${aiUrl}/predict_rank`, {
-      images: imagePaths, app_base_url: `${req.protocol}://${req.get('host')}`
-    }, { timeout: 60000 });
-
-    res.json(response.data);
-  } catch (err) {
-    console.error('[Training] Rank prediction error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── Helper: collect training images ──────────────────────────
 function collectTrainingImages(basePath) {
   const afterDir = path.join(basePath, 'after filter performer');
@@ -736,7 +536,7 @@ function collectPerformerComparisonCounts() {
 // ── GET /api/training/export-zip ─────────────────────────────
 // Download training data as a ZIP file
 router.get('/export-zip', async (req, res) => {
-  const type = req.query.type || 'binary';
+  const type = req.query.type || 'clip_siamese';
   const saveToDisk = req.query.saveToDisk === 'true';
 
   try {
@@ -827,7 +627,7 @@ router.get('/export-zip', async (req, res) => {
 // ── GET /api/training/export-manifest ──────────────────────────
 // Download only the manifest.json
 router.get('/export-manifest', async (req, res) => {
-  const type = req.query.type || 'binary';
+  const type = req.query.type || 'clip_siamese';
   try {
     const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
     if (!folder) return res.status(400).json({ error: 'No base folder configured' });
@@ -884,7 +684,7 @@ router.get('/export-manifest', async (req, res) => {
 // ── POST /api/training/push-labels ───────────────────────────
 // Push only the manifest.json to the AI server
 router.post('/push-labels', async (req, res) => {
-  const { type = 'binary', ai_server_url } = req.body;
+  const { type = 'clip_siamese', ai_server_url } = req.body;
   const aiUrl = ai_server_url || getAiServerUrl();
 
   try {
@@ -963,7 +763,7 @@ router.post('/push-labels', async (req, res) => {
 // ── POST /api/training/push-data ─────────────────────────────
 // Push training data to the AI server
 router.post('/push-data', async (req, res) => {
-  const { type = 'binary', ai_server_url } = req.body;
+  const { type = 'clip_siamese', ai_server_url } = req.body;
   const aiUrl = ai_server_url || getAiServerUrl();
 
   try {
@@ -1231,80 +1031,7 @@ router.post('/ai-delete-model', async (req, res) => {
     const response = await axios.post(`${aiUrl}/delete_model`, { model_id }, { timeout: 5000 });
     res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to delete model', message: err.message });
-  }
-});
-
-// POST /api/training/predict-ranks-batch
-router.post('/predict-ranks-batch', async (req, res) => {
-  const { performerIds, ai_server_url, limit } = req.body;
-  const aiUrl = ai_server_url || getAiServerUrl();
-  
-  // If limit is 51 (which UI treats as 'All'), use 100 as a reasonable 'All' limit
-  const imageLimit = (limit === 51) ? 100 : (limit || 10);
-
-  if (!performerIds || !Array.isArray(performerIds)) {
-    return res.status(400).json({ error: 'performerIds array is required' });
-  }
-
-  console.log(`[Training] Batch rank prediction for ${performerIds.length} performers...`);
-
-  try {
-    const results = {};
-    
-    // Auto-load ranker if not loaded
-    try {
-      const healthRes = await axios.get(`${aiUrl}/health`, { timeout: 5000 });
-      if (!healthRes.data.ranker_loaded) {
-        console.log(`[Training] Auto-loading ranker for batch prediction...`);
-        await axios.post(`${aiUrl}/load_model`, { model_id: 'performer_ranker.pt' }, { timeout: 60000 });
-      }
-    } catch (e) {
-      console.warn(`[Training] Batch health check failed: ${e.message}`);
-    }
-
-    const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
-    const basePath = folder?.path || '';
-    if (!basePath) throw new Error('No base path configured in folders table');
-
-    await Promise.all(performerIds.map(async (performerId) => {
-      try {
-        const performer = db.prepare('SELECT name FROM performers WHERE id = ?').get(performerId);
-        if (!performer) return;
-
-        let perfPath = path.join(basePath, 'before filter performer', performer.name, 'pics');
-        if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name, 'pics');
-        if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'before filter performer', performer.name);
-        if (!fs.existsSync(perfPath)) perfPath = path.join(basePath, 'after filter performer', performer.name);
-
-        if (!fs.existsSync(perfPath)) return;
-
-        const files = fs.readdirSync(perfPath).filter(f => 
-          ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-        ).slice(0, imageLimit); 
-
-        if (files.length === 0) return;
-
-        const imagePaths = files.map(f => path.join(perfPath, f));
-        
-        const response = await axios.post(`${aiUrl}/predict_rank`, {
-          images: imagePaths, app_base_url: `${req.protocol}://${req.get('host')}`
-        }, { timeout: 30000 });
-        
-        if (response.data.success) {
-          results[performerId] = response.data.predicted_rank;
-          console.log(`[Training]   ${performer.name}: ${response.data.predicted_rank.toFixed(2)} stars`);
-        }
-      } catch (err) {
-        console.error(`[Training] Failed to predict rank for ${performerId}:`, err.message);
-      }
-    }));
-
-    console.log(`[Training] Batch prediction complete. Got results for ${Object.keys(results).length} performers.`);
-    res.json({ success: true, results });
-  } catch (err) {
-    console.error('[Training] Batch rank prediction error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to delete model', message: err.response?.data?.error || err.message });
   }
 });
 

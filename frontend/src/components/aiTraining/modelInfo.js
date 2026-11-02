@@ -2,7 +2,7 @@
  * What the AI & Training page says about the models: the types that can be trained, and what each one achieved.
  */
 import React from 'react';
-import { Psychology, Star, FilterAlt, Compare, Tune, AutoAwesome } from '@mui/icons-material';
+import { Psychology, FilterAlt, AutoAwesome } from '@mui/icons-material';
 
 export const MODEL_TYPES = [
   { id: 'clip_siamese', name: 'CLIP Siamese (1st order)', icon: <AutoAwesome />, desc: 'Scores pictures so kept beats deleted and your hand-picked winners beat their losers, inside one performer. Best model so far.',
@@ -14,18 +14,6 @@ export const MODEL_TYPES = [
   { id: 'clip_keepdelete', name: 'K (keep / delete)', icon: <FilterAlt />, desc: 'A keep % for any picture with a fixed 50% line, learned from your keeps and deletes alone, so it grows as you filter. With the AI toggle in the filter view it refits every 10 decisions, with that performer\'s sorted pictures weighing 20x.',
     color: 'var(--ok)', requirements: 'Needs keep + delete folders pushed to the AI server; uses the performers that have both. No pairs, no stars. Fine-tunes SigLIP-384 with a LoRA for 3 epochs, about 40 minutes (the epochs and batch size fields do not apply); it starts from ComfyUI\'s clip_vision/sigclip_vision_patch14_384 file on the AI PC. 15% of the performers are held out.',
     pros: ['Learns the performer while you filter', 'Best inside a performer (AUC 0.779 vs 0.750 for CLIP)'], cons: ['Does not know disliked performers', 'About 40 minutes to train'] },
-  { id: 'binary', name: 'Simple Binary', icon: <FilterAlt />, desc: 'DINOv2 keep vs delete classifier.',
-    color: 'var(--ok)', requirements: 'Needs keep + delete image folders',
-    pros: ['Direct keep %'], cons: ['One global keep look'] },
-  { id: 'ranked_binary', name: 'Ranked Binary', icon: <Tune />, desc: 'Simple Binary that also gets the performer\'s stars as input.',
-    color: 'var(--chart-3)', requirements: 'Needs keep + delete folders + star ratings',
-    pros: ['Stricter for lower stars'], cons: ['Stars come from the ranker at filter time'] },
-  { id: 'pairwise', name: 'Pairwise Preference', icon: <Compare />, desc: 'DINOv2 trained on your Rank images pairs. CLIP Siamese does this job better.',
-    color: 'var(--info)', requirements: 'Needs 50+ labeled pairs from Rank images',
-    pros: ['Learns from your picks'], cons: ['Weaker than CLIP'] },
-  { id: 'performer_ranker', name: 'Performer Ranker', icon: <Star />, desc: 'Predicts a performer\'s stars from their pictures. No signal yet: too few rated performers.',
-    color: 'var(--chart-1)', requirements: 'Needs rated performers (star ratings) with keep + delete images',
-    pros: ['Feeds Ranked Binary'], cons: ['49% of duels (chance)'] },
 ];
 
 // What each model achieved so far (Claude's tests, 2026-10-16): keep vs delete on the 2,623 pictures of the
@@ -51,30 +39,30 @@ export const MODEL_NOTES = [
     ],
   },
   {
-    name: 'DINO Binary / Ranked Binary', status: 'OK', tone: 'warn', where: 'Train here',
+    name: 'Simple Binary / Ranked Binary (DINO)', status: 'Removed', tone: 'bad', where: 'acm-gpu',
     result: 'Keep vs delete AUC 0.74–0.77 on the same 38 new performers · 0.65–0.69 inside one performer',
     data: 'Keep folder (after filter performer) vs delete folder (deleted keep for training), May 2026 set: about 4,700 keep + 5,800 delete pictures. 15% of performers held out. Ranked also gets the performer\'s stars.',
-    how: 'DINOv2-large picture embedding → small head → keep probability. The backbone unfreezes from epoch 3. At filter time Ranked gets its stars from the Performer Ranker, which has no signal.',
+    how: 'DINOv2-large picture embedding → small head → keep probability. The backbone unfreezes from epoch 3. At filter time Ranked got its stars from the Performer Ranker, which had no signal.',
     better: [
-      'Learns one global "keep look", not your choice inside a performer; CLIP Siamese beats it on both',
+      'Learned one global "keep look", not your choice inside a performer; CLIP Siamese beat it on both, so both were taken out on 2026-11-02',
       'The old 98.5% score came from a random picture split (same performers in train and val), not new performers',
     ],
   },
   {
-    name: 'DINO Pairwise', status: 'OK', tone: 'warn', where: 'Train here',
+    name: 'DINO Pairwise Preference', status: 'Removed', tone: 'bad', where: 'acm-gpu',
     result: 'Keep vs delete AUC 0.75 · 0.68 inside one performer · 57% of 306 later Rank images pairs',
     data: 'Your Rank images pairs. File: pairwise/pairwise_rating.pt',
     how: 'The same pair idea as CLIP Siamese, on a DINOv2-large embedding with a margin loss.',
-    better: ['CLIP Siamese does the same job better; keep it only to compare'],
+    better: ['CLIP Siamese does the same job better, so it was taken out on 2026-11-02; your pairs train the CLIP models'],
   },
   {
-    name: 'Performer Ranker', status: 'No signal', tone: 'bad', where: 'Train here',
+    name: 'Performer Ranker', status: 'Removed', tone: 'bad', where: 'acm-gpu',
     result: 'Right in 49% of your Smart Compare duels (chance is 50%)',
     data: 'Every picture of a rated performer gets that performer\'s stars (53 rated performers).',
     how: 'DINOv2-large → small head → stars (0–5), regression. A performer\'s stars are the average over their pictures.',
     better: [
-      'The real sample size is the number of rated performers (53), not the pictures, so it learns who, not what',
-      'Needs hundreds of rated performers; until then use your own stars. Smart Compare\'s Ask AI is off for this reason',
+      'The real sample size was the number of rated performers (53), not the pictures, so it learned who, not what',
+      'Would need hundreds of rated performers, so it was taken out on 2026-11-02, with Smart Compare\'s Ask AI and Rate Performer (AI) that ran on it',
     ],
   },
   {
@@ -115,21 +103,16 @@ export const NOTE_TONE = {
 
 // Training-type → settings key of its default model (the filter view's AI loads K's)
 export const PREFERRED_KEYS = {
-  binary: 'preferred_binary_model',
-  ranked_binary: 'preferred_ranked_binary_model',
-  pairwise: 'preferred_pairwise_model',
   clip_siamese: 'preferred_clip_siamese_model',
   clip_taste: 'preferred_clip_taste_model',
   clip_keepdelete: 'preferred_clip_keepdelete_model',
-  performer_ranker: 'preferred_ranker_model',
 };
 
 /**
  * Hand-pair sources: Rank images (source NULL), the pairwise.db import, and the old labeller's file on the AI PC.
  * Legacy sources count, and train, only while "Use legacy pairs" is on. all = every pair that trains, across
- * performers too (CLIP 2nd order; "both bad" votes order nothing), same = same performer (CLIP 1st order),
- * db = the part in the app DB (DINO Pairwise reads only that). The import's pairs of performers deleted from
- * the app before it ran are in a PC file next to the labeller's, so they count for the CLIP models only.
+ * performers too (CLIP 2nd order; "both bad" votes order nothing), same = same performer (CLIP 1st order).
+ * The import's pairs of performers deleted from the app before it ran are in a PC file next to the labeller's.
  */
 export function pairSourcesOf(training, aiTrainingData) {
   const tp = training?.pairwise || {};
@@ -137,11 +120,11 @@ export function pairSourcesOf(training, aiTrainingData) {
   const orphans = aiTrainingData?.pairwise_db_orphans;
   const rankPairs = (tp.rankPairs || 0) - (tp.bothBad || 0);
   const pairSources = [
-    { id: 'rank', label: 'Rank images', all: rankPairs, db: rankPairs, same: (tp.intraPairs || 0) - (tp.importedIntra || 0) },
-    { id: 'pairwise_db', label: 'pairwise.db import', legacy: true, db: tp.importedPairs || 0,
+    { id: 'rank', label: 'Rank images', all: rankPairs, same: (tp.intraPairs || 0) - (tp.importedIntra || 0) },
+    { id: 'pairwise_db', label: 'pairwise.db import', legacy: true,
       all: (tp.importedPairs || 0) + (orphans || 0), same: (tp.importedIntra || 0) + (aiTrainingData?.pairwise_db_orphans_intra || 0),
       note: `${tp.importedPairs || 0} in the app · ${orphans == null ? 'PC file: AI server offline' : `${orphans} in a PC file (deleted performers)`}` },
-    { id: 'labeller', label: 'old labeller file', legacy: true, db: 0, all: labellerPairs == null ? null : labellerPairs + aiTrainingData.labeller_cross_pairs,
+    { id: 'labeller', label: 'old labeller file', legacy: true, all: labellerPairs == null ? null : labellerPairs + aiTrainingData.labeller_cross_pairs,
       same: labellerPairs, note: labellerPairs == null ? 'AI server offline' : `${labellerPairs} same performer, on the AI PC` },
   ];
   return pairSources;

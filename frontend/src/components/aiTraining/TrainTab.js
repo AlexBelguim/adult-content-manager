@@ -3,21 +3,11 @@
  * pictures from the NAS to acm-gpu.
  */
 import React, { useState } from 'react';
-import {
-  Box, Typography, Button, Alert, Chip, LinearProgress, TextField, Slider, Switch,
-  Select, MenuItem, FormControl, InputLabel
-} from '@mui/material';
+import { Box, Typography, Button, Alert, Chip, LinearProgress, TextField, Slider, Switch } from '@mui/material';
 import { PlayArrow } from '@mui/icons-material';
 import { Panel, Section, StatRow } from '../layout';
 import TrainingQueue from './TrainingQueue';
 import { MODEL_TYPES, pairSourcesOf } from './modelInfo';
-
-const BACKBONES = [
-  ['facebook/dinov2-small', 'DINOv2 Small', 'Fast · Low VRAM · ~21M params'],
-  ['facebook/dinov2-base', 'DINOv2 Base', 'Balanced · ~86M params'],
-  ['facebook/dinov2-large', 'DINOv2 Large', 'Best accuracy · High VRAM · ~307M params'],
-  ['facebook/dinov2-giant', 'DINOv2 Giant', 'Max accuracy · Very high VRAM · ~1.1B params'],
-];
 
 const smallBtnSx = {
   textTransform: 'none', whiteSpace: 'nowrap', color: 'var(--text)', borderColor: 'var(--line-strong)',
@@ -77,20 +67,12 @@ export default function TrainTab({ training, aiHealth, aiChecking, aiTrainingDat
   const [selectedType, setSelectedType] = useState('clip_siamese');
   const [epochs, setEpochs] = useState(8);
   const [batchSize, setBatchSize] = useState(16);
-  const [backbone, setBackbone] = useState('facebook/dinov2-large');
   const [starting, setStarting] = useState(false);
   const [queueVersion, setQueueVersion] = useState(0);   // bumped when a run is queued: the queue list loads again
   const [pushing, setPushing] = useState(false);
-  const [useHardExamples, setUseHardExamples] = useState(true);
-  const [enableMining, setEnableMining] = useState(false);
-  const [miningMultiplier, setMiningMultiplier] = useState(4);
-  const [deduplicate, setDeduplicate] = useState(true);
   const [syntheticPairsPerEpoch, setSyntheticPairsPerEpoch] = useState(500);
-  const [useQuantization, setUseQuantization] = useState(false);
-  const [finetuneStart, setFinetuneStart] = useState(3);
 
   const isClip = selectedType === 'clip_siamese' || selectedType === 'clip_taste';
-  const fixedBackbone = isClip || selectedType === 'clip_keepdelete';
   const selectedModel = MODEL_TYPES.find(m => m.id === selectedType);
   const aiOffline = !aiHealth && !aiChecking;
 
@@ -101,9 +83,7 @@ export default function TrainTab({ training, aiHealth, aiChecking, aiTrainingDat
     setStarting(true);
     try {
       const result = await postJson('/api/training/start', {
-        type: selectedType, epochs, batch_size: batchSize, backbone,
-        use_hard_examples: useHardExamples, enable_mining: enableMining, mining_multiplier: miningMultiplier,
-        deduplicate, quantize: useQuantization, finetune_start_epoch: finetuneStart, use_legacy: useLegacy,
+        type: selectedType, epochs, batch_size: batchSize, use_legacy: useLegacy,
         synthetic_pairs_per_epoch: isClip ? syntheticPairsPerEpoch : 0
       });
       if (result.success) {
@@ -163,11 +143,10 @@ export default function TrainTab({ training, aiHealth, aiChecking, aiTrainingDat
     + (disliked.length ? blacklisted.length * perPerf : 0) + starLosers * perPerf;
   // What each trainable type reads, for the "trains on" panel
   const picRow = (label, perfs, key) => ({ label, value: `${sumOf(perfs, key).toLocaleString()} pictures · ${perfs.length} performer${perfs.length === 1 ? '' : 's'}` });
-  const handRows = (key, sources = pairSources) => sources.map(s => ({ label: `${s.legacy ? 'Legacy · ' : ''}${s.label} pairs`,
+  const handRows = (key) => pairSources.map(s => ({ label: `${s.legacy ? 'Legacy · ' : ''}${s.label} pairs`,
     value: s[key] == null ? 'AI server offline' : s[key].toLocaleString(), legacy: s.legacy }));
   const deletedRow = picRow('Deleted pictures of kept performers', keptWithDeletes, 'delete');
   const withinRow = { label: 'Auto, within performer: kept > deleted', value: `≈${withinPairs.toLocaleString()} / epoch` };
-  const binaryRows = [picRow('Keep: kept pictures', kept, 'keep'), picRow('Delete: deleted, disliked and blacklisted pictures', [...keptWithDeletes, ...disliked, ...blacklisted], 'delete')];
   const TRAINS_ON = {
     clip_taste: [picRow('Kept pictures (keep)', kept, 'keep'), deletedRow, picRow('Disliked performers (delete)', disliked, 'delete'),
       picRow('Blacklisted performers (delete)', blacklisted, 'delete'), withinRow,
@@ -175,10 +154,6 @@ export default function TrainTab({ training, aiHealth, aiChecking, aiTrainingDat
       ...handRows('all')],
     clip_siamese: [picRow('Kept pictures of performers with deletes', keptWithDeletes, 'keep'), deletedRow, withinRow, ...handRows('same')],
     clip_keepdelete: [picRow('Kept pictures of performers with deletes', keptWithDeletes, 'keep'), deletedRow],
-    binary: binaryRows,
-    ranked_binary: [...binaryRows, { label: 'Star ratings (an input)', value: `${rated.length} rated performers` }],
-    pairwise: handRows('db', pairSources.filter(s => s.id !== 'labeller')),
-    performer_ranker: [{ label: 'Pictures of rated performers, labelled with their stars', value: `${(sumOf(rated, 'keep') + sumOf(rated, 'delete')).toLocaleString()} pictures · ${rated.length} performers` }],
   };
 
   return (
@@ -229,38 +204,8 @@ export default function TrainTab({ training, aiHealth, aiChecking, aiTrainingDat
               InputProps={{ inputProps: { min: 1, max: 50 } }} size="small" sx={{ width: 100 }} />
             <TextField label="Batch size" type="number" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 1)}
               InputProps={{ inputProps: { min: 1, max: 64 } }} size="small" sx={{ width: 100 }} />
-            {!fixedBackbone && (
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel>Backbone</InputLabel>
-                <Select value={backbone} label="Backbone" onChange={e => setBackbone(e.target.value)}
-                  renderValue={(v) => BACKBONES.find(b => b[0] === v)?.[1]}>
-                  {BACKBONES.map(([id, name, hint]) => (
-                    <MenuItem key={id} value={id}>
-                      <Box>
-                        <Typography variant="body2">{name}</Typography>
-                        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>{hint}</Typography>
-                      </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-            <TextField label="Finetune from epoch" type="number" value={finetuneStart} onChange={e => setFinetuneStart(parseInt(e.target.value) || 0)}
-              InputProps={{ inputProps: { min: 0, max: 20 } }} size="small" sx={{ width: 150 }} helperText="0: never unfreeze" />
           </Box>
-          <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, columnGap: 4 }}>
-            <SwitchRow label="8-bit quantization" hint="Reduces VRAM by 4x. Required for Giant models." checked={useQuantization} onChange={setUseQuantization} />
-            <SwitchRow label="Use human corrections" hint="Oversamples them" checked={useHardExamples} onChange={setUseHardExamples} />
-            <SwitchRow label="Hard example mining" hint="Recursive" checked={enableMining} onChange={setEnableMining} />
-            <SwitchRow label="Deduplicate data" checked={deduplicate} onChange={setDeduplicate} />
-            <SwitchRow label="Use legacy pairs" hint="pairwise.db import + old labeller file (CLIP Taste, CLIP Siamese, Pairwise)" checked={useLegacy} onChange={setUseLegacy} />
-          </Box>
-          {enableMining && (
-            <Box sx={{ mt: 1.5, maxWidth: 360 }}>
-              <Typography variant="caption" sx={{ color: 'var(--dim)' }}>Failure multiplier: {miningMultiplier}x</Typography>
-              <Slider value={miningMultiplier} min={2} max={10} step={1} onChange={(_, v) => setMiningMultiplier(v)} sx={{ color: 'var(--accent)', py: 1 }} />
-            </Box>
-          )}
+          {isClip && <SwitchRow label="Use legacy pairs" hint="pairwise.db import + old labeller file" checked={useLegacy} onChange={setUseLegacy} />}
           {isClip && (
             <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px solid var(--line)' }}>
               <Typography variant="body2" sx={{ color: 'var(--text)', display: 'flex', justifyContent: 'space-between' }}>

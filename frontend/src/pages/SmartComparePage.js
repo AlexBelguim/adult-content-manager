@@ -5,7 +5,7 @@ import {
   Snackbar, Alert, useMediaQuery
 } from '@mui/material';
 import {
-  ArrowBack, ArrowUpward, ArrowDownward, Settings, Psychology, AutoFixNormal,
+  ArrowBack, ArrowUpward, ArrowDownward, Settings, AutoFixNormal,
   Refresh, Undo, SkipNext, DragHandle, Check
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -18,9 +18,6 @@ const FLASH_MS = 240;
 // The swap is instant, so the second tap of an accidental double tap would
 // land on a set nobody has looked at yet. Votes this soon are ignored.
 const MIN_VIEW_MS = 180;
-// Ask AI runs the performer ranker, which picks the winner in only 49% of duels (2026-10-16).
-// Turn back on once a ranker beats chance on unseen performers.
-const ASK_AI_ENABLED = false;
 
 const previewUrl = (p) => `/api/files/preview?path=${encodeURIComponent(p)}`;
 
@@ -86,7 +83,6 @@ const chipSx = {
 };
 const accentChipSx = { ...chipSx, borderColor: 'var(--accent)', color: 'var(--accent)' };
 const warnChipSx = { ...chipSx, borderColor: 'var(--warn)', color: 'var(--warn)' };
-const aiChipSx = { ...chipSx, borderColor: 'var(--info)', color: 'var(--info)' };
 
 const kbdSx = {
   font: '600 .72rem ui-monospace, monospace', border: '1px solid currentColor',
@@ -101,12 +97,12 @@ const iconBtnSx = (size) => ({
 });
 
 /** Shared look of an action; `round` is the phone-landscape middle column. */
-const actSx = (tone, round) => ({
+const actSx = (round) => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1,
   font: 'inherit', fontWeight: 600, fontSize: '.88rem', whiteSpace: 'nowrap', cursor: 'pointer',
-  color: tone === 'ai' ? 'var(--info)' : 'var(--text)',
+  color: 'var(--text)',
   bgcolor: 'var(--raised)',
-  border: '1px solid', borderColor: tone === 'ai' ? 'var(--info)' : 'var(--line-strong)',
+  border: '1px solid', borderColor: 'var(--line-strong)',
   ...(round
     ? { width: 46, height: 46, borderRadius: '50%', p: 0, flex: 'none' }
     : { height: 46, borderRadius: '8px', minWidth: 0, px: 1 }),
@@ -158,19 +154,14 @@ function SmartComparePage() {
   const [loading, setLoading] = useState(true);
   const [randomPics, setRandomPics] = useState({});
   const [compareList, setCompareList] = useState(location.state?.selection || []);
-  const [inferenceUrl] = useState(localStorage.getItem('pairwiseInferenceUrl') || 'http://localhost:3344');
-  const [aiAnalysis, setAiAnalysis] = useState(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzingStatus, setAnalyzingStatus] = useState('');
+  const [recalibrating, setRecalibrating] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [globalModel, setGlobalModel] = useState(null);
-  const [calibratedStars, setCalibratedStars] = useState({});
   const [performerCount, setPerformerCount] = useState(parseInt(localStorage.getItem('compare_performerCount')) || 2);
   const [picsPerPerformer, setPicsPerPerformer] = useState(parseInt(localStorage.getItem('compare_picsPerPerformer')) || 10);
   const [autoNext, setAutoNext] = useState(true);
-  const [isOrderDirty, setIsOrderDirty] = useState(false);
   const [sessionCount, setSessionCount] = useState(0);
-  const [history, setHistory] = useState([]); // [{ list, pics, ai, cal, voted, tokens }]
+  const [history, setHistory] = useState([]); // [{ list, pics, voted, tokens }]
   const [flash, setFlash] = useState(null);   // { id, index }
   const [toast, setToast] = useState(null);   // { msg, severity }
   const [topOffset, setTopOffset] = useState(64);
@@ -179,7 +170,6 @@ function SmartComparePage() {
   const perfsRef = useRef([]);
   const countRef = useRef(performerCount);
   const picsRef = useRef(picsPerPerformer);
-  const urlRef = useRef(inferenceUrl);
   const listRef = useRef(compareList);
   const nextRef = useRef(null);      // prefetched { list, pics, promise, done }
   const activeSlot = useRef(null);
@@ -310,12 +300,6 @@ function SmartComparePage() {
     setPerformers(perfsRef.current);
   };
 
-  const resetAi = () => {
-    setAiAnalysis(null);
-    setCalibratedStars({});
-    setIsOrderDirty(false);
-  };
-
   const showList = (list, pics) => {
     listRef.current = list;
     setCompareList(list);
@@ -324,7 +308,6 @@ function SmartComparePage() {
   };
 
   const advance = (flashIndex) => {
-    resetAi();
     const slot = nextRef.current;
     if (slot) {
       activeSlot.current = slot;
@@ -350,7 +333,7 @@ function SmartComparePage() {
 
   /** Record what Undo restores, then move on (or leave, if auto-advance is off). */
   const finishVote = ({ voted, tokens }, flashIndex) => {
-    setHistory(h => [...h, { list: compareList, pics: randomPics, ai: aiAnalysis, cal: calibratedStars, voted, tokens }]);
+    setHistory(h => [...h, { list: compareList, pics: randomPics, voted, tokens }]);
     if (voted) setSessionCount(n => n + 1);
     if (!autoNext) {
       Promise.resolve(tokens).catch(() => null).then(() => navigate(backTo));
@@ -420,9 +403,6 @@ function SmartComparePage() {
     activeSlot.current = null;
     setFlash(null);
     showList(entry.list, entry.pics);
-    setAiAnalysis(entry.ai);
-    setCalibratedStars(entry.cal);
-    setIsOrderDirty(false);
 
     if (!entry.tokens) return;
     enqueue(async () => {
@@ -448,42 +428,10 @@ function SmartComparePage() {
     [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
     listRef.current = next;
     setCompareList(next);
-    setIsOrderDirty(true);
-  };
-
-  const updateCalibratedStars = useCallback(async (currentCompareList, currentAiScores) => {
-    if (!currentAiScores || Object.keys(currentAiScores).length === 0) return;
-    try {
-      const manualRatings = {};
-      currentCompareList.forEach(p => {
-        if (p.manual_star > 0 && !p.is_flagged) manualRatings[p.id] = p.manual_star;
-      });
-      const data = await postJson('/api/performers/predict-batch', {
-        performers: currentCompareList.map(p => ({
-          id: p.id, raw_ai_score: p.raw_ai_score, performer_rating: p.performer_rating
-        })),
-        manual_ratings: manualRatings,
-        ranks: currentCompareList.map(p => p.id),
-        ai_server_url: urlRef.current
-      });
-      // Only the displayed prediction stars change — the user's ordering is
-      // preserved until they press "Save rankings".
-      if (data.success && data.predictions) setCalibratedStars(data.predictions);
-    } catch (err) {
-      notify('Batch prediction failed: ' + err.message, 'error');
-    }
-  }, [notify]);
-
-  const handleApplyOrder = () => {
-    if (aiAnalysis?.scores) {
-      updateCalibratedStars(compareList, aiAnalysis.scores);
-      setIsOrderDirty(false);
-    }
   };
 
   const handleRecalibrate = async () => {
-    setAnalyzing(true);
-    setAnalyzingStatus('Recalibrating…');
+    setRecalibrating(true);
     try {
       const data = await postJson('/api/performers/calibrate', {});
       if (data.success) {
@@ -495,7 +443,7 @@ function SmartComparePage() {
     } catch (err) {
       notify('Calibration failed: ' + err.message, 'error');
     } finally {
-      setAnalyzing(false);
+      setRecalibrating(false);
     }
   };
 
@@ -516,69 +464,12 @@ function SmartComparePage() {
     }
   };
 
-  /** Star resolution: this session's Ranker result, else calibrated, else score/20. */
-  const scoreToStars = (score, perfId) => {
-    if (aiAnalysis?.rawRankResults && aiAnalysis.rawRankResults[perfId] !== undefined) {
-      return aiAnalysis.rawRankResults[perfId].toFixed(2);
-    }
-    const val = calibratedStars[perfId] ?? (score / 20) ?? 0;
-    return (isNaN(val) ? 0 : val).toFixed(2);
-  };
-
-  const handleAiAnalyze = async () => {
-    if (compareList.length < 2 || analyzing) return;
-    const list = compareList;
-    setAnalyzing(true);
-    setAiAnalysis(null);
-    setAnalyzingStatus(`Analyzing ${list.length}…`);
-    try {
-      const data = await postJson('/api/training/predict-ranks-batch', {
-        performerIds: list.map(p => p.id),
-        ai_server_url: urlRef.current,
-        limit: picsRef.current
-      });
-      if (!data.success) throw new Error(data.error || 'Prediction failed');
-      if (listRef.current !== list) return; // the set changed while the AI was thinking
-
-      const results = data.results; // performerId -> predicted rank (0-5)
-      const scoresMap = {};
-      let bestScore = -1;
-      let winnerId = null;
-      list.forEach(performer => {
-        const rank = results[performer.id];
-        if (rank !== undefined) {
-          const score = (rank / 5) * 100;
-          scoresMap[performer.id] = score;
-          if (score > bestScore) { bestScore = score; winnerId = performer.id; }
-        }
-      });
-      setAiAnalysis({ winnerId, scores: scoresMap, rawRankResults: results });
-
-      // Order the list by the AI's stars, highest first
-      const sorted = [...list].sort((a, b) => (results[b.id] ?? -1) - (results[a.id] ?? -1));
-      listRef.current = sorted;
-      setCompareList(sorted);
-      setIsOrderDirty(false);
-
-      // Save scores to DB for calibration
-      for (const [id, score] of Object.entries(scoresMap)) {
-        postJson(`/api/performers/${id}/ai-score`, { score }).catch(() => {});
-      }
-      updateCalibratedStars(list, scoresMap);
-    } catch (err) {
-      notify('AI analysis failed: ' + err.message, 'error');
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
   const changeCount = (v) => {
     setPerformerCount(v);
     countRef.current = v;
     clearTimeout(sliderTimer.current);
     sliderTimer.current = setTimeout(() => {
       if (perfsRef.current.length < 2) return;
-      resetAi();
       const list = performSmartSelection(perfsRef.current, v);
       showList(list, {});
       loadPicsFor(list);
@@ -609,7 +500,6 @@ function SmartComparePage() {
     draw: handleDraw,
     skip: handleSkip,
     undo: handleUndo,
-    ask: ASK_AI_ENABLED ? handleAiAnalyze : null,
     save: handleSaveRankings,
     escape: () => setShowSettings(false),
     blocked: showSettings
@@ -631,7 +521,6 @@ function SmartComparePage() {
       else if (k === 'x') run = a.draw;
       else if (k === 's') run = a.skip;
       else if (k === 'z') run = a.undo;
-      else if (k === 'i') run = a.ask;
       else if (k === 'enter') run = a.save;
       if (!run) return;
       e.preventDefault();
@@ -645,17 +534,12 @@ function SmartComparePage() {
     { id: 'undo', label: 'Undo', kbd: 'Z', icon: <Undo fontSize="small" />, onClick: handleUndo, disabled: history.length === 0 },
     { id: 'draw', label: 'Draw', kbd: 'X', icon: <DragHandle fontSize="small" />, onClick: handleDraw, disabled: !duel },
     { id: 'skip', label: 'Skip / Next', kbd: 'S', icon: <SkipNext fontSize="small" />, onClick: handleSkip, disabled: compareList.length === 0 },
-    {
-      id: 'ask', label: !ASK_AI_ENABLED ? 'Ask AI (off)' : analyzing ? analyzingStatus : 'Ask AI', kbd: 'I', tone: 'ai',
-      icon: analyzing ? <CircularProgress size={16} color="inherit" /> : <Psychology fontSize="small" />,
-      onClick: handleAiAnalyze, disabled: !ASK_AI_ENABLED || analyzing || compareList.length < 2
-    },
     ...(multi ? [{ id: 'save', label: 'Save rankings', kbd: '↵', icon: <Check fontSize="small" />, onClick: handleSaveRankings, disabled: false }] : [])
   ];
 
   const roundBtn = (a) => (
     <Box component="button" key={a.id} onClick={a.onClick} disabled={a.disabled}
-      title={a.label} aria-label={a.label} sx={actSx(a.tone, true)}>
+      title={a.label} aria-label={a.label} sx={actSx(true)}>
       {a.icon}
     </Box>
   );
@@ -674,15 +558,9 @@ function SmartComparePage() {
     <Box component="img" alt="" src={performer.thumbnail ? previewUrl(performer.thumbnail) : ''}
       sx={{
         width: size, height: size, borderRadius: '50%', objectFit: 'cover', flex: 'none', bgcolor: 'var(--raised)',
-        border: '2px solid', borderColor: aiAnalysis?.winnerId === performer.id ? 'var(--info)' : 'transparent'
+        border: '2px solid transparent'
       }} />
   );
-
-  const aiBadge = (performer) => {
-    const aiScore = aiAnalysis?.scores?.[performer.id];
-    if (aiScore === undefined) return null;
-    return <Box component="span" sx={aiChipSx}>AI {scoreToStars(aiScore, performer.id)}★</Box>;
-  };
 
   const duelColumn = (performer, index) => {
     const pics = randomPics[performer.id];
@@ -705,7 +583,6 @@ function SmartComparePage() {
             <Stars value={performer.performer_rating} compact={isLandscape} />
           </Box>
           <DuelBadge count={performer.comparison_count} />
-          {aiBadge(performer)}
           <Box component="button" onClick={(e) => { e.stopPropagation(); refreshPhotos(performer); }}
             title="Refresh photos" aria-label="Refresh photos" sx={iconBtnSx(isLandscape ? 30 : 36)}>
             <Refresh sx={{ fontSize: 16 }} />
@@ -746,15 +623,13 @@ function SmartComparePage() {
 
   const multiRow = (performer, index) => {
     const pics = randomPics[performer.id];
-    const aiScore = aiAnalysis?.scores?.[performer.id];
-    const isWinner = aiAnalysis?.winnerId === performer.id;
     return (
       <motion.div key={performer.id} layout transition={{ duration: 0.2 }}>
         <Box onClick={() => handlePick(performer)} title="Click to pick as the winner" sx={{
           display: 'grid', gap: isLandscape ? 1 : 1.25, alignItems: 'center', cursor: 'pointer',
           gridTemplateColumns: isPortraitPhone ? '40px minmax(0, 1fr)'
-            : isLandscape ? '40px 130px minmax(0, 1fr) 70px' : '54px 190px minmax(0, 1fr) 120px',
-          bgcolor: 'var(--surface)', border: '1px solid', borderColor: isWinner ? 'var(--info)' : 'var(--line)',
+            : isLandscape ? '40px 130px minmax(0, 1fr)' : '54px 190px minmax(0, 1fr)',
+          bgcolor: 'var(--surface)', border: '1px solid', borderColor: 'var(--line)',
           borderRadius: '8px', p: isLandscape ? 0.5 : 1,
           '&:hover': { borderColor: 'var(--ok)' }
         }}>
@@ -796,17 +671,6 @@ function SmartComparePage() {
               ))}
           </Box>
 
-          {!isPortraitPhone && (
-            <Box sx={{
-              border: '1px solid var(--line-strong)', borderRadius: '6px', p: 0.75, textAlign: 'center',
-              fontSize: '.72rem', color: 'var(--muted)'
-            }}>
-              AI prediction
-              <Typography sx={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--info)' }}>
-                {aiScore !== undefined ? `${scoreToStars(aiScore, performer.id)} ★` : '–'}
-              </Typography>
-            </Box>
-          )}
         </Box>
       </motion.div>
     );
@@ -887,11 +751,6 @@ function SmartComparePage() {
         {!compact && <Box component="span" sx={chipSx}>{globalModel ? 'Model active' : 'Default prior'}</Box>}
         <Box component="span" sx={accentChipSx}>{sessionCount} this session</Box>
         <Box sx={{ flex: 1 }} />
-        {isOrderDirty && (
-          <Button variant="contained" size="small" startIcon={<AutoFixNormal />} onClick={handleApplyOrder}>
-            Re-ask AI
-          </Button>
-        )}
         <Box component="label" sx={ctrlSx}>
           Performers: <b>{performerCount}</b>
           <input type="range" min={2} max={10} value={performerCount} aria-label="Performers per set"
@@ -899,7 +758,7 @@ function SmartComparePage() {
         </Box>
         {!compact && (
           <Box component="label" sx={ctrlSx}>
-            AI photos: <b>{picsPerPerformer === ALL_PICS ? 'All' : picsPerPerformer}</b>
+            Photos: <b>{picsPerPerformer === ALL_PICS ? 'All' : picsPerPerformer}</b>
             <input type="range" min={1} max={ALL_PICS} value={picsPerPerformer} aria-label="Photos per performer"
               onChange={(e) => changePics(Number(e.target.value))} style={sliderStyle} />
           </Box>
@@ -928,7 +787,7 @@ function SmartComparePage() {
         }}>
           {actions.map((a) => (
             <Box component="button" key={a.id} onClick={a.onClick} disabled={a.disabled}
-              title={a.label} aria-label={a.label} sx={actSx(a.tone, false)}>
+              title={a.label} aria-label={a.label} sx={actSx(false)}>
               {a.icon}
               {!isPortraitPhone && (
                 <>
@@ -946,15 +805,6 @@ function SmartComparePage() {
         <DialogTitle sx={{ fontWeight: 700 }}>Comparison settings</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2.5, fontSize: '.86rem' }}>
-            <Box>
-              <Typography sx={{ fontSize: '.7rem', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>AI server</Typography>
-              <Typography sx={{ color: 'var(--dim)', fontSize: '.86rem', mt: 0.5 }}>
-                <Box component="span" sx={{ fontFamily: 'ui-monospace, monospace', color: 'var(--text)' }}>{inferenceUrl}</Box>
-                {' — change it in the '}
-                <Box component="span" onClick={() => { setShowSettings(false); navigate('/ai-training'); }}
-                  sx={{ color: 'var(--accent)', cursor: 'pointer' }}>AI & Training</Box>
-              </Typography>
-            </Box>
             <Box component="label" sx={{ display: 'flex', gap: 1.5, alignItems: 'center', cursor: 'pointer' }}>
               <Box sx={{ flex: 1 }}>
                 <Typography sx={{ fontWeight: 700, fontSize: '.86rem' }}>Auto-advance (endless mode)</Typography>
@@ -968,7 +818,7 @@ function SmartComparePage() {
               <Typography sx={{ color: 'var(--dim)', fontSize: '.86rem', my: 0.5 }}>
                 Current model strength: {globalModel ? (globalModel.n_effective || 0).toFixed(1) : 0} ratings
               </Typography>
-              <Button variant="outlined" size="small" startIcon={<AutoFixNormal />} onClick={handleRecalibrate} disabled={analyzing}>
+              <Button variant="outlined" size="small" startIcon={<AutoFixNormal />} onClick={handleRecalibrate} disabled={recalibrating}>
                 Recalibrate global model
               </Button>
             </Box>

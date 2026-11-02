@@ -31,10 +31,6 @@ import {
   OpenInNew as OpenInNewIcon
 } from '@mui/icons-material';
 
-// Rate Performer (AI) runs the performer ranker, which picks the winner in only 49% of duels (2026-10-16).
-// Turn back on once a ranker beats chance on unseen performers. Same switch as ASK_AI_ENABLED in SmartComparePage.
-const RATE_AI_ENABLED = false;
-
 // Dark theme modal styles (matching UploadQueuePage)
 const darkModalStyles = {
   container: {
@@ -154,7 +150,6 @@ function PerformerSettingsModal({
   // Hash actions state
   const [isCreatingHash, setIsCreatingHash] = useState(false);
   const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
-  const [isPredictingRank, setIsPredictingRank] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     if (!performer?.id) return;
@@ -520,31 +515,6 @@ function PerformerSettingsModal({
     }
   };
   
-  const handlePredictRank = async () => {
-    if (!performer?.id || isPredictingRank) return;
-    
-    setIsPredictingRank(true);
-    try {
-      const response = await fetch('/api/training/predict-performer-rank', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ performerId: performer.id, sample_size: 200 })
-      });
-      
-      const data = await response.json();
-      if (data.success) {
-        alert(`⭐ AI Predicted Rating for ${performer.name}:\n\n${data.predicted_rank.toFixed(2)} Stars\n(Analyzed ${data.sample_size} images)`);
-      } else {
-        alert(`Rank Prediction Failed: ${data.error || 'Unknown error'}\n\nNote: Make sure a Ranker model is loaded in the Training Hub.`);
-      }
-    } catch (error) {
-      console.error('Error predicting rank:', error);
-      alert('Error predicting rank: ' + error.message);
-    } finally {
-      setIsPredictingRank(false);
-    }
-  };
-
   const handleMoveToAfter = async (merge = false) => {
     if (!performer?.id) return;
 
@@ -782,35 +752,6 @@ function PerformerSettingsModal({
             <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
 
             {/* AI Insights Section */}
-            <Box sx={darkModalStyles.section}>
-              <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                <RefreshIcon sx={{ color: 'var(--accent)' }} />
-                AI Insights
-              </Typography>
-              <Box sx={darkModalStyles.card}>
-                <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
-                  {RATE_AI_ENABLED
-                    ? "Use the active AI Ranker model to estimate this performer's star rating based on their content."
-                    : 'Off until a performer ranker beats chance: the current one picks the right winner in 49% of duels.'}
-                </Typography>
-                <Button
-                  variant="contained"
-                  onClick={handlePredictRank}
-                  disabled={!RATE_AI_ENABLED || isPredictingRank}
-                  startIcon={isPredictingRank ? <CircularProgress size={20} /> : <RefreshIcon />}
-                  sx={{ 
-                    ...darkModalStyles.gradientButton,
-                    background: 'linear-gradient(135deg, var(--accent) 0%, #6d28d9 100%)',
-                    '&:hover': { background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)' }
-                   }}
-                >
-                  {!RATE_AI_ENABLED ? 'Rate Performer (AI) (off)' : isPredictingRank ? 'Analyzing Content...' : 'Rate Performer (AI)'}
-                </Button>
-              </Box>
-            </Box>
-
-            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
-
             {/* Stats & Cache Sync Section */}
             <Box sx={darkModalStyles.section}>
               <Typography variant="h6" sx={darkModalStyles.sectionTitle}>

@@ -1,59 +1,22 @@
-# Pairwise Modeling Architecture & Comparison
+# The Picture Models
 
-This document explains the different machine learning models available in the Pairwise Labeling system, their strengths, weaknesses, and use cases.
+The models that judge pictures and what they train on. Their results so far are on the AI & Training page, under Models ("Results so far"). acm-gpu trains and runs them; this app holds the labels and the training queue.
 
-## Overview of Models
-
-Currently, the system uses **DINOv2** (Vision Transformer) from Meta AI as the core backbone for all visual understanding.
-
-| Model Type | Focus | Use Case |
-| :--- | :--- | :--- |
-| **Pairwise (Elo)** | Relative Preference | Ranking performers or images from best to worst. |
-| **Binary (Simple)** | Absolute Quality | Quick filtering (Keep vs. Delete). |
-| **Context-Aware Binary** | Personalized Quality | Filtering based on the "baseline" of a specific performer. |
-
----
-
-## 1. Pairwise Preference Model (`train_dinov2.py`)
-This model is trained on "Image A vs. Image B" samples. It learns which features make one image superior to another.
-
-*   **Pros:**
-    *   **High Precision:** Extremely good at fine-grained differences (e.g., better lighting, better pose).
-    *   **Scale Invariant:** Works well even if your "taste" changes over time, as it only cares about which of two images is better *now*.
-    *   **Active Learning:** Used to drive the "Next Pair" selection to find the most uncertain rankings.
-*   **Cons:**
-    *   **Data Intensive:** Requires many comparisons to build a stable Elo ranking.
-    *   **No Absolute Baseline:** It knows A is better than B, but it doesn't inherently know if both are "garbage" or both are "perfect."
-
-## 2. Simple Binary Model (`train_binary.py`)
-A standard classifier trained on your `Keep` (After Filter) and `Delete` (Training) folders.
-
-*   **Pros:**
-    *   **Fast Training:** Learns a general "quality" threshold quickly.
-    *   **Direct Application:** Can be used to automatically sort new images into "Keep" or "Delete" buckets.
-*   **Cons:**
-    *   **Subject Bias:** Tends to collapse if you like one performer much more than another. It might learn "Blonde = Keep" just because your favorite performer is blonde, failing on other performers.
-    *   **Global Average:** It tries to find one single rule for everything, which often fails because "good" for a home-photo is different from "good" for a professional studio photo.
-
-## 3. Context-Aware Binary Model (`train_context_binary.py`) [NEW]
-This model "views" a performer's entire gallery (average embedding) before judging a specific image.
-
-*   **Pros:**
-    *   **Personalized:** Understands that "Keep" criteria for Performer A might be different than for Performer B.
-    *   **Performer Baseline:** Learns the "typical" look of a performer so it can identify when a specific photo is better or worse than their usual standard.
-    *   **Highest Accuracy:** Best for mixed libraries where you have varying standards for different performers.
-*   **Cons:**
-    *   **Complex Inference:** Requires computing or storing the "performer profile" (average embedding) before it can judge a single image.
-    *   **Cold Start:** Needs at least 5-10 images of a performer to build a reliable context profile.
-
----
-
-## Technical Comparison
-
-| Feature | Pairwise | Simple Binary | Context-Aware Binary |
+| Model | Type | Answers | Trains on |
 | :--- | :--- | :--- | :--- |
-| **Backbone** | DINOv2 Large | DINOv2 Large | DINOv2 Large |
-| **Input** | 2 Images | 1 Image | 1 Image + Performer Gallery |
-| **Output** | Probability (A > B) | Keep Probability (0-1) | Keep Probability (0-1) |
-| **Bias Resistance** | High | Low | Medium-High |
-| **Inference Speed** | Medium | Fast | Slow (or requires cache) |
+| **CLIP Siamese** (1st order) | `clip_siamese` | An order inside one performer | Kept > deleted pairs of each performer, plus your same-performer hand pairs |
+| **CLIP Taste** (2nd order) | `clip_taste` | A keep % with a fixed 50% line | The same, plus disliked and blacklisted performers, stars 2+ apart and hand pairs across performers |
+| **K** (keep / delete) | `clip_keepdelete` | A keep % with a fixed 50% line | Keeps and deletes alone; the filter view's AI toggle refits it on the performer you are sorting |
+
+P and P2, the performer models of the profile page, are separate: they run in acm-gpu by themselves.
+
+## Where the labels come from
+
+- **Keep and delete folders:** `after filter performer` and `deleted keep for training`, pushed to acm-gpu from the Train tab.
+- **Rank images** (`/pairwise-rank`): saved straight to the app's `pairwise_pairs`, so they train the CLIP models at once.
+- **The Labeler** (`/pairwise`, `/pairwise-mobile`): saved by the labelling server (`npm run start:pairwise`) in `backend-pairwise/pairwise.db`. They reach the CLIP models through `backend/scripts/import_pairwise_db.js`, which can be run again: pairs already imported are skipped.
+- **Smart Compare and Group Rate:** performer ratings and duels. CLIP Taste uses the stars to pick pairs.
+
+## Removed on 2026-11-02
+
+Simple Binary (`binary`), Ranked Binary (`ranked_binary`), DINO Pairwise Preference (`pairwise`) and Performer Ranker (`performer_ranker`). They added nothing in tests: CLIP Siamese beats the DINO models on keep vs delete and on your own pairs, and the ranker picked the winner in 49% of duels. Their old files still show under Models, where they can be deleted; nothing can train or load them. The Context-Aware Binary that only ran from `backend-pairwise/python` went with them.
