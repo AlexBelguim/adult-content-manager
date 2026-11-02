@@ -75,6 +75,7 @@ h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 650; text-transform: upper
 .card em { position: absolute; right: 5px; top: 5px; font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; border-radius: 3px; padding: 0 5px; line-height: 15px; text-transform: uppercase; }
 .card em.babepedia { background: var(--info); color: var(--bg); }
 .card em.boobpedia { background: var(--warn); color: var(--bg); }
+.card em.discover { background: var(--accent); color: var(--on-accent); }
 
 .box { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); padding: 12px; }
 .dist { display: grid; grid-template-columns: 76px 1fr 34px; gap: 3px 8px; align-items: center; font-size: .76rem; }
@@ -97,6 +98,8 @@ h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 650; text-transform: upper
 .card b.v.keep { background: var(--ok); } .card b.v.delete { background: var(--bad); } .card b.v.bad { background: var(--warn); }
 .card b.v.app { top: auto; bottom: 46px; background: var(--info); }
 .card b.v.guess { left: auto; right: 5px; top: 24px; opacity: .9; }
+.card b.v.update { left: auto; right: 5px; top: 43px; }
+.card b.v.update.red { background: var(--bad); } .card b.v.update.green { background: var(--ok); }
 /* after a swipe the screen's edge flashes green when the model guessed the same, red when not (as components/filter/filter.css) */
 .dflash { position: fixed; inset: 0; z-index: 25; pointer-events: none; animation: dflash .9s ease-out forwards; }
 .dflash.agree { box-shadow: inset 0 0 0 5px var(--ok), inset 0 0 120px var(--ok); }
@@ -316,7 +319,7 @@ a { color: var(--accent); }
       <button class="btn phone" id="filters">Filters</button>
       <select class="select" id="sort">
         <option value="popular">Popular first</option><option value="newest">Newest first</option><option value="name">Name</option><option value="age">Age</option><option value="cup">Cup</option>
-        <option value="likely">Model: likely keep first</option><option value="unsure">Model: unsure first</option><option value="p2">Your ranking (duels)</option><option value="lists">Your sorted lists</option>
+        <option value="likely">Model: likely keep first</option><option value="unsure">Model: unsure first</option><option value="p2">Your ranking (duels)</option><option value="lists">Your sorted lists</option><option value="discover">From Discover</option><option value="uploaded">Uploaded</option>
       </select>
       <label class="sub" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="guess" checked style="accent-color:var(--accent)"> Model guesses</label>
       <label class="sub" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="hide" checked style="accent-color:var(--accent)"> Hide judged</label>
@@ -404,8 +407,12 @@ async function load() {
 }
 // Hide judged keeps the grid to performers without a verdict, unless the Your verdict filter asks for judged ones
 const hiding = () => $('hide').checked && !on.label?.size;
+// the From Discover and Uploaded sorts show only those records
+const ORIGIN_SORTS = { discover: 'scanner', uploaded: 'upload' };
+const originOf = () => ORIGIN_SORTS[$('sort').value];
 const match = (p, skip) => Object.entries(on).every(([k, vals]) => k === skip || !vals.size || vals.has(String(p[k])))
   && (skip === 'label' || !hiding() || p.label === 'not yet')
+  && (!originOf() || p.origin === originOf())
   && (!$('q').value || p.name.toLowerCase().includes($('q').value.toLowerCase()));
 
 function render() {
@@ -417,6 +424,7 @@ function render() {
     : sort === 'p2' ? (a, b) => (b.p2 ?? -1e9) - (a.p2 ?? -1e9)
     : sort === 'lists' ? (a, b) => (a.lpos ?? 1e12) - (b.lpos ?? 1e12)
     : sort === 'unsure' ? (a, b) => Math.abs((a.pred ?? 9) - 0.5) - Math.abs((b.pred ?? 9) - 0.5)
+    : originOf() ? (a, b) => (a.label !== 'not yet') - (b.label !== 'not yet') || String(b.origin_at || '').localeCompare(String(a.origin_at || ''))
     : sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : sort === 'age' ? (a, b) => (a.age ?? 99) - (b.age ?? 99)
     : sort === 'cup' ? (a, b) => cupN(b.cup) - cupN(a.cup) : (a, b) => b.i - a.i);
   order = shown;
@@ -425,7 +433,7 @@ function render() {
   $('sub').textContent = `Babepedia ${bySite('babepedia')} · Boobpedia ${bySite('boobpedia')} · ${all.reduce((n, p) => n + p.pictures, 0).toLocaleString()} pictures`;
   $('grid').innerHTML = shown.slice(0, 600).map((p, j) => {
     const tags = [p.rank && `#${p.rank}`, p.age && `${p.age}`, p.ethnicity, p.hair, p.body, p.cup && `${p.cup}${p.natural === 'enhanced' ? ' (enh.)' : ''}`].filter(Boolean).join(' · ');
-    return `<button class="card" data-j="${j}"><img loading="lazy" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}" alt=""><em class="${p.site}">${p.site === 'babepedia' ? 'BP' : 'BB'}</em>${p.label !== 'not yet' ? `<b class="v ${p.label}">${vname(p.label)}</b>` : ''}${p.in_app ? '<b class="v app">in your app</b>' : ''}${$('guess').checked && p.pred != null ? `<b class="v guess ${p.pred >= 0.5 ? 'keep' : 'delete'}">model ${Math.round(p.pred * 100)}%</b>` : ''}<div class="info"><div class="nm">${esc(p.name)}</div><div class="tags">${esc(tags)}</div></div></button>`;
+    return `<button class="card" data-j="${j}"><img loading="lazy" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}" alt=""><em class="${p.site}">${{ babepedia: 'BP', discover: 'D' }[p.site] || 'BB'}</em>${p.update_mark ? `<b class="v update ${p.update_mark}">Update</b>` : ''}${p.label !== 'not yet' ? `<b class="v ${p.label}">${vname(p.label)}</b>` : ''}${p.in_app ? '<b class="v app">in your app</b>' : ''}${$('guess').checked && p.pred != null ? `<b class="v guess ${p.pred >= 0.5 ? 'keep' : 'delete'}">model ${Math.round(p.pred * 100)}%</b>` : ''}<div class="info"><div class="nm">${esc(p.name)}</div><div class="tags">${esc(tags)}</div></div></button>`;
   }).join('') + (shown.length > 600 ? `<p class="hint" style="grid-column:1/-1">Showing the first 600; filter to see the rest.</p>` : '');
   $('facets').innerHTML = FACETS.map(([k, label]) => {
     const counts = {};
@@ -504,9 +512,9 @@ async function open(j) {
   $('strip').innerHTML = r.pictures.map(f => `<img data-f="${f}" src="/api/profile/thumb?site=${p.site}&slug=${encodeURIComponent(p.slug)}&file=${f}" alt="">`).join('');
   $('strip').onclick = e => e.target.dataset.f && show(e.target.dataset.f);
   const f = r.fields;
-  const rows = Object.entries(f).filter(([k]) => k !== 'categories').map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('');
+  const rows = Object.entries(f).filter(([k, v]) => k !== 'categories' && v != null).map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('');
   $('side').innerHTML = `<div class="mbar"><button class="mprev" aria-label="Back">‹</button><button class="vbtn keep" data-v="keep">Keep</button><button class="vbtn love" data-v="love" title="Love" aria-label="Love">★</button><button class="vbtn delete" data-v="delete">Delete</button><button class="vbtn superwrong" data-v="superwrong" title="Super wrong" aria-label="Super wrong">✕✕</button><button class="vbad" data-v="bad" title="Bad data: no usable picture" aria-label="Bad data">!</button><button class="mnext" aria-label="Next unlabelled">›</button></div>
-    <h2>${esc(r.name)}</h2><span class="sub">${j + 1} of ${order.length} · ${r.site} · <a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></span>
+    <h2>${esc(r.name)}</h2><span class="sub">${j + 1} of ${order.length} · ${r.site}${r.url ? ` · <a href="${esc(r.url)}" target="_blank" rel="noopener">source</a>` : ''}</span>
     <div class="vrow"><button class="vbtn keep" data-v="keep">Keep <kbd>F</kbd></button><button class="vbtn love" data-v="love">★ Love <kbd>R</kbd></button><button class="vbtn delete" data-v="delete">Delete <kbd>D</kbd></button></div>
     <button class="vbtn superwrong side-wrong" data-v="superwrong" title="A delete P got badly wrong; can count heavier (Training data)">✕✕ Super wrong <kbd>E</kbd></button>
     <button class="vbad side-bad" data-v="bad">Bad data: no usable picture <kbd>Q</kbd></button>

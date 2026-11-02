@@ -16,6 +16,7 @@ import MovieFilterIcon from '@mui/icons-material/MovieFilter';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import useJobs, { jobPercent } from '../hooks/useJobs';
 
 /** One icon per job type — shared with the Jobs page so the two never drift. */
@@ -26,7 +27,8 @@ export const JOB_TYPE_ICONS = {
   hash: VpnKeyIcon,
   encode: MovieFilterIcon,
   cleanup: CleaningServicesIcon,
-  train: PsychologyIcon
+  train: PsychologyIcon,
+  discover: TravelExploreIcon
 };
 
 /** The one progress bar for jobs. Indeterminate when the source reports no progress. */

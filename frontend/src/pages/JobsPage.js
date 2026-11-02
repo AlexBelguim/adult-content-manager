@@ -39,7 +39,8 @@ const START_LINKS = [
   ['import', 'Import a folder', '/local-import'],
   ['funpipe', 'Queue funscripts', '/funpipe'],
   ['hash', 'Build hash DB', '/performer-management'],
-  ['encode', 'Re-encode for space', '/settings/space']
+  ['encode', 'Re-encode for space', '/settings/space'],
+  ['discover', 'Discover performers', '/discover']
 ];
 
 // ── formatting ───────────────────────────────────────────────
@@ -126,6 +127,10 @@ function capabilities(j) {
     case 'cleanup':
       cap.remove = finished;
       cap.why = 'File operations run to the end once started';
+      break;
+    case 'discover':
+      cap.cancel = j.status === 'running' && j.sourceId === 'hand';
+      cap.why = 'Discover runs start from its page';
       break;
     default: // train: the training queue (Cancel stops a running run on its next report)
       cap.cancel = j.status === 'running';
@@ -261,7 +266,7 @@ function JobRow({ job, open, busy, onToggle, onCancel, onRemove, onRetry, onFron
         )}
         {job.link && (
           <SmallButton onClick={onLink} endIcon={<OpenInNewIcon sx={{ fontSize: '13px !important' }} />}>
-            {job.linkLabel || 'Training Hub'}
+            {job.linkLabel || (job.type === 'discover' ? 'Discover' : 'Training Hub')}
           </SmallButton>
         )}
         {cap.retry && <SmallButton disabled={busy} onClick={onRetry}>Retry</SmallButton>}
@@ -363,7 +368,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
   const countBy = (list, key, val) => list.filter(j => j[key] === val).length;
 
   const retryable = typed.filter(j => capabilities(j).retry);
-  const finishedInScope = typed.filter(j => j.status === 'done');
+  const finishedInScope = typed.filter(j => j.status === 'done' && j.type !== 'discover');   // nothing to clear: a Discover run leaves by itself
 
   const fpOnline = services ? services.funpipe.online : null;
   const fpRunning = !!services?.funpipe.workerRunning;
@@ -393,6 +398,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
     if (j.type === 'import') return send('DELETE', `/api/upload-queue/${encodeURIComponent(j.sourceId)}`);
     if (j.type === 'funpipe') return post('/api/funpipe/queue/remove', { id: j.sourceId });
     if (j.type === 'encode') return send('DELETE', `/api/encode/jobs/${j.sourceId}`);   // a running one is stopped
+    if (j.type === 'discover') return post('/api/discovery/pause');
     if (j.type === 'train') return j.status === 'queued' || j.status === 'running' ? post(`/api/training/jobs/${j.sourceId}/cancel`) : send('DELETE', `/api/training/jobs/${j.sourceId}`);
     if (j.type === 'hash' && j.local) return dropLocalHash([j.sourceId]);
     return post('/api/jobs/dismiss', { ids: [j.id] });
@@ -479,7 +485,7 @@ export default function JobsPage({ hashQueue, setHashQueue }) {
     <PageShell>
       <PageHeader
         title="Jobs"
-        subtitle="Everything running in the background — imports, labels and funscripts, hashing, encoding, cleanup and training"
+        subtitle="Everything running in the background — imports, labels and funscripts, hashing, encoding, cleanup, training and Discover"
         actions={(
           <>
             <Button size="small" variant="outlined" disabled={finishedInScope.length === 0} onClick={clearFinished}>

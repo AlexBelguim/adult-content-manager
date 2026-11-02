@@ -18,7 +18,8 @@ export const JOB_TYPES = {
   hash: 'Hashing',
   encode: 'Encoding',
   cleanup: 'Cleanup',
-  train: 'Training'
+  train: 'Training',
+  discover: 'Discover'
 };
 
 const HASH_STATUS = { queued: 'queued', processing: 'running', completed: 'done', error: 'failed' };
