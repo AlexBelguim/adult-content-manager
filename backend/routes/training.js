@@ -1019,7 +1019,7 @@ router.post('/ai-load-model', async (req, res) => {
     const response = await axios.post(`${aiUrl}/load_model`, { model_id }, { timeout: 10000 });
     res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to load model', message: err.message });
+    res.status(err.response?.status || 500).json({ error: 'Failed to load model', message: err.response?.data?.message || err.message });
   }
 });
 

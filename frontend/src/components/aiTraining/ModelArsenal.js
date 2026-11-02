@@ -84,7 +84,8 @@ export default function ModelArsenal({
             const result = testResults[m.filename];
             const isTesting = testingModel === m.filename;
             const isLoadingThis = loadingModel === m.filename;
-            const deleteButton = (
+            // only the removed types' old files: a kept model may be the only one there is
+            const deleteButton = tInfo.removed && (
               <IconButton size="small" aria-label={`Delete ${m.filename}`} onClick={() => handleDelete(m)} sx={{ color: 'var(--faint)', '&:hover': { color: 'var(--bad)' } }}>
                 <DeleteOutline sx={{ fontSize: 16 }} />
               </IconButton>
