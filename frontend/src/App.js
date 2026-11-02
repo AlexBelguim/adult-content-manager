@@ -620,7 +620,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
             <Route path="/funpipe" element={shell(<FunpipePage />)} />
             <Route path="/jobs" element={shell(<JobsPage hashQueue={hashQueue} setHashQueue={setHashQueue} />)} />
             <Route path="/settings/space" element={shell(<SpacePage />)} />
-            <Route path="/discover" element={shell(<DiscoverPage />)} />
+            <Route path="/discover" element={isPhone ? <DiscoverPage /> : shell(<DiscoverPage />)} />
             {/* Chrome-free: replaces the fullscreen modal the gallery used to
                 open, so like the modal it takes the whole viewport. */}
             <Route path="/player" element={

@@ -3,7 +3,7 @@ import {
   Box, Typography, InputBase, IconButton, CircularProgress,
   Menu, MenuItem, Button
 } from '@mui/material';
-import { Search, Sort, Refresh } from '@mui/icons-material';
+import { Search, Sort, Refresh, Apps } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import MobilePerformerList from './MobilePerformerList';
 // The shared filter view carries its own phone layout (swipe, round buttons,
@@ -78,6 +78,13 @@ const MODES = [
   { key: 'score', label: 'Score', route: '/smart-compare' }
 ];
 const LIST_MODES = MODES.filter((m) => !m.route).map((m) => m.key);
+// The pages beyond the library, behind one button so the mode row stays four wide. The profile page is a
+// page of its own (public/profile.html), not a route: it's opened in place, which stays inside the installed app.
+const PAGES = [
+  { label: 'Discover', route: '/discover' },
+  { label: 'Profile page', href: '/profile.html' },
+  { label: 'Profile duels', href: '/profile.html#duels' }
+];
 
 function MobileShell() {
   const navigate = useNavigate();
@@ -91,6 +98,7 @@ function MobileShell() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState(() => localStorage.getItem('mobileSort') || 'size-desc');
   const [sortAnchor, setSortAnchor] = useState(null);
+  const [pagesAnchor, setPagesAnchor] = useState(null);
   const [sorting, setSorting] = useState(null); // performer being sorted
   const [viewing, setViewing] = useState(null); // performer being browsed
 
@@ -260,6 +268,13 @@ function MobileShell() {
             <Sort />
           </IconButton>
           <IconButton
+            onClick={(e) => setPagesAnchor(e.currentTarget)}
+            aria-label="More pages"
+            sx={{ color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 'var(--radius, 6px)', width: 40, height: 40 }}
+          >
+            <Apps />
+          </IconButton>
+          <IconButton
             onClick={load}
             aria-label="Refresh"
             sx={{ color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 'var(--radius, 6px)', width: 40, height: 40 }}
@@ -302,6 +317,21 @@ function MobileShell() {
             onClick={() => { setSort(s.key); setSortAnchor(null); }}
           >
             {s.label}
+          </MenuItem>
+        ))}
+      </Menu>
+
+      <Menu anchorEl={pagesAnchor} open={!!pagesAnchor} onClose={() => setPagesAnchor(null)}>
+        {PAGES.map((p) => (
+          <MenuItem
+            key={p.label}
+            onClick={() => {
+              setPagesAnchor(null);
+              if (p.route) navigate(p.route);
+              else window.location.assign(p.href);
+            }}
+          >
+            {p.label}
           </MenuItem>
         ))}
       </Menu>

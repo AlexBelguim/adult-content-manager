@@ -18,6 +18,8 @@ import PerformersTab from '../components/discover/PerformersTab';
 import DuplicatesTab from '../components/discover/DuplicatesTab';
 import WatchersTab from '../components/discover/WatchersTab';
 import UploadTab from '../components/discover/UploadTab';
+import { useNavigate } from 'react-router-dom';
+import useIsPhone from '../mobile/useIsPhone';
 
 const VIEW_KEY = 'discover.view';
 const TABS = ['performers', 'liked', 'kept', 'duplicates', 'watchers', 'upload'];
@@ -159,6 +161,8 @@ function RunButton({ tip, children, ...rest }) {
 
 // ── the page ─────────────────────────────────────────────────
 export default function DiscoverPage() {
+  const navigate = useNavigate();
+  const isPhone = useIsPhone();
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [view, setView] = useState(restoreView);
@@ -296,7 +300,8 @@ export default function DiscoverPage() {
 
   return (
     <PageShell>
-      <PageHeader title="Discover" subtitle={subtitle} actions={actions} />
+      {/* on a phone there's no app bar: Back leads to the phone app's lists */}
+      <PageHeader title="Discover" subtitle={subtitle} actions={actions} back={isPhone} onBack={() => navigate('/')} />
 
       {error && <Alert severity="error" sx={{ mb: SPACE.md }}>{error}</Alert>}
       {!summary && !error && <LoadingState label="Loading…" />}
