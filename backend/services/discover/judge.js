@@ -7,7 +7,7 @@
  *      time it answers, so with the PC off it judges with the P the PC last had.
  *   3. Nobody: the error says waiting, the pictures stay saved and a later run judges them. A scan never stops for this.
  *
- *   POST <url>/performer_keep  { images: ["<base64 picture>", …], names: ["<file name>", …], weights?: { coef, intercept, backbone, model } }
+ *   POST <url>/performer_keep  { images: ["<base64 picture>", …], names: ["<file name>", …], why, weights?: { coef, intercept, backbone, model } }
  *   → { score: 0-100, model: "<checkpoint file>", used: n, failed: [names] }   the pictures judged together, as one performer
  */
 const fs = require('fs');
@@ -52,7 +52,7 @@ async function post(url, body, timeout) {
   }
 }
 
-function createJudge({ threshold = 50 } = {}) {
+function createJudge({ threshold = 50, why = 'Discover' } = {}) {
   let gpuAwayUntil = 0;
   let cpuAwayUntil = 0;
   const judge = {
@@ -77,7 +77,7 @@ function createJudge({ threshold = 50 } = {}) {
     },
     /** Keep % (0-100) for the pictures as one performer; one picture judges a post on its own. Rejects with .waiting when nobody can. */
     async score(files) {
-      const body = { images: files.map((f) => fs.readFileSync(f).toString('base64')), names: files.map((f) => path.basename(f)) };
+      const body = { images: files.map((f) => fs.readFileSync(f).toString('base64')), names: files.map((f) => path.basename(f)), why };
       if (Date.now() >= gpuAwayUntil) {
         try {
           const answer = await post(gpuUrl(), body, GPU_TIMEOUT_MS);

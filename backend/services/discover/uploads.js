@@ -19,7 +19,7 @@ const newUploadId = () => `u${Date.now().toString(36)}${crypto.randomBytes(3).to
 const uploadDir = (id) => path.join(CACHE, 'uploads', id);
 
 // One for all uploads: it remembers who is away, so a hanging acm-gpu costs one timeout and not one per picture
-const judger = createJudge();
+const judger = createJudge({ why: 'Discover upload' });
 
 /** P's keep % for these pictures judged together, one decimal, as on the rest of the page */
 async function scorePictures(files) {
