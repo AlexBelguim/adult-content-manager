@@ -25,6 +25,10 @@
  * - PUT  /api/profile/predictions  — the follower's P
  * - PUT  /api/profile/ranking      — the follower's P2
  * - GET  /api/profile/thumb, /full — ?site=&slug=&file=: one of her pictures (thumbnails kept in .thumbnails)
+ *
+ * Discover (services/discover/verdicts.js) adds to the collection: a performer of its own is a record of site "discover", in
+ * discover_entries with her pictures in <data>/profile/discover/<slug>; one the page already had keeps her record, and the pictures
+ * Discover found join hers. Both carry origin ("scanner" or "upload") and origin_at, for the page's sorts.
  */
 const express = require('express');
 const router = express.Router();
@@ -33,9 +37,11 @@ const path = require('path');
 const sharp = require('sharp');
 const db = require('../db');
 const config = require('../config');
+const entries = require('../services/discover/entries');
 
 const DATA = path.join(config.dataPath, 'profile');
 const SITES = ['babepedia', 'boobpedia'];
+const PICTURE_SITES = [...SITES, 'discover'];
 const LABELS = path.join(DATA, 'alex_labels.json');
 const DUELS = path.join(DATA, 'alex_duels.json');
 const SORTING = path.join(DATA, 'alex_sorting.json');
@@ -127,6 +133,12 @@ function records() {
       out.delete(`babepedia/${x.babepedia}`);
     }
   }
+  for (const e of entries.all()) {
+    const r = e.merged_into && out.get(e.merged_into);
+    if (e.merged_into) {
+      if (r) out.set(e.merged_into, { ...r, pictures: [...r.pictures, ...e.pictures], origin: e.origin, origin_at: e.updated_at });
+    } else out.set(`discover/${e.slug}`, entries.record(e));
+  }
   return out;
 }
 
@@ -148,7 +160,7 @@ function card(r) {
   const nat = f.boobs || f.natural;
   const tat = f.tattoos;
   return {
-    site: r.site, slug: r.slug, name: r.name, pictures: r.pictures.length,
+    site: r.site, slug: r.slug, name: r.name, pictures: r.pictures.length, first: r.pictures[0] || null, origin: r.origin || null, origin_at: r.origin_at || null, update_mark: r.update_mark || null,
     hair: word(f.hair_color), eyes: word(f.eye_color), ethnicity: word(f.ethnicity), body: word(f.body_type),
     cup: cup ? cup[1][0] : null,
     natural: !nat ? null : /^(real|y)/i.test(nat) ? 'natural' : /^(fake|n)/i.test(nat) ? 'enhanced' : null,
@@ -529,12 +541,13 @@ router.put('/ranking', (req, res) => {
 
 // one of her pictures: only a file her record lists, so no other path is ever read
 function picturePath(site, slug, file) {
-  const r = SITES.includes(site) && records().get(`${site}/${slug}`);
+  const r = PICTURE_SITES.includes(site) && records().get(`${site}/${slug}`);
   return r && r.pictures.includes(file) ? path.join(DATA, site, slug, file) : null;
 }
 
 router.get('/thumb', async (req, res) => {
-  const { site, slug, file = '1.jpg' } = req.query;
+  const { site, slug } = req.query;
+  const file = req.query.file || (site === 'discover' ? records().get(`${site}/${slug}`)?.pictures[0] : '1.jpg');   // Discover's pictures are named by their content
   const src = picturePath(site, slug, file);
   if (!src) return res.status(404).end();
   const thumb = path.join(DATA, '.thumbnails', site, slug, file);
@@ -558,3 +571,7 @@ router.get('/full', (req, res) => {
 });
 
 module.exports = router;
+// what Discover's verdicts need of this page (services/discover/verdicts.js)
+module.exports.collection = {
+  DATA, records, stamp, labels: () => readJson(LABELS, {}), saveLabels: (lab) => saveJson(LABELS, lab), current: () => roundsState().current.discover,
+};

@@ -78,6 +78,7 @@ app.use('/api/scenes', require('./routes/scenes'));
 app.use('/api/video-labels', require('./routes/video-labels')); // labelmaster's scenes, sent by scenetest
 app.use('/api/pipelines', require('./routes/pipelines')); // labels + funscripts run by scenetest on the GPU PC
 app.use('/api/profile', require('./routes/profile')); // the profile page's performers, verdicts and duels (/profile.html)
+app.use('/api/discovery', require('./routes/discovery')); // Discover: the keep scanner's watchers, results and verdicts
 app.use('/api/workers', require('./routes/workers')); // acm-gpu as a worker: funpipe jobs, library files and sidecars over HTTP
 app.use('/api/truenas', require('./routes/truenas'));
 app.use('/api/mobile', require('./routes/mobile')); // Mobile app API
@@ -244,6 +245,7 @@ server.listen(port, '0.0.0.0', async () => {
     console.log('  Tip: set ENABLE_HTTPS=1 to serve over HTTPS (required for WebXR/VR on a remote host).');
   }
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  require('./services/discover/runner').resume();
 
   // Cleanup: Remove any performers with names starting with '.' (like .cache, .thumbnails)
   try {
