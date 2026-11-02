@@ -951,8 +951,8 @@ function SmartComparePage() {
               <Typography sx={{ color: 'var(--dim)', fontSize: '.86rem', mt: 0.5 }}>
                 <Box component="span" sx={{ fontFamily: 'ui-monospace, monospace', color: 'var(--text)' }}>{inferenceUrl}</Box>
                 {' — change it in the '}
-                <Box component="span" onClick={() => { setShowSettings(false); navigate('/taste-dashboard'); }}
-                  sx={{ color: 'var(--accent)', cursor: 'pointer' }}>Taste Dashboard</Box>
+                <Box component="span" onClick={() => { setShowSettings(false); navigate('/ai-training'); }}
+                  sx={{ color: 'var(--accent)', cursor: 'pointer' }}>AI & Training</Box>
               </Typography>
             </Box>
             <Box component="label" sx={{ display: 'flex', gap: 1.5, alignItems: 'center', cursor: 'pointer' }}>

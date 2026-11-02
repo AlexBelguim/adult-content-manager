@@ -273,7 +273,7 @@ export default function FunpipePage() {
           </Tooltip>
         )}
         <Tooltip title="Runs on acm-gpu, ACM's GPU worker — its address is in Settings → Workers">
-          <IconButton onClick={() => navigate('/taste-dashboard')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
+          <IconButton onClick={() => navigate('/ai-training')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
         </Tooltip>
         <Tooltip title="Rescan funscript folders">
           <span>

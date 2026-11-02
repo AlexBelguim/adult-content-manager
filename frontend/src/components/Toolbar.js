@@ -285,7 +285,7 @@ function Toolbar({
               ['Performer Management — hash DBs and duplicates too', <People key="p" />, () => window.open('/performer-management', '_blank')]
             ],
             [
-              ['Taste Dashboard — system health & AI', <Science key="s" />, () => navigate('/taste-dashboard')],
+              ['AI & Training — models, training and app health', <Science key="s" />, () => navigate('/ai-training')],
               ['Funpipe — funscript queue & library', <Waves key="w" />, () => navigate('/funpipe')]
             ]
           ].map((group, gi) => (

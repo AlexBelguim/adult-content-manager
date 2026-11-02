@@ -1,6 +1,6 @@
 /**
  * Profile data — the performer profiles collected from Babepedia and Boobpedia on the GPU PC (extra/profile-data/collect.py),
- * Alex's verdicts on them and his duels between his keeps, for the page at /profile.html (the Taste Dashboard links it).
+ * Alex's verdicts on them and his duels between his keeps, for the page at /profile.html (the AI & Training page links it).
  *
  * Everything is in <data>/profile: <site>.jsonl and <site>/<slug>/<file> as collected, alex_labels / alex_duels /
  * alex_sorting.json as he answers, and predictions.json (P, the keep chance) and ranking.json (P2, how much he likes her) as
@@ -334,7 +334,7 @@ router.post('/duel', (req, res) => {
   res.json({ done: done.length });
 });
 
-// P's and P2's latest numbers (acm-gpu's performer_model.py), for the page and the Taste Dashboard
+// P's and P2's latest numbers (acm-gpu's performer_model.py), for the page and the AI & Training page
 router.get('/model', (req, res) => {
   const p = readJson(PREDICTIONS, {}), r = readJson(RANKING, {});
   res.json({

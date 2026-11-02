@@ -139,9 +139,11 @@ router.get('/', async (req, res) => {
     }
 
     // ── AI Server connectivity ───────────────────────────
+    // ?ai=0 skips it: the AI & Training page asks acm-gpu by itself, and doesn't wait for it to show the rest
     const aiUrl = getAiServerUrl();
+    const checkAi = req.query.ai !== '0';
     let aiServerHealth = { online: false };
-    try {
+    if (checkAi) try {
       const response = await axios.get(`${aiUrl}/health`, { timeout: 3000 });
       aiServerHealth = {
         online: true,
@@ -168,7 +170,7 @@ router.get('/', async (req, res) => {
     if (orphanedHashes > 0) issues.push({ type: 'orphan', table: 'performer_file_hashes', count: orphanedHashes });
     if (orphanedPairwise > 0) issues.push({ type: 'orphan', table: 'pairwise_image_scores', count: orphanedPairwise });
     if (orphanedFilterActions > 0) issues.push({ type: 'orphan', table: 'filter_actions', count: orphanedFilterActions });
-    if (!aiServerHealth.online) issues.push({ type: 'service', service: 'ai_inference', message: 'AI server is offline' });
+    if (checkAi && !aiServerHealth.online) issues.push({ type: 'service', service: 'ai_inference', message: 'AI server is offline' });
 
     res.json({
       status: issues.length === 0 ? 'healthy' : 'issues_found',

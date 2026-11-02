@@ -33,7 +33,7 @@ import PairwiseRefinePage from './pages/PairwiseRefinePage';
 import PairwiseAutoLabelPage from './pages/PairwiseAutoLabelPage';
 import GroupRatePage from './pages/GroupRatePage';
 import SmartComparePage from './pages/SmartComparePage';
-import TasteDashboardPage from './pages/TasteDashboardPage';
+import AiTrainingPage from './pages/AiTrainingPage';
 import PairwiseRankPage from './pages/PairwiseRankPage';
 import FunpipePage from './pages/FunpipePage';
 import VRPage from './pages/VRPage';
@@ -618,7 +618,8 @@ function AppContent({ onThemeChange, currentThemeId }) {
             {/* Phones never get the desktop app bar — it's reached from the
                 phone shell's Score tab, which has no bar to match. */}
             <Route path="/smart-compare" element={(isPhone || phoneLandscape) ? <SmartComparePage /> : shell(<SmartComparePage />)} />
-            <Route path="/taste-dashboard" element={shell(<TasteDashboardPage />)} />
+            <Route path="/ai-training" element={shell(<AiTrainingPage />)} />
+            <Route path="/taste-dashboard" element={<Navigate to="/ai-training" replace />} />
             {/* Chrome-free: a full-bleed comparison tool opened in its own tab
                 from the gallery. On the Fold's cover screen in landscape the
                 toolbar ate 64px of a 360px-tall viewport and pushed the

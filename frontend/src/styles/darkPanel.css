@@ -5,7 +5,7 @@
    running alongside the token layer: its own radii (8px / 4px), its own
    tabs, its own gradient button, its own chips, and !important on ~30 rules
    so it beat anything the primitives set. That is why the pages built on it
-   (Local Import, Performer Management, Taste Dashboard) never matched the
+   (Local Import, Performer Management, AI & Training) never matched the
    rest of the app no matter how much colour work was done.
 
    It is now a thin utility layer over the same tokens the primitives use:

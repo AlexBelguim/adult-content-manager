@@ -122,7 +122,7 @@ function GroupRatePage() {
               <IconButton onClick={fetchPerformers} sx={{ color: 'var(--dim)' }}><Refresh /></IconButton>
             </Tooltip>
             <Tooltip title="AI settings">
-              <IconButton onClick={() => navigate('/taste-dashboard')} sx={{ color: 'var(--dim)' }}><Settings /></IconButton>
+              <IconButton onClick={() => navigate('/ai-training')} sx={{ color: 'var(--dim)' }}><Settings /></IconButton>
             </Tooltip>
           </>
         }

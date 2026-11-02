@@ -1,7 +1,7 @@
 /**
  * The training queue, kept in the app (training_jobs, migration 017).
  *
- * The Taste Dashboard's Start puts a run here (with everything acm-gpu trains with, collected now). acm-gpu on
+ * The AI & Training page's Start puts a run here (with everything acm-gpu trains with, collected now). acm-gpu on
  * the GPU PC is a worker (routes/workers.js, the funpipe worker's token): it claims the next run, trains it in a process
  * of its own, sends its state every few seconds and the result at the end. One run at a time: acm-gpu claims the
  * next only when the last has ended. Cancel stops a waiting run at once and a running one on its next report.

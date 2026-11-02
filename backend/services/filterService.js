@@ -1034,7 +1034,7 @@ class FilterService {
       const preferred = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('preferred_clip_keepdelete_model')?.value;
       const models = (await axios.get(`${AI_URL}/list_models`, { timeout: 60000 })).data.models || [];
       const k = models.find(m => m.filename === preferred) || models.find(m => m.type === 'clip_keepdelete');
-      if (!k) throw new Error('No K model on the AI server yet: train one in the Taste Dashboard');
+      if (!k) throw new Error('No K model on the AI server yet: train one in the AI & Training page');
       await axios.post(`${AI_URL}/load_model`, { model_id: k.filename }, { timeout: 120000 });
     }
 
