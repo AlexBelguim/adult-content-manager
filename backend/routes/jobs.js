@@ -13,7 +13,7 @@
  *                               sources have no remove endpoint of their own)
  *
  * Job shape:
- *   { id, sourceId, type: 'import'|'funpipe'|'pipeline'|'hash'|'encode'|'cleanup'|'train',
+ *   { id, sourceId, type: 'import'|'funpipe'|'pipeline'|'hash'|'encode'|'cleanup'|'train'|'discover',
  *     title, subtitle, status: 'queued'|'running'|'done'|'failed',
  *     progress (0-1|null), done, total, unit, stage, currentFile, note,
  *     elapsedMs, startedAt, finishedAt, error, result, chips: [], thumbPath,
@@ -31,6 +31,8 @@ const hashService = require('../services/hashService');
 const trainingQueue = require('../services/trainingQueue');
 const scenetestService = require('../services/scenetestService');
 const { getAiServerUrl } = require('../utils/aiUrl');
+const discoverRunner = require('../services/discover/runner');
+const { WATCHERS } = require('../services/discover/watchers');
 
 // In-memory sources are never pruned by their owners, so "recent" needs a bound.
 const RECENT_MS = 6 * 60 * 60 * 1000;
@@ -327,6 +329,29 @@ async function trainJobs() {
   });
 }
 
+/** Discover's runs (services/discover/runner.js): the one started by hand and the timer's, running or just ended. */
+const DISCOVER_TITLE = { scan: 'Scan of the watchers', backlog: 'Older posts', profiles: 'All creator profiles', rescore: 'Judging again with the current P', pools: 'Pictures together' };
+function discoverJobs() {
+  const { job: byHand, watchJob } = discoverRunner.status();
+  return [['hand', byHand], ['timer', watchJob]].filter(([, s]) => s.running || (s.finishedAt && isRecent(toMs(s.finishedAt)))).map(([slot, s]) => {
+    const failed = s.exitCode === 1;
+    const lastLine = s.log.filter(Boolean).pop() || null;
+    const outcome = s.log.filter(l => /^This run/.test(l)).pop() || lastLine;
+    return job({
+      type: 'discover', sourceId: slot,
+      title: `Discover: ${s.mode === 'watcher' ? WATCHERS.find(w => w.id === s.watcher)?.label || s.watcher : DISCOVER_TITLE[s.mode] || 'Scan'}`,
+      subtitle: slot === 'timer' ? 'On the timer' : 'Started by hand',
+      status: s.running ? 'running' : failed ? 'failed' : 'done',
+      stage: s.running ? 'scanning' : null, note: s.running ? lastLine : null,
+      startedAt: toMs(s.startedAt), finishedAt: toMs(s.finishedAt), elapsedMs: elapsed(toMs(s.startedAt), toMs(s.finishedAt)),
+      error: failed ? s.error : null,
+      result: !s.running && !failed ? outcome : null,
+      link: '/discover', linkLabel: 'Discover',
+      raw: { mode: s.mode, watcher: s.watcher, secondsPerPicture: s.secondsPerPicture }
+    });
+  });
+}
+
 // ── routes ───────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   const fresh = req.query.fresh === '1';
@@ -337,7 +362,8 @@ router.get('/', async (req, res) => {
     ['hash', () => hashJobs()],
     ['encode', () => encodeJobs()],
     ['cleanup', () => cleanupJobs()],
-    ['train', () => trainJobs(fresh)]
+    ['train', () => trainJobs(fresh)],
+    ['discover', () => discoverJobs()]
   ];
   // One broken source must not blank the whole page.
   const settled = await Promise.all(sources.map(async ([name, read]) => {

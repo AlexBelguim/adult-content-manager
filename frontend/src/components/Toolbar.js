@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider, Popover, Badge } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Science, ViewInAr, Waves, Vibration } from '@mui/icons-material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Science, ViewInAr, Waves, Vibration, TravelExplore } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 import JobsIndicator from './JobsIndicator';
 import Logo from './Logo';
@@ -286,7 +286,8 @@ function Toolbar({
             ],
             [
               ['AI & Training — models, training and app health', <Science key="s" />, () => navigate('/ai-training')],
-              ['Funpipe — funscript queue & library', <Waves key="w" />, () => navigate('/funpipe')]
+              ['Funpipe — funscript queue & library', <Waves key="w" />, () => navigate('/funpipe')],
+              ['Discover: new performers found by the watchers', <TravelExplore key="d" />, () => navigate('/discover')]
             ]
           ].map((group, gi) => (
             <React.Fragment key={gi}>
