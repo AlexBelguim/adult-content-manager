@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { AppBar, Toolbar as MuiToolbar, Button, IconButton, InputBase, Box, Tooltip, Divider, Popover, Badge } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Science, ViewInAr, Waves, Vibration, TravelExplore } from '@mui/icons-material';
+import { AppBar, Toolbar as MuiToolbar, Button, IconButton, Box, Tooltip, Divider } from '@mui/material';
+import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Science, ViewInAr, Waves, TravelExplore } from '@mui/icons-material';
 import ShortcutSettingsModal from './ShortcutSettingsModal';
 import JobsIndicator from './JobsIndicator';
 import Logo from './Logo';
@@ -90,10 +90,6 @@ function Toolbar({
   subMode,
   onModeChange,
   onSubModeChange,
-  onHandyConnect,
-  onHandyDisconnect,
-  handyCode,
-  handyConnected,
   basePath = null,
   onFolderDeleted = null,
   onScanPerformers = null,
@@ -105,14 +101,11 @@ function Toolbar({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [localHandyCode, setLocalHandyCode] = useState(() => localStorage.getItem('handyConnectionCode') || handyCode || '');
   const [showSettings, setShowSettings] = useState(false);
   // VR is only enterable on a WebXR headset; gate the toolbar entry on support.
   const [vrSupported, setVrSupported] = useState(null); // null = unknown yet
 
   const [showVideoPathModal, setShowVideoPathModal] = useState(false);
-  // Below lg the Handy input collapses into a button that opens it here.
-  const [handyAnchor, setHandyAnchor] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -141,55 +134,12 @@ function Toolbar({
     }
   };
 
-  const handleHandyConnect = () => {
-    if (handyConnected) {
-      onHandyDisconnect();
-    } else {
-      onHandyConnect(localHandyCode);
-    }
-  };
-
   const handleVideoPathSubmit = (videoPath) => {
     // Open scene editor in new tab with video path as query param
     const url = `/scene-editor?video=${encodeURIComponent(videoPath)}`;
     window.open(url, '_blank');
     setShowVideoPathModal(false);
   };
-
-  const handyControl = (
-    <Box sx={{
-      display: 'flex', alignItems: 'center', gap: 0.5,
-      pl: 1.25, py: '3px', pr: '3px',
-      bgcolor: 'var(--bg)',
-      border: '1px solid var(--line)',
-      borderRadius: 'var(--radius, 6px)'
-    }}>
-      <Box sx={{
-        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-        bgcolor: handyConnected ? 'var(--ok)' : 'var(--faint)'
-      }} />
-      <InputBase
-        placeholder="Handy code"
-        value={localHandyCode}
-        onChange={(e) => {
-          setLocalHandyCode(e.target.value);
-          localStorage.setItem('handyConnectionCode', e.target.value);
-        }}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !handyConnected) handleHandyConnect(); }}
-        disabled={handyConnected}
-        sx={{ flex: 1, width: 108, fontSize: '0.8rem', color: 'var(--text)' }}
-      />
-      <Button
-        variant={handyConnected ? 'outlined' : 'contained'}
-        color={handyConnected ? 'error' : 'primary'}
-        onClick={handleHandyConnect}
-        size="small"
-        sx={{ minWidth: 0, px: 1.25 }}
-      >
-        {handyConnected ? 'Disconnect' : 'Connect'}
-      </Button>
-    </Box>
-  );
 
   return (
     <AppBar position="sticky">
@@ -345,36 +295,15 @@ function Toolbar({
             </IconButton>
           </Tooltip>
 
-          {/* Handy connection. Reads as one control rather than a loose
-              input + button pair. Inline from lg up; narrower (the unfolded
-              Fold held sideways is ~960px) it is a button that opens the same
-              control, since the inline one pushed the bar onto two rows. */}
+          {/* Handy connection and its settings: public/handy-control.js, shared with faptap-dl. Inline from lg up;
+              narrower (the unfolded Fold held sideways is ~960px) just its dot and gear, with the key in the gear's panel,
+              since the inline one pushed the bar onto two rows. */}
           <Box sx={{ display: { xs: 'none', lg: 'flex' }, ml: 1 }}>
-            {handyControl}
+            <handy-control />
           </Box>
-          <Tooltip title={handyConnected ? 'Handy connected' : 'Connect Handy'}>
-            <IconButton
-              onClick={(e) => setHandyAnchor(e.currentTarget)}
-              size="small"
-              aria-label="Handy connection"
-              sx={{ display: { xs: 'inline-flex', lg: 'none' }, color: 'var(--dim)', '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' } }}
-            >
-              <Badge variant="dot" overlap="circular"
-                sx={{ '& .MuiBadge-dot': { bgcolor: handyConnected ? 'var(--ok)' : 'var(--faint)' } }}>
-                <Vibration />
-              </Badge>
-            </IconButton>
-          </Tooltip>
-          <Popover
-            open={!!handyAnchor}
-            anchorEl={handyAnchor}
-            onClose={() => setHandyAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            slotProps={{ paper: { sx: { p: 1, bgcolor: 'var(--surface)', border: '1px solid var(--line)' } } }}
-          >
-            {handyControl}
-          </Popover>
+          <Box sx={{ display: { xs: 'flex', lg: 'none' } }}>
+            <handy-control compact="" />
+          </Box>
         </Box>
       </MuiToolbar>
 

@@ -261,6 +261,19 @@ function AppContent({ onThemeChange, currentThemeId }) {
     }
   }, [handyCode]);
 
+  // The connection is the shared Handy control's (the toolbar's <handy-control>, public/handy-control.js): follow it.
+  useEffect(() => {
+    const control = window.HandyControl;
+    if (!control) return undefined;
+    const follow = () => {
+      setHandyConnected(control.connected);
+      if (control.connected) setHandyCode(control.key);
+    };
+    follow();
+    control.addEventListener('change', follow);
+    return () => control.removeEventListener('change', follow);
+  }, []);
+
   useEffect(() => {
     // Initialize HandyIntegration - wait for SDK to load
     const initHandyIntegration = async () => {
