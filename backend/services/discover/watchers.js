@@ -12,6 +12,7 @@ const WATCHERS = [
   { id: 'thothd-albums', label: 'ThotHD albums', name: 'thothd', adapter: 'kvs-albums', kind: 'posts', url: 'https://thothd.com/albums/', watch: true },
   { id: 'porn4fans-new', label: 'Porn4Fans new models', name: 'porn4fans', adapter: 'porn4fans', kind: 'posts', url: 'https://www.porn4fans.com/models/?p=date_of_first_video', watch: true },
   { id: 'pimpbunny-new', label: 'PimpBunny new creators', name: 'pimpbunny', adapter: 'pimpbunny', kind: 'posts', url: 'https://pimpbunny.com/onlyfans-creators/?sort_by=added_date', watch: true },
+  { id: 'gigafans-new', label: 'GigaFans new posts', name: 'gigafans', adapter: 'gigafans', kind: 'posts', url: 'https://www.gigafans.net/', watch: true },
 ];
 
 /** The rest of what a run goes by; threshold and the timer are settings of their own (discover_settings). */

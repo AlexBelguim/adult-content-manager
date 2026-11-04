@@ -22,8 +22,9 @@ const { createFapello } = require('../sites/fapello');
 const { createKvsAlbums } = require('../sites/kvs-albums');
 const { createPorn4fans } = require('../sites/porn4fans');
 const { createPimpbunny } = require('../sites/pimpbunny');
+const { createGigafans } = require('../sites/gigafans');
 
-const ADAPTERS = { leakshaven: createLeakshaven, leakgallery: createLeakgallery, fapello: createFapello, 'kvs-albums': createKvsAlbums, porn4fans: createPorn4fans, pimpbunny: createPimpbunny };
+const ADAPTERS = { leakshaven: createLeakshaven, leakgallery: createLeakgallery, fapello: createFapello, 'kvs-albums': createKvsAlbums, porn4fans: createPorn4fans, pimpbunny: createPimpbunny, gigafans: createGigafans };
 
 /** The keep line; a setting of its own */
 const threshold = () => store.setting('threshold', 50);
