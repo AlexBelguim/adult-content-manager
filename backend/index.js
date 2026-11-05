@@ -263,6 +263,16 @@ server.listen(port, '0.0.0.0', async () => {
       console.log(`Repaired stale folder paths: ${repaired.performers} performer(s), ${repaired.fileCacheRows} cached file list row(s)`);
     }
 
+    // Merge performers with two records for one folder (duplicate "before" rows)
+    try {
+      const duplicates = await require('./services/merger').mergeDuplicateRecords();
+      for (const d of duplicates) {
+        console.log(`Merged duplicate records of "${d.name}": ${d.merged.join(', ')} -> ${d.kept}`);
+      }
+    } catch (err) {
+      console.error('Could not merge duplicate performer records:', err.message);
+    }
+
     // Create .cache folders for all registered base paths
     const folders = db.prepare('SELECT path FROM folders').all();
     for (const folder of folders) {

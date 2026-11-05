@@ -367,6 +367,33 @@ class MergerService {
     };
   }
 
+  /**
+   * Merge performers that have more than one record for the same folder
+   * (imports used to find the "after" row of a name and create a second
+   * "before" row next to the existing one). Keeps the newest record: it is the
+   * one the last import scanned. Safe to run on every startup.
+   *
+   * @returns {Array<{name: string, kept: number, merged: number[]}>}
+   */
+  async mergeDuplicateRecords() {
+    const groups = db.prepare(`
+      SELECT name, GROUP_CONCAT(id) AS ids FROM performers
+      WHERE COALESCE(blacklisted, 0) = 0
+      GROUP BY folder_id, name, moved_to_after
+      HAVING COUNT(*) > 1
+    `).all();
+
+    const done = [];
+    for (const group of groups) {
+      const [kept, ...older] = group.ids.split(',').map(Number).sort((a, b) => b - a);
+      for (const id of older) {
+        await this.mergePerformers(id, kept);
+      }
+      done.push({ name: group.name, kept, merged: older });
+    }
+    return done;
+  }
+
   async mergePerformers(sourceId, targetId) {
     const source = db.prepare('SELECT * FROM performers WHERE id = ?').get(sourceId);
     const target = db.prepare('SELECT * FROM performers WHERE id = ?').get(targetId);
@@ -383,13 +410,19 @@ class MergerService {
 
     const sourcePath = getPath(source);
     const targetPath = getPath(target);
+    // Two records for one folder (a duplicate "before" row): only the records
+    // are merged. Moving the folder onto itself would rename every file and
+    // then remove the folder.
+    const sameFolder = path.resolve(sourcePath) === path.resolve(targetPath);
 
     console.log(`[Merge] Merging performer "${source.name}" (ID:${sourceId}) → "${target.name}" (ID:${targetId})`);
     console.log(`[Merge] Source: ${sourcePath}`);
     console.log(`[Merge] Target: ${targetPath}`);
 
     // ── 1. Merge files on disk ──────────────────────────────
-    if (await fs.pathExists(sourcePath)) {
+    if (sameFolder) {
+      console.log(`[Merge] Source and target share a folder (DB-only merge)`);
+    } else if (await fs.pathExists(sourcePath)) {
       await fs.ensureDir(targetPath);
       await fs.ensureDir(path.join(targetPath, 'pics'));
       await fs.ensureDir(path.join(targetPath, 'vids'));
@@ -439,14 +472,33 @@ class MergerService {
         db.prepare('DELETE FROM ratings WHERE performer_id = ?').run(sourceId);
       }
 
-      // Merge file hashes → point to target
+      // Drop the source's compare runs first: their items reference the
+      // source's hash rows, which are deleted or moved below
+      db.prepare('DELETE FROM hash_runs WHERE source_performer_id = ? OR target_performer_id = ?')
+        .run(sourceId, sourceId);
+
+      // Merge file hashes → point to target. Files moved into the target
+      // folder, so their paths move with them first.
+      if (sameFolder) {
+        // The target's scan of the shared folder is the current one; the
+        // source's rows for the same content are older copies (often under an
+        // old file name) and would match the live files in every compare
+        db.prepare(`
+          DELETE FROM performer_file_hashes
+          WHERE performer_id = ? AND exact_hash IN (
+            SELECT exact_hash FROM performer_file_hashes WHERE performer_id = ? AND exact_hash IS NOT NULL
+          )
+        `).run(sourceId, targetId);
+      } else {
+        const from = sourcePath + path.sep;
+        db.prepare(`
+          UPDATE performer_file_hashes SET file_path = ? || substr(file_path, ?)
+          WHERE performer_id = ? AND substr(file_path, 1, ?) = ?
+        `).run(targetPath + path.sep, from.length + 1, sourceId, from.length, from);
+      }
       db.prepare('UPDATE OR IGNORE performer_file_hashes SET performer_id = ? WHERE performer_id = ?')
         .run(targetId, sourceId);
       db.prepare('DELETE FROM performer_file_hashes WHERE performer_id = ?').run(sourceId);
-
-      // Merge hash runs
-      db.prepare('DELETE FROM hash_runs WHERE source_performer_id = ? OR target_performer_id = ?')
-        .run(sourceId, sourceId);
 
       // Merge pairwise data → point to target
       db.prepare('UPDATE pairwise_pairs SET performer_id = ?, performer_name = (SELECT name FROM performers WHERE id = ?) WHERE performer_id = ?')
@@ -460,6 +512,16 @@ class MergerService {
       // Merge content items + embeddings
       db.prepare('DELETE FROM content_clip_embeddings WHERE content_item_id IN (SELECT id FROM content_items WHERE performer_id = ?)').run(sourceId);
       db.prepare('DELETE FROM content_items WHERE performer_id = ?').run(sourceId);
+
+      // Filter decisions on a shared folder are about the target's files too;
+      // keep the ones the target has not made itself
+      if (sameFolder) {
+        db.prepare(`
+          UPDATE filter_actions SET performer_id = ?
+          WHERE performer_id = ?
+            AND file_path NOT IN (SELECT file_path FROM filter_actions WHERE performer_id = ?)
+        `).run(targetId, sourceId, targetId);
+      }
 
       // Cleanup remaining source references
       db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(sourceId);
@@ -477,12 +539,24 @@ class MergerService {
         }
       }
 
-      // Finally delete source performer
-      db.prepare('DELETE FROM performers WHERE id = ?').run(sourceId);
+      // Finally delete source performer (and what still references it)
+      deletePerformerRecord(sourceId);
+      // The target's file list changed
+      db.prepare('DELETE FROM performer_file_cache WHERE performer_id = ?').run(targetId);
     });
 
     mergeTransaction();
     console.log(`[Merge] Database records merged`);
+
+    // Hashes of files no longer on disk (a stale duplicate's, or a file renamed
+    // on a name clash) stay as deleted history, as a hash rescan would mark them
+    const flagDeleted = db.prepare('UPDATE performer_file_hashes SET deleted_flag = 1 WHERE id = ?');
+    const missing = [];
+    for (const row of db.prepare('SELECT id, file_path FROM performer_file_hashes WHERE performer_id = ? AND deleted_flag = 0').all(targetId)) {
+      if (!await fs.pathExists(row.file_path)) missing.push(row.id);
+    }
+    db.transaction(ids => ids.forEach(id => flagDeleted.run(id)))(missing);
+    if (missing.length) console.log(`[Merge] Flagged ${missing.length} hash rows of missing files as deleted`);
 
     // ── 3. Update target stats ──────────────────────────────
     try {

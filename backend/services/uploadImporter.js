@@ -185,13 +185,14 @@ async function uploadImportPerformer(performerName, basePath, files, uploadId, c
         throw new Error(`Base folder not found in database: ${basePath}`);
     }
 
-    // Check if performer already exists in DB
-    const existingPerformer = db.prepare('SELECT * FROM performers WHERE name = ?').get(finalName);
+    // Check if performer already exists in "before filter" (not the "after" row
+    // of the same name, which a plain name lookup finds first)
+    const existingPerformer = db.prepare('SELECT * FROM performers WHERE name = ? AND moved_to_after = 0').get(finalName);
 
     let resultId;
     let isUpdate = false;
 
-    if (existingPerformer && existingPerformer.moved_to_after === 0) {
+    if (existingPerformer) {
         // UPDATE existing record in "before filter"
         console.log(`Updating existing performer "${finalName}" (ID: ${existingPerformer.id}) with new stats`);
 

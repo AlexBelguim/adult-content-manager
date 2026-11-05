@@ -31,26 +31,19 @@ async function importPerformer(performerName, basePath, newName = null, mergeIfE
     );
   }
   
-  // Check if performer already exists
-  const existingPerformer = db.prepare('SELECT * FROM performers WHERE name = ?').get(finalName);
+  // Check if performer already exists in "before filter performer". Looked up
+  // on its own: a plain name lookup finds the "after" row first when both
+  // exist, which used to create a second "before" row for the same folder.
+  const existingPerformer = db.prepare('SELECT * FROM performers WHERE name = ? AND moved_to_after = 0').get(finalName);
   console.log(`Existing performer check for "${finalName}":`, existingPerformer);
-  
+
   if (existingPerformer) {
-    // If existing performer is in "before filter performer" folder (moved_to_after = 0),
-    // auto-merge to combine content
-    if (existingPerformer.moved_to_after === 0) {
-      console.log(`Performer ${finalName} already exists in "before filter performer". Auto-merging...`);
-      return await mergeWithExistingPerformer(existingPerformer, performerFolderPath, basePath);
-    }
-    
-    // If existing performer is in "after filter performer" folder (moved_to_after = 1),
-    // allow import to "before filter performer" for new content filtering
-    if (existingPerformer.moved_to_after === 1) {
-      console.log(`Performer ${finalName} exists in "after filter performer". Allowing import to "before filter performer" for new content.`);
-      // Continue with normal import - this will create a new database record
-      // The existing "after" performer will remain separate until merge during move-to-after
-    }
+    // Auto-merge to combine content
+    console.log(`Performer ${finalName} already exists in "before filter performer". Auto-merging...`);
+    return await mergeWithExistingPerformer(existingPerformer, beforePath, basePath);
   }
+  // A performer in "after filter performer" with this name stays separate:
+  // this import creates its "before" record, merged on move-to-after.
   
   // Rename the folder if a new name is provided
   let performerFolderPath = beforePath;
