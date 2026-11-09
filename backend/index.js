@@ -88,7 +88,6 @@ app.use('/api/hashes', require('./routes/hashes')); // Hash deduplication
 // app.use('/api/ml', require('./routes/ml')); // ML predictions -- REMOVED
 // app.use('/api/ml-training', require('./routes/ml-training')); // ML training for vision models -- REMOVED
 app.use('/api/performer-management', require('./routes/performer-management')); // Comprehensive performer management
-app.use('/api/video-analysis', require('./routes/video-analysis')); // Video action timeline analysis
 app.use('/api/ranking', require('./routes/ranking')); // ELO ranking for preference learning
 app.use('/api/upload-queue', require('./routes/uploadQueue')); // Upload queue management
 app.use('/api/coordinator', require('./routes/coordinator')); // Settings → Coordinator: the coordinator hands this app's work to the worker nodes
