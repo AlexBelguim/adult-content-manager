@@ -2,16 +2,23 @@
  * Discover → Performers, Liked and Kept: the one performer card grid (PerformerGrid), with this tab's filters in the URL.
  * Performers has two views: To decide (default) and Decided (deleted, removed and checked: Put back undoes a decision).
  * Keep and Delete reach the profile page and P's training; Remove only takes her off Discover (POST /performer-status).
+ * Its search, sort and filters are the sidebar's Show group; the content line says what is shown.
  */
 import React from 'react';
-import { Box } from '@mui/material';
-import { Toolbar } from '../layout';
-import { FilterChip, SearchField, Segment, SmallButton, SortSelect, TotalText, useQueryState } from './shared';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import { ContentLine, SIDE, SideChecks, SideGroup, SideSearch, SideSegment, SideSelect } from '../layout';
+import { SmallButton, SORT_OPTIONS, useQueryState } from './shared';
 import PerformerGrid from './PerformerGrid';
 import './tabs.css';
 
 const DEFAULTS = { show: 'decide', q: '', sort: 'score', new: '', data: '', pics: '', hideHand: '' };
 const SORTS = ['score', 'scoreAsc', 'newest', 'name'];
+const TITLE = { all: 'Performers', decided: 'Decided', liked: 'Liked', kept: 'Kept' };
+/** 'score, high to low': a sort's label inside a line */
+export const sortText = (sort) => {
+  const label = SORT_OPTIONS.find(o => o.value === sort)?.label || '';
+  return label.charAt(0).toLowerCase() + label.slice(1);
+};
 const EXPORT_TIP = 'The profile data of every performer in this tab, whatever the search and filters';
 
 const EMPTY = {
@@ -47,38 +54,42 @@ export default function PerformersTab({ tab, version, ask, notify, refresh, watc
   const clearFilters = () => setQs({ q: '', new: '', data: '', pics: '', hideHand: '' });
   const exportOnly = tab === 'liked' ? '?only=liked' : tab === 'kept' ? '?only=kept' : '';
 
+  const onCount = [q, on.new, on.data, on.pics, on.hideHand].filter(Boolean).length;
+
   const toolbar = (list) => (
-    <Toolbar>
-      {tab === 'performers' && (
-        <Segment label="Show" value={view === 'decided' ? 'decided' : 'decide'}
-          onChange={(show) => setQs({ show, data: '', pics: '', hideHand: '' })}
-          options={[
-            { id: 'decide', label: 'To decide', count: totals.performers },
-            { id: 'decided', label: 'Decided', count: totals.hidden }
-          ]} />
-      )}
-      <Box className="dt-search">
-        <SearchField value={q} onChange={(q) => setQs({ q })} placeholder="Search names and aliases" />
-      </Box>
-      <SortSelect value={sort} onChange={(next) => setQs({ sort: next })} />
-      <FilterChip on={on.new} onClick={() => toggle('new')} title="Only the performers not in the library yet">New only</FilterChip>
-      {hasData && <FilterChip on={on.data} onClick={() => toggle('data')} title="Only the performers with profile data">Has profile data</FilterChip>}
-      {hasPics && (
-        <FilterChip on={on.pics} onClick={() => toggle('pics')} title="Only the performers with 3 or more pictures">3+ pictures</FilterChip>
-      )}
-      {hasHand && (
-        <FilterChip on={on.hideHand} onClick={() => toggle('hideHand')}
-          title="Leaves out the performers found only by the watchers that run by hand; one also found elsewhere stays">
-          {`Hide ${byHand.join(' / ')} only`}
-        </FilterChip>
-      )}
-      <TotalText>{`${list.items.length} of ${list.total}`}</TotalText>
-      {view !== 'decided' && (
-        <Box sx={{ ml: 'auto' }}>
+    <>
+      <SideGroup id="show" title="Show" icon={<FilterListIcon />} badge={onCount} summary={onCount ? `${onCount} on` : 'no filters'} order={SIDE.show}>
+        <SideSearch value={q} onChange={(next) => setQs({ q: next })} placeholder="Search names and aliases" />
+        <SideSelect label="Sort" value={sort} onChange={(next) => setQs({ sort: next })} options={SORT_OPTIONS} />
+        {tab === 'performers' && (
+          <SideSegment label="Show" value={view === 'decided' ? 'decided' : 'decide'}
+            onChange={(show) => setQs({ show, data: '', pics: '', hideHand: '' })}
+            options={[
+              { id: 'decide', label: 'To decide', count: totals.performers },
+              { id: 'decided', label: 'Decided', count: totals.hidden }
+            ]} />
+        )}
+        <SideChecks items={[
+          { id: 'new', label: 'New only', checked: on.new, onChange: () => toggle('new'), title: 'Only the performers not in the library yet' },
+          hasData && { id: 'data', label: 'Has profile data', checked: on.data, onChange: () => toggle('data'), title: 'Only the performers with profile data' },
+          hasPics && { id: 'pics', label: '3+ pictures', checked: on.pics, onChange: () => toggle('pics'), title: 'Only the performers with 3 or more pictures' },
+          hasHand && {
+            id: 'hideHand', label: `Hide ${byHand.join(' / ')} only`, checked: on.hideHand, onChange: () => toggle('hideHand'),
+            title: 'Leaves out the performers found only by the watchers that run by hand; one also found elsewhere stays'
+          }
+        ]} />
+      </SideGroup>
+      <ContentLine
+        title={TITLE[view]}
+        meta={list.loaded ? [
+          `${list.total.toLocaleString()}${view === 'all' ? ' to decide' : ''}`,
+          `${list.items.length.toLocaleString()} shown`,
+          sortText(sort)
+        ].join(' · ') : 'Loading…'}
+        actions={view !== 'decided' ? (
           <SmallButton component="a" href={`/api/discovery/export/profile-data${exportOnly}`} tip={EXPORT_TIP}>Export profile data</SmallButton>
-        </Box>
-      )}
-    </Toolbar>
+        ) : null} />
+    </>
   );
 
   const empty = filtered

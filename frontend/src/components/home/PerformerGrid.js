@@ -1,41 +1,24 @@
 /**
- * The Gallery home's performer grid: fixed 280x520 cells, 24px gaps, as many columns as fit, centred. Only the
+ * The Gallery home's performer grid: the column count nearest to 280x520 cards, then every cell grows or shrinks a little so a row meets both
+ * edges with the fixed 24px gap; each card keeps its exact look, scaled with a transform. Only the
  * rows within one viewport above and below the window are mounted, so a big library does not load every card's
  * picture and stats at once. Every cell is placed absolutely and keyed by its item, so a filter or sort change
  * moves a card instead of mounting it again.
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
+import { useFill } from '../layout';
 
 export const CARD_W = 280;
 export const CARD_H = 520;
 export const GAP = 24;
 export const DIVIDER_H = 44;
 
-const colsFor = (width) => Math.max(1, Math.floor((width + GAP) / (CARD_W + GAP)));
-const rowWidth = (cols) => cols * CARD_W + (cols - 1) * GAP;
-
-/** The container's width, measured before paint and on every resize. */
-function useWidth(ref) {
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const measure = () => {
-      const w = el.getBoundingClientRect().width;
-      setWidth(prev => (Math.abs(prev - w) < 0.5 ? prev : w));
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', measure);
-      return () => window.removeEventListener('resize', measure);
-    }
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return width;
-}
+/** The scaled card: a 280x520 box grown to the cell with a transform, so the card keeps its exact look. */
+const cardBoxSx = (scale) => ({
+  position: 'absolute', top: 0, left: 0, width: CARD_W, height: CARD_H,
+  transform: scale === 1 ? 'none' : `scale(${scale})`, transformOrigin: '0 0'
+});
 
 /**
  * sections: [{ key, label?, items }]; a section with a label starts with a divider line.
@@ -44,9 +27,8 @@ function useWidth(ref) {
  */
 export default function PerformerGrid({ sections, renderItem, itemKey, onAuxOpen }) {
   const ref = useRef(null);
-  const width = useWidth(ref);
-  const cols = colsFor(width);
-  const left0 = Math.max(0, (width - rowWidth(cols)) / 2);
+  const { width, cols, cellW, scale } = useFill(ref, { base: CARD_W, gap: GAP });
+  const rowH = CARD_H * scale;
 
   const layout = useMemo(() => {
     const rows = [];
@@ -59,12 +41,12 @@ export default function PerformerGrid({ sections, renderItem, itemKey, onAuxOpen
         offset += DIVIDER_H + GAP;
       }
       for (let i = 0; i < items.length; i += cols) {
-        rows.push({ kind: 'cards', items: items.slice(i, i + cols), top: offset, height: CARD_H });
-        offset += CARD_H + GAP;
+        rows.push({ kind: 'cards', items: items.slice(i, i + cols), top: offset, height: rowH });
+        offset += rowH + GAP;
       }
     }
     return { rows, height: rows.length ? offset - GAP : 0 };
-  }, [sections, cols]);
+  }, [sections, cols, rowH]);
 
   const [range, setRange] = useState({ first: 0, last: -1 });
   const layoutRef = useRef(layout);
@@ -115,7 +97,7 @@ export default function PerformerGrid({ sections, renderItem, itemKey, onAuxOpen
     if (row.kind === 'divider') {
       nodes.push(
         <Box key={row.key} sx={{
-          position: 'absolute', top: row.top, left: left0, width: rowWidth(cols), maxWidth: '100%', height: DIVIDER_H,
+          position: 'absolute', top: row.top, left: 0, width, maxWidth: '100%', height: DIVIDER_H,
           display: 'flex', alignItems: 'center', gap: 1.5
         }}>
           <Typography component="h3" sx={{ fontSize: '.8rem', fontWeight: 600, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
@@ -131,9 +113,9 @@ export default function PerformerGrid({ sections, renderItem, itemKey, onAuxOpen
         <Box
           key={itemKey(item)}
           onAuxClick={(e) => { if (isCardAux(e)) { e.preventDefault(); onAuxOpen?.(item, e); } }}
-          sx={{ position: 'absolute', top: row.top, left: left0 + c * (CARD_W + GAP), width: CARD_W, height: CARD_H }}
+          sx={{ position: 'absolute', top: row.top, left: c * (cellW + GAP), width: cellW, height: rowH }}
         >
-          {renderItem(item)}
+          <Box sx={cardBoxSx(scale)}>{renderItem(item)}</Box>
         </Box>
       );
     });
@@ -164,17 +146,16 @@ const hiddenSx = {
 /** Two rows of card-sized boxes while the list loads for the first time. */
 export function GridSkeleton() {
   const ref = useRef(null);
-  const width = useWidth(ref);
-  const cols = colsFor(width);
+  const { cols, cellW, scale } = useFill(ref, { base: CARD_W, gap: GAP });
   return (
     <Box ref={ref} sx={{ position: 'relative', width: '100%' }}>
       <Box role="status" sx={hiddenSx}>Loading performers…</Box>
       <Box aria-hidden sx={{
-        display: 'grid', gridTemplateColumns: `repeat(${cols}, ${CARD_W}px)`, gap: `${GAP}px`, justifyContent: 'center'
+        display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${GAP}px`
       }}>
         {Array.from({ length: cols * 2 }, (_, i) => (
           <Box key={i} sx={{
-            width: CARD_W, height: CARD_H, bgcolor: 'var(--raised)', borderRadius: '8px',
+            width: cellW, maxWidth: '100%', height: CARD_H * scale, bgcolor: 'var(--raised)', borderRadius: '8px',
             animation: 'homeGridPulse 1.6s ease-in-out infinite',
             '@keyframes homeGridPulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.55 }, '100%': { opacity: 1 } },
             '@media (prefers-reduced-motion: reduce)': { animation: 'none' }

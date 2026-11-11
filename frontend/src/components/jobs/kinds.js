@@ -29,6 +29,13 @@ export const KIND_LABEL = {
   probe: 'Library scan'
 };
 
+/** Shorter names where the room is small (the Jobs sidebar); the full name goes in the row's title. */
+export const KIND_SHORT = {
+  ...KIND_LABEL,
+  funpipe: 'Funscript',
+  pipeline: 'Labels + funscript'
+};
+
 /** One icon per kind. */
 export const KIND_ICON = {
   import: MoveToInboxIcon,

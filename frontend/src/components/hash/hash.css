@@ -54,15 +54,20 @@
 .hr-badge.info { color: var(--info); background: var(--info-quiet); }
 .hr-badge.accent { color: var(--accent); background: var(--accent-quiet); }
 
-/* ── header ── */
-.hr-title { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
-.hr-subtitle { font-variant-numeric: tabular-nums; }
-.hr-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.hr-control {
-  display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 0 8px 0 2px;
-  border: 1px solid var(--line); border-radius: var(--radius); color: var(--dim); font-size: .8125rem; white-space: nowrap;
+/* ── the frame: SidebarPage (className hr-page). Its content column is a flex column, so the selection bar, its last
+   child, stands at the foot of the window even when the list is short ── */
+.hr-page > [data-sidebar-content] { display: flex; flex-direction: column; }
+.hr-page[data-sidebar-mode="phone"] {
+  display: flex; flex-direction: column;
+  min-height: calc(100dvh - 49px - env(safe-area-inset-top, 0px) - 57px - env(safe-area-inset-bottom, 0px));
 }
-.hr-control.disabled { opacity: .5; }
+.hr-foot { flex: 1 0 16px; }
+
+/* ── the content line's title ── */
+.hr-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.hr-title { max-width: 100%; vertical-align: middle; }
+.hr-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hr-title .hr-badge { flex: none; }
 .hr-infoline { display: flex; gap: 8px; align-items: flex-start; margin: -8px 0 16px; font-size: .8125rem; color: var(--info); }
 .hr-infoline svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
 
@@ -78,39 +83,6 @@
 .hr-banner > svg { color: var(--warn); margin-top: 1px; width: 20px; height: 20px; flex: none; }
 .hr-banner.bad { border-color: var(--warn); background: var(--warn-quiet); color: var(--warn); }
 .hr-banner.bad > svg { color: var(--warn); }
-
-/* ── stats ── */
-.hr-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 24px; }
-.hr-stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px 16px; min-width: 0; }
-.hr-stat b { display: block; font-size: 1.35rem; font-weight: 660; line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--text); }
-.hr-stat b small { font-size: .8rem; font-weight: 500; color: var(--muted); }
-.hr-stat span { display: block; font-size: .78rem; color: var(--dim); margin-top: 3px; }
-.hr-stat em { display: block; font-style: normal; font-size: .75rem; color: var(--muted); margin-top: 2px; }
-.hr-stat.accent b { color: var(--accent); }
-.hr-stat.bad b { color: var(--bad); }
-.hr-stat.warn b { color: var(--warn); }
-
-/* ── filter chips ── */
-.hr-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-.hr-chipgroup { display: inline-flex; gap: 4px; flex: none; }
-.hr-fchip {
-  display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border-radius: var(--radius-sm);
-  border: 1px solid var(--line); background: var(--raised); color: var(--dim);
-  font-size: .78rem; font-weight: 550; white-space: nowrap; cursor: pointer; flex: none;
-}
-.hr-fchip:hover { border-color: var(--line-strong); color: var(--text); }
-.hr-fchip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-quiet); }
-.hr-vsep { width: 1px; height: 20px; background: var(--line); flex: none; }
-.hr-select {
-  height: 30px; padding: 0 8px; background: var(--surface); color: var(--text);
-  border: 1px solid var(--line); border-radius: var(--radius); font-size: .8rem; flex: none; cursor: pointer;
-}
-.hr-select:hover { border-color: var(--line-strong); }
-.hr-select:focus { outline: none; border-color: var(--accent); }
-.hr-select:disabled { opacity: .45; cursor: default; }
-.hr-select option { background: var(--surface); color: var(--text); }
-.hr-match { color: var(--muted); font-size: .8rem; white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
-.hr-hint { font-size: .75rem; color: var(--muted); margin: -8px 0 16px; }
 
 /* ── review list ── */
 .hr-anchor { scroll-margin-top: 80px; }
@@ -202,11 +174,12 @@
 .hr-orow-ctl .hr-kr { width: 160px; }
 .hr-more { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); font-size: .78rem; color: var(--muted); }
 
-/* ── selection bar ── */
+/* ── selection bar: sticky at the foot of the window, across the content column only (its negative margins take
+   back the column's 24px padding, its own padding puts it back) ── */
 .hr-selbar {
   position: sticky; bottom: var(--nav-bottom, 0px); z-index: 15; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 10px 24px; padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  background: var(--surface); border-top: 1px solid var(--line-strong);
+  margin: 0 -24px -24px; padding: 10px 24px; padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  background: var(--surface); border-top: 1px solid var(--line);
 }
 .hr-selbar .hr-count { font-size: .9rem; font-weight: 620; color: var(--text); font-variant-numeric: tabular-nums; min-width: 0; }
 .hr-selbar .hr-count small { display: block; font-size: .75rem; font-weight: 400; color: var(--muted); }
@@ -263,12 +236,6 @@
 
 /* ── phone ── */
 @media (max-width: 600px) {
-  .hr-stats { grid-template-columns: 1fr 1fr; margin-bottom: 12px; }
-  .hr-stat { padding: 10px 12px; }
-  .hr-stat b { font-size: 1.1rem; }
-  .hr-stat.space { display: none; }
-  .hr-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 12px; padding-bottom: 2px; }
-  .hr-chips::-webkit-scrollbar { display: none; }
   .hr-group { flex: 1 1 100%; max-width: 100%; }
   .hr-tiles { grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
   .hr-orow { grid-template-columns: 72px minmax(0, 1fr); padding: 10px 12px; }
@@ -281,14 +248,13 @@
   .hr-selbar .hr-selbtns .hr-btn { width: 100%; padding: 4px 8px; }
   .hr-selbar .hr-remove { flex: 1 1 100%; }
   .hr-selbar .hr-remove .hr-btn { width: 100%; }
-  .hr-actions { gap: 6px; }
-  .hr-actions .hr-btn { min-height: 28px; padding: 2px 9px; font-size: .78rem; }
-  .hr-actions .hr-btn svg { width: 16px; height: 16px; }
-  .hr-actions .hr-control { height: 28px; font-size: .78rem; }
   .hr-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .hr-cmp { grid-template-columns: 1fr; }
   .hr-banner { padding: 10px 12px; }
 }
+
+/* the phone layout: the content has 12px padding */
+.hr-selbar.phone { margin: 0 -12px -12px; padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
 
 /* ── compact tile: facts on the picture, one control row (overrides the rules above) ── */
 .hr-tile { gap: 6px; }

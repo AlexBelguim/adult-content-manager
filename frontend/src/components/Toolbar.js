@@ -3,20 +3,21 @@
  * the bottom navigation). No props: everything comes from the route and the
  * shell context.
  *
- * Left: logo (home), the Library item (a Gallery | Filter segment on the
- * library lists, a text link elsewhere), then the section links from lg up.
- * Right: jobs, the Handy control and More. Below lg the sections fold into
- * More's Pages group.
+ * Left: logo (home), Library (at every width), then the other section links
+ * from lg up; below lg those fold into More's Pages group. The library's
+ * Gallery | Filter switch is the Library page's View list, not the bar.
+ * Right: Jobs, the Handy gear and More, in one style (barGhostSx): no border,
+ * no box, a hover background, icon and label.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar as MuiToolbar, Button, IconButton, Box, Divider, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import { Image, FilterList, MoreHoriz } from '@mui/icons-material';
-import JobsIndicator from './JobsIndicator';
+import { MoreHoriz } from '@mui/icons-material';
+import JobsIndicator, { barGhostSx } from './JobsIndicator';
 import Logo from './Logo';
 import AppMoreMenu, { navIcon } from './AppMoreMenu';
-import { SECTIONS, sectionOf, libraryState } from '../nav';
+import { SECTIONS, sectionOf } from '../nav';
 
 /** A text link in the bar: full height, so the active underline sits on the bar's edge. */
 const barLinkSx = (active) => ({
@@ -36,21 +37,77 @@ const barLinkSx = (active) => ({
   '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' },
 });
 
-const segmentSx = (on) => ({
-  fontSize: 13,
-  px: 1.75,
-  minWidth: 0,
-  textTransform: 'none',
-  whiteSpace: 'nowrap',
-  borderRadius: 'var(--radius-sm, 4px)',
-  fontWeight: on ? 600 : 500,
-  color: on ? 'var(--on-accent)' : 'var(--dim)',
-  bgcolor: on ? 'var(--accent)' : 'transparent',
-  '&:hover': {
-    bgcolor: on ? 'var(--accent-hover)' : 'var(--raised)',
-    color: on ? 'var(--on-accent)' : 'var(--text)',
-  },
-});
+/**
+ * Styles the shared Handy element's own chrome away, so the bar item draws the hover (public/handy-control.js stays
+ * as is). The compact rule is matched again because ':host([compact]) .hc' outranks '.hc'; the gear takes the item's
+ * colour (--bar-fg, set on the item), and the changed-settings dot moves to the smaller gear's corner.
+ */
+const HANDY_BAR_CSS = '.hc{padding:0;gap:6px;background:transparent;border-color:transparent} .gear{width:24px;height:24px;border:0} '
+  + '.gear:hover,.gear.on{background:transparent;border-color:transparent} '
+  + ':host([compact]) .hc{padding:0} .gear{color:var(--bar-fg,var(--dim))} .mod{right:0;top:0}';
+
+/**
+ * The Handy control in the bar's style: <handy-control compact bare> (its connection dot and gear, with the gear's
+ * changed-settings dot), then the label "Handy". A click on the label or around the element opens its settings, like the gear.
+ */
+function HandyBarItem() {
+  const ref = useRef(null);
+  const closedAt = useRef(0);
+
+  useEffect(() => {
+    let alive = true;
+    let tries = 0;
+    let frame = 0;
+    let panel = null;
+    const onToggle = (e) => { if (e.newState === 'closed') closedAt.current = performance.now(); };
+    const style = () => {
+      if (!alive) return;
+      const root = ref.current?.shadowRoot;
+      if (!root) {
+        tries += 1;
+        if (tries < 60) frame = requestAnimationFrame(style);
+        return;
+      }
+      if (!root.querySelector('style[data-acm-bar]')) {
+        const el = document.createElement('style');
+        el.setAttribute('data-acm-bar', '');
+        el.textContent = HANDY_BAR_CSS;
+        root.appendChild(el);
+      }
+      panel = root.querySelector('.hs');
+      panel?.addEventListener('toggle', onToggle);
+    };
+    if (window.customElements?.whenDefined) {
+      window.customElements.whenDefined('handy-control').then(style).catch(() => {});
+    }
+    return () => {
+      alive = false;
+      if (frame) cancelAnimationFrame(frame);
+      panel?.removeEventListener('toggle', onToggle);
+    };
+  }, []);
+
+  const openPanel = useCallback((e) => {
+    const host = ref.current;
+    if (!host) return;
+    // A click on the element itself is the gear's (or its dot's) own.
+    if (e.target === host || host.contains(e.target)) return;
+    // The click that light-dismissed the open panel should not open it again.
+    if (performance.now() - closedAt.current < 300) return;
+    host.shadowRoot?.querySelector('.gear')?.click();
+  }, []);
+
+  return (
+    <Box
+      onClick={openPanel}
+      sx={{ ...barGhostSx(false), '--bar-fg': 'var(--dim)', '&:hover': { bgcolor: 'var(--raised)', color: 'var(--text)', '--bar-fg': 'var(--text)' } }}
+    >
+      {/* Shared with faptap-dl (public/handy-control.js). Compact: the key field lives in its panel. */}
+      <handy-control ref={ref} compact="" bare="" />
+      <Box component="span" aria-hidden>Handy</Box>
+    </Box>
+  );
+}
 
 export default function Toolbar() {
   const location = useLocation();
@@ -65,13 +122,8 @@ export default function Toolbar() {
   }, [pathname, location.search]);
 
   const section = sectionOf(pathname);
-  const lib = libraryState(pathname);
-  const showSegment = !!lib && (lib.list === 'gallery' || lib.list === 'filter') && !lib.galleryId;
-  const libraryItem = SECTIONS[0];
   const moreActive =
     section === 'tools' || section === 'system' || section === null || (belowLg && section !== 'library');
-  // Mode-switch rule: history holds at most one mode switch.
-  const replaceSwitch = !!location.state?.modeSwitch;
 
   return (
     <AppBar
@@ -108,56 +160,7 @@ export default function Toolbar() {
 
         <Divider orientation="vertical" flexItem sx={{ mx: 0.25, my: 1.25, borderColor: 'var(--line)' }} />
 
-        {showSegment ? (
-          <Box
-            role="group"
-            aria-label="Library view"
-            sx={{
-              display: 'flex',
-              flexShrink: 0,
-              gap: '2px',
-              p: '2px',
-              bgcolor: 'var(--bg)',
-              border: '1px solid var(--line)',
-              borderRadius: 'var(--radius, 6px)',
-            }}
-          >
-            {[
-              ['gallery', 'Gallery', '/', <Image key="g" />],
-              ['filter', 'Filter', '/filter', <FilterList key="f" />],
-            ].map(([key, label, to, icon]) => {
-              const on = lib.list === key;
-              return (
-                <Button
-                  key={key}
-                  component={RouterLink}
-                  to={to}
-                  replace={replaceSwitch}
-                  state={{ modeSwitch: true }}
-                  aria-current={on ? 'page' : undefined}
-                  startIcon={icon}
-                  size="small"
-                  disableElevation
-                  sx={segmentSx(on)}
-                >
-                  {label}
-                </Button>
-              );
-            })}
-          </Box>
-        ) : (
-          <Button
-            component={RouterLink}
-            to={libraryItem.to}
-            startIcon={navIcon(libraryItem.icon, 15)}
-            aria-current={section === 'library' ? 'page' : undefined}
-            sx={barLinkSx(section === 'library')}
-          >
-            {libraryItem.label}
-          </Button>
-        )}
-
-        {SECTIONS.filter((s) => s.id !== 'library').map((s) => {
+        {SECTIONS.map((s) => {
           const active = section === s.id;
           return (
             <Button
@@ -166,7 +169,7 @@ export default function Toolbar() {
               to={s.to}
               startIcon={navIcon(s.icon, 15)}
               aria-current={active ? 'page' : undefined}
-              sx={{ ...barLinkSx(active), display: { xs: 'none', lg: 'inline-flex' } }}
+              sx={{ ...barLinkSx(active), display: s.id === 'library' ? 'inline-flex' : { xs: 'none', lg: 'inline-flex' } }}
             >
               {s.label}
             </Button>
@@ -175,24 +178,22 @@ export default function Toolbar() {
 
         <Box sx={{ flex: 1, minWidth: 0 }} />
 
-        <JobsIndicator />
-
-        {/* Shared with faptap-dl (public/handy-control.js). Compact at every width: the key field lives in its panel. */}
-        <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-          <handy-control compact="" />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+          <JobsIndicator />
+          <HandyBarItem />
+          <Button
+            id="app-more-button"
+            onClick={(e) => setMoreAnchor(e.currentTarget)}
+            startIcon={<MoreHoriz />}
+            aria-haspopup="true"
+            aria-expanded={moreAnchor ? 'true' : 'false'}
+            aria-controls={moreAnchor ? 'app-more-menu' : undefined}
+            disableRipple
+            sx={barGhostSx(moreActive || !!moreAnchor)}
+          >
+            More
+          </Button>
         </Box>
-
-        <Button
-          id="app-more-button"
-          onClick={(e) => setMoreAnchor(e.currentTarget)}
-          startIcon={<MoreHoriz />}
-          aria-haspopup="true"
-          aria-expanded={moreAnchor ? 'true' : 'false'}
-          aria-controls={moreAnchor ? 'app-more-menu' : undefined}
-          sx={barLinkSx(moreActive)}
-        >
-          More
-        </Button>
       </MuiToolbar>
 
       <AppMoreMenu anchorEl={moreAnchor} open={!!moreAnchor} onClose={() => setMoreAnchor(null)} />

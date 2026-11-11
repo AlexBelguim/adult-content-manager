@@ -1,13 +1,4 @@
+/* Only the first-run folder picker uses this; the library itself sits in SidebarPage, which pads itself. */
 .main-page {
   min-height: calc(100vh - 56px);
-}
-
-.main-content {
-  padding: 20px;
-}
-
-@media (max-width: 768px) {
-  .main-content {
-    padding: 10px;
-  }
 }

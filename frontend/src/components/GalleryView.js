@@ -1,29 +1,72 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Link as RouterLink, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
-import { Box, IconButton, Tooltip } from '@mui/material';
-import SlideshowIcon from '@mui/icons-material/Slideshow';
+import React, { useEffect, useMemo } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import PhotoLibraryOutlinedIcon from '@mui/icons-material/PhotoLibraryOutlined';
 import FullscreenGalleryDialog from './fullscreenModes/FullscreenGalleryDialog';
-import { PageShell, PageHeader, iconBtnSx } from './layout';
-import { TabBar, SmallButton, useOverlay } from './discover/shared';
-import { useChrome } from '../nav';
+import { SideGroup, SideFacts, SideButtons, SideButton, SIDE } from './layout';
+import { useOverlay } from './discover/shared';
 import useHomeQuery from './home/useHomeQuery';
-import { useGalleryPerformers, useGenres } from './home/homeData';
+import { useGalleryPerformers, useGenres, useGalleryList, formatGb } from './home/homeData';
 import { galleryUrl, hasNewUpload } from './home/performerFacts';
 import { buildFacets, normalizeFilters, matchesSearch, applyFilters, sortPerformers } from './home/filterModel';
 import PerformersTab from './home/PerformersTab';
 import GenresTab from './home/GenresTab';
-import PerformerFilters from './home/PerformerFilters';
 
 /**
- * The Gallery home (`/` in Gallery mode, 900px and wider): Performers and Genres tabs, the filter drawer and the
- * slideshow. basePath is the library root from MainPage. The lists live in components/home/homeData.js, so a
- * remount shows the last list at once; the query (tab, search, sort, filters) lives in the URL.
- * No title block on PC (the app bar names the page): Group rate and the slideshow sit right of the tabs, and the
- * new-upload count is the Performers toolbar's "New uploads N" chip. In the phone chrome PageHeader gives the page
- * bar its title and holds the two buttons.
+ * The sidebar's Library section: facts summed over the gallery performers, then Group rate and (on the gallery)
+ * the slideshow. The Filter list shows it too, without the slideshow. It reads the gallery list as it is; the
+ * page's View list loads it. facts=false (the Genres view, which has its own totals): only the buttons.
+ */
+export function LibraryGroup({ onSlideshow, canShow = false, facts = true }) {
+  const list = useGalleryList();
+  const rows = useMemo(() => {
+    if (!list) return [];
+    let pics = 0;
+    let vids = 0;
+    let gb = 0;
+    let fresh = 0;
+    for (const p of list) {
+      pics += Number(p.pics_count) || 0;
+      vids += Number(p.vids_count) || 0;
+      gb += Number(p.total_size_gb) || 0;
+      if (hasNewUpload(p)) fresh += 1;
+    }
+    // the performer count is in the View list already (each fact once)
+    return [
+      { label: 'Pictures', value: pics.toLocaleString() },
+      { label: 'Videos', value: vids.toLocaleString() },
+      { label: 'Size', value: formatGb(gb) },
+      fresh > 0 ? { label: 'New uploads', value: fresh.toLocaleString(), tone: 'accent', title: 'Performers with a new upload on Leakhaven' } : null
+    ];
+  }, [list]);
+
+  return (
+    <SideGroup
+      id="library"
+      title="Library"
+      icon={<PhotoLibraryOutlinedIcon />}
+      summary={list ? `${list.length.toLocaleString()} performers` : 'loading'}
+      order={SIDE.page}
+    >
+      {facts ? <SideFacts rows={rows} /> : null}
+      <SideButtons>
+        <SideButton component={RouterLink} to="/group-rate">Group rate</SideButton>
+        {onSlideshow ? (
+          <SideButton plain disabled={!canShow} tip={canShow ? undefined : 'Nothing to show'} onClick={onSlideshow}>
+            Slideshow
+          </SideButton>
+        ) : null}
+      </SideButtons>
+    </SideGroup>
+  );
+}
+
+/**
+ * The Gallery home (`/`, 900px and wider), inside MainPage's SidebarPage: the Performers or the Genres view (the
+ * sidebar's View list switches them, ?tab=genres), their Show groups, the Library section and the slideshow.
+ * basePath is the library root from MainPage. The lists live in components/home/homeData.js, so a remount shows
+ * the last list at once; the query (tab, search, sort, filters) lives in the URL.
  */
 export default function GalleryView({ basePath }) {
-  const isPhone = useChrome() === 'phone';
   const navigate = useNavigate();
   const query = useHomeQuery();
   const data = useGalleryPerformers();
@@ -39,29 +82,7 @@ export default function GalleryView({ basePath }) {
   const total = performers?.length ?? 0;
   const newCount = useMemo(() => (performers ? performers.filter(hasNewUpload).length : 0), [performers]);
 
-  const filtersOv = useOverlay('filters');
   const showOv = useOverlay('show');
-
-  // The drawer's filters apply live, by replacing its own history entry. Closing it (Done, Close, Esc, Back) pops that
-  // entry, which would bring back the query from before it opened: put the drawer's last query back on the entry below.
-  const location = useLocation();
-  const navType = useNavigationType();
-  const keepOnClose = useRef(null);
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.has('filters')) {
-      params.delete('filters');
-      const rest = params.toString();
-      keepOnClose.current = rest ? `?${rest}` : '';
-      return;
-    }
-    const keep = keepOnClose.current;
-    keepOnClose.current = null;
-    if (keep != null && navType === 'POP' && keep !== location.search) {
-      navigate({ pathname: location.pathname, search: keep, hash: location.hash }, { replace: true, state: location.state });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per history entry
-  }, [location.key]);
 
   // A reload never reopens the slideshow without a click.
   useEffect(() => {
@@ -71,63 +92,17 @@ export default function GalleryView({ basePath }) {
 
   const canShow = performers != null && shownList.length > 0;
 
-  const pageActions = (
-    <>
-      <SmallButton component={RouterLink} to="/group-rate">Group rate</SmallButton>
-      <Tooltip title={canShow ? 'Slideshow' : 'Nothing to show'}>
-        <span>
-          <IconButton aria-label="Slideshow" disabled={!canShow} onClick={() => showOv.open('1')} sx={iconBtnSx()}>
-            <SlideshowIcon />
-          </IconButton>
-        </span>
-      </Tooltip>
-    </>
-  );
-
-  const tabBar = (
-    <TabBar
-      label="Gallery"
-      value={query.tab}
-      onChange={(t) => { query.set({ tab: t }); window.scrollTo(0, 0); }}
-      tabs={[
-        { id: 'performers', label: 'Performers', count: performers ? total : null },
-        { id: 'genres', label: 'Genres', count: g.genres ? g.genres.length : null }
-      ]}
-      sx={isPhone ? undefined : { flex: '1 1 auto', mb: 0 }}
-    />
-  );
-
   return (
-    <PageShell full>
-      {isPhone ? (
-        <>
-          <PageHeader title="Gallery" actions={pageActions} />
-          {tabBar}
-        </>
-      ) : (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, minWidth: 0 }}>
-          {tabBar}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 'none' }}>{pageActions}</Box>
-        </Box>
-      )}
-
+    <>
       {query.tab === 'genres' ? (
-        <GenresTab genres={g.genres} loading={g.loading} error={g.error} reload={g.reload}
+        <GenresTab genres={g.genres} error={g.error} reload={g.reload}
           gq={query.gq} gsort={query.gsort} onQuery={query.set} basePath={basePath} />
       ) : (
-        <PerformersTab data={data} shown={shown} total={total} newCount={newCount} q={query.q} sort={query.sort} filters={filters}
-          facets={facets} onQuery={query.set} onOpenFilters={() => filtersOv.open('1')} basePath={basePath} />
+        <PerformersTab data={data} shown={shown} total={total} newCount={newCount} q={query.q} sort={query.sort}
+          filters={filters} facets={facets} onQuery={query.set} basePath={basePath} />
       )}
 
-      <PerformerFilters
-        open={filtersOv.value != null}
-        onClose={filtersOv.close}
-        facets={facets}
-        filters={filters}
-        onChange={(next) => query.set({ filters: next })}
-        shown={shownList.length}
-        total={total}
-      />
+      <LibraryGroup onSlideshow={() => showOv.open('1')} canShow={canShow} facts={query.tab !== 'genres'} />
 
       <FullscreenGalleryDialog
         open={showOv.value != null}
@@ -135,6 +110,6 @@ export default function GalleryView({ basePath }) {
         performers={shownList}
         onPhotoClick={(p) => navigate(galleryUrl(p, basePath), { replace: true })}
       />
-    </PageShell>
+    </>
   );
 }

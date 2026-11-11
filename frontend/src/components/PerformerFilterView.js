@@ -673,6 +673,23 @@ useToastLift(phone ? 'calc(99px + env(safe-area-inset-bottom, 0px))' : '83px');
     onBack();
   }, [backBusy, performer.id, onBack, notify]);
 
+  // A Library View list item (desktop): Filter is Back; Performers and Genres clean the trash the same way
+  // (fire and forget: a server task the Jobs page shows), then open that list.
+  const handleView = useCallback((view) => {
+    if (view.id === 'filter') {
+      handleBack();
+      return;
+    }
+    if (backBusy) return;
+    left.current = true; // this cleanup, not the unmount one
+    setBackBusy(true);
+    abortRef.current?.abort();
+    fetch(`/api/performers/${performer.id}/cleanup-trash-async`, { method: 'POST', keepalive: true })
+      .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); })
+      .catch((error) => notify('warning', `Trash cleanup could not be started: ${error.message}`));
+    navigate(view.to, { state: view.state });
+  }, [handleBack, backBusy, performer.id, notify, navigate]);
+
   const handleNextPerformer = useCallback(async () => {
     left.current = true; // this cleanup, not the unmount one
     try {
@@ -796,6 +813,7 @@ useToastLift(phone ? 'calc(99px + env(safe-area-inset-bottom, 0px))' : '83px');
         progress={progress}
         onTab={switchTab}
         onBack={handleBack}
+        onView={handleView}
         backBusy={backBusy}
         onNextPerformer={handleNextPerformer}
         sortBy={sortBy}

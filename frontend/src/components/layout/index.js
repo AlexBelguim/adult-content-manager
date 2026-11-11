@@ -20,6 +20,11 @@
  *       <Panel>…</Panel>
  *     </Section>
  *   </PageShell>
+ *
+ * Pages with a sidebar use SidebarPage instead (SidebarPage.js: the frame, rail, flyout, phone tabs and sheet;
+ * side.js: SideGroup, SideList, SideFacts, SideChecks, SideSearch, SideSelect, SideSegment, SideField,
+ * SideButtons/SideButton, SideMain, SideNote, ContentLine; FillGrid.js: grids that meet both edges). All are
+ * re-exported here.
  */
 import React from 'react';
 import { Box, Typography, IconButton, Tooltip, CircularProgress } from '@mui/material';
@@ -127,7 +132,7 @@ export function PageShell({ children, full = false, flush = false, sx = {}, ...r
  *   title       the page title (a string also becomes the phone page bar's title)
  *   subtitle    one line under the title
  *   actions     buttons on the right of the header
- *   back        show a Back arrow (desktop and bare chrome)
+ *   back        show a Back arrow, only in the bare chrome (VR): with the app bar, the sidebar's View list is the way back
  *   parent      where Back goes when the app did not push this entry (default: the route table's parent)
  *   onBack      replaces the back rule (nav/useBack) for the arrow and the phone bar
  *   barActions  phone only: nodes in the page bar, right of the title
@@ -180,7 +185,9 @@ export function PageHeader({ title, titleIsInfo = false, subtitle, actions, back
   // when it carries information (titleIsInfo, e.g. "Duplicates: katielefit"), the subtitle line and the actions.
   // A page with none of these draws nothing. The title still names the page for screen readers.
   const shownTitle = titleIsInfo ? title : null;
-  if (!subtitle && !actions && !shownTitle && !back) {
+  // The arrow is drawn only in the bare chrome (no app bar); with the app bar the sidebar's View list leads back.
+  const showBack = !!back && chrome === 'bare';
+  if (!subtitle && !actions && !shownTitle && !showBack) {
     return typeof title === 'string' ? <Typography component="h1" sx={visuallyHidden}>{title}</Typography> : null;
   }
   return (
@@ -198,7 +205,7 @@ export function PageHeader({ title, titleIsInfo = false, subtitle, actions, back
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, minWidth: 0, flex: '1 1 auto' }}>
-        {back && (
+        {showBack && (
           <Tooltip title="Back">
             <IconButton aria-label="Back" onClick={onBack || goBack} size="small" sx={{ color: 'var(--dim)' }}>
               <ArrowBackIcon fontSize="small" />
@@ -359,6 +366,10 @@ export function LoadingState({ label = 'Loading…', sx = {} }) {
     </Box>
   );
 }
+
+export * from './SidebarPage';
+export * from './side';
+export * from './FillGrid';
 
 const layout = {
   PageShell, PageHeader, Section, Panel, Toolbar,

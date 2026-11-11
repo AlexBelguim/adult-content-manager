@@ -13,7 +13,7 @@ export default function NotFoundPage() {
   const phone = useChrome() === 'phone';
   const where = `No page at ${pathname}.`;
   return (
-    <PageShell>
+    <PageShell full>
       <EmptyState
         title={phone ? where : 'Page not found'}
         description={phone ? null : where}

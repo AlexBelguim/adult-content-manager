@@ -3,20 +3,34 @@ import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import PerformerCard from './PerformerCard';
 import PerformerFilterView from './PerformerFilterView';
 import PerformerSettingsModal from './PerformerSettingsModal';
-import { EmptyState, LoadingState, PageShell } from './layout';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import {
+  EmptyState, LoadingState, PageShell, FillGrid, SideGroup, SideSearch, SideSelect, ContentLine, SIDE
+} from './layout';
+import { CARD_W, CARD_H, GAP } from './home/PerformerGrid';
+import { setFilterCount } from './home/homeData';
+import { lowerFirst } from './home/filterModel';
+import { LibraryGroup } from './GalleryView';
 import { useOpen } from '../nav';
 import useFilterViewHistory from './filter/filterHistory';
-import {
-  Box,
-  Button,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Typography,
-  Container,
-  TextField
-} from '@mui/material';
+import { Box, Button } from '@mui/material';
+
+const skeletonSx = { width: CARD_W, height: CARD_H, borderRadius: '8px', bgcolor: 'var(--raised)' };
+// When her filter view was left (the list mounts anew after it): the list then refreshes its cards.
+let leftPerformerAt = 0;
+const FILTER_SORTS = [
+  ['size-desc', 'Size, largest first'], ['size-asc', 'Size, smallest first'],
+  ['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A'],
+  ['date-desc', 'Newest first'], ['date-asc', 'Oldest first'],
+  ['pics-desc', 'Most pictures'], ['pics-asc', 'Fewest pictures'],
+  ['vids-desc', 'Most videos'], ['vids-asc', 'Fewest videos'],
+  ['funscript-desc', 'Most funscripts'], ['funscript-asc', 'Fewest funscripts'],
+  ['pics-completion-asc', 'Pictures, least done'], ['pics-completion-desc', 'Pictures, most done'],
+  ['vids-completion-asc', 'Videos, least done'], ['vids-completion-desc', 'Videos, most done'],
+  ['overall-completion-asc', 'Overall, least done'], ['overall-completion-desc', 'Overall, most done'],
+  ['in-after-first', 'Also in After first']
+];
+const SORT_OPTIONS = FILTER_SORTS.map(([value, label]) => ({ value, label }));
 
 // Export utility functions for reuse in phone components
 export const fetchPerformers = (page = 1, itemsPerPage = 12, sortBy = 'size-desc', searchTerm = '') => {
@@ -111,8 +125,6 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
   const [sort, setSort] = useState(() => localStorage.getItem('filterSortBy') || 'size-desc');
   const [searchTerm, setSearchTerm] = useState('');
   const [settingsModal, setSettingsModal] = useState({ open: false, performer: null });
-  const [containerWidth, setContainerWidth] = useState(0);
-  const cardRowRef = useRef(null);
   const prevSortRef = useRef(sort);
 
   // The performer of /filter/:performerId: from the list when she is in it, else asked of the server
@@ -157,6 +169,7 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
       console.log(`FilterView: Loaded ${performers.length} performers`);
       setAllPerformers(performers);
       setRenderedCount(performers.length); // Show all immediately on refresh
+      setFilterCount(performers.length);
 
       if (onPerformersUpdate) {
         onPerformersUpdate(performers);
@@ -177,6 +190,7 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
       console.log(`FilterView: Using ${cachedPerformers.length} cached performers`);
       setAllPerformers(cachedPerformers);
       setRenderedCount(cachedPerformers.length);
+      setFilterCount(cachedPerformers.length);
       setLoading(false);
       return; // Don't fetch, we have cache
     }
@@ -198,6 +212,7 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
 
         // All at once: a card-by-card timer chain is slowed down by the browser in a background tab
         setRenderedCount(performers.length);
+        setFilterCount(performers.length);
 
         if (onPerformersUpdate) {
           onPerformersUpdate(performers);
@@ -221,12 +236,12 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
 
   // Back on the list from her filter view, by any way out (Back here, browser Back, a link): counts moved
   // and the view's cleanup runs on the server, so refresh the cards now and once more when it has most
-  // likely finished.
-  const shownPerformer = useRef(performerId);
+  // likely finished. Her view and the list are separate mounts (MainPage gives the list the sidebar), so
+  // leaving her is noted at module level and picked up by the list that mounts next.
   useEffect(() => {
-    const was = shownPerformer.current;
-    shownPerformer.current = performerId;
-    if (!was || performerId) return undefined;
+    if (performerId) return () => { leftPerformerAt = Date.now(); };
+    if (!leftPerformerAt || Date.now() - leftPerformerAt > 10000) return undefined;
+    leftPerformerAt = 0;
     fetchAllPerformers();
     const timer = setTimeout(fetchAllPerformers, 5000);
     return () => clearTimeout(timer);
@@ -238,26 +253,6 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
     localStorage.setItem('filterSortBy', sort);
   }, [sort]);
 
-  // Measure the row the cards actually live in, for the ghost-card count.
-  //
-  // This used to guess — window.innerWidth * 0.8, capped by breakpoint, with a
-  // "rough calculation" comment to match. At 1430px that returns 1144 against a
-  // real content width of 1366, so it concluded 3 cards per row where 4 fit and
-  // padded the last row with the wrong number of ghosts. Measuring the element
-  // removes both the guess and the hardcoded 48px padding that went with it:
-  // clientWidth is already the content box.
-  useEffect(() => {
-    const el = cardRowRef.current;
-    if (!el) return undefined;
-
-    const measure = () => setContainerWidth(el.clientWidth);
-    measure();
-
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  // the row is only there while the list shows, so measure again each time it comes back
-  }, [inPerformer]);
 
   // Client-side filtering by search term
   const sorted = allPerformers.filter(performer => {
@@ -423,7 +418,7 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
     }
     if (fetchedNow?.status === 'missing' || fetchedNow?.status === 'error') {
       return (
-        <PageShell>
+        <PageShell full>
           <EmptyState
             title={fetchedNow.status === 'missing' ? 'Performer not found' : 'Could not load this performer'}
             description={fetchedNow.status === 'missing' ? `No performer has the id ${performerId}.` : fetchedNow.error}
@@ -432,216 +427,63 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
         </PageShell>
       );
     }
-    return <PageShell><LoadingState label="Loading the performer…" /></PageShell>;
+    return <PageShell full><LoadingState label="Loading the performer…" /></PageShell>;
   }
 
+  // The list, inside MainPage's SidebarPage like the Gallery home: its Show group and the Library section in the
+  // sidebar, one content line, the 280px cards grown to fill each row (FillGrid scales them; they keep their look).
+  const sortLabel = lowerFirst(FILTER_SORTS.find(([value]) => value === sort)?.[1] || '');
+  const total = allPerformers.length;
+  const countText = searchTerm ? `${sorted.length.toLocaleString()} of ${total.toLocaleString()}` : total.toLocaleString();
+  const meta = loading && total === 0 ? null
+    : [`${countText} ${total === 1 ? 'performer' : 'performers'} to filter`, sortLabel].join(' · ');
   return (
-    <Container
-      maxWidth={false}
-      sx={{
-        py: 3,
-        maxWidth: {
-          xs: '100%',
-          sm: '100%',
-          md: '100%',
-          lg: 'calc(1200px * 1.3)', // Increased by 0.3 for large screens
-          xl: 'calc(1536px * 1.3)'  // Increased by 0.3 for xl screens
-        },
-        px: { xs: 2, sm: 3, md: 4 } // Responsive padding
-      }}
-    >
-      {/* Header Controls */}
-      <Box sx={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        mb: 3,
-        flexWrap: 'wrap',
-        gap: 2
-        // This used to carry a computed `mx` meant to inset the header to the
-        // edge of the centred 280px card block. It missed on both counts: the
-        // header landed at x=160 while the cards started at x=119, because the
-        // maths assumed a flat 48px of container padding when the Container
-        // uses a responsive px of {xs:2, sm:3, md:4} — 64px at desktop. It also
-        // put this header 108px right of the Gallery one, which shares the same
-        // Container and sits flush. Flush here too, so switching modes doesn't
-        // move the title.
-      }}>
-        <Box>
-          {/* Matches the PageHeader primitive — see GalleryView. */}
-          <Typography variant="h5" sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>
-            Filter Performers
-          </Typography>
-          {allPerformers.length > 0 && (
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-              {searchTerm ? `${sorted.length} of ${allPerformers.length} performers` : `${allPerformers.length} performers`}
-            </Typography>
-          )}
-        </Box>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <TextField
-            size="small"
-            placeholder="Search performers..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            sx={{ minWidth: 200 }}
-          />
-
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Sort By</InputLabel>
-            <Select
-              value={sort}
-              label="Sort By"
-              onChange={e => setSort(e.target.value)}
-            >
-              <MenuItem value="size-desc">Size (Largest First)</MenuItem>
-              <MenuItem value="size-asc">Size (Smallest First)</MenuItem>
-              <MenuItem value="name-asc">Name (A-Z)</MenuItem>
-              <MenuItem value="name-desc">Name (Z-A)</MenuItem>
-              <MenuItem value="date-desc">Date (Newest First)</MenuItem>
-              <MenuItem value="date-asc">Date (Oldest First)</MenuItem>
-              <MenuItem value="pics-desc">Images (Most First)</MenuItem>
-              <MenuItem value="pics-asc">Images (Least First)</MenuItem>
-              <MenuItem value="vids-desc">Videos (Most First)</MenuItem>
-              <MenuItem value="vids-asc">Videos (Least First)</MenuItem>
-              <MenuItem value="funscript-desc">Funscript Count (Most First)</MenuItem>
-              <MenuItem value="funscript-asc">Funscript Count (Least First)</MenuItem>
-              <MenuItem value="pics-completion-asc">Images % (Least Done)</MenuItem>
-              <MenuItem value="pics-completion-desc">Images % (Most Done)</MenuItem>
-              <MenuItem value="vids-completion-asc">Videos % (Least Done)</MenuItem>
-              <MenuItem value="vids-completion-desc">Videos % (Most Done)</MenuItem>
-              <MenuItem value="overall-completion-asc">Overall % (Least Done)</MenuItem>
-              <MenuItem value="overall-completion-desc">Overall % (Most Done)</MenuItem>
-              <MenuItem value="in-after-first">Also in After (First)</MenuItem>
-            </Select>
-          </FormControl>
-        </Box>
-      </Box>
-
-      {/* Performers Grid */}
-      <Box
-        ref={cardRowRef}
-        sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: '24px' // Static gap between cards
-        }}
+    <>
+      <SideGroup
+        id="show"
+        title="Show"
+        icon={<FilterListIcon />}
+        badge={searchTerm ? 1 : 0}
+        summary={searchTerm ? 'search on' : 'nothing on'}
+        order={SIDE.show}
       >
-        {loading && sorted.length === 0 ? (
-          // Show skeleton cards while loading initial data
-          [...Array(12)].map((_, index) => (
-            <Box key={`skeleton-${index}`} sx={{ flexShrink: 0 }}>
-              <Box
-                sx={{
-                  width: '280px',
-                  height: '520px',
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  background: 'linear-gradient(90deg, rgba(40, 40, 40, 0.9) 25%, rgba(60, 60, 60, 0.9) 50%, rgba(40, 40, 40, 0.9) 75%)',
-                  backgroundSize: '200% 100%',
-                  animation: 'loading-skeleton 1.5s ease-in-out infinite',
-                  '@keyframes loading-skeleton': {
-                    '0%': { backgroundPosition: '200% 0' },
-                    '100%': { backgroundPosition: '-200% 0' }
-                  },
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Typography sx={{ color: 'var(--dim)', fontSize: '14px' }}>
-                  Loading...
-                </Typography>
-              </Box>
-            </Box>
-          ))
-        ) : (
-          sorted.map((performer, index) => (
-            <Box key={performer.id} sx={{ flexShrink: 0 }}>
-              {index >= renderedCount ? (
-                <Box
-                  sx={{
-                    width: '280px',
-                    height: '520px',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    background: 'linear-gradient(90deg, rgba(40, 40, 40, 0.9) 25%, rgba(60, 60, 60, 0.9) 50%, rgba(40, 40, 40, 0.9) 75%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'loading-skeleton 1.5s ease-in-out infinite',
-                    '@keyframes loading-skeleton': {
-                      '0%': { backgroundPosition: '200% 0' },
-                      '100%': { backgroundPosition: '-200% 0' }
-                    },
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <Typography sx={{ color: 'var(--dim)', fontSize: '14px' }}>
-                    Loading...
-                  </Typography>
-                </Box>
-              ) : (
-                <PerformerCard
-                  performer={performer}
-                  onClick={(e) => handlePerformerClick(performer, e)}
-                  onChangeThumbnail={handlePerformerThumbnailChange}
-                  onComplete={handlePerformerComplete}
-                  onSettings={handlePerformerSettings}
-                  onOpenHash={handleOpenHash}
-                  onDelete={handlePerformerDelete}
-                  onProgressClick={handleProgressClick}
-                  onOpenThumbnailSelector={(performer) => navigate(`/thumbnail-selector/${performer.id}`)}
-                  mode="filter"
-                  basePath={basePath}
-                />
-              )}
-            </Box>
-          ))
-        )}
+        <SideSearch value={searchTerm} onChange={setSearchTerm} placeholder="Search performers" />
+        <SideSelect label="Sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+      </SideGroup>
+      <LibraryGroup />
 
-        {/* Ghost cards to fill out the last row */}
-        {(() => {
-          if (containerWidth === 0) return null; // Don't render until we have container width
+      <ContentLine title="Filter" meta={meta} />
 
-          const cardWidth = 280;
-          const gap = 24;
-          // containerWidth is the measured content box, so no padding to
-          // subtract. The last card in a row has no trailing gap.
-          const cardsPerRow = Math.max(1, Math.floor((containerWidth + gap) / (cardWidth + gap)));
-          const remainder = sorted.length % cardsPerRow;
-          const ghostCards = remainder > 0 ? cardsPerRow - remainder : 0;
-
-          return Array.from({ length: ghostCards }, (_, index) => (
-            <Box
-              key={`ghost-${index}`}
-              sx={{
-                width: '280px',
-                height: '520px',
-                flexShrink: 0,
-                visibility: 'hidden' // Invisible but takes up space
-              }}
-            />
-          ));
-        })()}
-      </Box>
-
-      {/* Empty State */}
-      {!loading && sorted.length === 0 && (
-        <Box sx={{
-          textAlign: 'center',
-          py: 8,
-          color: 'text.secondary'
-        }}>
-          <Typography variant="h6" gutterBottom>
-            No performers to filter
-          </Typography>
-          <Typography variant="body2">
-            All performers have been processed or moved to the gallery.
-          </Typography>
-        </Box>
+      {loading && sorted.length === 0 ? (
+        <FillGrid base={CARD_W} height={CARD_H} gap={GAP} fit="scale" aria-hidden>
+          {[...Array(12)].map((_, i) => <Box key={`skeleton-${i}`} sx={skeletonSx} />)}
+        </FillGrid>
+      ) : sorted.length > 0 ? (
+        <FillGrid base={CARD_W} height={CARD_H} gap={GAP} fit="scale">
+          {sorted.map((performer, index) => (
+            index >= renderedCount ? <Box key={performer.id} sx={skeletonSx} /> : (
+              <PerformerCard
+                key={performer.id}
+                performer={performer}
+                onClick={(e) => handlePerformerClick(performer, e)}
+                onChangeThumbnail={handlePerformerThumbnailChange}
+                onComplete={handlePerformerComplete}
+                onSettings={handlePerformerSettings}
+                onOpenHash={handleOpenHash}
+                onDelete={handlePerformerDelete}
+                onProgressClick={handleProgressClick}
+                onOpenThumbnailSelector={(p) => navigate(`/thumbnail-selector/${p.id}`)}
+                mode="filter"
+                basePath={basePath}
+              />
+            )
+          ))}
+        </FillGrid>
+      ) : !loading && (
+        <EmptyState
+          title={searchTerm ? 'No performer matches the search' : 'No performers to filter'}
+          description={searchTerm ? undefined : 'Every performer is filtered or moved to the gallery.'}
+        />
       )}
 
       {/* Performer Settings Modal. Move-to-after / refresh-stats are server
@@ -654,7 +496,7 @@ function FilterView({ performerId = null, basePath, handyIntegration, handyConne
         basePath={basePath}
         onUpdate={fetchAllPerformers}
       />
-    </Container>
+    </>
   );
 }
 

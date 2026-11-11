@@ -20,7 +20,7 @@
 .fv-grow { flex: 1 1 0; min-width: 0; }
 .fv-sub { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .fv-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.fv kbd { font: 600 .72rem ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 0 5px; color: var(--text); white-space: nowrap; }
+.fv kbd { font: 600 .75rem ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 0 5px; color: var(--text); white-space: nowrap; }
 .pl-btn.fv-go { background: var(--ok); border-color: var(--ok); color: var(--bg); font-weight: 650; }
 .pl-btn.fv-go:hover { background: var(--ok); filter: brightness(1.1); }
 .pl-btn.is-on { border-color: var(--accent); color: var(--accent); }
@@ -182,13 +182,6 @@ button.fv-kstate:hover { background: var(--raised); color: var(--text); }
 }
 
 /* ── phone: one column, media full height, round buttons, sheet, queue below ── */
-/* MainPage wraps the desktop view in .main-content, which pads 20px (10px on
-   phones); take that back so the media fills the viewport under the app bar.
-   The phone shell has no such wrapper, so this is scoped to it. */
-.main-content .fv { margin: -20px; }
-@media (max-width: 768px) {
-  .main-content .fv { margin: -10px; }
-}
 @media (max-width: 760px) {
   .fv { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
   .fv-mid { height: calc(100vh - var(--fv-top)); height: calc(100dvh - var(--fv-top)); }

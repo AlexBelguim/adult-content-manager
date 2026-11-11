@@ -11,7 +11,13 @@
  * Action = { key, label, disabled: reason | null, busy, busyLabel?, danger?, to?, href? }. A link carries `to` (in-app)
  * or `href` (another site) and is rendered as a link, never passed to run().
  * Ctx = { view, filter, byId, job(id), pendingOf(id), checkingId, hashBusy(id, otherId?), unlabelled(p) } (buildCtx).
+ *
+ * The one React part: performerViews(), the sidebar's View list of the page and of the hash results page.
  */
+import React from 'react';
+import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
+import UpdateIcon from '@mui/icons-material/Update';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 export const VIEWS = [
   { id: 'library', label: 'Library' },
@@ -780,3 +786,44 @@ export function metaLine(p, view, ctx) {
 
 /** Her other records (any location) for texts: the first one, or null. */
 export const otherRecordOf = anyTwin;
+
+// ── the sidebar's View list ──────────────────────────────────
+const VIEW_ICONS = { library: PeopleOutlineIcon, updates: UpdateIcon, duplicates: ContentCopyIcon };
+const plainClick = (e) => !e || (!e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey);
+
+/**
+ * The View list of SidebarPage: Library (every record), Updates (new uploads), Duplicates (needs attention).
+ *
+ *   performerViews({ library, updates, duplicates }?, onPick?)
+ *
+ * counts: a number or null per view (left out: no count). Each item links to /performer-management?view=<id>, so a
+ * middle or ctrl click opens a tab. onPick(id): a plain click calls it instead of following the link (the page
+ * switches through its query state); without it the link is followed (pushed), as from the hash results page.
+ */
+let lastViewCounts = null;
+
+/** Performer Management keeps its View list counts here, so the hash results page can show them without a fetch. */
+export function rememberViewCounts(counts) {
+  lastViewCounts = counts || null;
+}
+
+/** The counts Performer Management last showed ({} when it has not loaded in this tab). */
+export function rememberedViewCounts() {
+  return lastViewCounts || {};
+}
+
+export function performerViews(counts = {}, onPick) {
+  return VIEWS.map(v => ({
+    id: v.id,
+    label: v.label,
+    count: typeof counts?.[v.id] === 'number' ? counts[v.id] : null,
+    icon: React.createElement(VIEW_ICONS[v.id]),
+    to: `/performer-management?view=${v.id}`,
+    title: v.id === 'updates' ? 'New uploads' : v.id === 'duplicates' ? 'Needs attention' : 'Every record',
+    onClick: onPick ? (e) => {
+      if (!plainClick(e)) return;
+      e.preventDefault();
+      onPick(v.id);
+    } : undefined,
+  }));
+}

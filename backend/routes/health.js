@@ -56,10 +56,20 @@ router.get('/', async (req, res) => {
       WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = r.performer_id)
     `).get().c;
 
+    // A hash row with no performer_id is kept on purpose (migration 013): only one of a performer that is gone is an orphan
     const orphanedHashes = db.prepare(`
       SELECT COUNT(*) as c FROM performer_file_hashes h
-      WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = h.performer_id)
+      WHERE performer_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = h.performer_id)
     `).get().c;
+
+    // A tag with no performer_id is a tag definition (routes/tags.js): only a tag of a performer that is gone is an orphan
+    let orphanedTags = 0;
+    try {
+      orphanedTags = db.prepare(`
+        SELECT COUNT(*) as c FROM tags t
+        WHERE t.performer_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = t.performer_id)
+      `).get().c;
+    } catch (_) { orphanedTags = 0; }
 
     const orphanedPairwise = db.prepare(`
       SELECT COUNT(*) as c FROM pairwise_image_scores s
@@ -170,6 +180,7 @@ router.get('/', async (req, res) => {
     if (orphanedHashes > 0) issues.push({ type: 'orphan', table: 'performer_file_hashes', count: orphanedHashes });
     if (orphanedPairwise > 0) issues.push({ type: 'orphan', table: 'pairwise_image_scores', count: orphanedPairwise });
     if (orphanedFilterActions > 0) issues.push({ type: 'orphan', table: 'filter_actions', count: orphanedFilterActions });
+    if (orphanedTags > 0) issues.push({ type: 'orphan', table: 'tags', count: orphanedTags });
     if (checkAi && !aiServerHealth.online) issues.push({ type: 'service', service: 'ai_inference', message: 'AI server is offline' });
 
     res.json({
@@ -183,6 +194,7 @@ router.get('/', async (req, res) => {
           hashes: orphanedHashes, 
           pairwise: orphanedPairwise, 
           filterActions: orphanedFilterActions,
+          tags: orphanedTags,
           performerComparisons: orphanedPerformerComparisons
         }
       },
@@ -229,7 +241,7 @@ router.post('/cleanup', (req, res) => {
     `).run().changes;
 
     results.hashes = db.prepare(`
-      DELETE FROM performer_file_hashes WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = performer_file_hashes.performer_id)
+      DELETE FROM performer_file_hashes WHERE performer_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = performer_file_hashes.performer_id)
     `).run().changes;
 
     results.pairwiseScores = db.prepare(`
@@ -241,7 +253,7 @@ router.post('/cleanup', (req, res) => {
     `).run().changes;
 
     results.tags = db.prepare(`
-      DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = tags.performer_id)
+      DELETE FROM tags WHERE performer_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM performers p WHERE p.id = tags.performer_id)
     `).run().changes;
 
     results.performerComparisons = db.prepare(`

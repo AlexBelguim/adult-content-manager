@@ -6,17 +6,19 @@
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Typography, Button, TextField, Select, MenuItem, IconButton } from '@mui/material';
-import { ExpandMore, ExpandLess, Close, PhotoLibraryOutlined } from '@mui/icons-material';
+import { Box, Typography, Button, IconButton } from '@mui/material';
+import { ExpandMore, ExpandLess, Close, PhotoLibraryOutlined, TuneOutlined } from '@mui/icons-material';
 import {
-    PageShell, PageHeader, Panel, Toolbar, EmptyState, LoadingState, iconBtnSx, overlayChipSx, SPACE
+    SidebarPage, SideGroup, SideSearch, SideSelect, ContentLine, SIDE,
+    Panel, EmptyState, LoadingState, iconBtnSx, overlayChipSx, SPACE
 } from '../components/layout';
 import { useNotify } from '../components/ui';
 import { useIsPhone } from '../nav';
-import RateTabs from '../components/rating/RateTabs';
+import { RATE_VIEWS } from '../components/rating/RateTabs';
 
 const SORT_KEY = 'rate.pictures.sort';
 const SORTS = [['needs', 'Needs pairs'], ['most', 'Most pairs'], ['name', 'Name']];
+const SORT_OPTIONS = SORTS.map(([value, label]) => ({ value, label }));
 const LANE_LIMIT = 60; // above this a lane shows the best 40 and the worst 20 until 'Show all'
 const LANE_HEAD = 40;
 const LANE_TAIL = 20;
@@ -503,40 +505,29 @@ function RankingInsightPage() {
         ? `${query.trim() ? `${shown.length.toLocaleString()} of ` : ''}${count(performers.length, 'performer')} · ${totalPairs == null ? '– pairs' : count(totalPairs, 'pair')}`
         : null;
 
-    return (
-        <PageShell full>
-            <PageHeader title="Rank pictures" />
+    const searching = !!query.trim();
+    const sortLabel = (SORTS.find(([id]) => id === sort) || SORTS[0])[1];
 
-            <Toolbar>
-                <RateTabs current="pictures" />
-                {facts && (
-                    <Typography sx={{ fontSize: 13, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                        {facts}
-                    </Typography>
-                )}
-                <Box sx={{ display: 'flex', gap: SPACE.sm, alignItems: 'center', width: { xs: '100%', sm: 'auto' }, ml: { sm: 'auto' } }}>
-                    <TextField
-                        size="small" type="search" placeholder="Search names" value={query}
-                        onChange={(e) => setQuery(e.target.value)} inputProps={{ 'aria-label': 'Search names' }}
-                        sx={{
-                            flex: { xs: '1 1 auto', sm: '0 0 180px' }, minWidth: 0,
-                            '& .MuiInputBase-root': { fontSize: 13, height: 32, bgcolor: 'var(--surface)' }
-                        }}
-                    />
-                    <Select
-                        size="small" value={sort} inputProps={{ 'aria-label': 'Sort' }}
-                        onChange={(e) => { setSort(e.target.value); writeSort(e.target.value); }}
-                        sx={{ flexShrink: 0, fontSize: 13, height: 32, bgcolor: 'var(--surface)' }}
-                    >
-                        {SORTS.map(([id, label]) => <MenuItem key={id} value={id}>{label}</MenuItem>)}
-                    </Select>
-                </Box>
-            </Toolbar>
+    return (
+        <SidebarPage title="Rank pictures" views={RATE_VIEWS} view="pictures">
+            <SideGroup
+                id="show" title="Show" icon={<TuneOutlined />} order={SIDE.show}
+                badge={searching ? 1 : 0}
+                summary={searching ? `"${query.trim()}" · ${sortLabel}` : sortLabel}
+            >
+                <SideSearch value={query} onChange={setQuery} placeholder="Search names" />
+                <SideSelect
+                    label="Sort" value={sort} options={SORT_OPTIONS}
+                    onChange={(v) => { setSort(v); writeSort(v); }}
+                />
+            </SideGroup>
+
+            <ContentLine title="Rank pictures" meta={facts} />
 
             {content}
 
             {tray && <Tray tray={tray} onChoose={choose} onClose={closeTray} />}
-        </PageShell>
+        </SidebarPage>
     );
 }
 

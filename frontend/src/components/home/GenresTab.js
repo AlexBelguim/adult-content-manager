@@ -1,20 +1,27 @@
 /**
- * The Gallery home's Genres tab: the genre folders under content, as cards or as a table. Search and sort are in
- * the URL (gq, gsort); the view is remembered in localStorage.
+ * The Gallery home's Genres view: the genre folders under content, as cards or as a table. Its Show group (search,
+ * sort, Grid or List) and the genre totals sit in the sidebar. Search and sort are in the URL (gq, gsort); the view
+ * is remembered in localStorage. The cards fill the width: as many 300px columns as fit, then grown to meet both
+ * edges, each card keeping the proportions it has at 300px.
  */
 import React, { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Box, MenuItem, Select, Typography } from '@mui/material';
-import { Toolbar, Panel, EmptyState } from '../layout';
-import { SearchField, Segment, SmallButton, TotalText } from '../discover/shared';
+import { Box, Typography } from '@mui/material';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined';
+import {
+  Panel, EmptyState, FillGrid, SideGroup, SideSearch, SideSelect, SideSegment, SideFacts, SideNote, ContentLine, SIDE
+} from '../layout';
+import { SmallButton } from '../discover/shared';
 import { errorText } from '../ui';
 import { useOpen } from '../../nav';
-import { GENRE_SORTS, sortGenres, genreTotals } from './filterModel';
-import GenreCard, { GenrePipeline, genreUrl, formatCount, formatSize } from './GenreCard';
+import { GENRE_SORTS, sortGenres, genreTotals, lowerFirst } from './filterModel';
+import { formatGb } from './homeData';
+import GenreCard, { GenrePipeline, genreUrl, formatCount, formatSize, GENRE_CARD_W, GENRE_CARD_H } from './GenreCard';
 
 const VIEW_KEY = 'galleryContentViewMode';
-const selectSx = { fontSize: '.84rem', height: 32, bgcolor: 'var(--surface)' };
-const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))', gap: 1.5 };
+const SORT_OPTIONS = GENRE_SORTS.map(s => ({ value: s.id, label: s.label }));
+const VIEW_OPTIONS = [{ id: 'grid', label: 'Grid' }, { id: 'list', label: 'List' }];
 
 function readView() {
   try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'; } catch { return 'grid'; }
@@ -88,6 +95,43 @@ function GenreTable({ list, basePath }) {
   );
 }
 
+/** The genre totals as sidebar facts: every genre's folder counts, and the files tagged with one elsewhere. */
+function genreFacts(genres) {
+  const sum = { pics: 0, vids: 0, funscripts: 0, tagged: 0, gb: 0 };
+  for (const g of genres) {
+    const t = genreTotals(g);
+    sum.pics += t.pics;
+    sum.vids += t.vids;
+    sum.funscripts += t.funscripts;
+    sum.tagged += t.tagged.total;
+    sum.gb += t.sizeGb;
+  }
+  return [
+    { label: 'Genres', value: formatCount(genres.length) },
+    { label: 'Pictures', value: formatCount(sum.pics) },
+    { label: 'Videos', value: formatCount(sum.vids) },
+    { label: 'Funscripts', value: formatCount(sum.funscripts) },
+    sum.tagged > 0 ? { label: 'Tagged elsewhere', value: formatCount(sum.tagged) } : null,
+    { label: 'Size', value: formatGb(sum.gb) }
+  ];
+}
+
+function Skeleton() {
+  return (
+    <FillGrid base={GENRE_CARD_W} gap={24} fit="stretch" aria-hidden>
+      {Array.from({ length: 8 }, (_, i) => (
+        <Box key={i} sx={{
+          height: GENRE_CARD_H,
+          bgcolor: 'var(--raised)', borderRadius: 'var(--radius-lg, 10px)',
+          animation: 'homeGenrePulse 1.6s ease-in-out infinite',
+          '@keyframes homeGenrePulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.55 }, '100%': { opacity: 1 } },
+          '@media (prefers-reduced-motion: reduce)': { animation: 'none' }
+        }} />
+      ))}
+    </FillGrid>
+  );
+}
+
 export default function GenresTab({ genres, error, reload, gq, gsort, onQuery, basePath }) {
   const [view, setViewState] = useState(readView);
   const setView = (v) => {
@@ -101,6 +145,7 @@ export default function GenresTab({ genres, error, reload, gq, gsort, onQuery, b
     const rows = (genres || []).filter(g => !lower || String(g.name || '').toLowerCase().includes(lower));
     return sortGenres(rows, gsort);
   }, [genres, needle, gsort]);
+  const facts = useMemo(() => (genres ? genreFacts(genres) : []), [genres]);
 
   let content;
   if (genres == null && error) {
@@ -112,18 +157,7 @@ export default function GenresTab({ genres, error, reload, gq, gsort, onQuery, b
       </Panel>
     );
   } else if (genres == null) {
-    content = (
-      <Box sx={GRID} aria-hidden>
-        {Array.from({ length: 8 }, (_, i) => (
-          <Box key={i} sx={{
-            height: 152, bgcolor: 'var(--raised)', borderRadius: 'var(--radius-lg, 10px)',
-            animation: 'homeGenrePulse 1.6s ease-in-out infinite',
-            '@keyframes homeGenrePulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.55 }, '100%': { opacity: 1 } },
-            '@media (prefers-reduced-motion: reduce)': { animation: 'none' }
-          }} />
-        ))}
-      </Box>
-    );
+    content = <Skeleton />;
   } else if (genres.length === 0) {
     content = <EmptyState title="No genres yet" description="Genres are the folders under content in your library." />;
   } else if (list.length === 0) {
@@ -131,34 +165,49 @@ export default function GenresTab({ genres, error, reload, gq, gsort, onQuery, b
       <EmptyState title={`No genres match "${needle}"`}
         action={<SmallButton onClick={() => onQuery({ gq: '' })}>Clear search</SmallButton>} />
     );
+  } else if (view === 'list') {
+    content = <GenreTable list={list} basePath={basePath} />;
   } else {
+    // natural height: the cards are text, so a taller cell would only add empty space; a row's cards stretch to one height
     content = (
-      <>
-        <Typography sx={{ fontSize: '.78rem', color: 'var(--muted)', mb: 1.5 }}>
-          Counts are files in the genre folder, plus files tagged with the genre elsewhere (+ tagged).
-        </Typography>
-        {view === 'list'
-          ? <GenreTable list={list} basePath={basePath} />
-          : <Box sx={GRID}>{list.map(genre => <GenreCard key={genre.name} genre={genre} basePath={basePath} />)}</Box>}
-      </>
+      <FillGrid base={GENRE_CARD_W} gap={24} fit="stretch">
+        {list.map(genre => <GenreCard key={genre.name} genre={genre} basePath={basePath} />)}
+      </FillGrid>
     );
   }
 
+  const sortLabel = lowerFirst(GENRE_SORTS.find(x => x.id === gsort)?.label || '');
+  const meta = genres == null ? null : [
+    needle ? `${formatCount(list.length)} of ${formatCount(genres.length)}` : formatCount(genres.length),
+    sortLabel
+  ].filter(Boolean).join(' · ');
+
   return (
     <>
-      <Toolbar>
-        <SearchField value={gq} onChange={(v) => onQuery({ gq: v })} placeholder="Search genres" />
-        <Select size="small" value={gsort} onChange={(e) => onQuery({ gsort: e.target.value })} inputProps={{ 'aria-label': 'Sort genres' }} sx={selectSx}>
-          {GENRE_SORTS.map(s => <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>)}
-        </Select>
-        <Segment label="Genre view" value={view} onChange={setView}
-          options={[{ id: 'grid', label: 'Grid' }, { id: 'list', label: 'List' }]} />
-        {needle && genres && (
-          <Box sx={{ ml: 'auto' }}>
-            <TotalText>{`Showing ${list.length} of ${genres.length}`}</TotalText>
-          </Box>
-        )}
-      </Toolbar>
+      <SideGroup
+        id="show"
+        title="Show"
+        icon={<FilterListIcon />}
+        badge={needle ? 1 : 0}
+        summary={needle ? 'search on' : 'nothing on'}
+        order={SIDE.show}
+      >
+        <SideSearch value={gq} onChange={(v) => onQuery({ gq: v })} placeholder="Search genres" />
+        <SideSelect label="Sort genres" value={gsort} onChange={(v) => onQuery({ gsort: v })} options={SORT_OPTIONS} />
+        <SideSegment label="Genre view" value={view} onChange={setView} options={VIEW_OPTIONS} />
+      </SideGroup>
+      <SideGroup
+        id="genres"
+        title="Genres"
+        icon={<CategoryOutlinedIcon />}
+        summary={genres ? `${formatCount(genres.length)} genres` : 'loading'}
+        order={SIDE.page + 1}
+      >
+        <SideFacts rows={facts} />
+        <SideNote>Counts are files in the genre folder, plus files tagged with the genre elsewhere (+ tagged).</SideNote>
+      </SideGroup>
+
+      <ContentLine title="Genres" meta={meta} />
       {content}
     </>
   );

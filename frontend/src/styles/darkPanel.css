@@ -17,15 +17,7 @@
    re-styled here. See components/layout/index.js.
    ============================================================ */
 
-/* Page container.
-   Kept as an alias of PageShell so any straggler markup still lines up;
-   new code should use <PageShell>. */
-.dp-page {
-  padding: 24px;
-  min-height: 100vh;
-  max-width: 1600px;
-  margin: 0 auto;
-}
+/* (.dp-page, the old page container, is gone: Discover, its only user, is a SidebarPage now.) */
 
 /* Page title — matches the PageHeader primitive. */
 .dp-title {

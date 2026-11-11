@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box, Typography, Button, IconButton, CircularProgress, Rating, Tooltip, useMediaQuery
 } from '@mui/material';
-import { Refresh, ArrowUpward, ArrowDownward } from '@mui/icons-material';
+import { Refresh, ArrowUpward, ArrowDownward, FormatListNumbered } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
-import { PageShell, PageHeader, Panel, LoadingState, EmptyState, SPACE, iconBtnSx } from '../components/layout';
+import {
+  SidebarPage, SideGroup, SideNote, SideButtons, SideButton, ContentLine, Panel, LoadingState, EmptyState, SPACE, iconBtnSx
+} from '../components/layout';
 import { useNotify, plural, errorText } from '../components/ui';
-import RateTabs from '../components/rating/RateTabs';
+import { rateViews } from '../components/rating/RateTabs';
 import { newVoteId } from '../components/rating/voteQueue';
 
 const CALIBRATION_THRESHOLD = 5;
@@ -503,28 +505,31 @@ function GroupRatePage() {
     );
   }
 
-  return (
-    <PageShell full>
-      <PageHeader title="Group Rate" />
+  const ready = status === 'ready';
+  const views = useMemo(() => rateViews({ list: ready ? performers.length : null }), [ready, performers.length]);
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap', mb: SPACE.md, minWidth: 0 }}>
-        <RateTabs current="list" />
-        {status === 'ready' && performers.length > 0 && (
-          <Typography sx={{ color: 'var(--dim)', fontSize: '13px', minWidth: 0, flex: '1 1 220px', fontVariantNumeric: 'tabular-nums' }}>
-            {plural(performers.length, 'performer')}, best first · each button records one duel with the neighbour
-          </Typography>
-        )}
-        <Tooltip title="Reload">
-          <Box component="span" sx={{ display: 'inline-flex', ml: 'auto' }}>
-            <IconButton aria-label="Reload" onClick={() => fetchList()} disabled={reloading} sx={btnSx}>
-              {reloading ? <CircularProgress size={16} sx={{ color: 'var(--dim)' }} /> : <Refresh />}
-            </IconButton>
-          </Box>
-        </Tooltip>
-      </Box>
+  return (
+    <SidebarPage title="Group Rate" views={views} view="list">
+      <SideGroup id="group" title="Group Rate" icon={<FormatListNumbered />} summary={reloading ? 'Loading…' : 'Best first'}>
+        <SideNote>Each button records one duel with the neighbour.</SideNote>
+        <SideButtons>
+          <SideButton
+            icon={reloading ? <CircularProgress size={14} sx={{ color: 'inherit' }} /> : <Refresh />}
+            onClick={() => fetchList()}
+            disabled={reloading}
+          >
+            {reloading ? 'Loading…' : 'Reload'}
+          </SideButton>
+        </SideButtons>
+      </SideGroup>
+
+      <ContentLine
+        title="Group Rate"
+        meta={ready ? `${plural(performers.length, 'performer')} · best first` : (status === 'loading' ? 'Loading…' : null)}
+      />
 
       {content}
-    </PageShell>
+    </SidebarPage>
   );
 }
 

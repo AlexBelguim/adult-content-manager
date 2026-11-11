@@ -344,6 +344,9 @@ export function removeChip(state, chip) {
   return next;
 }
 
+/** 'Name, A to Z' -> 'name, A to Z': a sort label inside a line of text. */
+export const lowerFirst = (t) => (t ? `${t.charAt(0).toLowerCase()}${t.slice(1)}` : '');
+
 // ── performer sorts ──────────────────────────────────────────
 export const SORTS = Object.freeze([
   { id: 'name-asc', label: 'Name, A to Z' },

@@ -1,6 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { Box } from '@mui/material';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import EmojiEventsOutlinedIcon from '@mui/icons-material/EmojiEventsOutlined';
 import { ensureFlag } from '../../utils/countryFlags';
 import FlagEmoji from '../FlagEmoji';
+import { SideGroup, SideFacts, SideNote, SideMain, SIDE } from '../layout';
 
 const parseScrapedTags = (raw) => {
   if (!raw) return [];
@@ -12,141 +16,63 @@ const parseScrapedTags = (raw) => {
   }
 };
 
-const initials = (name = '') => {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-};
-
 /**
- * Gallery header: avatar, name, one-line facts, count chips and the
- * collapsible performer details (Personal / Physical / Appearance / Tags).
+ * The sidebar's Performer section of her gallery (it replaced the header above the grid): her scraped facts, only
+ * those she has, her scraped tags on one line, and the page's main action, Rank images (Pictures only).
  */
-const GalleryHero = ({ name, isPerformer, performer, age, counts }) => {
-  const [open, setOpen] = useState(false);
-  const [avatarFailed, setAvatarFailed] = useState(false);
-
-  const p = isPerformer ? performer : null;
+const GalleryHero = ({ performer, age, onRank, rankEnabled }) => {
+  const p = performer;
   const flag = p ? ensureFlag(p.country_flag) : null;
 
-  const birthplace = p?.birthplace ? (
-    <span className="flag">
-      {flag && <FlagEmoji countryCode={flag} size="1rem" />}
-      {p.birthplace}
-    </span>
-  ) : null;
-
-  const groups = useMemo(() => {
+  const rows = useMemo(() => {
     if (!p) return [];
-    const rows = (list) => list.filter(([, value]) => value);
+    const birthplace = p.birthplace ? (
+      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        {flag && <FlagEmoji countryCode={flag} size="1rem" />}
+        {p.birthplace}
+      </Box>
+    ) : null;
     return [
-      ['Personal info', rows([
-        ['Age', p.age ? `${age} years old` : null],
-        ['Born', p.born],
-        ['Birthplace', p.birthplace ? 'birthplace' : null],
-        ['Sexuality', p.orientation],
-      ])],
-      ['Physical attributes', rows([
-        ['Height', p.height],
-        ['Weight', p.weight],
-        ['Measurements', p.measurements],
-        ['Cup size', p.measurements_cup],
-        ['Body type', p.body_type],
-        ['Grooming', p.pubic_hair],
-      ])],
-      ['Appearance', rows([
-        ['Hair', p.hair_color],
-        ['Eyes', p.eye_color],
-        ['Ethnicity', p.ethnicity],
-        ['Tattoos', p.tattoos],
-        ['Piercings', p.piercings],
-      ])],
-    ].filter(([, list]) => list.length > 0);
-  }, [p, age]);
+      p.age ? { label: 'Age', value: `${age}` } : null,
+      p.born ? { label: 'Born', value: p.born } : null,
+      birthplace ? { label: 'Birthplace', value: birthplace } : null,
+      p.orientation ? { label: 'Sexuality', value: p.orientation } : null,
+      p.height ? { label: 'Height', value: p.height } : null,
+      p.weight ? { label: 'Weight', value: p.weight } : null,
+      p.measurements ? { label: 'Measurements', value: p.measurements } : null,
+      p.measurements_cup ? { label: 'Cup', value: p.measurements_cup } : null,
+      p.body_type ? { label: 'Body', value: p.body_type } : null,
+      p.pubic_hair ? { label: 'Grooming', value: p.pubic_hair } : null,
+      p.hair_color ? { label: 'Hair', value: p.hair_color } : null,
+      p.eye_color ? { label: 'Eyes', value: p.eye_color } : null,
+      p.ethnicity ? { label: 'Ethnicity', value: p.ethnicity } : null,
+      p.tattoos ? { label: 'Tattoos', value: p.tattoos } : null,
+      p.piercings ? { label: 'Piercings', value: p.piercings } : null
+    ];
+  }, [p, age, flag]);
 
-  const scrapedTags = useMemo(() => parseScrapedTags(p?.scraped_tags), [p]);
-  const hasInfo = groups.length > 0 || scrapedTags.length > 0;
-
-  const facts = p ? [
-    p.age ? <span key="age">{age} yrs</span> : null,
-    birthplace ? <React.Fragment key="bp">{birthplace}</React.Fragment> : null,
-    p.height ? <span key="h">{p.height}</span> : null,
-    p.hair_color ? <span key="hair">{p.hair_color}</span> : null,
-    p.eye_color ? <span key="eyes">{p.eye_color} eyes</span> : null,
-  ].filter(Boolean) : [];
-
-  const showAvatarImage = p?.thumbnail && !avatarFailed;
+  const tags = useMemo(() => parseScrapedTags(p?.scraped_tags).map(String), [p]);
+  const known = rows.filter(Boolean).length;
 
   return (
-    <>
-      <header className="ug-hero">
-        <div className="ug-ava" aria-hidden="true">
-          {showAvatarImage ? (
-            <img
-              src={`/api/files/preview?path=${encodeURIComponent(p.thumbnail)}`}
-              alt=""
-              decoding="async"
-              onError={() => setAvatarFailed(true)}
-            />
-          ) : (isPerformer ? initials(name) : '#')}
-        </div>
-        <div className="ug-hero-main">
-          <h2>{name}</h2>
-          {facts.length > 0 && (
-            <p className="ug-facts">
-              {facts.map((fact, i) => (
-                <React.Fragment key={fact.key}>
-                  {i > 0 && <span className="sep">·</span>}
-                  {fact}
-                </React.Fragment>
-              ))}
-            </p>
-          )}
-          <div className="ug-cnt">
-            <span>{counts.pics} pics</span>
-            <span>{counts.vids} videos</span>
-            <span>{counts.funscripts} funscripts</span>
-          </div>
-        </div>
-        {hasInfo && (
-          <button
-            type="button"
-            className={`ug-btn${open ? ' on' : ''}`}
-            aria-expanded={open}
-            onClick={() => setOpen(prev => !prev)}
-          >
-            {open ? 'Less ▴' : 'More details ▾'}
-          </button>
-        )}
-      </header>
-
-      {open && hasInfo && (
-        <div className="ug-panel">
-          <div className="ug-info">
-            {groups.map(([heading, rows]) => (
-              <div key={heading}>
-                <h4>{heading}</h4>
-                <dl>
-                  {rows.map(([label, value]) => (
-                    <React.Fragment key={label}>
-                      <dt>{label}</dt>
-                      <dd>{label === 'Birthplace' ? birthplace : value}</dd>
-                    </React.Fragment>
-                  ))}
-                </dl>
-              </div>
-            ))}
-            {scrapedTags.length > 0 && (
-              <div className="ug-stags">
-                <h4>Tags</h4>
-                <div>{scrapedTags.map((tag, i) => <span key={`${tag}-${i}`}>{String(tag)}</span>)}</div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </>
+    <SideGroup
+      id="performer"
+      title="Performer"
+      icon={<PersonOutlineIcon />}
+      summary={p ? `${known} ${known === 1 ? 'fact' : 'facts'}` : 'loading'}
+      order={SIDE.page}
+    >
+      <SideMain
+        label="Rank images"
+        icon={<EmojiEventsOutlinedIcon />}
+        onClick={onRank}
+        disabled={!rankEnabled}
+        tip={rankEnabled ? 'Rank this performer\'s pictures against each other' : 'Available on the Pictures tab'}
+      />
+      <SideFacts rows={rows} />
+      {p && known === 0 && <SideNote>No scraped facts for her yet.</SideNote>}
+      {tags.length > 0 && <SideNote>{tags.join(' · ')}</SideNote>}
+    </SideGroup>
   );
 };
 

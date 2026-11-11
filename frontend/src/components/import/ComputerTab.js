@@ -4,11 +4,12 @@
  * from this browser (UploadRows).
  *
  *   basePath  the library (null: the server takes its first one)
- *   active    the tab is shown
+ *   active    the tab is shown: only then does it draw the content line
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Switch, TextField, Typography } from '@mui/material';
-import { useNotify, errorText } from '../ui';
+import { ContentLine } from '../layout';
+import { useNotify, errorText, plural } from '../ui';
 import { Badge, SmallButton, headSx } from '../discover/shared';
 import UploadRows from './UploadRows';
 import { useUploads } from './UploadsProvider';
@@ -104,7 +105,7 @@ const countsText = (c) => [
   c.scripts ? `${c.scripts} funscripts` : null
 ].filter(Boolean).join(', ');
 
-export default function ComputerTab({ basePath }) {
+export default function ComputerTab({ basePath, active = true }) {
   const notify = useNotify();
   const { uploads, addUpload, retryUpload, cancelUpload } = useUploads();
   const folderPicker = useMemo(hasFolderPicker, []);
@@ -214,6 +215,12 @@ export default function ComputerTab({ basePath }) {
 
   return (
     <div className="im-page">
+      {active && (
+        <ContentLine
+          title="From this computer"
+          meta={uploads.length ? `${plural(uploads.length, 'upload')} from this browser` : 'Nothing uploaded from this browser yet'}
+        />
+      )}
       <p className="im-line">{LINE}</p>
 
       <section

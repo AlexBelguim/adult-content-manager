@@ -1,22 +1,25 @@
 /**
- * The Discover page's run controls: the keep line, the watch timer, Older posts, Re-judge and Scan now.
+ * The Discover sidebar's Watch section (SideGroup 'watch'): the keep line, the watch timer, what the runs are doing (the
+ * facts), Pause while a run goes, Scan now (the page's main action), Older posts, Re-judge and the Log. On a phone it is
+ * in the Filters sheet; on the rail it is one icon with a dot (a watcher failed, or the timer is on).
  *
- *   layout="bar"   an inline row for the PC header, with tooltips
- *   layout="sheet" the phone's Runs sheet (a bottom drawer, open while the URL has sheet=runs), each control with a
- *                  visible one-line description under it
+ *   compact   the short version (the Duplicates view): the keep line, the last and next run, Scan now
+ *   main      false: Scan now is a plain button, for a view with a main action of its own (one watcher's Run now)
  *
  * act(path, body) POSTs, reloads the summary and says a refusal in a toast; it answers true when the POST went through.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Drawer, Switch, Tooltip } from '@mui/material';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import RefreshIcon from '@mui/icons-material/Refresh';
+import { CircularProgress, Switch } from '@mui/material';
+import RadarOutlinedIcon from '@mui/icons-material/RadarOutlined';
 import SearchIcon from '@mui/icons-material/Search';
-import { useOverlay } from './shared';
+import { SIDE, SideButton, SideButtons, SideFacts, SideField, SideGroup, SideMain, SideNote } from '../layout';
+import { AppDialog } from '../ui';
+import { when } from './shared';
+import { runInfo, RunLog, useTick } from './RunLine';
 import './page.css';
 
 /** A number that takes effect when you leave the field or press Enter; anything out of range goes back. */
-function NumberField({ value, min, max, whole, label, large, onCommit }) {
+function NumberField({ value, min, max, whole, label, title, onCommit }) {
   const [text, setText] = useState(String(value ?? ''));
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setText(String(value ?? '')); }, [value]);
@@ -28,35 +31,24 @@ function NumberField({ value, min, max, whole, label, large, onCommit }) {
     if (n !== value) onCommit(n);
   };
   return (
-    <input type="number" inputMode={whole ? 'numeric' : 'decimal'} min={min} max={max} aria-label={label} value={text}
-      className={`dp-num${large ? ' lg' : ''}`}
+    <input type="number" inputMode={whole ? 'numeric' : 'decimal'} min={min} max={max} aria-label={label} title={title} value={text}
+      className="dp-num side"
       onChange={(e) => setText(e.target.value)} onFocus={() => { focused.current = true; }} onBlur={commit}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
   );
 }
 
-/**
- * A header button with a tooltip that still shows while it is disabled. Outlined and contained are the same box (32px, a
- * 1px border), so Scan now is no bigger than Older posts and Re-judge.
- */
-function RunButton({ tip, contained, children, ...rest }) {
-  return (
-    <Tooltip title={tip}>
-      <span className="dp-tip">
-        <Button size="small" variant={contained ? 'contained' : 'outlined'} disableElevation
-          className={`dp-run-btn ${contained ? 'contained' : 'outlined'}`} {...rest}>
-          {children}
-        </Button>
-      </span>
-    </Tooltip>
-  );
-}
+const percent = (part, whole) => (whole ? `${Math.round(part / whole * 100)}%` : '');
 
-export default function RunControls({ summary, layout = 'bar', ask, notify, act }) {
-  const sheet = useOverlay('sheet');
+export default function RunControls({ summary, ask, notify, act, compact = false, main = true }) {
+  useTick();
+  const [logOpen, setLogOpen] = useState(false);
+  const [pausing, setPausing] = useState(null);
+
   const run = summary.run || {};
   const watch = summary.watch || {};
   const totals = summary.totals || {};
+  const watchers = summary.watchers || [];
   const threshold = summary.threshold ?? run.threshold ?? 50;
   const minutes = watch.minutes ?? 20;
   const busy = !!(summary.job?.running || summary.watchJob?.running);
@@ -67,7 +59,9 @@ export default function RunControls({ summary, layout = 'bar', ask, notify, act 
   const profiles = rejudge.profiles || 0;
   const n = posts + profiles;
   const model = rejudge.model || run.current_model || 'the current one';
-  const isSheet = layout === 'sheet';
+  const modelName = run.current_model || (run.models || []).join(', ') || '';
+  const info = runInfo(summary);
+  const failed = watchers.filter(w => w.last_error);
 
   const setLine = (value) => act('/settings', { threshold: value });
 
@@ -83,7 +77,6 @@ export default function RunControls({ summary, layout = 'bar', ask, notify, act 
       okLabel: 'Read'
     });
     if (!yes) return;
-    if (isSheet) sheet.close();
     await act('/scan', { mode: 'backlog' });
   };
 
@@ -95,84 +88,108 @@ export default function RunControls({ summary, layout = 'bar', ask, notify, act 
       okLabel: 'Re-judge'
     });
     if (!yes) return;
-    if (isSheet) sheet.close();
     await act('/scan', { mode: 'rescore' });
+  };
+
+  const pause = async (slot) => {
+    setPausing(slot);
+    try { await act('/pause', { slot }); } finally { setPausing(null); }
   };
 
   const lineText = 'P likes a picture at this score or above. Liked follows at once.';
   const watchText = `Runs the watched sites every ${minutes} min. Switching it on starts a run now.`;
-  const olderText = next ? `Reads up to 300 older posts, starting with ${next}.` : 'Every site was read to the end.';
-  const rejudgeText = n ? `Judges again the ${n.toLocaleString()} posts and profiles judged by another model.` : 'Everything is judged by the current model.';
+  const olderText = next ? `Reads up to 300 older posts, starting with ${next}` : 'Every site was read to the end';
+  const rejudgeText = n ? `Judges again the ${n.toLocaleString()} posts and profiles judged by another model` : 'Everything is judged by the current model';
+  const scanTip = `Runs every watcher on watch now${notNow}`;
+  const scan = () => act('/scan', {});
 
-  const lineField = (
-    <NumberField label="Keep line" value={threshold} min={0} max={100} large={isSheet} onCommit={setLine} />
-  );
-  const watchSwitch = (
-    <Switch size={isSheet ? 'medium' : 'small'} checked={!!watch.on} inputProps={{ 'aria-label': 'Watch: run the watched sites on a timer' }}
-      onChange={(e) => setWatch(e.target.checked, minutes)} />
-  );
-  const minutesField = (
-    <NumberField label="Minutes between runs" value={minutes} min={5} max={1440} whole large={isSheet}
-      onCommit={(mins) => setWatch(!!watch.on, mins)} />
-  );
+  // The rail's icon: a dot for a failed watcher or the timer on; its tooltip and the flyout's head say the state
+  const dot = failed.length ? 'bad' : watch.on ? 'ok' : null;
+  const state = info.running.length
+    ? `${info.running.map(s => s.label).join(', ')}…`
+    : !watch.on ? 'off'
+      : info.next === 'after the hand run' ? 'on, runs after the hand run'
+        : info.next ? `on, next run ${info.next}` : 'on';
+  const summaryText = failed.length ? `${state}, ${failed.length === 1 ? `${failed[0].label} failed` : `${failed.length} watchers failed`}` : state;
 
-  if (!isSheet) {
-    return (
-      <>
-        <Tooltip title={lineText}>
-          <label className="dp-ctl">Keep at {lineField}+</label>
-        </Tooltip>
-        <Tooltip title={watchText}>
-          <span className="dp-ctl sw">{watchSwitch}Watch every {minutesField} min</span>
-        </Tooltip>
-        <RunButton startIcon={<ArrowDownwardIcon />} disabled={busy || !next} onClick={olderPosts}
-          tip={next ? `${olderText.replace(/\.$/, '')}${notNow}` : olderText}>
-          Older posts
-        </RunButton>
-        <RunButton startIcon={<RefreshIcon />} disabled={busy || !n} onClick={reJudge}
-          tip={n ? `${rejudgeText.replace(/\.$/, '')}${notNow}` : rejudgeText}>
-          Re-judge
-        </RunButton>
-        <RunButton contained startIcon={<SearchIcon />} disabled={busy} onClick={() => act('/scan', {})}
-          tip={`Runs every watcher on watch now${notNow}`}>
-          Scan now
-        </RunButton>
-      </>
-    );
-  }
+  const checked = watchers.reduce((s, w) => s + (w.checked || 0), 0);
+  const kept = watchers.reduce((s, w) => s + (w.kept || 0), 0);
+  const now = info.running.map(s => ({
+    key: `now-${s.key}`,
+    label: info.running.length === 1 ? 'Now' : s.key === 'hand' ? 'By hand' : 'Timer',
+    value: (
+      <span className="dp-now">
+        <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)', flex: 'none' }} aria-hidden />
+        {s.label}
+      </span>
+    ),
+    title: s.line || undefined
+  }));
+  const rows = [
+    compact && { label: 'Keep line', value: threshold, title: lineText },
+    ...now,
+    { label: 'Last run', value: info.last.ago, tone: info.last.bad ? 'bad' : undefined, title: info.last.at ? when(info.last.at) : undefined },
+    info.next && { label: 'Next run', value: info.next },
+    !compact && { label: 'Judged', value: checked.toLocaleString(), title: `Checked by ${watchers.length} watchers: judged or skipped` },
+    !compact && { label: 'Kept by P', value: `${kept.toLocaleString()}${checked ? ` · ${percent(kept, checked)}` : ''}`, tone: 'ok', title: 'At or above the line, of judged' },
+    !compact && { label: 'New liked', value: (totals.new_performers || 0).toLocaleString(), tone: 'accent', title: 'Liked and not in the library yet' },
+    !compact && { label: 'With profile data', value: (totals.performers_with_data || 0).toLocaleString() },
+    !compact && modelName && { label: 'P model', value: modelName },
+    ...info.notes
+  ];
+  // Under the facts: what the run is doing now, else how the last one ended
+  const notes = info.running.length
+    ? info.running.filter(s => s.line).map(s => ({ key: s.key, text: s.line }))
+    : info.last.note ? [{ key: 'last', text: info.last.note, bad: info.last.bad }] : [];
 
-  const busyNote = busy ? ' Not while a run is going.' : '';
   return (
-    <Drawer anchor="bottom" open={sheet.value === 'runs'} onClose={() => sheet.close()}
-      PaperProps={{ className: 'dp-sheet', role: 'dialog', 'aria-label': 'Runs' }}>
-      <div className="dp-sheet-head">
-        <h2>Runs</h2>
-        <Button variant="outlined" className="dp-run-btn outlined lg" onClick={() => sheet.close()}>Close</Button>
-      </div>
-
-      <div className="dp-sheet-row">
-        <label className="dp-sheet-ctl">Keep at {lineField}+</label>
-        <p className="dp-sheet-desc">{lineText}</p>
-      </div>
-
-      <div className="dp-sheet-row">
-        <span className="dp-sheet-ctl">{watchSwitch}Watch every {minutesField} min</span>
-        <p className="dp-sheet-desc">{watchText}</p>
-      </div>
-
-      <div className="dp-sheet-row">
-        <Button variant="outlined" className="dp-run-btn outlined lg" startIcon={<ArrowDownwardIcon />} disabled={busy || !next} onClick={olderPosts}>
-          Older posts
-        </Button>
-        <p className="dp-sheet-desc">{olderText}{next ? busyNote : ''}</p>
-      </div>
-
-      <div className="dp-sheet-row">
-        <Button variant="outlined" className="dp-run-btn outlined lg" startIcon={<RefreshIcon />} disabled={busy || !n} onClick={reJudge}>
-          Re-judge
-        </Button>
-        <p className="dp-sheet-desc">{rejudgeText}{n ? busyNote : ''}</p>
-      </div>
-    </Drawer>
+    <SideGroup id="watch" title="Watch · P model" icon={<RadarOutlinedIcon />} dot={dot} summary={summaryText} order={SIDE.page + 1}>
+      {!compact && (
+        <>
+          <SideField label="Keep at">
+            <NumberField label="Keep line" title={lineText} value={threshold} min={0} max={100} onCommit={setLine} />
+          </SideField>
+          <SideField label="Every">
+            <NumberField label="Minutes between runs" title={watchText} value={minutes} min={5} max={1440} whole
+              onCommit={(mins) => setWatch(!!watch.on, mins)} />
+            <span>min</span>
+            <Switch size="small" checked={!!watch.on} title={watchText}
+              inputProps={{ 'aria-label': 'Watch: run the watched sites on a timer' }}
+              onChange={(e) => setWatch(e.target.checked, minutes)} />
+          </SideField>
+        </>
+      )}
+      <SideFacts rows={rows} />
+      {notes.map(x => (
+        <SideNote key={x.key} sx={{ overflowWrap: 'anywhere', ...(x.bad && { color: 'var(--bad)' }) }}>{x.text}</SideNote>
+      ))}
+      {info.running.length > 0 && (
+        <SideButtons columns={info.running.length}>
+          {info.running.map(s => (
+            <SideButton key={s.key} disabled={pausing === s.key} onClick={() => pause(s.key)}
+              tip={`Stops this run. ${s.j.mode === 'rescore' ? 'Re-judge goes on with the pictures left.' : 'The next run goes on from where it stopped.'}`}>
+              {info.running.length === 1 ? 'Pause' : s.key === 'hand' ? 'Pause hand run' : 'Pause timer run'}
+            </SideButton>
+          ))}
+        </SideButtons>
+      )}
+      {main
+        ? <SideMain label="Scan now" icon={<SearchIcon />} disabled={busy} tip={scanTip} onClick={scan} />
+        : <SideButtons><SideButton icon={<SearchIcon />} disabled={busy} tip={scanTip} onClick={scan}>Scan now</SideButton></SideButtons>}
+      {!compact && (
+        <>
+          <SideButtons columns={2}>
+            <SideButton disabled={busy || !next} onClick={olderPosts} tip={next ? `${olderText}${notNow}` : olderText}>Older posts</SideButton>
+            <SideButton disabled={busy || !n} onClick={reJudge} tip={n ? `${rejudgeText}${notNow}` : rejudgeText}>Re-judge</SideButton>
+          </SideButtons>
+          <SideButtons>
+            <SideButton plain aria-haspopup="dialog" onClick={() => setLogOpen(true)}>Log</SideButton>
+          </SideButtons>
+        </>
+      )}
+      <AppDialog open={logOpen} onClose={() => setLogOpen(false)} title="Log" subtitle={summaryText} size="md" cancelLabel="Close">
+        <RunLog logs={info.logs} />
+      </AppDialog>
+    </SideGroup>
   );
 }

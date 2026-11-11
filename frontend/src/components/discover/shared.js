@@ -514,8 +514,8 @@ export function TabBar({ tabs, value, onChange, label, small, sx }) {
 // ── the toolbar's pieces ─────────────────────────────────────
 const fieldSx = { fontSize: '.84rem', height: 32, bgcolor: 'var(--surface)' };
 
-/** Search, a quarter of a second after the typing stops. */
-export function SearchField({ value, onChange, placeholder }) {
+/** Search, a quarter of a second after the typing stops. sx is merged into the root. */
+export function SearchField({ value, onChange, placeholder, sx }) {
   const [text, setText] = useState(value);
   const timer = useRef(null);
   useEffect(() => { setText(value); }, [value]);
@@ -528,17 +528,25 @@ export function SearchField({ value, onChange, placeholder }) {
         clearTimeout(timer.current);
         timer.current = setTimeout(() => onChange(next), 250);
       }}
-      sx={{ flex: '1 1 200px', maxWidth: { sm: 260 }, '& .MuiInputBase-root': fieldSx }} />
+      sx={{ flex: '1 1 200px', maxWidth: { sm: 260 }, '& .MuiInputBase-root': fieldSx, ...sx }} />
   );
 }
 
-export function SortSelect({ value, onChange, newest = 'Newest found first' }) {
+/** The sorts of the Discover lists, for SortSelect and the sidebar's SideSelect. */
+export const SORT_OPTIONS = Object.freeze([
+  { value: 'score', label: 'Score, high to low' },
+  { value: 'scoreAsc', label: 'Score, low to high' },
+  { value: 'newest', label: 'Newest found first' },
+  { value: 'name', label: 'Name' }
+]);
+
+/** newest: the label of the 'newest' sort. sx is merged into the root. */
+export function SortSelect({ value, onChange, newest = 'Newest found first', sx }) {
   return (
-    <Select size="small" value={value} onChange={(e) => onChange(e.target.value)} inputProps={{ 'aria-label': 'Sort' }} sx={fieldSx}>
-      <MenuItem value="score">Score, high to low</MenuItem>
-      <MenuItem value="scoreAsc">Score, low to high</MenuItem>
-      <MenuItem value="newest">{newest}</MenuItem>
-      <MenuItem value="name">Name</MenuItem>
+    <Select size="small" value={value} onChange={(e) => onChange(e.target.value)} inputProps={{ 'aria-label': 'Sort' }} sx={{ ...fieldSx, ...sx }}>
+      {SORT_OPTIONS.map((o) => (
+        <MenuItem key={o.value} value={o.value}>{o.value === 'newest' ? newest : o.label}</MenuItem>
+      ))}
     </Select>
   );
 }

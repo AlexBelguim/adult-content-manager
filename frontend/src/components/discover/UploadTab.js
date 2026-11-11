@@ -6,15 +6,20 @@
  * below) and Delete (here only: nothing goes to the profile page).
  *
  * It stays mounted when another tab is open (hidden, not loading), so an upload that's going keeps its progress. While hidden
- * it does not read or write the URL: the search and sort in it belong to the open tab.
+ * it does not read or write the URL (the search and sort in it belong to the open tab) and draws nothing in the sidebar.
+ * The sidebar: Show (search, sort) and Uploads (how many, how many not judged, what is being done now, Judge the rest).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, ButtonBase, CircularProgress, LinearProgress, TextField, Tooltip, Typography } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import { EmptyState, LoadingState, Toolbar } from '../layout';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
+import {
+  ContentLine, EmptyState, LoadingState, SIDE, SideButton, SideButtons, SideFacts, SideGroup, SideNote, SideSearch, SideSelect
+} from '../layout';
 import {
   ago, Badge, DetailDrawer, DrawerTitle, headSx, ListError, LoadMore, one, PICTURE_GRID, PictureTile, plural, post, request, RowOf,
-  SearchField, SmallButton, SortSelect, StalePill, TotalText, useList, useOverlay, useQueryState
+  SmallButton, SORT_OPTIONS, StalePill, useList, useOverlay, useQueryState
 } from './shared';
 import { RowBtn, RowIcon, Tile, TileChip, TILE_GRID } from './Tile';
 import Lightbox from './Lightbox';
@@ -45,6 +50,7 @@ function bulkLine(r, action) {
 }
 const DEFAULTS = { q: '', sort: 'score' };
 const SORTS = ['score', 'scoreAsc', 'newest', 'name'];
+const UPLOAD_SORTS = SORT_OPTIONS.map(o => (o.value === 'newest' ? { ...o, label: 'Newest added first' } : o));
 const KIND_KEY = 'discover.uploadKind';
 const KIND_LINE = {
   performer: 'All pictures as one performer; a folder of folders gives one each.',
@@ -650,8 +656,50 @@ export default function UploadTab({ active, threshold, version, ask, notify, ref
   const pickedShown = items.filter(u => picked.has(u.id));
   const shownProblems = problems.slice(0, 8);
 
+  const progressRow = progress && (
+    <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', fontSize: '.8rem', color: 'var(--dim)' }}>
+      <CircularProgress size={14} sx={{ color: 'var(--accent)' }} />
+      <span>{progress.text}</span>
+      <LinearProgress variant="determinate" value={pct(progress.done, progress.total)}
+        sx={{ flex: '1 1 120px', maxWidth: 360, height: 4, borderRadius: 2 }} />
+    </Box>
+  );
+  const uploadState = progress ? progress.text : notJudged ? `${notJudged.toLocaleString()} not judged` : 'all judged';
+
   return (
     <Box sx={{ display: active ? 'block' : 'none' }}>
+      {active && (
+        <>
+          <SideGroup id="show" title="Show" icon={<FilterListIcon />} badge={q ? 1 : 0} summary={q ? '1 on' : 'no filters'} order={SIDE.show}>
+            <SideSearch value={q} onChange={(next) => setQs({ q: next })} placeholder="Search names and file names" />
+            <SideSelect label="Sort" value={sort} onChange={(next) => setQs({ sort: next })} options={UPLOAD_SORTS} />
+          </SideGroup>
+          <SideGroup id="upload" title="Uploads" icon={<PlaylistAddCheckIcon />} dot={notJudged && !progress ? 'warn' : null}
+            summary={uploadState} order={SIDE.page}>
+            <SideFacts rows={[
+              list.loaded && { label: 'Entries', value: list.total.toLocaleString() },
+              { label: 'Not judged', value: notJudged.toLocaleString(), tone: notJudged ? 'warn' : undefined },
+              progress && {
+                label: 'Now',
+                value: (
+                  <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)' }} aria-hidden />
+                    {`${pct(progress.done, progress.total)}%`}
+                  </Box>
+                )
+              }
+            ]} />
+            {progress && <SideNote>{progress.text}</SideNote>}
+            <SideButtons>
+              <SideButton disabled={!!progress || !notJudged} onClick={judgeLeft}
+                tip={notJudged ? 'P judges every entry not judged yet, one at a time' : 'Every entry is judged'}>
+                {notJudged ? `Judge the rest (${notJudged.toLocaleString()})` : 'Judge the rest'}
+              </SideButton>
+            </SideButtons>
+          </SideGroup>
+          <ContentLine title="Upload" meta={list.loaded ? `${items.length.toLocaleString()} of ${list.total.toLocaleString()}` : 'Loading…'} />
+        </>
+      )}
       <Box ref={zone} component="section" aria-label="Upload pictures"
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); }}
@@ -699,14 +747,8 @@ export default function UploadTab({ active, threshold, version, ask, notify, ref
           </Tooltip>
           <span id="discover-judge-as-line" className="dt-kind-line">{KIND_LINE[kind]}</span>
         </Box>
-        {progress && (
-          <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', fontSize: '.8rem', color: 'var(--dim)' }}>
-            <CircularProgress size={14} sx={{ color: 'var(--accent)' }} />
-            <span>{progress.text}</span>
-            <LinearProgress variant="determinate" value={pct(progress.done, progress.total)}
-              sx={{ flex: '1 1 120px', maxWidth: 360, height: 4, borderRadius: 2 }} />
-          </Box>
-        )}
+        {/* the progress is in the sidebar; a phone's sidebar is a sheet, so there it shows here too */}
+        {isPhone && progressRow}
         {problems.length > 0 && (
           <div className="dt-problems" role="alert">
             <div className="dt-problems-head">
@@ -720,19 +762,6 @@ export default function UploadTab({ active, threshold, version, ask, notify, ref
           </div>
         )}
       </Box>
-
-      <Toolbar>
-        <Box className="dt-search">
-          <SearchField value={q} onChange={(q) => active && setQs({ q })} placeholder="Search names and file names" />
-        </Box>
-        <SortSelect value={sort} onChange={(next) => active && setQs({ sort: next })} newest="Newest added first" />
-        {notJudged > 0 && (
-          <SmallButton disabled={!!progress} onClick={judgeLeft} tip="P judges every entry not judged yet, one at a time">
-            {`Judge ${notJudged} not judged`}
-          </SmallButton>
-        )}
-        <TotalText>{`${items.length} of ${list.total}`}</TotalText>
-      </Toolbar>
 
       {active && <StalePill list={list} onReload={list.reload} />}
       {list.error && <ListError error={list.error} onRetry={list.retry} />}

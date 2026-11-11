@@ -2,11 +2,12 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { savePlayerContext, playerUrl } from '../utils/playerContext';
 import GalleryHero from './gallery/GalleryHero';
-import GalleryToolbar from './gallery/GalleryToolbar';
-import ActiveFilters from './gallery/ActiveFilters';
+import GalleryToolbar, { TAB_LABELS } from './gallery/GalleryToolbar';
 import FilterDrawer from './gallery/FilterDrawer';
 import MasonryGrid from './gallery/MasonryGrid';
-import { usePageBar, useChrome } from '../nav';
+import { SidebarPage, ContentLine } from './layout';
+import { useLibraryViews } from './home/homeData';
+import { lowerFirst } from './home/filterModel';
 import './gallery/gallery.css';
 
 // Tiles rendered at first, and added each time the user nears the bottom.
@@ -81,16 +82,15 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
   const hasLoadedPrefsRef = useRef(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const pendingTagStatesRef = useRef(null);
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [tileSize, setTileSize] = useState(readStoredSize);
   const [renderCount, setRenderCount] = useState(RENDER_BATCH);
   const pendingRestoreRef = useRef(null); // { scrollY, count } saved when a tile was opened
-  const rootRef = useRef(null);
   const [pairwiseScores, setPairwiseScores] = useState(null); // Map of path -> score
 
-  // The phone's page bar names the gallery (nothing on desktop)
-  usePageBar({ title: galleryName || 'Gallery' });
-  const chrome = useChrome();
+  // The sidebar's View list is the library's: her gallery keeps Performers highlighted (a genre's: Genres), and
+  // that is the way back to the list.
+  // load: false: her gallery fetches nothing for the counts; it shows those the library already loaded.
+  const libraryViews = useLibraryViews({ root: basePath, load: false });
   const preferencesKey = useMemo(() => {
     if (!galleryType || !galleryName || !basePath) return null;
     return `unifiedGalleryPrefs:${galleryType}:${encodeURIComponent(basePath)}:${encodeURIComponent(galleryName)}`;
@@ -901,8 +901,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     }
   }, [currentTab, sortBy, galleryType]);
 
-  const handleSortChange = (event) => {
-    const value = event.target.value;
+  const handleSortChange = (value) => {
     const [sortField, order] = value.includes('-desc')
       ? [value.replace('-desc', ''), 'desc']
       : [value, 'asc'];
@@ -912,41 +911,37 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
 
   const sortOptions = useMemo(() => {
     const options = [
-      ['name', 'Name (A-Z)'],
-      ['name-desc', 'Name (Z-A)'],
-      ['size', 'Size (Small-Large)'],
-      ['size-desc', 'Size (Large-Small)'],
-      ['date', 'Date (Old-New)'],
-      ['date-desc', 'Date (New-Old)'],
+      ['name', 'Name, A to Z'],
+      ['name-desc', 'Name, Z to A'],
+      ['size', 'Size, smallest first'],
+      ['size-desc', 'Size, largest first'],
+      ['date', 'Date, oldest first'],
+      ['date-desc', 'Date, newest first'],
     ];
     if (currentTab !== 0) {
       options.push(
-        ['duration', 'Duration (Short-Long)'],
-        ['duration-desc', 'Duration (Long-Short)'],
-        ['video_rating', 'Video Score (Low-High)'],
-        ['video_rating-desc', 'Video Score (High-Low)'],
+        ['duration', 'Duration, shortest first'],
+        ['duration-desc', 'Duration, longest first'],
+        ['video_rating', 'Video score, low to high'],
+        ['video_rating-desc', 'Video score, high to low'],
       );
     }
     if (currentTab === 0 && galleryType === 'performer') {
       options.push(
-        ['pairwise_score', 'ELO Score (Low-High)'],
-        ['pairwise_score-desc', 'ELO Score (High-Low)'],
+        ['pairwise_score', 'ELO score, low to high'],
+        ['pairwise_score-desc', 'ELO score, high to low'],
       );
     }
     if (currentTab === 2) {
       options.push(
-        ['funscript_rating', 'Funscript Score (Low-High)'],
-        ['funscript_rating-desc', 'Funscript Score (High-Low)'],
-        ['funscript_count', 'Funscript Count (Low-High)'],
-        ['funscript_count-desc', 'Funscript Count (High-Low)'],
+        ['funscript_rating', 'Funscript score, low to high'],
+        ['funscript_rating-desc', 'Funscript score, high to low'],
+        ['funscript_count', 'Funscripts, fewest first'],
+        ['funscript_count-desc', 'Funscripts, most first'],
       );
     }
     return options;
   }, [currentTab, galleryType]);
-
-  const handleRemoveTagFilter = useCallback((tag) => {
-    setTagStates(prev => ({ ...prev, [tag]: 'neutral' }));
-  }, []);
 
   const handleSizeChange = useCallback((nextSize) => {
     setTileSize(nextSize);
@@ -956,8 +951,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       console.warn('Failed to persist thumbnail size:', error);
     }
   }, []);
-
-  const closeFilters = useCallback(() => setShowFilterPanel(false), []);
 
   const handleRank = () => {
     const params = new URLSearchParams({
@@ -1055,24 +1048,6 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     navigate(target);
   }, [navigate]);
 
-  // The app bar above (the desktop one or the phone's page bar, both data-app-bar) is sticky; keep the
-  // gallery toolbar glued to its bottom edge whatever height it has. A chrome flip swaps the bar.
-  useEffect(() => {
-    const root = rootRef.current;
-    const appBar = document.querySelector('[data-app-bar]');
-    if (root) root.style.setProperty('--ug-top', '0px');
-    if (!root || !appBar) return undefined;
-    const update = () => {
-      const position = window.getComputedStyle(appBar).position;
-      const pinned = position === 'sticky' || position === 'fixed';
-      root.style.setProperty('--ug-top', pinned ? `${Math.round(appBar.getBoundingClientRect().height)}px` : '0px');
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(appBar);
-    return () => observer.disconnect();
-  }, [chrome]);
-
   const isPerformer = galleryType === 'performer';
   const counts = {
     pics: currentContent?.pics?.length || 0,
@@ -1080,21 +1055,40 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     funscripts: currentContent?.funscriptVids?.length || 0,
   };
 
+  const sortValue = `${sortBy}${sortOrder === 'desc' ? '-desc' : ''}`;
+  // the sort falls back to name for a tab that lacks it (the effect above); until then show what applies
+  const shownSort = sortOptions.some(([value]) => value === sortValue) ? sortValue : 'name';
+  const sortLabel = sortOptions.find(([value]) => value === shownSort)?.[1] || '';
+  const meta = loading || error ? null
+    : `${TAB_LABELS[currentTab]} · ${tabItems.length.toLocaleString()} · ${lowerFirst(sortLabel)}`;
+
   let body;
   if (loading) {
-    body = <div className="ug-state">Loading...</div>;
+    body = <div className="ug-state">Loading…</div>;
   } else if (error) {
     body = <div className="ug-state bad">{error}</div>;
   } else {
     body = (
-      <>
-        <GalleryHero
-          name={galleryName}
-          isPerformer={isPerformer}
-          performer={performerData}
-          age={performerData ? calculateCurrentAge(performerData.age, performerData.scraped_at) : null}
-          counts={counts}
-        />
+      <MasonryGrid
+        items={tabItems}
+        tab={currentTab}
+        size={tileSize}
+        count={renderCount}
+        showElo={sortBy === 'pairwise_score'}
+        onNeedMore={handleNeedMore}
+        onOpen={openItem}
+        emptyText={totalActiveFilters > 0 ? 'Nothing matches these filters.' : 'Nothing here yet.'}
+      />
+    );
+  }
+
+  return (
+    <SidebarPage
+      title={galleryName || 'Gallery'}
+      views={libraryViews}
+      view={galleryType === 'genre' ? 'genres' : 'performers'}
+    >
+      {galleryType && (
         <GalleryToolbar
           tab={currentTab}
           onTabChange={setCurrentTab}
@@ -1102,60 +1096,41 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
           showTaggedMode={galleryType === 'genre'}
           taggedMode={showTaggedMode}
           onTaggedModeChange={setShowTaggedMode}
-          sortValue={`${sortBy}${sortOrder === 'desc' ? '-desc' : ''}`}
+          sortValue={shownSort}
           sortOptions={sortOptions}
           onSortChange={handleSortChange}
           filterCount={totalActiveFilters}
-          filtersOpen={showFilterPanel}
-          onOpenFilters={() => setShowFilterPanel(true)}
-          showRank={isPerformer}
-          rankEnabled={currentTab === 0 && Boolean(performerData?.id)}
-          onRank={handleRank}
           size={tileSize}
           minSize={SIZE_MIN}
           maxSize={SIZE_MAX}
           onSizeChange={handleSizeChange}
+        >
+          <FilterDrawer
+            availableTags={availableTags}
+            tagStates={tagStates}
+            tagActiveCount={activeFilters.tagActiveCount}
+            onToggleTag={handleTagToggle}
+            onClearTags={handleClearTags}
+            onReverseTags={handleReverseTags}
+            scoreFilters={scoreFilters}
+            scoreActive={scoreFilterActivity}
+            onScoreChange={handleScoreFilterChange}
+            onClearScore={handleClearScoreFilter}
+          />
+        </GalleryToolbar>
+      )}
+      {isPerformer && (
+        <GalleryHero
+          performer={performerData}
+          age={performerData ? calculateCurrentAge(performerData.age, performerData.scraped_at) : null}
+          onRank={handleRank}
+          rankEnabled={currentTab === 0 && Boolean(performerData?.id)}
         />
-        <ActiveFilters
-          includeTags={activeFilters.includeTags}
-          excludeTags={activeFilters.excludeTags}
-          scoreFilters={scoreFilters}
-          scoreActive={scoreFilterActivity}
-          onRemoveTag={handleRemoveTagFilter}
-          onClearScore={handleClearScoreFilter}
-        />
-        <MasonryGrid
-          items={tabItems}
-          tab={currentTab}
-          size={tileSize}
-          count={renderCount}
-          showElo={sortBy === 'pairwise_score'}
-          onNeedMore={handleNeedMore}
-          onOpen={openItem}
-          emptyText={totalActiveFilters > 0 ? 'Nothing matches these filters.' : 'Nothing here yet.'}
-        />
-        <FilterDrawer
-          open={showFilterPanel}
-          onClose={closeFilters}
-          availableTags={availableTags}
-          tagStates={tagStates}
-          tagActiveCount={activeFilters.tagActiveCount}
-          onToggleTag={handleTagToggle}
-          onClearTags={handleClearTags}
-          onReverseTags={handleReverseTags}
-          scoreFilters={scoreFilters}
-          scoreActive={scoreFilterActivity}
-          onScoreChange={handleScoreFilterChange}
-          onClearScore={handleClearScoreFilter}
-        />
-      </>
-    );
-  }
+      )}
 
-  return (
-    <div className="ug" ref={rootRef}>
-      <div className="ug-inner">{body}</div>
-    </div>
+      <ContentLine title={galleryName || 'Gallery'} meta={meta} />
+      <div className="ug">{body}</div>
+    </SidebarPage>
   );
 };
 

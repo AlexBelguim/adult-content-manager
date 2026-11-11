@@ -1,322 +1,261 @@
 /**
- * AI & Training: the models, what they train on, and how the app stands. What the app knows shows at once; what
- * acm-gpu knows (it may be off) fills in when it answers, and never holds the page up.
+ * AI & Training (/ai-training): the models, training them, what they train on, and the app's own state.
+ *
+ * URL: ?tab=models (default, no param) | train | data | system, and on Train &type=<model type>. The old values
+ * overview and performers are replaced by models and data.
+ *
+ * The page owns what more than one tab reads, each with loading and failed kept apart:
+ *   ai       GET /api/training/ai-health (200 = online), every 30 s while the page is visible
+ *   models   GET /api/training/models (acm-gpu's files, or the last snapshot when it does not answer; ?snapshot=1 at
+ *            once when ai-health already says acm-gpu is off)
+ *   queue    GET /api/training/queue, every 5 s while visible
+ *   summary  GET /api/training/data-summary, and aiData GET /api/training/ai-data-status: the first time Train or
+ *            Data is shown, and on Reload
+ * Nothing here waits for anything else, and nothing waits for acm-gpu.
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Box, Typography, LinearProgress, Chip, Button, IconButton, Tooltip, Tabs, Tab
-} from '@mui/material';
-import { Refresh, Star, Psychology, Speed, Autorenew, Delete as DeleteIcon } from '@mui/icons-material';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { PageShell, PageHeader, Panel, Section, StatRow, Toolbar, EmptyState, LoadingState, iconBtnSx } from '../components/layout';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import ModelTrainingOutlined from '@mui/icons-material/ModelTrainingOutlined';
+import SchoolOutlined from '@mui/icons-material/SchoolOutlined';
+import DatasetOutlined from '@mui/icons-material/DatasetOutlined';
+import SettingsSuggestOutlined from '@mui/icons-material/SettingsSuggestOutlined';
+import MemoryOutlined from '@mui/icons-material/MemoryOutlined';
+import Refresh from '@mui/icons-material/Refresh';
+import { SidebarPage, SideGroup, SideFacts, SideButtons, SideButton } from '../components/layout';
+import { errorText } from '../components/ui';
+import { useQueryState } from '../components/discover/shared';
+import ModelsTab from '../components/aiTraining/ModelsTab';
 import TrainTab from '../components/aiTraining/TrainTab';
-import ModelArsenal from '../components/aiTraining/ModelArsenal';
-import ModelNotes from '../components/aiTraining/ModelNotes';
-import PerformerTrainingTable from '../components/aiTraining/PerformerTrainingTable';
-import { PREFERRED_KEYS, MODEL_NOTES, pairSourcesOf, sumPairs } from '../components/aiTraining/modelInfo';
-import { useAsk, useNotify, errorText, plural } from '../components/ui';
+import DataTab from '../components/aiTraining/DataTab';
+import SystemTab from '../components/aiTraining/SystemTab';
+import { MODEL_TYPES, modelName, fmtWhen } from '../components/aiTraining/modelInfo';
 
-const TABS = [['overview', 'Overview'], ['train', 'Train'], ['models', 'Models'], ['performers', 'Performers'], ['system', 'System']];
+const TAB_IDS = ['models', 'train', 'data', 'system'];
+const ALIAS = { overview: 'models', performers: 'data' };
+const AI_EVERY = 30000;
+const QUEUE_EVERY = 5000;
 
-const smallBtnSx = {
-  textTransform: 'none', whiteSpace: 'nowrap', color: 'var(--text)', borderColor: 'var(--line-strong)',
-  '&:hover': { borderColor: 'var(--line-strong)', bgcolor: 'var(--raised)' }
+/**
+ * Runs `run` (async) now and again `ms` after each answer, only while the page is visible; a page that comes back
+ * into view runs it at once. Stops on unmount.
+ */
+function useVisiblePoll(run, ms) {
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => {
+    let alive = true;
+    let busy = false;
+    let timer = null;
+    const visible = () => document.visibilityState === 'visible';
+    const tick = async () => {
+      clearTimeout(timer);
+      timer = null;
+      if (!alive || busy || !visible()) return;
+      busy = true;
+      try { await runRef.current(); } catch { /* the loader keeps its own error */ }
+      busy = false;
+      if (alive && visible()) timer = setTimeout(tick, ms);
+    };
+    const onVisibility = () => { if (visible() && !timer && !busy) tick(); };
+    tick();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [ms]);
+}
+
+const BADGE = {
+  online: ['ok', 'acm-gpu online'],
+  offline: ['bad', 'acm-gpu not answering'],
+  checking: ['dim', 'Checking acm-gpu…'],
 };
+// acm-gpu's state as a sidebar dot and a fact
+const GPU_DOT = { online: 'ok', offline: 'bad' };
+const GPU_STATE = { online: ['online', 'ok'], offline: ['not answering', 'bad'], checking: ['checking', undefined] };
 
-// null when it can't be had: a section without its data says so, the rest of the page goes on
-const getJson = (url) => fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null);
-const count = (n) => (n == null ? '–' : n.toLocaleString());
-
-// What POST /api/health/cleanup deletes: rows whose performer is no longer in the app. The health check counts five
-// of the tables; the sixth, tags, it does not count, and there a tag definition (performer_id empty) counts as orphaned.
-const CLEANUP_TEXT = 'Deletes the rows that belong to a performer who is no longer in the app. That includes the kept file '
-  + 'hashes of deleted performers, so re-downloads of their files are no longer recognised. It also deletes every tag '
-  + 'definition, since those have no performer; their folders stay. Cannot be undone.';
-const orphanRows = (o = {}) => [
-  ['Ratings', count(o.ratings)],
-  ['File hashes', count(o.hashes)],
-  ['Pairwise scores', count(o.pairwise)],
-  ['Filter actions', count(o.filterActions)],
-  ['Duels', count(o.performerComparisons)],
-  ['Tags', 'All tag definitions'],
+const TAB_VIEWS = [
+  { id: 'models', label: 'Models', icon: <ModelTrainingOutlined />, to: '/ai-training' },
+  { id: 'train', label: 'Train', icon: <SchoolOutlined />, to: '/ai-training?tab=train' },
+  { id: 'data', label: 'Data', icon: <DatasetOutlined />, to: '/ai-training?tab=data' },
+  { id: 'system', label: 'System', icon: <SettingsSuggestOutlined />, to: '/ai-training?tab=system' },
 ];
-
-function Overview({ health, training, trainingData, aiChecking, aiOnline, useLegacy, onCleanup, navigate }) {
-  const p = health?.performers || {};
-  const pw = health?.pairwise || {};
-  const db = health?.database || {};
-  const ratings = health?.ratings || {};
-  const ratingBuckets = ratings.distribution || [];
-  const maxBucket = Math.max(...ratingBuckets.map(b => b.count), 1);
-  const pairSources = pairSourcesOf(training, trainingData);
-  const usedSources = pairSources.filter(s => useLegacy || !s.legacy);
-  const ready = training?.readyForTraining?.pictures;
-
-  const suggestions = [];
-  if (health && p.ratingCoverage < 50) suggestions.push({ icon: <Star />, text: `Only ${p.ratingCoverage}% of performers are rated. Rate more performers for better AI predictions.`, action: 'Rate performers', onClick: () => navigate('/smart-compare') });
-  if (health && pw.totalPairs === 0) suggestions.push({ icon: <Psychology />, text: 'No picture pairs yet. Rank pictures: your pairs train the CLIP models.', action: 'Rank pictures', onClick: () => navigate('/ranking-insight') });
-  if (ready && !aiChecking && !aiOnline) suggestions.push({ icon: <Autorenew />, text: `${training.pictures.keep + training.pictures.delete} training images available but acm-gpu is offline. Start it to train.` });
-  if (p.inBefore > p.inAfter * 2 && p.inBefore > 20) suggestions.push({ icon: <Speed />, text: `${p.inBefore} performers still need filtering vs ${p.inAfter} done. Keep filtering!` });
-  if (health?.issues?.some(i => i.type === 'orphan')) {
-    const orphans = Object.values(db.orphanedRecords || {}).reduce((a, b) => a + b, 0);
-    suggestions.push({ icon: <DeleteIcon />, text: `${orphans} orphaned database records found. Run cleanup to fix.`, action: 'Clean up', onClick: onCleanup });
-  }
-
-  return (
-    <Box>
-      <Toolbar>
-        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={() => navigate('/smart-compare')}>Rate performers</Button>
-        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={() => navigate('/ranking-insight')}>Rank pictures</Button>
-        <Button size="small" variant="outlined" sx={smallBtnSx} component="a" href="/profile.html">Profile page</Button>
-        <Button size="small" variant="outlined" sx={smallBtnSx} component="a" href="/profile.html#duels">Profile duels</Button>
-      </Toolbar>
-
-      {suggestions.length > 0 && (
-        <Section title="Suggestions">
-          <Box sx={{ display: 'grid', gap: 1 }}>
-            {suggestions.map((s, i) => (
-              <Panel key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, '& > svg': { fontSize: 17, color: 'var(--warn)' } }}>
-                {s.icon}
-                <Typography variant="body2" sx={{ flex: 1, color: 'var(--dim)' }}>{s.text}</Typography>
-                {s.action && <Button size="small" variant="outlined" sx={smallBtnSx} onClick={s.onClick}>{s.action}</Button>}
-              </Panel>
-            ))}
-          </Box>
-        </Section>
-      )}
-
-      <Section title="Ratings" description={`${ratings.total || 0} performers rated out of ${p.total ?? '–'} (${p.ratingCoverage || 0}%)`}>
-        <Panel sx={{ display: 'grid', gap: 0.5 }}>
-          {ratingBuckets.map((bucket, i) => (
-            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography variant="caption" sx={{ color: 'var(--dim)', width: 40 }}>★ {bucket.bucket || `${i + 1}`}</Typography>
-              <Typography variant="caption" sx={{ color: 'var(--muted)', width: 30, textAlign: 'right' }}>{bucket.count}</Typography>
-              <Box sx={{ flex: 1, bgcolor: 'var(--bg)', borderRadius: 0.5, height: 12, overflow: 'hidden' }}>
-                <Box sx={{ width: `${(bucket.count / maxBucket) * 100}%`, height: '100%', bgcolor: 'var(--accent)', borderRadius: 0.5 }} />
-              </Box>
-            </Box>
-          ))}
-          {!ratingBuckets.length && <Typography variant="caption" sx={{ color: 'var(--muted)' }}>{health ? 'No ratings yet' : 'Loading…'}</Typography>}
-        </Panel>
-      </Section>
-
-      <Section title="Hand pairs" description={`${sumPairs(usedSources, 'all')} pairs${useLegacy ? ' incl. legacy' : ' (legacy off)'}`}>
-        <StatRow min={170} sx={{ mb: 1 }} items={pairSources.map(s => ({
-          label: s.legacy ? `Legacy · ${s.label}` : `${s.label} pairs`, value: s.all ?? '–', tone: s.legacy ? 'default' : 'info',
-          hint: s.note && (useLegacy ? s.note : 'not used: legacy pairs off'),
-        }))} />
-        <StatRow min={170} sx={{ mb: 1.5 }} items={[
-          { label: 'Performers labeled', value: `${pw.performersLabeled || 0} / ${p.total ?? '–'}`, tone: 'ok' },
-          { label: 'Images scored', value: count(pw.totalScoredImages || 0), tone: 'accent' },
-          { label: 'Comparisons per image', value: pw.avgComparisonsPerImage?.toFixed(1) || 0, tone: 'warn' },
-        ]} />
-        <Typography variant="caption" sx={{ color: 'var(--dim)' }}>{p.pairwiseCoverage || 0}% of performers have pairwise scores</Typography>
-        <LinearProgress variant="determinate" value={p.pairwiseCoverage || 0} sx={{ mt: 0.5, height: 5, borderRadius: 3, bgcolor: 'var(--bg)', '& .MuiLinearProgress-bar': { bgcolor: 'var(--info)' } }} />
-      </Section>
-
-      <Section title="Training data" description={training ? (ready ? 'Ready to train' : 'Needs more data') : 'Loading…'}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 1 }}>
-          <Panel>
-            <Typography variant="body2" sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>Keep and delete pictures</Typography>
-            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-              {count(training?.pictures?.keep)} keep · {count(training?.pictures?.delete)} delete
-            </Typography>
-            <Chip label={ready ? 'Ready' : 'Need more data'} size="small" sx={{ mt: 1, height: 20, bgcolor: ready ? 'var(--ok-quiet)' : 'var(--warn-quiet)', color: ready ? 'var(--ok)' : 'var(--warn)' }} />
-          </Panel>
-          <Panel>
-            <Typography variant="body2" sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>CLIP Siamese hand pairs</Typography>
-            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>{sumPairs(usedSources, 'same')} same-performer pairs, on top of kept &gt; deleted:</Typography>
-            {pairSources.map(s => (
-              <Typography key={s.id} variant="caption" sx={{ display: 'block', color: s.legacy ? 'var(--muted)' : 'var(--dim)', textDecoration: s.legacy && !useLegacy ? 'line-through' : 'none' }}>
-                {s.legacy ? 'Legacy ' : ''}{s.label} {s.same ?? '– (AI server offline)'}
-              </Typography>
-            ))}
-          </Panel>
-        </Box>
-      </Section>
-    </Box>
-  );
-}
-
-function System({ health, cleaning, onCleanup, onOpenWorkers }) {
-  if (!health) return <LoadingState />;
-  const sizes = health.database?.tableSizes || {};
-  const disk = health.disk || {};
-  const folder = (d) => `${d?.exists ? 'Folder there' : 'Folder missing'}`;
-  return (
-    <Box>
-      <Section title="Disk">
-        <StatRow min={170} sx={{ mb: 0 }} items={[
-          { label: 'Before folders', value: count(disk.beforeFilter?.performers || 0), tone: 'info', hint: folder(disk.beforeFilter) },
-          { label: 'After folders', value: count(disk.afterFilter?.performers || 0), tone: 'ok', hint: folder(disk.afterFilter) },
-          { label: 'Training folders', value: count(disk.trainingData?.performers || 0), tone: 'warn', hint: folder(disk.trainingData) },
-        ]} />
-      </Section>
-      <Section title="Database" description={`${Object.values(sizes).reduce((a, b) => a + b, 0).toLocaleString()} records · schema v${health.schemaVersion}`} actions={
-        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={onCleanup} disabled={cleaning}>{cleaning ? 'Cleaning…' : 'Clean up orphans'}</Button>
-      }>
-        <Panel sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', columnGap: 3, rowGap: 0.25 }}>
-          {Object.entries(sizes).map(([table, n]) => (
-            <Box key={table} sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
-              <Typography variant="caption" sx={{ color: 'var(--dim)' }}>{table}</Typography>
-              <Typography variant="caption" sx={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{n.toLocaleString()}</Typography>
-            </Box>
-          ))}
-        </Panel>
-      </Section>
-      <Section title="AI server address" description="The acm-gpu address is set in Settings → Workers, with the coordinator that can supply it." actions={
-        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={onOpenWorkers}>Open Workers</Button>
-      } />
-    </Box>
-  );
-}
+// a plain click switches in place (keeping the tab's own params); ctrl-, shift- and middle-click open the link
+const plainClick = (e) => !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button != null && e.button !== 0));
 
 export default function AiTrainingPage() {
-  const navigate = useNavigate();
-  const ask = useAsk();
-  const notify = useNotify();
-  const [params, setParams] = useSearchParams();
-  const tab = TABS.some(([id]) => id === params.get('tab')) ? params.get('tab') : 'overview';
+  const [q, setQ] = useQueryState({ tab: 'models', type: 'clip_keepdelete' });
+  const valid = TAB_IDS.includes(q.tab);
+  const tab = valid ? q.tab : (ALIAS[q.tab] || 'models');
+  const type = MODEL_TYPES.some(m => m.id === q.type) ? q.type : 'clip_keepdelete';
 
-  const [health, setHealth] = useState(null);
-  const [training, setTraining] = useState(null);
-  const [perfStats, setPerfStats] = useState(null);
-  const [aiHealth, setAiHealth] = useState(null);
-  const [aiChecking, setAiChecking] = useState(true);
-  const [aiTrainingData, setAiTrainingData] = useState(null);
-  const [trainingStatus, setTrainingStatus] = useState(null);
-  const [modelList, setModelList] = useState([]);
-  const [preferred, setPreferred] = useState({}); // training type → default model file
-  const [testingModel, setTestingModel] = useState(null);
-  const [testResults, setTestResults] = useState({});
-  const [useLegacy, setUseLegacy] = useState(true); // pairwise.db import + old labeller file
-  const [cleaning, setCleaning] = useState(false);
-  const pollRef = useRef(null);
+  // an old or unknown ?tab= is replaced (useQueryState replaces the history entry)
+  useEffect(() => {
+    if (!valid) setQ({ tab });
+  }, [valid, tab, setQ]);
 
-  // TrainTab reports the results of Push, Export and Start as { severity, text }: they pass, so they are toasts
-  const toastNotice = useCallback((n) => {
-    if (n?.text) notify({ message: n.text, severity: n.severity || 'info' });
-  }, [notify]);
+  const [ai, setAi] = useState({ state: 'checking', health: null, checkedAt: null });
+  const [models, setModels] = useState({ status: 'loading', list: [], current: null, at: null, fromSnapshot: false });
+  const [queue, setQueue] = useState({ status: 'loading', jobs: [], error: null });
+  const [summary, setSummary] = useState({ status: 'idle', data: null, error: null });
+  const [aiData, setAiData] = useState({ status: 'idle', data: null });
+  const [reloadKey, setReloadKey] = useState(0);
 
-  // each on its own, so nothing here waits for anything else
-  const loadHere = useCallback(() => {
-    getJson('/api/health?ai=0').then(setHealth);
-    getJson('/api/training/data-summary').then(setTraining);
-    getJson('/api/training/performer-stats').then(d => d && setPerfStats(d));
-  }, []);
+  // the statuses the callbacks below read, without making them again on every change
+  const statusRef = useRef({});
+  statusRef.current = { summary: summary.status, aiData: aiData.status };
 
   const loadAi = useCallback(async () => {
-    setAiChecking(true);
-    await Promise.all([
-      getJson('/api/training/ai-health').then(h => setAiHealth(h && !h.error ? h : null)),
-      getJson('/api/training/ai-data-status').then(td => setAiTrainingData(td && !td.error ? td : null)),
-      getJson('/api/training/status').then(d => d && setTrainingStatus(d)),
-      getJson('/api/training/models').then(d => d?.models && setModelList(d.models)),
-    ]);
-    setAiChecking(false);
+    try {
+      const r = await fetch('/api/training/ai-health');
+      const health = r.ok ? await r.json() : null;
+      setAi(health ? { state: 'online', health, checkedAt: Date.now() } : { state: 'offline', health: null, checkedAt: Date.now() });
+    } catch {
+      setAi({ state: 'offline', health: null, checkedAt: Date.now() });
+    }
   }, []);
 
-  const reload = useCallback(() => { loadHere(); loadAi(); }, [loadHere, loadAi]);
-
-  useEffect(() => {
-    reload();
-    Object.entries(PREFERRED_KEYS).forEach(([type, key]) =>
-      getJson(`/api/settings/${key}`).then(d => d?.value && setPreferred(p => ({ ...p, [type]: d.value }))));
-  }, [reload]);
-
-  // Poll training status when active
-  useEffect(() => {
-    if (!trainingStatus?.active) return undefined;
-    pollRef.current = setInterval(async () => {
-      const data = await getJson('/api/training/status');
-      if (!data) return;
-      setTrainingStatus(data);
-      if (!data.active) { clearInterval(pollRef.current); reload(); }
-    }, 2000);
-    return () => clearInterval(pollRef.current);
-  }, [trainingStatus?.active, reload]);
-
-  const cleanup = async () => {
-    let cleaned = 0;
-    const done = await ask({
-      title: 'Clean up the database?',
-      text: CLEANUP_TEXT,
-      rows: orphanRows(health?.database?.orphanedRecords),
-      okLabel: 'Delete orphaned rows',
-      danger: true,
-      busyLabel: 'Deleting…',
-      run: async () => {
-        setCleaning(true);
-        try {
-          const res = await fetch('/api/health/cleanup', { method: 'POST' });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data.cleaned) throw new Error(data.error || `The server answered ${res.status}`);
-          cleaned = Object.values(data.cleaned).reduce((a, b) => a + b, 0);
-        } finally { setCleaning(false); }
-      },
-    });
-    if (!done) return;
-    notify(cleaned ? `Deleted ${plural(cleaned, 'orphaned row')}` : 'Nothing to clean up');
-    loadHere();
-  };
-
-  const setDefaultModel = async (modelName, type) => {
+  const loadModels = useCallback(async () => {
     try {
-      await fetch(`/api/settings/${PREFERRED_KEYS[type]}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: modelName }) });
-      setPreferred(p => ({ ...p, [type]: modelName }));
-    } catch (err) { notify({ message: errorText(err, 'Could not save the default model'), severity: 'error' }); }
+      const r = await fetch('/api/training/models');
+      const d = await r.json().catch(() => ({}));
+      // an older server passes acm-gpu's list on as it is, without online
+      const online = d.online === true || (d.online == null && r.ok && d.success !== false && Array.isArray(d.models));
+      if (online) {
+        setModels({ status: 'online', list: d.models || [], current: d.active_model_file || null, at: d.at || null, fromSnapshot: false });
+      } else {
+        const s = d.snapshot;
+        setModels({ status: 'offline', list: s?.models || [], current: s?.current || null, at: s?.at || null, fromSnapshot: !!s });
+      }
+    } catch {
+      setModels({ status: 'offline', list: [], current: null, at: null, fromSnapshot: false });
+    }
+  }, []);
+
+  // /models waits up to 30 s for acm-gpu, ai-health only 3 s: once acm-gpu is known to be off, the kept snapshot shows
+  // at once (the full answer still replaces it when it comes)
+  const modelsLoading = models.status === 'loading';
+  useEffect(() => {
+    if (ai.state !== 'offline' || !modelsLoading) return undefined;
+    let gone = false;
+    fetch('/api/training/models?snapshot=1')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (gone) return;
+        const s = d?.snapshot;
+        setModels(cur => (cur.status !== 'loading' ? cur
+          : { status: 'offline', list: s?.models || [], current: s?.current || null, at: s?.at || null, fromSnapshot: !!s }));
+      })
+      .catch(() => {});
+    return () => { gone = true; };
+  }, [ai.state, modelsLoading]);
+
+  const loadQueue = useCallback(async () => {
+    try {
+      const r = await fetch('/api/training/queue');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `The server answered ${r.status}`);
+      setQueue({ status: 'ok', jobs: d.jobs || [], error: null });
+    } catch (err) {
+      setQueue(cur => ({ ...cur, status: 'error', error: errorText(err, 'Could not load the training runs') }));
+    }
+  }, []);
+
+  const loadSummary = useCallback(async (fresh = false) => {
+    setSummary(cur => ({ ...cur, status: 'loading' }));
+    try {
+      const r = await fetch(`/api/training/data-summary${fresh ? '?fresh=1' : ''}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `The server answered ${r.status}`);
+      setSummary({ status: 'ok', data: d, error: null });
+    } catch (err) {
+      setSummary(cur => ({ ...cur, status: 'error', error: errorText(err, 'Could not count the training pictures') }));
+    }
+  }, []);
+
+  const loadAiData = useCallback(async () => {
+    setAiData(cur => ({ ...cur, status: 'loading' }));
+    try {
+      const r = await fetch('/api/training/ai-data-status');
+      if (!r.ok) throw new Error(`The server answered ${r.status}`);
+      setAiData({ status: 'ok', data: await r.json() });
+    } catch {
+      setAiData({ status: 'offline', data: null });
+    }
+  }, []);
+
+  const loadSummaryAndAiData = useCallback(() => { loadSummary(); loadAiData(); }, [loadSummary, loadAiData]);
+
+  useVisiblePoll(loadAi, AI_EVERY);
+  useVisiblePoll(loadQueue, QUEUE_EVERY);
+  useEffect(() => { loadModels(); }, [loadModels]);
+
+  // Train and Data read the picture counts: loaded the first time one of them is shown
+  const needsData = tab === 'train' || tab === 'data';
+  useEffect(() => {
+    if (!needsData) return;
+    if (statusRef.current.summary === 'idle') loadSummary();
+    if (statusRef.current.aiData === 'idle') loadAiData();
+  }, [needsData, loadSummary, loadAiData]);
+
+  const reload = () => {
+    loadAi();
+    loadModels();
+    loadQueue();
+    if (statusRef.current.summary !== 'idle') loadSummary(true);
+    if (statusRef.current.aiData !== 'idle') loadAiData();
+    setReloadKey(k => k + 1);
   };
 
-  const p = health?.performers || {};
-  const aiTone = aiHealth ? 'ok' : aiChecking ? 'warn' : 'bad';
-  const summary = perfStats?.summary;
+  const health = ai.health;
+  const [, badgeText] = BADGE[ai.state] || BADGE.checking;
+  const [stateWord, stateTone] = GPU_STATE[ai.state] || GPU_STATE.checking;
+  const loadedNow = health?.model_loaded
+    ? `${modelName(health.model_type)}${health.current_model ? ` · ${health.current_model}` : ''}`
+    : 'nothing loaded';
+
+  const active = queue.jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
+  // the type belongs to Train, search and sort to Data: they leave the URL with their tab
+  const changeTab = (id) => setQ({
+    tab: id,
+    type: id === 'train' ? q.type : null,
+    ...(id === 'data' ? {} : { q: null, sort: null }),
+  });
+  const views = TAB_VIEWS.map(v => ({
+    ...v,
+    count: v.id === 'train' ? (active || null) : null,
+    onClick: (e) => {
+      if (!plainClick(e)) return;
+      e.preventDefault();
+      if (v.id !== tab) changeTab(v.id);
+    },
+  }));
 
   return (
-    <PageShell>
-      <PageHeader title="AI & Training" subtitle="Your models, what they train on, and how the app stands" back actions={<>
-        <Chip size="small" label={aiHealth ? 'acm-gpu online' : aiChecking ? 'Checking acm-gpu…' : 'acm-gpu offline'} sx={{ height: 22, bgcolor: `var(--${aiTone}-quiet)`, color: `var(--${aiTone})` }} />
-        <Tooltip title="Reload"><IconButton sx={iconBtnSx()} onClick={reload}><Refresh /></IconButton></Tooltip>
-      </>} />
-
-      <StatRow min={130} sx={{ mb: 2 }} items={[
-        { label: 'Performers', value: count(p.total) },
-        { label: 'Filtered', value: count(p.inAfter), tone: 'ok' },
-        { label: 'Need filtering', value: count(p.inBefore), tone: 'warn' },
-        { label: 'Blacklisted', value: count(p.blacklisted), tone: 'bad' },
-        { label: 'Rated', value: p.ratingCoverage == null ? '–' : `${p.ratingCoverage}%`, tone: 'info' },
-      ]} />
-
-      <Tabs value={tab} onChange={(_, v) => setParams(v === 'overview' ? {} : { tab: v }, { replace: true })} variant="scrollable" scrollButtons={false}
-        sx={{ mb: 2, minHeight: 36, borderBottom: '1px solid var(--line)', '& .MuiTab-root': { minHeight: 36, py: 0, textTransform: 'none', color: 'var(--dim)' },
-          '& .Mui-selected': { color: 'var(--text) !important' }, '& .MuiTabs-indicator': { bgcolor: 'var(--accent)' } }}>
-        {TABS.map(([id, label]) => <Tab key={id} value={id} label={id === 'train' && trainingStatus?.active ? `${label} · running` : label} />)}
-      </Tabs>
-
-      {tab === 'overview' && <Overview health={health} training={training} trainingData={aiTrainingData} aiChecking={aiChecking} aiOnline={!!aiHealth}
-        useLegacy={useLegacy} onCleanup={cleanup} navigate={navigate} />}
-
-      {tab === 'train' && <TrainTab training={training} aiHealth={aiHealth} aiChecking={aiChecking} aiTrainingData={aiTrainingData} setAiTrainingData={setAiTrainingData}
-        trainingStatus={trainingStatus} setTrainingStatus={setTrainingStatus} useLegacy={useLegacy} setUseLegacy={setUseLegacy} setNotice={toastNotice} />}
+    <SidebarPage title="AI & Training" views={views} view={tab}>
+      <SideGroup id="gpu" title="acm-gpu" icon={<MemoryOutlined />} dot={GPU_DOT[ai.state] || null} summary={badgeText}>
+        <SideFacts rows={[
+          { label: 'State', value: stateWord, tone: stateTone },
+          ai.state === 'online' && { label: 'Loaded now', value: loadedNow },
+          ai.state === 'offline' && { label: 'Last answer', value: models.at ? fmtWhen(models.at) : 'none yet' },
+        ]} />
+        <SideButtons>
+          <SideButton icon={<Refresh />} onClick={reload}>Check again</SideButton>
+        </SideButtons>
+      </SideGroup>
 
       {tab === 'models' && (
-        <Box>
-          <Section title="Models on acm-gpu" description={aiChecking && !aiHealth ? 'Checking…' : `${modelList.length} models`}>
-            <ModelArsenal models={modelList} aiHealth={aiHealth} testingModel={testingModel} setTestingModel={setTestingModel}
-              testResults={testResults} setTestResults={setTestResults} onModelLoaded={loadAi} preferred={preferred} onSetPreferred={setDefaultModel} />
-          </Section>
-          <Section title="Results so far" description={`${MODEL_NOTES.length} models`}><ModelNotes /></Section>
-        </Box>
+        <ModelsTab ai={ai} models={models} queue={queue}
+          onReload={() => { loadAi(); loadModels(); }}
+          onOpenTrain={(t) => setQ({ tab: 'train', type: t })} />
       )}
-
-      {tab === 'performers' && (
-        <Section title="Training data per performer" description={summary ? `${summary.withData} of ${summary.total} have data · average quality ${summary.avgQuality}% · ${summary.readyForKeepDelete} with keep and delete pictures · ${summary.readyForPairwise} with hand pairs` : undefined}>
-          {perfStats?.performers?.length > 0
-            ? <Panel><PerformerTrainingTable performers={perfStats.performers} /></Panel>
-            : perfStats ? <EmptyState title="No performer data yet" /> : <LoadingState />}
-        </Section>
+      {tab === 'train' && (
+        <TrainTab ai={ai} summary={summary} aiData={aiData} queue={queue} type={type}
+          onType={(t) => setQ({ type: t })} onQueued={loadQueue} onPushed={loadAiData} onRetry={loadSummaryAndAiData} />
       )}
-
-      {tab === 'system' && <System health={health} cleaning={cleaning} onCleanup={cleanup} onOpenWorkers={() => navigate('/settings/workers')} />}
-    </PageShell>
+      {tab === 'data' && <DataTab ai={ai} summary={summary} aiData={aiData} reloadKey={reloadKey} onRetry={loadSummaryAndAiData} />}
+      {tab === 'system' && <SystemTab ai={ai} reloadKey={reloadKey} />}
+    </SidebarPage>
   );
 }

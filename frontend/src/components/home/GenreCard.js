@@ -1,6 +1,7 @@
 /**
- * One genre of the Gallery home's Genres tab: a flat card that is a link to the genre in the unified gallery,
- * with the folder counts, the "+N tagged" counts and the Labels & funscripts control.
+ * One genre of the Gallery home's Genres view: a flat card that is a link to the genre in the unified gallery,
+ * with the folder counts, the "+N tagged" counts and the Labels & funscripts control. It fills the height its grid
+ * cell gives it (the size row sits at the bottom).
  */
 import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
@@ -13,6 +14,11 @@ import { genreTotals } from './filterModel';
 export const genreUrl = (genre, basePath) => (
   `/unified-gallery?genre=${encodeURIComponent(genre.name)}&basePath=${encodeURIComponent(basePath || '')}`
 );
+
+/** The card's base width: GenresTab's grid fits as many as fit at it and stretches them to fill the row. */
+export const GENRE_CARD_W = 300;
+/** The card's natural height (name, counts, size row), for the loading skeleton. */
+export const GENRE_CARD_H = 136;
 
 export const formatCount = (n) => Number(n || 0).toLocaleString('en-US');
 export const formatSize = (gb) => `${(Number(gb) || 0).toFixed(1)} GB`;
@@ -88,7 +94,7 @@ export default function GenreCard({ genre, basePath }) {
         })}
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', minHeight: 30 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', minHeight: 30, mt: 'auto' }}>
         <Typography sx={{ fontSize: '.8rem', color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.sizeGb)}</Typography>
         <Box sx={{ flex: 1 }} />
         <Box sx={{ position: 'relative', zIndex: 1 }}>

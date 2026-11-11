@@ -6,13 +6,20 @@
  *                           the uploads themselves run in components/import/UploadsProvider.js, app-wide)
  *
  * The tab is in the URL (?from=server|computer); without one, the tab used last. Both tabs stay mounted, so a pick or
- * a search survives a switch. The page is in the normal document flow: the window scrolls, and the server tab's
- * action bar is sticky at the bottom. Queued imports are jobs: the header links to /jobs with the import counts.
+ * a search survives a switch. SidebarPage: the two tabs are its View list (the phone's tab row); each tab adds its own
+ * sidebar groups while it is shown. The page is in the normal document flow: the window scrolls, and the server tab's
+ * action bar is sticky at the bottom of the content. Queued imports are jobs: the Imports group counts them and links
+ * to /jobs.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink, useSearchParams } from 'react-router-dom';
-import { PageShell, PageHeader, EmptyState } from '../components/layout';
-import { TabBar, SmallButton } from '../components/discover/shared';
+import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined';
+import ComputerOutlinedIcon from '@mui/icons-material/ComputerOutlined';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import {
+  SidebarPage, SideGroup, SideFacts, SideButtons, SideButton, ContentLine, EmptyState, SIDE
+} from '../components/layout';
+import { SmallButton } from '../components/discover/shared';
 import ServerTab from '../components/import/ServerTab';
 import ComputerTab from '../components/import/ComputerTab';
 import { useUploads } from '../components/import/UploadsProvider';
@@ -34,16 +41,26 @@ function storeTab(tab) {
   try { window.localStorage.setItem(TAB_KEY, tab); } catch { /* the choice lasts for this visit */ }
 }
 
-/** 'Jobs · 2 running · 1 failed' from the import rows of /api/jobs (browser uploads included). */
-function JobsButton() {
+const TAB_LABEL = { server: 'From the server folder', computer: 'From this computer' };
+const IMPORTS_ICON = <ListAltIcon />;
+
+/** The sidebar's Imports group: running (or queued) and failed import jobs from /api/jobs (browser uploads included). */
+function ImportsGroup() {
   const { jobs } = useJobs();
   const imports = jobs.filter(j => j.type === 'import');
   const running = imports.filter(j => j.status === 'running' || j.status === 'queued').length;
   const failed = imports.filter(j => j.status === 'failed').length;
+  const summary = [running ? `${running} running` : null, failed ? `${failed} failed` : null].filter(Boolean).join(' · ') || 'none running';
   return (
-    <SmallButton component={RouterLink} to="/jobs">
-      Jobs{running ? ` · ${running} running` : ''}{failed ? ` · ${failed} failed` : ''}
-    </SmallButton>
+    <SideGroup id="jobs" title="Imports" icon={IMPORTS_ICON} order={SIDE.page + 1} dot={failed ? 'bad' : null} summary={summary}>
+      <SideFacts rows={[
+        { label: 'Running', value: running.toLocaleString(), tone: running ? 'accent' : undefined, title: 'Import jobs running or queued' },
+        { label: 'Failed', value: failed.toLocaleString(), tone: failed ? 'bad' : undefined }
+      ]} />
+      <SideButtons>
+        <SideButton component={RouterLink} to="/jobs?kind=import">Open Jobs</SideButton>
+      </SideButtons>
+    </SideGroup>
   );
 }
 
@@ -90,23 +107,32 @@ export default function LocalImportPage({ basePath: given }) {
   const onNoLibrary = useCallback(() => setNoLibrary(true), [setNoLibrary]);
 
   const activeUploads = uploads.filter(u => u.status !== 'importing').length;
-  const tabs = [
-    { id: 'server', label: 'From the server folder', count: folderCount || null },
-    { id: 'computer', label: 'From this computer', count: activeUploads || null }
-  ];
+  const views = [
+    { id: 'server', label: TAB_LABEL.server, count: folderCount || null, icon: <DnsOutlinedIcon /> },
+    { id: 'computer', label: TAB_LABEL.computer, count: activeUploads || null, icon: <ComputerOutlinedIcon /> }
+  ].map(v => ({
+    ...v,
+    to: `/local-import?from=${v.id}`,
+    replace: true,
+    onClick: (e) => {
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;   // a new tab: the link's own way
+      e.preventDefault();
+      setTab(v.id);
+    }
+  }));
 
   return (
-    <PageShell>
-      <PageHeader title="Import" back actions={<JobsButton />} />
-      <TabBar label="Import from" tabs={tabs} value={tab} onChange={setTab} />
-
+    <SidebarPage title="Import" views={views} view={tab}>
       {noLibrary
         ? (
-          <EmptyState
-            title="No library folder set up"
-            description="Import needs a library folder to move files into."
-            action={<SmallButton primary onClick={() => shell.openSettings('library')}>Open Settings</SmallButton>}
-          />
+          <>
+            <ContentLine title={TAB_LABEL[tab]} />
+            <EmptyState
+              title="No library folder set up"
+              description="Import needs a library folder to move files into."
+              action={<SmallButton primary onClick={() => shell.openSettings('library')}>Open Settings</SmallButton>}
+            />
+          </>
         )
         : (
           <>
@@ -125,6 +151,8 @@ export default function LocalImportPage({ basePath: given }) {
             </div>
           </>
         )}
-    </PageShell>
+
+      <ImportsGroup />
+    </SidebarPage>
   );
 }

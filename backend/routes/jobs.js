@@ -606,6 +606,8 @@ const TRAIN_TITLE = {
 async function trainJobs() {
   const STATUS = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', cancelled: 'cancelled' };
   const pct = (n) => `${(n * 100).toFixed(1)}%`;
+  // what val_acc means per type: AUC for K and CLIP taste, pair accuracy on held-out pairs for CLIP siamese
+  const metricText = (type, v) => type === 'clip_keepdelete' || type === 'clip_taste' ? `AUC ${Number(v).toFixed(2)}` : type === 'clip_siamese' ? `${Math.round(v * 100)}% pairs right` : `val ${pct(v)}`;
   return trainingQueue.list().jobs.filter(j => j.status === 'queued' || j.status === 'running' || isRecent(j.finishedAt)).map(j => {
     const t = j.state || {};
     const status = STATUS[j.status] || 'queued';
@@ -617,10 +619,10 @@ async function trainJobs() {
       progress: status === 'done' ? 1 : status === 'running' ? clamp01(j.progress) : null,
       done: t.epoch || 0, total: t.total_epochs || j.epochs || null, unit: 'epochs',
       stage: status === 'running' ? (j.cancelling ? 'cancelling' : t.phase && t.phase !== 'idle' ? t.phase : j.phase) : null,
-      note: t.val_acc ? `val acc ${pct(t.val_acc)}${t.best_val_acc ? ` · best ${pct(t.best_val_acc)}` : ''}` : (j.message || null),
+      note: t.val_acc ? `${metricText(j.type, t.val_acc)}${t.best_val_acc ? ` · best ${metricText(j.type, t.best_val_acc)}` : ''}` : (j.message || null),
       startedAt: j.startedAt || null, finishedAt: j.finishedAt || null, elapsedMs: elapsed(j.startedAt, j.finishedAt),
       error: status === 'failed' ? j.error || 'failed' : null,
-      result: status === 'done' && j.result ? `best ${pct(j.result.best_val_acc || 0)}${j.result.model ? ` · ${j.result.model}` : ''}` : null,
+      result: status === 'done' && j.result ? `best ${metricText(j.type, j.result.best_val_acc || 0)}${j.result.model ? ` · ${j.result.model}` : ''}` : null,
       link: '/ai-training?tab=train', linkLabel: 'AI & Training',
       actions: actionsOf({
         pause: [false, 'Training can\'t pause: Cancel stops it'],

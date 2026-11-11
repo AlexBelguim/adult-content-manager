@@ -1,15 +1,19 @@
 import React from 'react';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import { useSidebarMode } from '../../layout';
 import { formatBytes, plural } from '../hashApi';
 
 /**
  * Sticky bottom bar (never moves): what is selected over the whole run,
- * Clear, Select all shown, Remove. Rendered after PageShell as a sibling.
+ * Clear, Select all shown, Remove. Rendered as the last child of the page's
+ * SidebarPage, so it is pinned to the foot of the window and spans only the
+ * content column (hash.css .hr-selbar; .phone on the phone layout).
  */
 export default function SelectionBar({
   selection, offScreen, waiting = 0, showCount, libraryReachable, busy,
   onClear, onSelectShown, onRemove
 }) {
+  const phone = useSidebarMode() === 'phone';
   const count = selection?.count || 0;
   const second = [
     `${(selection?.exact || 0).toLocaleString()} exact`,
@@ -24,7 +28,7 @@ export default function SelectionBar({
   else if (count === 0) removeTitle = 'Select files first';
 
   return (
-    <div className="hr-selbar" role="region" aria-label="Selection">
+    <div className={`hr-selbar${phone ? ' phone' : ''}`} role="region" aria-label="Selection">
       <div className="hr-count" aria-live="polite">
         {`${plural(count, 'file')} · ${formatBytes(selection?.bytes || 0)} selected`}
         <small>{second.join(' · ')}</small>

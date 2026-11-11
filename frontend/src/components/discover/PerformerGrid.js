@@ -1,7 +1,8 @@
 /**
  * A grid of performer cards from GET /performers (path), with its drawer. After a decision the card stays where it is,
  * patched with the new state; one that no longer belongs to the list (view) is counted in the stale pill until a reload.
- * toolbar: a node, or a function (list) => node that gets the list (total, items.length, extra.counts).
+ * toolbar: a node, or a function (list) => node that gets the list (total, items.length, extra.counts): the tab's sidebar
+ * groups (drawn in the sidebar, not here) and its content line, which comes first in the content.
  */
 import React, { useCallback, useRef } from 'react';
 import { EmptyState } from '../layout';

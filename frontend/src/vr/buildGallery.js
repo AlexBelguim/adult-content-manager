@@ -5,34 +5,31 @@
  * The cards live on a CYLINDER around the user, scrolled continuously with the right thumbstick
  * (no pages — it wraps, so it's effectively infinite). Only a window of columns is rendered
  * (virtualized) so any list size works. The floating, grabbable bar swaps controls per view.
+ * A Menu chip sits just left of the bar in every view: Exit VR, Back to library, Recentre, Close
+ * and a short controls legend for the current view.
+ *
+ * Colours: every colour comes from vr/palette.js (the live Darkroom or Instrument tokens, read
+ * once per scene). No colour literals in this file.
  *
  * INPUT (Quest 3) — driven by low-level sources A-Frame's events are unreliable for:
- *   - TRIGGER -> WebXR `select` -> fresh raycast (A-Frame's own ray) -> click.
+ *   - TRIGGER -> WebXR `select` -> fresh raycast (A-Frame's own ray) -> click. Only visible
+ *     clickables are hit, and panel backgrounds absorb clicks so nothing behind a panel is hit.
  *   - THUMBSTICK X (tilt) -> scroll the ring (gallery/detail) / prev-next media (player).
  *   - THUMBSTICK Y (tilt) -> scrub the video (player).
  *   - THUMBSTICK press -> recenter. GRIP -> grab the bar (if aimed at it) else recenter.
  *
- * Returns { sceneEl, destroy }.
+ * buildGallery(AFRAME, container, opts) -> Promise<{ sceneEl, destroy }>. opts, all optional:
+ *   onEnterVR()  on the scene's 'enter-vr'.
+ *   onExitVR()   on the scene's 'exit-vr'.
+ *   onLeave()    the Menu's 'Back to library' was pressed (after exitVR settled, when in VR).
+ *   onLibrary({ count, error })  after every performer load attempt: { count: n, error: null }
+ *                on success, { count: null, error: message } on failure.
  */
+import { readVrPalette } from './palette';
 
-// ---- Shared palette (one surface language everywhere — matches the main app's
-// ContentCard / PerformerCard styling, so the VR cards read as the same product) ----
-const ACCENT = '#007acc';
-const ACCENT_WARM = '#ffd54f';   // cinematic content-card accent (folder avatar)
-const SURFACE = '#14161b';       // panels / bar
-const CARD_BG = '#15151a';       // card body (performer + content)
-const CARD_BG_ALT = '#1c1d22';   // inner strips / badges
-const CHIP_BG = 'rgba(255,255,255,0.06)'; // idle icon/text chip background
-const BORDER_SUBTLE = 'rgba(255,255,255,0.06)';
-const BORDER_ACCENT = 'rgba(0,122,204,0.18)';
-const TEXT = '#e8e6df';
-const TEXT_MUTED = '#9bb8d4';
-const TEXT_DIM = '#7d889a';
-// Stat-chip signature colors (verbatim from frontend/src/styles/ContentCard.styles.js)
-const C_PICS = '#90caf9';
-const C_VIDS = '#ef9a9a';
-const C_FUN = '#a5d6a7';
-const C_TOTAL = '#ffffff';
+// The scene's colours. Re-read at the start of every buildGallery so a token switch shows up
+// the next time the scene is built.
+let P = readVrPalette();
 
 // ---- Ring geometry ----
 const R_RING = 4.6;       // cylinder radius (performer + content share this cylinder)
@@ -71,7 +68,7 @@ const BAR_Y = 0.7;
 const TRACK_W = BAR_W - 0.4; // scrub track width
 
 // Performer sort cycle (uses only fields the gallery API returns).
-const SORTS = [
+const sortCycle = [
   { key: 'name', dir: 1, label: 'Name A–Z' },
   { key: 'performer_rating', dir: -1, label: 'Rating ↓' },
   { key: 'total_size_gb', dir: -1, label: 'Size ↓' },
@@ -135,19 +132,19 @@ function drawPill(ctx, cw, ch, color, alpha) {
   roundRectPath(ctx, m, m, cw - 2 * m, ch - 2 * m, Math.min(cw, ch) * 0.24);
   ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
 }
-// Every tappable bar/panel icon sits on a consistent chip surface — idle gets a subtle
-// translucent background (no more bare "floating ghost glyph"), active gets the accent fill.
-// This is the single biggest lever for the "professional" button feel.
+// Every tappable bar/panel icon sits on a chip: idle is the raised surface with a text-coloured
+// icon, active is the accent fill with the on-accent icon.
 function drawIconChip(ctx, cw, ch, { active = false, color } = {}) {
   ctx.clearRect(0, 0, cw, ch);
   const m = Math.min(cw, ch) * 0.05;
   roundRectPath(ctx, m, m, cw - 2 * m, ch - 2 * m, Math.min(cw, ch) * 0.22);
-  if (active) { ctx.globalAlpha = 0.95; ctx.fillStyle = ACCENT; }
-  else { ctx.globalAlpha = 0.5; ctx.fillStyle = '#ffffff'; }
+  ctx.globalAlpha = 0.95; ctx.fillStyle = active ? P.accent : P.raised;
   ctx.fill(); ctx.globalAlpha = 1;
-  // icon colour: white on active, else the supplied idle colour (or muted)
-  return active ? '#ffffff' : (color || TEXT_DIM);
+  // icon colour: on-accent when active, else the supplied idle colour (or text)
+  return active ? P.onAccent : (color || P.text);
 }
+// the dark round badge with a play arrow on video cards and tiles
+function drawPlayBadge(ctx, cw, ch) { drawPill(ctx, cw, ch, P.bg, 0.45); drawIcon(ctx, 'play', cw, ch, P.text); }
 function drawIcon(ctx, name, cw, ch, color) {
   const cx = cw / 2, cy = ch / 2, s = Math.min(cw, ch);
   ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -269,6 +266,9 @@ function drawIcon(ctx, name, cw, ch, color) {
     const d = name === 'arrowLeft' ? 1 : -1;
     ctx.lineWidth = 0.09 * s;
     ctx.beginPath(); ctx.moveTo(cx + d * 0.1 * s, cy - 0.2 * s); ctx.lineTo(cx - d * 0.14 * s, cy); ctx.lineTo(cx + d * 0.1 * s, cy + 0.2 * s); ctx.stroke();
+  } else if (name === 'menu') {
+    ctx.lineWidth = lw;
+    [-0.16, 0, 0.16].forEach((dy) => { ctx.beginPath(); ctx.moveTo(cx - 0.24 * s, cy + dy * s); ctx.lineTo(cx + 0.24 * s, cy + dy * s); ctx.stroke(); });
   } else if (name === 'vr') {
     // VR goggles silhouette — two lenses in a rounded frame
     ctx.lineWidth = lw;
@@ -279,7 +279,8 @@ function drawIcon(ctx, name, cw, ch, color) {
 }
 
 export async function buildGallery(AFRAME, container, opts = {}) {
-  const { onEnterVR, onExitVR } = opts;
+  P = readVrPalette();
+  const { onEnterVR, onExitVR, onLeave, onLibrary } = opts;
   const THREE = AFRAME.THREE;
 
   function canvasPlane(parent, { w, h, x = 0, y = 0, clickable = false, name, onClick, draw }) {
@@ -311,21 +312,23 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
 
   // ---- Scene + rig + lasers ----
-  const scene = makeEl('a-scene', { background: 'color: #07090d', renderer: 'antialias: true; colorManagement: true', 'vr-mode-ui': 'enabled: false', 'system-recenter': '', 'vr-tick': '' });
-  makeEl('a-sky', { color: '#07090d' }, scene);
-  makeEl('a-light', { type: 'ambient', color: '#33405a', intensity: '1.6' }, scene);
-  makeEl('a-light', { type: 'directional', color: '#88aaff', intensity: '0.4', position: '0 4 -4' }, scene);
+  // embedded: the canvas stays inside the container. Without it A-Frame marks <html> a-fullscreen and its own CSS makes
+  // the canvas position:fixed at z-index 999999, over the VR page's landing and look-mode buttons. Immersive VR is the same.
+  const scene = makeEl('a-scene', { embedded: '', background: `color: ${P.bg}`, renderer: 'antialias: true; colorManagement: true', 'vr-mode-ui': 'enabled: false', 'system-recenter': '', 'vr-tick': '' });
+  makeEl('a-sky', { color: P.bg }, scene);
+  makeEl('a-light', { type: 'ambient', color: P.text, intensity: '1.6' }, scene);
+  makeEl('a-light', { type: 'directional', color: P.dim, intensity: '0.4', position: '0 4 -4' }, scene);
   const rig = makeEl('a-entity', { id: 'rig', position: '0 0 0', recenter: `anchorY: ${CENTER_Y}` }, scene);
   makeEl('a-entity', { id: 'head', camera: '', 'look-controls': '', 'wasd-controls': '', position: '0 1.6 0' }, rig);
   // No showLine here — force-laser turns the line ON only once the controller actually connects,
   // so an unused hand (e.g. only one controller held) doesn't project a stray laser.
-  const RAY = 'objects: .clickable; far: 40; lineColor: #007acc; lineOpacity: 0.9';
+  const RAY = `objects: .clickable; far: 40; lineColor: ${P.accent}; lineOpacity: 0.9`;
   // NOTE: no `cursor` component on the hands. A-Frame's cursor fires its OWN click on
   // triggerdown/triggerup, which double-fired alongside our manual `select` handler and made
   // every toggle flip on then straight back off ("does nothing"). Clicks come solely from the
   // WebXR `select` event in attachXRInput -> clickFromHand. The raycaster stays for the laser line.
-  const leftHand = makeEl('a-entity', { id: 'leftHand', 'laser-controls': 'hand: left', 'force-laser': '', raycaster: RAY }, rig);
-  const rightHand = makeEl('a-entity', { id: 'rightHand', 'laser-controls': 'hand: right', 'force-laser': '', raycaster: RAY }, rig);
+  const leftHand = makeEl('a-entity', { id: 'leftHand', 'laser-controls': 'hand: left', 'force-laser': `color: ${P.accent}`, raycaster: RAY }, rig);
+  const rightHand = makeEl('a-entity', { id: 'rightHand', 'laser-controls': 'hand: right', 'force-laser': `color: ${P.accent}`, raycaster: RAY }, rig);
   const world = makeEl('a-entity', { id: 'world' }, scene);
   container.appendChild(scene);
 
@@ -363,8 +366,6 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   let fileType = 'all';                     // filtering: all | pics | vids
   let fileSort = 'name';                    // filtering file sort: name | size
   let fileOrder = 'asc';                    // asc | desc
-  let lastFilterAction = null;              // 'keep'|'delete'|'move_to_funscript' — shown as a brief flash + label
-  let lastActionAt = 0;                     // timestamp of the last triage action (for fade-out)
   // Content/genre ring (second ring under the performers)
   let genres = [];
   let basePath = null;
@@ -373,6 +374,10 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   let showSearch = false;
   let showDevice = false;
   let searchQuery = '';
+  let showMenu = false;      // the Menu panel (left chip on the bar)
+  let menuRenderedFor = null; // the view the open Menu's legend was drawn for
+  let clickMuteUntil = 0;    // swallow trigger echoes right after the Menu closes itself
+  let doneNote = null;       // 'Done with <name>', shown once the filter list reloads
   let handyCode = (typeof localStorage !== 'undefined' && localStorage.getItem('handyCode')) || '';
 
   const bar = makeEl('a-entity', {}, world);
@@ -381,13 +386,20 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   const filterPanel = makeEl('a-entity', { visible: 'false' }, world);
   const searchPanel = makeEl('a-entity', { visible: 'false' }, world);
   const devicePanel = makeEl('a-entity', { visible: 'false' }, world);
+  const menuPanel = makeEl('a-entity', { visible: 'false' }, world);
   const playerRoot = makeEl('a-entity', { visible: 'false' }, world);
-  const statusText = makeEl('a-text', { value: 'Loading performers…', align: 'center', color: TEXT_MUTED, width: '3', 'wrap-count': '40', font: 'roboto' }, world);
+  const statusText = makeEl('a-text', { value: 'Loading performers…', align: 'center', color: P.dim, width: '3', 'wrap-count': '40', font: 'roboto' }, world);
   faceUser(statusText, 0, CENTER_Y, -DIST_FRONT());
+  // One way to set the status line: sentence case, no emoji, real error text (bad = error colour).
+  function setStatus(text, bad = false) {
+    statusText.setAttribute('value', text || '');
+    statusText.setAttribute('color', bad ? P.bad : P.dim);
+  }
+  const errText = (e) => (e && e.message ? e.message : String(e));
   // Debug overlay — hidden in normal use. setDebug stays as a no-op-ish hook so the many call
   // sites don't need removing; flip DEBUG_VR=true to re-enable diagnostics.
   const DEBUG_VR = false;
-  const debug = makeEl('a-text', { value: '', align: 'center', color: '#9fd0ff', width: '1.8', 'wrap-count': '40', font: 'roboto', visible: 'false' }, world);
+  const debug = makeEl('a-text', { value: '', align: 'center', color: P.info, width: '1.8', 'wrap-count': '40', font: 'roboto', visible: 'false' }, world);
   faceUser(debug, 0, BAR_Y + 0.42, -BAR_Z);
   const setDebug = (s) => { if (DEBUG_VR) debug.setAttribute('value', s); };
 
@@ -418,9 +430,13 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     // filtering view gets the TALL (2-row) bar too, so there's room for actions + a scrub row
     const tall = view === 'player' || view === 'filtering';
     const bh = tall ? BAR_H_PLAYER : BAR_H;
-    makeEl('a-entity', { rounded: `width: ${BAR_W}; height: ${bh}; radius: 0.13; color: ${SURFACE}; opacity: 0.92` }, bar);
-    if (!tall) makeEl('a-entity', { rounded: `width: ${BAR_W - 0.4}; height: 0.016; radius: 0.008; color: ${ACCENT}; opacity: 0.5`, position: `0 ${-bh / 2 + 0.04} 0.011` }, bar);
-    makeEl('a-entity', { rounded: `width: 0.5; height: 0.03; radius: 0.015; color: #39414f; opacity: 0.85`, position: `0 ${bh / 2 - 0.07} 0.011` }, bar);
+    makeEl('a-entity', { rounded: `width: ${BAR_W}; height: ${bh}; radius: 0.13; color: ${P.surface}; opacity: 0.92` }, bar);
+    if (!tall) makeEl('a-entity', { rounded: `width: ${BAR_W - 0.4}; height: 0.016; radius: 0.008; color: ${P.accent}; opacity: 0.5`, position: `0 ${-bh / 2 + 0.04} 0.011` }, bar);
+    makeEl('a-entity', { rounded: `width: 0.5; height: 0.03; radius: 0.015; color: ${P.faint}; opacity: 0.85`, position: `0 ${bh / 2 - 0.07} 0.011` }, bar);
+    // Menu chip, just outside the bar's left edge in every view (moves with the bar when grabbed)
+    canvasPlane(bar, { w: 0.3, h: 0.3, x: -half - 0.24, y: 0, clickable: true, name: 'menu', onClick: function () { popScale(this); Promise.resolve().then(toggleMenu); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: showMenu }); drawIcon(ctx, 'menu', cw, ch, c); } });
+    // keep an open Menu's legend in step with the view
+    if (showMenu && menuRenderedFor !== view) renderMenuPanel();
     if (view === 'player') buildPlayerControls(half, bh);
     else if (view === 'filtering') buildFilteringControls(half, bh);
     else if (view === 'detail') buildDetailControls(half);
@@ -430,9 +446,9 @@ export async function buildGallery(AFRAME, container, opts = {}) {
 
   function buildFilterListControls(half) {
     const y = -0.02, isz = 0.34;
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.3, y, clickable: true, name: 'back', onClick: function () { popScale(this); Promise.resolve().then(showGallery); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: TEXT }); drawIcon(ctx, 'back', cw, ch, c); } });
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.72, y, clickable: true, name: 'filter', onClick: function () { popScale(this); Promise.resolve().then(toggleFilters); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: showFilters, color: TEXT_MUTED }); drawIcon(ctx, 'filter', cw, ch, c); } });
-    makeEl('a-text', { value: `Filter — ${filterPerformers.length} performers left`, align: 'right', color: ACCENT_WARM, position: `${half - 0.2} ${y} 0.011`, width: '1.7', 'wrap-count': '34', font: 'roboto' }, bar);
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.3, y, clickable: true, name: 'back', onClick: function () { popScale(this); Promise.resolve().then(showGallery); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.text }); drawIcon(ctx, 'back', cw, ch, c); } });
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.72, y, clickable: true, name: 'filter', onClick: function () { popScale(this); Promise.resolve().then(toggleFilters); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: showFilters, color: P.text }); drawIcon(ctx, 'filter', cw, ch, c); } });
+    makeEl('a-text', { value: `${filterPerformers.length} performer${filterPerformers.length === 1 ? '' : 's'} left to filter`, align: 'right', color: P.dim, position: `${half - 0.2} ${y} 0.011`, width: '1.7', 'wrap-count': '34', font: 'roboto' }, bar);
   }
 
   function buildFilteringControls(half, bh) {
@@ -442,31 +458,31 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     const item = filterFiles[filterIndex];
     const isVid = item && item.type === 'video';
     // row 1: back · KEEP · DELETE · FUNSCRIPT · UNDO · zoom -/+ · filter · count
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.26, y: y1, clickable: true, name: 'back', onClick: function () { popScale(this); Promise.resolve().then(closeFiltering); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: TEXT }); drawIcon(ctx, 'back', cw, ch, c); } });
-    canvasPlane(bar, { w: 0.42, h: 0.36, x: -half + 0.74, y: y1, clickable: true, name: 'keepFile', onClick: function () { popScale(this); Promise.resolve().then(() => doFilterAction('keep')); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, '#2e7d4f', 0.95); drawIcon(ctx, 'keep', cw, ch, '#fff'); } });
-    canvasPlane(bar, { w: 0.42, h: 0.36, x: -half + 1.22, y: y1, clickable: true, name: 'deleteFile', onClick: function () { popScale(this); Promise.resolve().then(() => doFilterAction('delete')); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, '#b3402f', 0.95); drawIcon(ctx, 'trash', cw, ch, '#fff'); } });
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 1.68, y: y1, clickable: true, name: 'funscript', onClick: function () { popScale(this); Promise.resolve().then(() => doFilterAction('move_to_funscript')); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: C_FUN }); drawIcon(ctx, 'funscript', cw, ch, c); } });
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 2.12, y: y1, clickable: true, name: 'undoFile', onClick: function () { popScale(this); Promise.resolve().then(undoFilter); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: TEXT }); drawIcon(ctx, 'undo', cw, ch, c); } });
-    canvasPlane(bar, { w: isz, h: isz, x: half - 1.4, y: y1, clickable: true, name: 'zoomout', onClick: function () { popScale(this); zoomPlayer(0.85); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: TEXT }); drawIcon(ctx, 'minus', cw, ch, c); } });
-    canvasPlane(bar, { w: isz, h: isz, x: half - 1.0, y: y1, clickable: true, name: 'zoomin', onClick: function () { popScale(this); zoomPlayer(1.18); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: TEXT }); drawIcon(ctx, 'plus', cw, ch, c); } });
-    canvasPlane(bar, { w: isz, h: isz, x: half - 0.6, y: y1, clickable: true, name: 'filter', onClick: function () { popScale(this); Promise.resolve().then(toggleFilters); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: showFilters, color: TEXT_MUTED }); drawIcon(ctx, 'filter', cw, ch, c); } });
-    makeEl('a-text', { value: filterTotal ? `${Math.min(filterIndex + 1, filterTotal)}/${filterTotal}` : '', align: 'right', color: TEXT_MUTED, position: `${half - 0.2} ${y1} 0.011`, width: '0.5', 'wrap-count': '10', font: 'roboto' }, bar);
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.26, y: y1, clickable: true, name: 'back', onClick: function () { popScale(this); Promise.resolve().then(closeFiltering); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.text }); drawIcon(ctx, 'back', cw, ch, c); } });
+    canvasPlane(bar, { w: 0.42, h: 0.36, x: -half + 0.74, y: y1, clickable: true, name: 'keepFile', onClick: function () { popScale(this); Promise.resolve().then(() => doFilterAction('keep')); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, P.ok, 0.95); drawIcon(ctx, 'keep', cw, ch, P.bg); } });
+    canvasPlane(bar, { w: 0.42, h: 0.36, x: -half + 1.22, y: y1, clickable: true, name: 'deleteFile', onClick: function () { popScale(this); Promise.resolve().then(() => doFilterAction('delete')); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, P.bad, 0.95); drawIcon(ctx, 'trash', cw, ch, P.bg); } });
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 1.68, y: y1, clickable: true, name: 'funscript', onClick: function () { popScale(this); Promise.resolve().then(() => doFilterAction('move_to_funscript')); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.ok }); drawIcon(ctx, 'funscript', cw, ch, c); } });
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 2.12, y: y1, clickable: true, name: 'undoFile', onClick: function () { popScale(this); Promise.resolve().then(undoFilter); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.text }); drawIcon(ctx, 'undo', cw, ch, c); } });
+    canvasPlane(bar, { w: isz, h: isz, x: half - 1.4, y: y1, clickable: true, name: 'zoomout', onClick: function () { popScale(this); zoomPlayer(0.85); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.text }); drawIcon(ctx, 'minus', cw, ch, c); } });
+    canvasPlane(bar, { w: isz, h: isz, x: half - 1.0, y: y1, clickable: true, name: 'zoomin', onClick: function () { popScale(this); zoomPlayer(1.18); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.text }); drawIcon(ctx, 'plus', cw, ch, c); } });
+    canvasPlane(bar, { w: isz, h: isz, x: half - 0.6, y: y1, clickable: true, name: 'filter', onClick: function () { popScale(this); Promise.resolve().then(toggleFilters); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: showFilters, color: P.text }); drawIcon(ctx, 'filter', cw, ch, c); } });
+    makeEl('a-text', { value: filterTotal ? `${Math.min(filterIndex + 1, filterTotal)}/${filterTotal}` : '', align: 'right', color: P.dim, position: `${half - 0.2} ${y1} 0.011`, width: '0.5', 'wrap-count': '10', font: 'roboto' }, bar);
     // row 2: transport + scrub (only when a video is loaded) — mirrors the player controls
     if (isVid) {
       const trackW = BAR_W - 1.5;
       const trackCenterX = 0.35; // track sits right of the play button, centered in remaining space
-      canvasPlane(bar, { w: isz, h: isz, x: -half + 0.26, y: y2, clickable: true, name: 'playpause', onClick: function () { popScale(this); togglePlay(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, ACCENT, 0.95); drawIcon(ctx, (!videoEl || videoEl.paused) ? 'play' : 'pause', cw, ch, '#fff'); } });
+      canvasPlane(bar, { w: isz, h: isz, x: -half + 0.26, y: y2, clickable: true, name: 'playpause', onClick: function () { popScale(this); togglePlay(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, P.accent, 0.95); drawIcon(ctx, (!videoEl || videoEl.paused) ? 'play' : 'pause', cw, ch, P.onAccent); } });
       const track = makeEl('a-entity', { class: 'clickable', 'data-name': 'scrub', position: `${trackCenterX} ${y2} 0.011` }, bar);
-      makeEl('a-entity', { rounded: `width: ${trackW}; height: 0.05; radius: 0.025; color: #2a2f3a` }, track);
+      makeEl('a-entity', { rounded: `width: ${trackW}; height: 0.05; radius: 0.025; color: ${P.raised}` }, track);
       track.__trackW = trackW;
       track.__seek = (frac) => { if (videoEl && videoEl.duration) videoEl.currentTime = Math.max(0, Math.min(videoEl.duration - 0.2, frac * videoEl.duration)); };
       wireScrubSeek(track, trackW);
       const fill = makeEl('a-entity', { position: `${trackCenterX} ${y2} 0.013` }, bar);
-      makeEl('a-entity', { rounded: `width: ${trackW}; height: 0.05; radius: 0.025; color: ${ACCENT}` }, fill);
+      makeEl('a-entity', { rounded: `width: ${trackW}; height: 0.05; radius: 0.025; color: ${P.accent}` }, fill);
       scrubFillEl = fill;
       scrubFillEl.__trackW = trackW;
       scrubFillEl.__baseX = trackCenterX;
-      scrubTimeEl = makeEl('a-text', { value: '0:00 / 0:00', align: 'center', color: TEXT, position: `${trackCenterX} ${y2 + 0.12} 0.012`, width: '0.9', 'wrap-count': '16', font: 'roboto' }, bar);
+      scrubTimeEl = makeEl('a-text', { value: '0:00 / 0:00', align: 'center', color: P.text, position: `${trackCenterX} ${y2 + 0.12} 0.012`, width: '0.9', 'wrap-count': '16', font: 'roboto' }, bar);
       updateScrubUI();
     }
   }
@@ -476,8 +492,9 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     // Status removed (placeholder). Search + Device implemented in Phase 5.
     const items = [
       { name: 'tab:Performers', icon: 'performers', active: activeTab === 'Performers', on: showGallery },
-      { name: 'filter', icon: 'filter', active: showFilters, on: toggleFilters },     // sort & filter overlay, next to Performers
-      { name: 'search', icon: 'search', active: showSearch, on: toggleSearch },       // search by name
+      // sort & filter overlay, next to Performers; stays lit while a filter is set
+      { name: 'filter', icon: 'filter', active: showFilters || perfFilter.ratingMin > 0 || perfFilter.hasVideos || perfFilter.hasPics || perfFilter.ratedOnly, on: toggleFilters },
+      { name: 'search', icon: 'search', active: showSearch || !!searchQuery, on: toggleSearch }, // search by name; lit while a query is set
       { name: 'tab:Device', icon: 'device', active: showDevice, on: toggleDevice },   // Handy device
       { name: 'triage', icon: 'triage', active: false, on: enterFilterList },          // keep/delete filter mode
     ];
@@ -487,12 +504,12 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         // Defer the action: toggle*() calls buildBar(), which wipes the bar (and this button) mid-click.
         // Running it on the next microtask lets the click event finish cleanly before the DOM changes.
         onClick: function () { popScale(this); const fn = it.on; Promise.resolve().then(fn); },
-        draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: it.active, color: TEXT_MUTED }); drawIcon(ctx, it.icon, cw, ch, c); } });
+        draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: it.active, color: P.text }); drawIcon(ctx, it.icon, cw, ch, c); } });
     });
   }
 
   function applySort() {
-    const s = SORTS[sortIndex];
+    const s = sortCycle[sortIndex];
     performers.sort((a, b) => {
       if (s.key === 'name') return s.dir * String(a.name || '').localeCompare(String(b.name || ''));
       const av = a[s.key] == null ? -Infinity : a[s.key];
@@ -505,15 +522,17 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   // Uses canvasPlane (the SAME proven clickable path as bar buttons) so overlay buttons are
   // always raycast-hittable — earlier the manual entity+rounded construction sometimes failed
   // to resolve through rootClickable, leaving the overlay "showing but unclickable".
-  function textButton(parent, { x, y, w, h, label, active, onClick }) {
+  // disabled: drawn in the faint colour and not clickable (the panel background absorbs the click).
+  function textButton(parent, { x, y, w, h, label, active, disabled = false, onClick }) {
     const el = canvasPlane(parent, {
-      w, h, x, y: y, clickable: true, name: 'f:' + label,
-      onClick: function () { popScale(this); if (onClick) onClick(); },
+      w, h, x, y: y, clickable: !disabled, name: 'f:' + label,
+      onClick: disabled ? undefined : function () { popScale(this); if (onClick) onClick(); },
       draw: (ctx, cw, ch) => {
+        const on = active && !disabled;
         const m = Math.min(cw, ch) * 0.08;
         roundRectPath(ctx, m, m, cw - 2 * m, ch - 2 * m, Math.min(cw, ch) * 0.18);
-        ctx.globalAlpha = active ? 0.95 : 0.9; ctx.fillStyle = active ? ACCENT : '#262a33'; ctx.fill(); ctx.globalAlpha = 1;
-        ctx.fillStyle = active ? '#ffffff' : TEXT;
+        ctx.globalAlpha = on ? 0.95 : 0.9; ctx.fillStyle = on ? P.accent : P.raised; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.fillStyle = disabled ? P.faint : (on ? P.onAccent : P.text);
         ctx.font = `${Math.round(ch * 0.42)}px roboto, sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(label, cw / 2, ch / 2);
@@ -532,14 +551,61 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     _toggleLock[key] = now;
     fn();
   }
-  function toggleFilters() { _guarded('filters', () => { showFilters = !showFilters; setDebug(`toggleFilters -> ${showFilters} (view=${view})`); renderFilterPanel(); buildBar(); }); }
-  function toggleSearch() { _guarded('search', () => { showSearch = !showSearch; setDebug(`toggleSearch -> ${showSearch}`); renderSearchPanel(); buildBar(); }); }
-  function toggleDevice() { _guarded('device', () => { showDevice = !showDevice; setDebug(`toggleDevice -> ${showDevice}`); renderDevicePanel(); buildBar(); }); }
+  function toggleFilters() { _guarded('filters', () => { showFilters = !showFilters; if (showFilters) { showMenu = false; renderMenuPanel(); } setDebug(`toggleFilters -> ${showFilters} (view=${view})`); renderFilterPanel(); buildBar(); }); }
+  function toggleSearch() { _guarded('search', () => { showSearch = !showSearch; if (showSearch) { showMenu = false; renderMenuPanel(); } setDebug(`toggleSearch -> ${showSearch}`); renderSearchPanel(); buildBar(); }); }
+  function toggleDevice() { _guarded('device', () => { showDevice = !showDevice; if (showDevice) { showMenu = false; renderMenuPanel(); } setDebug(`toggleDevice -> ${showDevice}`); renderDevicePanel(); buildBar(); }); }
+  function toggleMenu() {
+    _guarded('menu', () => {
+      showMenu = !showMenu;
+      if (showMenu) { showFilters = false; showSearch = false; showDevice = false; renderFilterPanel(); renderSearchPanel(); renderDevicePanel(); }
+      else clickMuteUntil = performance.now() + 300;
+      renderMenuPanel(); buildBar();
+    });
+  }
+  // Close the Menu from one of its own buttons. The trigger's echoes (a pull throws several
+  // 'select' events) would otherwise land on whatever was behind the panel.
+  function closeMenu() { showMenu = false; clickMuteUntil = performance.now() + 300; renderMenuPanel(); }
+  function exitVrQuietly() {
+    try { return Promise.resolve(scene.exitVR()).catch(() => {}); } catch (_) { return Promise.resolve(); }
+  }
+  function menuLegend() {
+    const lines = ['Trigger: select', 'Stick press: recentre', 'Grip: move the bar (aimed at it) or recentre'];
+    if (view === 'gallery' || view === 'filterList') lines.push('Stick left or right: turn the ring');
+    else if (view === 'detail') lines.push('Stick left or right: scroll');
+    else if (view === 'player') lines.push('Stick left or right: previous or next', 'Stick up or down: scrub');
+    else if (view === 'filtering') lines.push('A or X: keep · B or Y: delete (to .trash)', 'Stick up or down: scrub');
+    return lines;
+  }
+  function renderMenuPanel() {
+    menuPanel.innerHTML = '';
+    menuPanel.setAttribute('visible', showMenu ? 'true' : 'false');
+    menuRenderedFor = showMenu ? view : null;
+    if (!showMenu) return;
+    faceUser(menuPanel, 0, CENTER_Y - 0.1, -2.2);
+    const W = 1.9, H = 2.0;
+    const lines = menuLegend();
+    // The legend starts at y -0.46; grow the panel downward when it needs more than H.
+    const legendRows = lines.reduce((n, l) => n + Math.ceil(l.length / 36), 0);
+    const extra = Math.max(0, 0.46 + legendRows * 0.1 + 0.1 - H / 2);
+    makeEl('a-entity', { class: 'clickable', 'data-name': 'm:bg', position: `0 ${-extra / 2} 0`, rounded: `width: ${W}; height: ${H + extra}; radius: 0.09; color: ${P.surface}; opacity: 0.97` }, menuPanel);
+    makeEl('a-text', { value: 'Menu', align: 'center', color: P.text, position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, menuPanel);
+    const inVR = !!(scene.is && scene.is('vr-mode'));
+    textButton(menuPanel, { x: 0, y: 0.56, w: 1.5, h: 0.22, label: 'Exit VR', disabled: !inVR, onClick: () => { closeMenu(); buildBar(); exitVrQuietly(); } });
+    textButton(menuPanel, { x: 0, y: 0.28, w: 1.5, h: 0.22, label: 'Back to library', onClick: () => {
+      closeMenu();
+      const leave = () => { if (onLeave) onLeave(); };
+      if (scene.is && scene.is('vr-mode')) exitVrQuietly().then(leave); else leave();
+    } });
+    textButton(menuPanel, { x: 0, y: 0.0, w: 1.5, h: 0.22, label: 'Recentre', onClick: () => { if (window.__recenter) window.__recenter(); closeMenu(); buildBar(); } });
+    textButton(menuPanel, { x: 0, y: -0.28, w: 1.5, h: 0.22, label: 'Close', onClick: toggleMenu });
+    makeEl('a-text', { value: lines.join('\n'), align: 'left', baseline: 'top', color: P.dim, position: '0 -0.46 0.01', width: '1.7', 'wrap-count': '36', font: 'roboto' }, menuPanel);
+  }
   function panelBg(W, H, title, sub) {
-    makeEl('a-entity', { rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${SURFACE}; opacity: 0.96` }, filterPanel);
-    makeEl('a-text', { value: title, align: 'center', color: '#ffffff', position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, filterPanel);
-    if (sub) makeEl('a-text', { value: sub, align: 'center', color: TEXT_MUTED, position: `0 ${H / 2 - 0.33} 0.01`, width: `${W * 0.82}`, 'wrap-count': '26', font: 'roboto' }, filterPanel);
-    return (txt, y) => makeEl('a-text', { value: txt, align: 'left', color: TEXT_DIM, position: `${-W / 2 + 0.16} ${y} 0.01`, width: '1.1', 'wrap-count': '18', font: 'roboto' }, filterPanel);
+    // the background is clickable with no handler, so it absorbs clicks meant for nothing
+    makeEl('a-entity', { class: 'clickable', 'data-name': 'bg:filter', rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${P.surface}; opacity: 0.96` }, filterPanel);
+    makeEl('a-text', { value: title, align: 'center', color: P.text, position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, filterPanel);
+    if (sub) makeEl('a-text', { value: sub, align: 'center', color: P.dim, position: `0 ${H / 2 - 0.33} 0.01`, width: `${W * 0.82}`, 'wrap-count': '26', font: 'roboto' }, filterPanel);
+    return (txt, y) => makeEl('a-text', { value: txt, align: 'left', color: P.dim, position: `${-W / 2 + 0.16} ${y} 0.01`, width: '1.1', 'wrap-count': '18', font: 'roboto' }, filterPanel);
   }
   function renderFilterPanel() {
     filterPanel.innerHTML = '';
@@ -555,8 +621,8 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
   function renderGalleryPanel() {
     const W = 1.7, H = 2.95;
-    const lbl = panelBg(W, H, 'SORT & FILTER', `${displayList().length} performers`);
-    const apply = () => { offset = 0; rebuildRing(); renderFilterPanel(); };
+    const lbl = panelBg(W, H, 'Sort and filter', `${displayList().length} performers`);
+    const apply = () => { offset = 0; rebuildRing(); renderFilterPanel(); galleryStatus(); };
     lbl('Sort by', 0.98);
     ['Name', 'Rating', 'Size', 'Pics', 'Vids'].forEach((s, i) => {
       const row = i < 3 ? 0 : 1, col = i < 3 ? i : i - 3;
@@ -572,7 +638,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
   function renderFilterListPanel() {
     const W = 1.7, H = 1.7;
-    const lbl = panelBg(W, H, 'SORT', `${filterPerformers.length} to filter`);
+    const lbl = panelBg(W, H, 'Sort', `${filterPerformers.length} to filter`);
     const by = filterListSort.split('-')[0], order = filterListSort.split('-')[1];
     const set = (b, o) => { filterListSort = `${b}-${o}`; enterFilterList(); };
     lbl('Sort by', 0.42);
@@ -584,7 +650,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
   function renderFilteringPanel() {
     const W = 1.7, H = 2.2;
-    const lbl = panelBg(W, H, 'FILTER FILES', filteringPerf ? filteringPerf.name : '');
+    const lbl = panelBg(W, H, 'Filter files', filteringPerf ? filteringPerf.name : '');
     const reload = () => { renderFilterPanel(); reloadFilteringFiles(); };
     lbl('Type', 0.62);
     [['all', 'All'], ['pics', 'Pics'], ['vids', 'Vids']].forEach(([v, t], i) => textButton(filterPanel, { x: -0.46 + i * 0.46, y: 0.4, w: 0.42, h: 0.22, label: t, active: fileType === v, onClick: () => { fileType = v; reload(); } }));
@@ -598,7 +664,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
 
   function buildDetailControls(half) {
     const y = -0.02, isz = 0.34;
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.3, y, clickable: true, name: 'back', onClick: function () { popScale(this); showGallery(); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: TEXT }); drawIcon(ctx, 'back', cw, ch, c); } });
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.3, y, clickable: true, name: 'back', onClick: function () { popScale(this); showGallery(); }, draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active: false, color: P.text }); drawIcon(ctx, 'back', cw, ch, c); } });
     // All / Vids / Pics / Funscripts filter
     const filters = [['all', 'all'], ['video', 'film'], ['image', 'image'], ['funscript', 'funscript']];
     const pitch = 0.42, center = -0.15;
@@ -606,9 +672,9 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       const active = mediaFilter === f;
       canvasPlane(bar, { w: isz, h: isz, x: center + (i - 1.5) * pitch, y, clickable: true, name: 'filter:' + f,
         onClick: function () { popScale(this); if (mediaFilter !== f) { mediaFilter = f; scrollAngle = 0; rebuildRing(); buildBar(); } },
-        draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active, color: TEXT_MUTED }); drawIcon(ctx, icon, cw, ch, c); } });
+        draw: (ctx, cw, ch) => { const c = drawIconChip(ctx, cw, ch, { active, color: P.text }); drawIcon(ctx, icon, cw, ch, c); } });
     });
-    makeEl('a-text', { id: 'focusName', value: currentPerf ? currentPerf.name : '', align: 'right', color: TEXT, position: `${half - 0.2} ${y} 0.011`, width: '1.5', 'wrap-count': '30', font: 'roboto' }, bar);
+    makeEl('a-text', { id: 'focusName', value: currentPerf ? currentPerf.name : '', align: 'right', color: P.text, position: `${half - 0.2} ${y} 0.011`, width: '1.5', 'wrap-count': '30', font: 'roboto' }, bar);
   }
 
   function buildPlayerControls(half, bh) {
@@ -616,32 +682,32 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     const item = displayList()[playerIndex];
     const isVid = item && item.type === 'video';
     // row 1: transport + zoom (resize) controls
-    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.28, y: y1, clickable: true, name: 'back', onClick: function () { popScale(this); closePlayer(); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'back', cw, ch, '#cfe3f5') });
-    canvasPlane(bar, { w: isz, h: isz, x: -0.75, y: y1, clickable: true, name: 'prevMedia', onClick: function () { popScale(this); stepMedia(-1); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'arrowLeft', cw, ch, playerIndex > 0 ? '#fff' : '#454d5b') });
-    if (isVid) canvasPlane(bar, { w: isz, h: isz, x: -0.4, y: y1, clickable: true, name: 'playpause', onClick: function () { popScale(this); togglePlay(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, ACCENT, 0.95); drawIcon(ctx, (!videoEl || videoEl.paused) ? 'play' : 'pause', cw, ch, '#fff'); } });
-    canvasPlane(bar, { w: isz, h: isz, x: -0.05, y: y1, clickable: true, name: 'nextMedia', onClick: function () { popScale(this); stepMedia(1); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'arrowRight', cw, ch, playerIndex < displayList().length - 1 ? '#fff' : '#454d5b') });
-    canvasPlane(bar, { w: isz, h: isz, x: 0.45, y: y1, clickable: true, name: 'zoomout', onClick: function () { popScale(this); zoomPlayer(0.8); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'minus', cw, ch, '#cfe3f5') });
-    canvasPlane(bar, { w: isz, h: isz, x: 0.83, y: y1, clickable: true, name: 'zoomin', onClick: function () { popScale(this); zoomPlayer(1.25); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'plus', cw, ch, '#cfe3f5') });
+    canvasPlane(bar, { w: isz, h: isz, x: -half + 0.28, y: y1, clickable: true, name: 'back', onClick: function () { popScale(this); closePlayer(); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'back', cw, ch, P.text) });
+    canvasPlane(bar, { w: isz, h: isz, x: -0.75, y: y1, clickable: true, name: 'prevMedia', onClick: function () { popScale(this); stepMedia(-1); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'arrowLeft', cw, ch, playerIndex > 0 ? P.text : P.faint) });
+    if (isVid) canvasPlane(bar, { w: isz, h: isz, x: -0.4, y: y1, clickable: true, name: 'playpause', onClick: function () { popScale(this); togglePlay(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, P.accent, 0.95); drawIcon(ctx, (!videoEl || videoEl.paused) ? 'play' : 'pause', cw, ch, P.onAccent); } });
+    canvasPlane(bar, { w: isz, h: isz, x: -0.05, y: y1, clickable: true, name: 'nextMedia', onClick: function () { popScale(this); stepMedia(1); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'arrowRight', cw, ch, playerIndex < displayList().length - 1 ? P.text : P.faint) });
+    canvasPlane(bar, { w: isz, h: isz, x: 0.45, y: y1, clickable: true, name: 'zoomout', onClick: function () { popScale(this); zoomPlayer(0.8); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'minus', cw, ch, P.text) });
+    canvasPlane(bar, { w: isz, h: isz, x: 0.83, y: y1, clickable: true, name: 'zoomin', onClick: function () { popScale(this); zoomPlayer(1.25); }, draw: (ctx, cw, ch) => drawIcon(ctx, 'plus', cw, ch, P.text) });
     // VR toggle: render the video as side-by-side 180° (each eye = one half of the frame)
     if (isVid) {
       // VR toggle (goggles) — switches the flat plane to a wraparound VR sphere
-      canvasPlane(bar, { w: isz, h: isz, x: half - 0.62, y: y1, clickable: true, name: 'vrMode', onClick: function () { popScale(this); toggleVRVideo(); }, draw: (ctx, cw, ch) => { if (vrVideoMode) drawPill(ctx, cw, ch, ACCENT, 0.95); drawIcon(ctx, 'vr', cw, ch, vrVideoMode ? '#fff' : '#cfe3f5'); } });
+      canvasPlane(bar, { w: isz, h: isz, x: half - 0.62, y: y1, clickable: true, name: 'vrMode', onClick: function () { popScale(this); toggleVRVideo(); }, draw: (ctx, cw, ch) => { if (vrVideoMode) drawPill(ctx, cw, ch, P.accent, 0.95); drawIcon(ctx, 'vr', cw, ch, vrVideoMode ? P.onAccent : P.text); } });
       // Type label — only while VR mode is on. Click cycles SBS180 -> SBS360 -> TB180 -> TB360.
-      if (vrVideoMode) canvasPlane(bar, { w: 0.6, h: isz, x: half - 0.28, y: y1, clickable: true, name: 'vrType', onClick: function () { popScale(this); cycleVRVideoType(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, CARD_BG_ALT, 0.92); ctx.fillStyle = TEXT; ctx.font = `${Math.round(ch * 0.32)}px roboto, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(VR_VIDEO_LABELS[vrVideoType] || 'SBS', cw / 2, ch / 2); } });
+      if (vrVideoMode) canvasPlane(bar, { w: 0.6, h: isz, x: half - 0.28, y: y1, clickable: true, name: 'vrType', onClick: function () { popScale(this); cycleVRVideoType(); }, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, P.raised, 0.92); ctx.fillStyle = P.text; ctx.font = `${Math.round(ch * 0.32)}px roboto, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(VR_VIDEO_LABELS[vrVideoType] || 'SBS', cw / 2, ch / 2); } });
     }
     // row 2: scrub bar (video only) — clickable track + accent fill + time text
     if (isVid) {
       const track = makeEl('a-entity', { class: 'clickable', 'data-name': 'scrub', position: `0 ${y2} 0.011` }, bar);
-      makeEl('a-entity', { rounded: `width: ${TRACK_W}; height: 0.05; radius: 0.025; color: #2a2f3a` }, track);
+      makeEl('a-entity', { rounded: `width: ${TRACK_W}; height: 0.05; radius: 0.025; color: ${P.raised}` }, track);
       track.__trackW = TRACK_W;
       track.__seek = (frac) => { if (videoEl && videoEl.duration) videoEl.currentTime = Math.max(0, Math.min(videoEl.duration - 0.2, frac * videoEl.duration)); };
       wireScrubSeek(track, TRACK_W);
       const fill = makeEl('a-entity', { position: `0 ${y2} 0.013` }, bar);
-      makeEl('a-entity', { rounded: `width: ${TRACK_W}; height: 0.05; radius: 0.025; color: ${ACCENT}` }, fill);
+      makeEl('a-entity', { rounded: `width: ${TRACK_W}; height: 0.05; radius: 0.025; color: ${P.accent}` }, fill);
       scrubFillEl = fill;
       scrubFillEl.__trackW = TRACK_W;
       scrubFillEl.__baseX = 0;
-      scrubTimeEl = makeEl('a-text', { value: '0:00 / 0:00', align: 'center', color: '#cdd6e4', position: `0 ${y2 + 0.12} 0.012`, width: '0.9', 'wrap-count': '16', font: 'roboto' }, bar);
+      scrubTimeEl = makeEl('a-text', { value: '0:00 / 0:00', align: 'center', color: P.text, position: `0 ${y2 + 0.12} 0.012`, width: '0.9', 'wrap-count': '16', font: 'roboto' }, bar);
       updateScrubUI();
     }
   }
@@ -680,6 +746,12 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     });
   }
 
+  // read at click time: the view can change after the card was built
+  function cardClicked(card, item) {
+    popScale(card);
+    if (view === 'filterList') enterFiltering(item); else showDetail(item);
+  }
+
   function buildColumn(col) {
     const items = displayList(), N = items.length;
     const colEl = makeEl('a-entity', {}, ring);
@@ -689,37 +761,40 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       const y = ((ROWS - 1) / 2 - row) * ROW_SPACING;
       const card = makeEl('a-entity', { class: 'clickable', 'data-name': view === 'detail' ? (item.name || item.type) : (item.name || 'Unknown'), position: `0 ${y} 0` }, colEl);
       card.setAttribute('data-index', String(idx));
-      makeEl('a-entity', { rounded: `width: ${CARD_W}; height: ${CARD_H}; radius: 0.05; color: ${CARD_BG}` }, card);
+      makeEl('a-entity', { rounded: `width: ${CARD_W}; height: ${CARD_H}; radius: 0.05; color: ${P.surface}` }, card);
       const thumb = makeEl('a-entity', { position: '0 0 0.01' }, card);
       if (view === 'detail') {
         const url = item.type === 'video' ? `/api/files/video-thumbnail?path=${encodeURIComponent(item.path)}` : `/api/files/raw?path=${encodeURIComponent(item.path)}`;
         containImage(thumb, url, CARD_W - 0.04, CARD_H - 0.04);
-        if (item.type === 'video') canvasPlane(card, { w: 0.3, h: 0.3, x: 0, y: 0, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, '#000', 0.45); drawIcon(ctx, 'play', cw, ch, '#fff'); } });
+        if (item.type === 'video') canvasPlane(card, { w: 0.3, h: 0.3, x: 0, y: 0, draw: drawPlayBadge });
         card.addEventListener('click', () => { popScale(card); openPlayer(idx); });
       } else {
         // performer card: cover thumbnail + name + rating
-        if (item.thumbnail) makeEl('a-entity', { position: '0 0 0.001', rounded: `width: ${CARD_W}; height: ${CARD_H}; radius: 0.05; color: ${CARD_BG}`, 'cover-thumb': `src: /api/files/raw?path=${encodeURIComponent(item.thumbnail)}; ratio: ${CARD_W / CARD_H}` }, card);
+        if (item.thumbnail) makeEl('a-entity', { position: '0 0 0.001', rounded: `width: ${CARD_W}; height: ${CARD_H}; radius: 0.05; color: ${P.surface}`, 'cover-thumb': `src: /api/files/raw?path=${encodeURIComponent(item.thumbnail)}; ratio: ${CARD_W / CARD_H}` }, card);
         const sh = 0.3, strip = makeEl('a-entity', { position: `0 ${-CARD_H / 2 + sh / 2 + 0.03} 0.02` }, card);
-        makeEl('a-entity', { rounded: `width: ${CARD_W - 0.06}; height: ${sh}; radius: 0.04; color: ${CARD_BG_ALT}; opacity: 0.94` }, strip);
-        makeEl('a-text', { value: item.name || 'Unknown', align: 'center', color: TEXT, position: `0 ${sh / 2 - 0.08} 0.01`, width: `${CARD_W * 0.92}`, 'wrap-count': '16', font: 'roboto' }, strip);
+        makeEl('a-entity', { rounded: `width: ${CARD_W - 0.06}; height: ${sh}; radius: 0.04; color: ${P.raised}; opacity: 0.94` }, strip);
+        makeEl('a-text', { value: item.name || 'Unknown', align: 'center', color: P.text, position: `0 ${sh / 2 - 0.08} 0.01`, width: `${CARD_W * 0.92}`, 'wrap-count': '16', font: 'roboto' }, strip);
         const pics = item.pics_count || 0, vids = item.vids_count || 0;
         if (view === 'filterList') {
           // show how much is left to filter (state), and a progress badge
           const uPics = Math.max(0, pics - (item.pics_filtered || 0)), uVids = Math.max(0, vids - (item.vids_filtered || 0));
-          makeEl('a-text', { value: `${uPics} pics · ${uVids} vids to filter`, align: 'center', color: ACCENT_WARM, position: `0 ${-sh / 2 + 0.07} 0.01`, width: `${CARD_W * 0.92}`, 'wrap-count': '26', font: 'roboto' }, strip);
+          makeEl('a-text', { value: `${uPics} pics · ${uVids} vids to filter`, align: 'center', color: P.warn, position: `0 ${-sh / 2 + 0.07} 0.01`, width: `${CARD_W * 0.92}`, 'wrap-count': '26', font: 'roboto' }, strip);
           const done = pics + vids - uPics - uVids, total = pics + vids;
           const badge = makeEl('a-entity', { position: `${-CARD_W / 2 + 0.24} ${CARD_H / 2 - 0.13} 0.02` }, card);
-          makeEl('a-entity', { rounded: 'width: 0.5; height: 0.18; radius: 0.07; color: #000; opacity: 0.7' }, badge);
-          makeEl('a-text', { value: `${total ? Math.round((done / total) * 100) : 0}% done`, align: 'center', color: '#9be08b', position: '0 0 0.01', width: '0.52', 'wrap-count': '10', font: 'roboto' }, badge);
+          makeEl('a-entity', { rounded: `width: 0.5; height: 0.18; radius: 0.07; color: ${P.bg}; opacity: 0.7` }, badge);
+          makeEl('a-text', { value: `${total ? Math.round((done / total) * 100) : 0}% done`, align: 'center', color: P.ok, position: '0 0 0.01', width: '0.52', 'wrap-count': '10', font: 'roboto' }, badge);
         } else {
           const fun = item.funscript_vids_count || 0;
-          makeEl('a-text', { value: `${pics} pics · ${vids} vids · ${fun} fun`, align: 'center', color: TEXT_MUTED, position: `0 ${-sh / 2 + 0.07} 0.01`, width: `${CARD_W * 0.94}`, 'wrap-count': '30', font: 'roboto' }, strip);
+          makeEl('a-text', { value: `${pics} pics · ${vids} vids · ${fun} fun`, align: 'center', color: P.dim, position: `0 ${-sh / 2 + 0.07} 0.01`, width: `${CARD_W * 0.94}`, 'wrap-count': '30', font: 'roboto' }, strip);
+          // rating badge only on rated performers
           const rating = fmtRating(item.performer_rating);
-          const badge = makeEl('a-entity', { position: `${-CARD_W / 2 + 0.2} ${CARD_H / 2 - 0.13} 0.02` }, card);
-          makeEl('a-entity', { rounded: 'width: 0.36; height: 0.18; radius: 0.07; color: #000; opacity: 0.7' }, badge);
-          makeEl('a-text', { value: rating ? `★ ${rating}` : '★ Rate', align: 'center', color: '#ffeb3b', position: '0 0 0.01', width: '0.36', 'wrap-count': '6', font: 'roboto' }, badge);
+          if (rating) {
+            const badge = makeEl('a-entity', { position: `${-CARD_W / 2 + 0.2} ${CARD_H / 2 - 0.13} 0.02` }, card);
+            makeEl('a-entity', { rounded: `width: 0.36; height: 0.18; radius: 0.07; color: ${P.bg}; opacity: 0.7` }, badge);
+            makeEl('a-text', { value: `★ ${rating}`, align: 'center', color: P.warn, position: '0 0 0.01', width: '0.36', 'wrap-count': '6', font: 'roboto' }, badge);
+          }
         }
-        card.addEventListener('click', () => { popScale(card); if (view === 'filterList') enterFiltering(item); else showDetail(item); });
+        card.addEventListener('click', () => cardClicked(card, item));
       }
     }
     cols.set(col, colEl);
@@ -782,11 +857,11 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
   function buildTile(t) {
     const tile = makeEl('a-entity', { class: 'clickable', 'data-name': t.item.name || t.item.type }, ring);
-    makeEl('a-entity', { rounded: `width: ${t.tileW}; height: ${M_ROW_H}; radius: 0.04; color: ${CARD_BG}` }, tile);
+    makeEl('a-entity', { rounded: `width: ${t.tileW}; height: ${M_ROW_H}; radius: 0.04; color: ${P.surface}` }, tile);
     const url = t.item.type === 'video' ? `/api/files/video-thumbnail?path=${encodeURIComponent(t.item.path)}` : `/api/files/raw?path=${encodeURIComponent(t.item.path)}`;
     // slot aspect == image aspect, so cover-fit shows the whole image with no crop
-    makeEl('a-entity', { position: '0 0 0.001', rounded: `width: ${t.tileW}; height: ${M_ROW_H}; radius: 0.04; color: ${CARD_BG}`, 'cover-thumb': `src: ${url}; ratio: ${t.tileW / M_ROW_H}` }, tile);
-    if (t.item.type === 'video') canvasPlane(tile, { w: 0.26, h: 0.26, x: 0, y: 0, draw: (ctx, cw, ch) => { drawPill(ctx, cw, ch, '#000', 0.45); drawIcon(ctx, 'play', cw, ch, '#fff'); } });
+    makeEl('a-entity', { position: '0 0 0.001', rounded: `width: ${t.tileW}; height: ${M_ROW_H}; radius: 0.04; color: ${P.surface}`, 'cover-thumb': `src: ${url}; ratio: ${t.tileW / M_ROW_H}` }, tile);
+    if (t.item.type === 'video') canvasPlane(tile, { w: 0.26, h: 0.26, x: 0, y: 0, draw: drawPlayBadge });
     tile.addEventListener('click', () => { popScale(tile); openPlayer(t.idx); });
     return tile;
   }
@@ -831,7 +906,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     const startX = -gridW / 2 + kw / 2;
     const rows = nums ? [...KB_ROWS, KB_NUMS] : KB_ROWS;
     // live query readout
-    makeEl('a-text', { value: query || (nums ? 'Tap digits…' : 'Tap letters…'), align: 'center', color: TEXT, position: `0 ${(rows.length / 2) * (kh + gap) + 0.04} 0.02`, width: `${W * 0.9}`, 'wrap-count': '30', font: 'roboto' }, parent);
+    makeEl('a-text', { value: query || (nums ? 'Tap digits…' : 'Tap letters…'), align: 'center', color: P.text, position: `0 ${(rows.length / 2) * (kh + gap) + 0.04} 0.02`, width: `${W * 0.9}`, 'wrap-count': '30', font: 'roboto' }, parent);
     rows.forEach((row, ri) => {
       const y = (rows.length / 2 - 0.5 - ri) * (kh + gap);
       // centre each row's keys (rows can be shorter than 10)
@@ -840,8 +915,8 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         const x = rowStartX + ci * (kw + gap);
         const isBack = k === '⌫', isClr = k === 'Clr';
         const b = makeEl('a-entity', { class: 'clickable', position: `${x} ${y} 0.02`, 'data-name': 'kb:' + k }, parent);
-        makeEl('a-entity', { rounded: `width: ${kw}; height: ${kh}; radius: 0.03; color: ${isBack || isClr ? CARD_BG_ALT : '#262a33'}` }, b);
-        makeEl('a-text', { value: k, align: 'center', color: isBack || isClr ? ACCENT_WARM : TEXT, position: '0 0 0.01', width: `${kw * 0.9}`, 'wrap-count': '4', font: 'roboto' }, b);
+        makeEl('a-entity', { rounded: `width: ${kw}; height: ${kh}; radius: 0.03; color: ${P.raised}` }, b);
+        makeEl('a-text', { value: k, align: 'center', color: isBack || isClr ? P.warn : P.text, position: '0 0 0.01', width: `${kw * 0.9}`, 'wrap-count': '4', font: 'roboto' }, b);
         b.addEventListener('click', () => {
           popScale(b);
           let next = query;
@@ -861,10 +936,10 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     if (!open) return;
     const W = 2.0, H = 2.4;
     faceUser(searchPanel, 0, CENTER_Y + 0.3, -2.6);
-    makeEl('a-entity', { rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${SURFACE}; opacity: 0.97` }, searchPanel);
-    makeEl('a-text', { value: 'SEARCH', align: 'center', color: '#ffffff', position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, searchPanel);
-    makeEl('a-text', { value: `${displayList().length} matches`, align: 'center', color: TEXT_MUTED, position: `0 ${H / 2 - 0.33} 0.01`, width: `${W * 0.82}`, 'wrap-count': '26', font: 'roboto' }, searchPanel);
-    vrKeyboard(searchPanel, { query: searchQuery, onChange: (q) => { searchQuery = q; renderSearchPanel(); buildBar(); offset = 0; rebuildRing(); }, W });
+    makeEl('a-entity', { class: 'clickable', 'data-name': 'bg:search', rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${P.surface}; opacity: 0.97` }, searchPanel);
+    makeEl('a-text', { value: 'Search', align: 'center', color: P.text, position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, searchPanel);
+    makeEl('a-text', { value: `${displayList().length} matches`, align: 'center', color: P.dim, position: `0 ${H / 2 - 0.33} 0.01`, width: `${W * 0.82}`, 'wrap-count': '26', font: 'roboto' }, searchPanel);
+    vrKeyboard(searchPanel, { query: searchQuery, onChange: (q) => { searchQuery = q; renderSearchPanel(); buildBar(); offset = 0; rebuildRing(); galleryStatus(); }, W });
   }
 
   function renderDevicePanel() {
@@ -874,17 +949,17 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     if (!open) return;
     const W = 2.0, H = 2.6;
     faceUser(devicePanel, 0, CENTER_Y + 0.3, -2.6);
-    makeEl('a-entity', { rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${SURFACE}; opacity: 0.97` }, devicePanel);
-    makeEl('a-text', { value: 'HANDY DEVICE', align: 'center', color: '#ffffff', position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, devicePanel);
+    makeEl('a-entity', { class: 'clickable', 'data-name': 'bg:device', rounded: `width: ${W}; height: ${H}; radius: 0.09; color: ${P.surface}; opacity: 0.97` }, devicePanel);
+    makeEl('a-text', { value: 'Handy', align: 'center', color: P.text, position: `0 ${H / 2 - 0.16} 0.01`, width: `${W * 0.85}`, font: 'roboto' }, devicePanel);
     const connected = !!(window.appHandyConnected);
     const sdkOk = !!(window.Handy && window.appHandyIntegration);
-    const statusTxt = sdkOk ? (connected ? 'Connected ✓' : 'Enter connection code') : 'Handy SDK not loaded (best-effort on headset)';
-    makeEl('a-text', { value: statusTxt, align: 'center', color: sdkOk ? (connected ? C_FUN : TEXT_MUTED) : ACCENT_WARM, position: `0 ${H / 2 - 0.33} 0.01`, width: `${W * 0.85}`, 'wrap-count': '30', font: 'roboto' }, devicePanel);
+    const statusTxt = sdkOk ? (connected ? 'Connected' : 'Enter connection code') : 'Handy did not load on this page';
+    makeEl('a-text', { value: statusTxt, align: 'center', color: sdkOk ? (connected ? P.ok : P.dim) : P.warn, position: `0 ${H / 2 - 0.33} 0.01`, width: `${W * 0.85}`, 'wrap-count': '30', font: 'roboto' }, devicePanel);
     vrKeyboard(devicePanel, { query: handyCode, nums: true, onChange: (q) => { handyCode = q; localStorage.setItem('handyCode', q); renderDevicePanel(); }, W });
     // Connect / Disconnect button
     const connectBtn = makeEl('a-entity', { class: 'clickable', position: `0 ${-H / 2 + 0.2} 0.02`, 'data-name': 'handyConnect' }, devicePanel);
-    makeEl('a-entity', { rounded: `width: 1.0; height: 0.22; radius: 0.05; color: ${connected ? '#b3402f' : ACCENT}` }, connectBtn);
-    makeEl('a-text', { value: connected ? 'Disconnect' : 'Connect', align: 'center', color: '#ffffff', position: '0 0 0.01', width: '0.9', 'wrap-count': '12', font: 'roboto' }, connectBtn);
+    makeEl('a-entity', { rounded: `width: 1.0; height: 0.22; radius: 0.05; color: ${connected ? P.bad : P.accent}` }, connectBtn);
+    makeEl('a-text', { value: connected ? 'Disconnect' : 'Connect', align: 'center', color: P.onAccent, position: '0 0 0.01', width: '0.9', 'wrap-count': '12', font: 'roboto' }, connectBtn);
     connectBtn.addEventListener('click', () => {
       popScale(connectBtn);
       const integ = window.appHandyIntegration;
@@ -899,9 +974,15 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     view = 'gallery'; currentPerf = null; offset = 0; mediaFilter = 'all';
     closePlayerMedia(); playerRoot.setAttribute('visible', 'false'); playerRoot.innerHTML = '';
     ring.setAttribute('visible', 'true');
-    statusText.setAttribute('value', performers.length ? '' : 'No performers found.');
+    galleryStatus();
     buildBar(); rebuildRing(); renderFilterPanel(); renderSearchPanel(); renderDevicePanel();
     buildGenreRing(); loadGenres();
+  }
+
+  // The gallery's status line: empty library, everyone filtered out, or nothing.
+  function galleryStatus() {
+    if (view !== 'gallery') return;
+    setStatus(!performers.length ? 'No performers yet' : displayList().length ? '' : 'No performers match the search or filters');
   }
 
   // ---- Content genre ring (second ring under the performers) ----
@@ -928,15 +1009,20 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
   function applyGenreRotation() { if (genreRing.object3D) genreRing.object3D.rotation.y = -offset * GENRE_ROT; }
   function hideGenreRing() { genreRing.setAttribute('visible', 'false'); }
-  // collapse all overlay panels (filter/search/device) on view transitions
-  function hidePanels() { showFilters = false; showSearch = false; showDevice = false; filterPanel.setAttribute('visible', 'false'); searchPanel.setAttribute('visible', 'false'); devicePanel.setAttribute('visible', 'false'); }
+  // collapse all overlay panels (filter/search/device/menu) on view transitions; they are
+  // emptied too, so nothing in a hidden panel stays around to be hit
+  function hidePanels() {
+    showFilters = false; showSearch = false; showDevice = false; showMenu = false; menuRenderedFor = null;
+    filterPanel.setAttribute('visible', 'false'); searchPanel.setAttribute('visible', 'false'); devicePanel.setAttribute('visible', 'false'); menuPanel.setAttribute('visible', 'false');
+    filterPanel.innerHTML = searchPanel.innerHTML = devicePanel.innerHTML = menuPanel.innerHTML = '';
+  }
   function buildGenreRing() {
     genreRing.innerHTML = '';
     if (view !== 'gallery') { genreRing.setAttribute('visible', 'false'); return; }
     genreRing.setAttribute('visible', 'true');
     if (!genres.length) {
       // genres take ~20s to scan the first time — show a hint so the ring area isn't just empty
-      if (genresLoading) { const h = makeEl('a-text', { value: 'Loading content by genre…', align: 'center', color: '#7d889a', width: '2', 'wrap-count': '30', font: 'roboto' }, genreRing); faceUser(h, 0, GENRE_Y, -GENRE_R); }
+      if (genresLoading) { const h = makeEl('a-text', { value: 'Loading content by genre…', align: 'center', color: P.dim, width: '2', 'wrap-count': '30', font: 'roboto' }, genreRing); faceUser(h, 0, GENRE_Y, -GENRE_R); }
       return;
     }
     const N = genres.length;
@@ -956,33 +1042,33 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       faceUser(card, x, GENRE_Y, z); // faces the user; spins around them as the ring rotates
       const pics = g.pics || 0, vids = g.vids || 0, fun = g.funscripts || 0, total = pics + vids + fun;
       // body + subtle accent border (matches cinematic content-card spec)
-      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.07; color: ${CARD_BG}` }, card);
-      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.07; color: ${ACCENT}; opacity: 0.06` }, card);
-      // folder avatar (warm gold circle, like ContentCard's genre-avatar)
+      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.07; color: ${P.surface}` }, card);
+      makeEl('a-entity', { rounded: `width: ${GENRE_W}; height: ${GENRE_H}; radius: 0.07; color: ${P.accent}; opacity: 0.06` }, card);
+      // folder avatar (warm circle, like ContentCard's genre-avatar)
       const av = makeEl('a-entity', { position: `0 ${topY - avatarR} 0.01` }, card);
-      makeEl('a-entity', { rounded: `width: ${avatarR * 2}; height: ${avatarR * 2}; radius: ${avatarR}; color: ${ACCENT_WARM}` }, av);
-      canvasPlane(av, { w: avatarR * 1.1, h: avatarR * 1.1, y: 0.012, draw: (ctx, cw, ch) => drawIcon(ctx, 'folder', cw, ch, '#1a1a1a') });
+      makeEl('a-entity', { rounded: `width: ${avatarR * 2}; height: ${avatarR * 2}; radius: ${avatarR}; color: ${P.warn}` }, av);
+      canvasPlane(av, { w: avatarR * 1.1, h: avatarR * 1.1, y: 0.012, draw: (ctx, cw, ch) => drawIcon(ctx, 'folder', cw, ch, P.bg) });
       // genre name (bold-ish, centered)
-      makeEl('a-text', { value: g.name, align: 'center', color: TEXT, position: `0 ${nameY} 0.01`, width: `${GENRE_W * 0.92}`, 'wrap-count': '24', font: 'roboto' }, card);
-      // 2x2 stat chip grid: Pics / Vids / Funscripts / Total — color-coded like ContentCard.styles.js
+      makeEl('a-text', { value: g.name, align: 'center', color: P.text, position: `0 ${nameY} 0.01`, width: `${GENRE_W * 0.92}`, 'wrap-count': '24', font: 'roboto' }, card);
+      // 2x2 stat chip grid: Pics / Vids / Funscripts / Total (funscripts in the ok colour)
       const chips = [
-        { label: 'Pics', val: pics, color: C_PICS, icon: 'photo', r: 0, c: 0 },
-        { label: 'Vids', val: vids, color: C_VIDS, icon: 'video', r: 0, c: 1 },
-        { label: 'Fun', val: fun, color: C_FUN, icon: 'playcircle', r: 1, c: 0 },
-        { label: 'All', val: total, color: C_TOTAL, icon: 'storage', r: 1, c: 1 },
+        { label: 'Pics', val: pics, color: P.text, icon: 'photo', r: 0, c: 0 },
+        { label: 'Vids', val: vids, color: P.text, icon: 'video', r: 0, c: 1 },
+        { label: 'Fun', val: fun, color: P.ok, icon: 'playcircle', r: 1, c: 0 },
+        { label: 'All', val: total, color: P.text, icon: 'storage', r: 1, c: 1 },
       ];
       chips.forEach((ch) => {
         const cxp = (ch.c === 0 ? -1 : 1) * (chipW / 2 + 0.06);
         const cyp = gridTopY - ch.r * (rowH + rowGap); // gridTopY is the top-row centre
         const chip = makeEl('a-entity', { position: `${cxp} ${cyp} 0.01` }, card);
-        makeEl('a-entity', { rounded: `width: ${chipW}; height: ${chipH}; radius: 0.04; color: #22242b; opacity: 0.92` }, chip);
+        makeEl('a-entity', { rounded: `width: ${chipW}; height: ${chipH}; radius: 0.04; color: ${P.raised}; opacity: 0.92` }, chip);
         canvasPlane(chip, { w: 0.1, h: 0.1, x: -chipW / 2 + 0.12, draw: (ctx, cw, chh) => drawIcon(ctx, ch.icon, cw, chh, ch.color) });
         makeEl('a-text', { value: `${ch.label} ${ch.val}`, align: 'left', color: ch.color, position: `${-chipW / 2 + 0.22} 0 0.01`, width: `${chipW}`, 'wrap-count': '12', font: 'roboto' }, chip);
       });
       // size row
       const sizeRow = makeEl('a-entity', { position: `0 ${sizeY} 0.01` }, card);
-      canvasPlane(sizeRow, { w: 0.09, h: 0.09, x: -0.18, draw: (ctx, cw, chh) => drawIcon(ctx, 'storage', cw, chh, TEXT_DIM) });
-      makeEl('a-text', { value: `${g.size || 0} GB`, align: 'center', color: TEXT_DIM, position: '0.08 0 0.01', width: '1.0', 'wrap-count': '14', font: 'roboto' }, sizeRow);
+      canvasPlane(sizeRow, { w: 0.09, h: 0.09, x: -0.18, draw: (ctx, cw, chh) => drawIcon(ctx, 'storage', cw, chh, P.dim) });
+      makeEl('a-text', { value: `${g.size || 0} GB`, align: 'center', color: P.dim, position: '0.08 0 0.01', width: '1.0', 'wrap-count': '14', font: 'roboto' }, sizeRow);
       card.addEventListener('click', () => { popScale(card); showGenre(g); });
     });
     applyGenreRotation();
@@ -993,7 +1079,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     hidePanels(); hideGenreRing();
     closePlayerMedia(); playerRoot.setAttribute('visible', 'false'); playerRoot.innerHTML = '';
     ring.setAttribute('visible', 'true'); ring.innerHTML = ''; cols.clear(); tiles.clear();
-    statusText.setAttribute('value', `Loading ${g.name}…`); buildBar();
+    setStatus(`Loading ${g.name}…`); buildBar();
     const ref = currentPerf;
     try {
       const bp = await getBasePath();
@@ -1006,11 +1092,11 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         ...(j.pics || []).map((p) => ({ type: 'image', path: ext(p.url), name: p.name, fun: false })),
       ].filter((m) => m.path);
       buildBar();
-      if (!media.length) { statusText.setAttribute('value', 'No content found.'); return; }
-      statusText.setAttribute('value', '');
+      if (!media.length) { setStatus('No content in this genre'); return; }
+      setStatus('');
       rebuildRing(); // show immediately (progressive)
       fetchDims(media.map((m) => m.path)).then(() => { if (!destroyed && view === 'detail' && currentPerf === ref) rebuildRing(); });
-    } catch (e) { console.error('[VR] genre load failed', e); if (!destroyed) statusText.setAttribute('value', 'Failed to load genre.'); }
+    } catch (e) { console.error('[VR] genre load failed', e); if (!destroyed) setStatus(`Could not load ${g.name}: ${errText(e)}`, true); }
   }
 
   async function showDetail(perf) {
@@ -1019,7 +1105,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     hidePanels(); hideGenreRing();
     closePlayerMedia(); playerRoot.setAttribute('visible', 'false'); playerRoot.innerHTML = '';
     ring.setAttribute('visible', 'true'); ring.innerHTML = ''; cols.clear(); tiles.clear();
-    statusText.setAttribute('value', `Loading ${perf.name || ''}…`);
+    setStatus(`Loading ${perf.name || ''}…`);
     buildBar();
     try {
       const [imgRes, vidRes] = await Promise.all([
@@ -1035,17 +1121,17 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         ...imgs.map((p) => ({ type: 'image', path: p.path, name: p.name, fun: false })),
       ];
       buildBar();
-      if (!media.length) { statusText.setAttribute('value', 'No media found.'); return; }
-      statusText.setAttribute('value', '');
+      if (!media.length) { setStatus('No pictures or videos'); return; }
+      setStatus('');
       rebuildRing(); // show immediately with default aspect (progressive)
       // refine layout in the background once real dimensions arrive
       fetchDims(media.map((m) => m.path)).then(() => { if (!destroyed && view === 'detail' && currentPerf === perf) rebuildRing(); });
-    } catch (e) { console.error('[VR] detail load failed', e); if (!destroyed) statusText.setAttribute('value', 'Failed to load media.'); }
+    } catch (e) { console.error('[VR] detail load failed', e); if (!destroyed) setStatus(`Could not load ${perf.name || 'this performer'}: ${errText(e)}`, true); }
   }
 
   function openPlayer(index) {
     view = 'player'; playerIndex = index; playerScale = 1;
-    ring.setAttribute('visible', 'false'); statusText.setAttribute('value', '');
+    ring.setAttribute('visible', 'false'); setStatus('');
     buildBar(); renderPlayer();
   }
   function closePlayer() {
@@ -1061,7 +1147,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     hidePanels(); hideGenreRing();
     closePlayerMedia(); playerRoot.setAttribute('visible', 'false'); playerRoot.innerHTML = '';
     ring.setAttribute('visible', 'true'); ring.innerHTML = ''; cols.clear();
-    statusText.setAttribute('value', 'Loading performers to filter…');
+    setStatus('Loading performers to filter…');
     buildBar(); renderFilterPanel();
     try {
       const r = await fetch(`/api/performers/filter?limit=1000&offset=0&sortBy=${encodeURIComponent(filterListSort)}`);
@@ -1070,9 +1156,17 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       if (destroyed || view !== 'filterList') return;
       // only those with something left to filter
       filterPerformers = list.filter((p) => ((p.pics_count || 0) - (p.pics_filtered || 0)) + ((p.vids_count || 0) - (p.vids_filtered || 0)) > 0);
-      statusText.setAttribute('value', filterPerformers.length ? '' : 'Nothing left to filter 🎉');
+      if (filterPerformers.length) {
+        // the 'Done with <name>' note from the last triage, cleared after a few seconds
+        setStatus(doneNote || '');
+        if (doneNote) {
+          const n = doneNote;
+          setTimeout(() => { if (!destroyed && view === 'filterList' && statusText.getAttribute('value') === n) setStatus(''); }, 4000);
+        }
+      } else setStatus('Nothing left to filter');
+      doneNote = null;
       rebuildRing(); buildBar(); renderFilterPanel(); // rebuild so the count reflects the loaded list
-    } catch (e) { console.error('[VR] filter list failed', e); if (!destroyed) statusText.setAttribute('value', 'Failed to load.'); }
+    } catch (e) { console.error('[VR] filter list failed', e); doneNote = null; if (!destroyed) setStatus(`Could not load the filter list: ${errText(e)}`, true); }
   }
 
   // Stream-first filtering load (mirrors PerformerFilterView.js): fetch 1 file first so
@@ -1109,30 +1203,30 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   async function enterFiltering(perf) {
     view = 'filtering'; filteringPerf = perf; filterFiles = []; filterIndex = 0; filterTotal = 0; filterBusy = false; filterStreaming = false; playerScale = 1;
     hidePanels();
-    ring.setAttribute('visible', 'false'); statusText.setAttribute('value', `Loading ${perf.name}…`);
+    ring.setAttribute('visible', 'false'); setStatus(`Loading ${perf.name}…`);
     buildBar();
     try {
       // FIRST file only — start triaging immediately, then stream the rest in the background
       await fetchFilterBatch(0, 1);
       if (destroyed || view !== 'filtering' || filteringPerf !== perf) return;
-      statusText.setAttribute('value', filterFiles.length ? '' : 'Nothing to filter.');
+      setStatus(filterFiles.length ? '' : 'Nothing to filter');
       if (!filterFiles.length) { buildBar(); return; }
       renderFiltering();
       streamFiltering(filterFiles.length); // fire-and-forget backfill
-    } catch (e) { console.error('[VR] enterFiltering failed', e); if (!destroyed) statusText.setAttribute('value', 'Failed to load files.'); }
+    } catch (e) { console.error('[VR] enterFiltering failed', e); if (!destroyed) setStatus(`Could not load the files: ${errText(e)}`, true); }
   }
   // re-fetch the current performer's files when the type/sort changes in the overlay
   async function reloadFilteringFiles() {
     if (!filteringPerf) return;
     filterFiles = []; filterIndex = 0; filterTotal = 0; filterStreaming = false;
-    statusText.setAttribute('value', 'Loading…');
+    setStatus('Loading…');
     try {
       await fetchFilterBatch(0, 1);
       if (destroyed || view !== 'filtering') return;
-      statusText.setAttribute('value', filterFiles.length ? '' : 'Nothing to filter (try another type).');
+      setStatus(filterFiles.length ? '' : 'Nothing to filter (try another type)');
       if (filterFiles.length) { renderFiltering(); streamFiltering(filterFiles.length); }
       else { closePlayerMedia(); playerRoot.setAttribute('visible', 'false'); playerRoot.innerHTML = ''; buildBar(); }
-    } catch (e) { console.error('[VR] reload files failed', e); }
+    } catch (e) { console.error('[VR] reload files failed', e); if (!destroyed && view === 'filtering') setStatus(`Could not load the files: ${errText(e)}`, true); }
   }
   function renderFiltering() {
     const item = filterFiles[filterIndex];
@@ -1157,7 +1251,6 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       setDebug(`${action}: ${item.name}`);
-      lastFilterAction = action; lastActionAt = performance.now();
       // advance to next remaining file (kept/deleted/moved are hidden)
       filterIndex += 1;
       if (filterIndex >= filterFiles.length) {
@@ -1166,16 +1259,16 @@ export async function buildGallery(AFRAME, container, opts = {}) {
       if (filterIndex >= filterFiles.length) {
         // done with this performer
         closePlayerMedia(); playerRoot.setAttribute('visible', 'false'); playerRoot.innerHTML = '';
-        statusText.setAttribute('value', `Done filtering ${filteringPerf.name} 🎉`);
+        doneNote = `Done with ${filteringPerf.name}`;
         view = 'filterList'; buildBar();
         enterFilterList();
       } else { renderFiltering(); }
     } catch (e) { console.error('[VR] filter action failed', e); setDebug('action failed'); }
     finally { filterBusy = false; }
   }
-  // Brief coloured border flash around the screen on keep (green) / delete (red) / funscript (purple).
+  // Brief coloured border flash around the screen on keep (ok) / delete (bad) / funscript (info).
   function flashFilterAction(action) {
-    const colors = { keep: '#2e7d4f', delete: '#b3402f', move_to_funscript: '#7e57c2' };
+    const colors = { keep: P.ok, delete: P.bad, move_to_funscript: P.info };
     const c = colors[action]; if (!c) return;
     const flash = makeEl('a-entity', { rounded: `width: ${SCREEN_W + 0.28}; height: ${SCREEN_H + 0.28}; radius: 0.08; color: ${c}`, position: '0 0 -0.015' }, playerRoot);
     flash.object3D.scale.set(1.02, 1.02, 1.02);
@@ -1198,7 +1291,6 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         // step back to the undone file (clamped to 0); re-render reloads its media fresh
         filterIndex = Math.max(0, filterIndex - 1);
         setDebug('undo: ' + (j && j.action ? j.action.action : ''));
-        lastFilterAction = 'undo'; lastActionAt = performance.now();
         renderFiltering();
       } else { setDebug('undo failed: ' + res.status); }
     } catch (e) { console.error('[VR] undo failed', e); setDebug('undo error'); }
@@ -1309,11 +1401,11 @@ export async function buildGallery(AFRAME, container, opts = {}) {
     }
     applyPlayerScale();
     if (!item) return;
-    if (!vrVideoMode) makeEl('a-entity', { rounded: `width: ${SCREEN_W + 0.2}; height: ${SCREEN_H + 0.2}; radius: 0.06; color: #000; opacity: 0.95`, position: '0 0 -0.02' }, playerRoot);
+    if (!vrVideoMode) makeEl('a-entity', { rounded: `width: ${SCREEN_W + 0.2}; height: ${SCREEN_H + 0.2}; radius: 0.06; color: ${P.bg}; opacity: 0.95`, position: '0 0 -0.02' }, playerRoot);
     const screen = makeEl('a-entity', { class: 'clickable', 'data-name': 'screen' }, playerRoot);
-    const note = makeEl('a-text', { value: 'Loading…', align: 'center', color: TEXT_MUTED, position: '0 0 0.01', width: '1.6', 'wrap-count': '24', font: 'roboto' }, playerRoot);
+    const note = makeEl('a-text', { value: 'Loading…', align: 'center', color: P.dim, position: '0 0 0.01', width: '1.6', 'wrap-count': '24', font: 'roboto' }, playerRoot);
     const clearNote = () => { if (note.parentNode) note.parentNode.removeChild(note); };
-    const fail = (t) => { if (destroyed || !isActive()) return; note.setAttribute('color', '#ff8a8a'); note.setAttribute('value', t); };
+    const fail = (t) => { if (destroyed || !isActive()) return; note.setAttribute('color', P.bad); note.setAttribute('value', t); };
     if (item.type === 'image') {
       vrVideoMode = false; // images can't be VR; reset
       new THREE.TextureLoader().load(`/api/files/raw?path=${encodeURIComponent(item.path)}`, (tex) => {
@@ -1357,7 +1449,7 @@ export async function buildGallery(AFRAME, container, opts = {}) {
         v.play().then(() => { if (v.muted) { v.muted = false; v.play().catch(() => {}); } buildBar(); })
           .catch(() => {
             // Autoplay blocked (needs a gesture) — prompt the user; tapping the screen retries.
-            if (!destroyed && videoEl === v) { note.setAttribute('color', ACCENT_WARM); note.setAttribute('value', 'Tap to play'); }
+            if (!destroyed && videoEl === v) { note.setAttribute('color', P.warn); note.setAttribute('value', 'Tap to play'); }
             buildBar();
           });
       };
@@ -1372,28 +1464,42 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   }
 
   function showError(msg) {
-    statusText.setAttribute('value', ''); ring.innerHTML = ''; cols.clear();
+    setStatus(''); ring.innerHTML = ''; cols.clear();
     const panel = makeEl('a-entity', { class: 'clickable' }, world);
     faceUser(panel, 0, CENTER_Y, -R_RING);
-    makeEl('a-entity', { rounded: `width: 1.8; height: 0.9; radius: 0.06; color: #14161b; opacity: 0.96` }, panel);
-    makeEl('a-text', { value: msg, align: 'center', color: '#ff8a8a', position: '0 0.18 0.01', width: '1.7', 'wrap-count': '34', font: 'roboto' }, panel);
+    makeEl('a-entity', { rounded: `width: 1.8; height: 0.9; radius: 0.06; color: ${P.surface}; opacity: 0.96` }, panel);
+    makeEl('a-text', { value: msg, align: 'center', color: P.bad, position: '0 0.18 0.01', width: '1.7', 'wrap-count': '34', font: 'roboto' }, panel);
     const retry = makeEl('a-entity', { class: 'clickable', position: '0 -0.18 0.01', 'data-name': 'retry' }, panel);
-    makeEl('a-entity', { rounded: `width: 0.5; height: 0.18; radius: 0.05; color: ${ACCENT}` }, retry);
-    makeEl('a-text', { value: 'Retry', align: 'center', color: '#fff', position: '0 0 0.01', width: '0.4', 'wrap-count': '8', font: 'roboto' }, retry);
-    retry.addEventListener('click', () => { popScale(retry); panel.parentNode && panel.parentNode.removeChild(panel); statusText.setAttribute('value', 'Loading performers…'); loadData(); });
+    makeEl('a-entity', { rounded: `width: 0.5; height: 0.18; radius: 0.05; color: ${P.accent}` }, retry);
+    makeEl('a-text', { value: 'Retry', align: 'center', color: P.onAccent, position: '0 0 0.01', width: '0.4', 'wrap-count': '8', font: 'roboto' }, retry);
+    retry.addEventListener('click', () => { popScale(retry); panel.parentNode && panel.parentNode.removeChild(panel); setStatus('Loading performers…'); loadData(); });
+  }
+
+  // Tell the page how the performer load went (first load and each in-scene Retry).
+  function reportLibrary(result) {
+    if (destroyed || !onLibrary) return;
+    try { onLibrary(result); } catch (err) { console.error('[VR] onLibrary failed', err); }
   }
 
   async function loadData() {
+    let loaded = false;
     try {
       const res = await fetch('/api/performers/gallery');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       performers = Array.isArray(data) ? data : [];
+      loaded = true;
       if (destroyed) return;
+      reportLibrary({ count: performers.length, error: null });
       applySort();
       setDebug(`${performers.length} performers · push the stick to scroll`);
       showGallery();
-    } catch (e) { console.error('[VR] failed to load performers', e); if (!destroyed) showError('Could not load performers.\nIs the backend running on :4069?'); }
+    } catch (e) {
+      console.error('[VR] failed to load performers', e);
+      if (destroyed) return;
+      if (!loaded) reportLibrary({ count: null, error: errText(e) });
+      showError(loaded ? `Could not show the performers: ${errText(e)}` : `Could not load performers: ${errText(e)}`);
+    }
   }
 
   // ---- Raycast (use A-Frame's own ray so hits match the visible laser) ----
@@ -1413,9 +1519,17 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   // duplicate and the toggle flips on then straight back off. 150ms swallows one trigger pull but
   // leaves deliberate repeated clicks (triage keep/delete, paging — >200ms apart) intact.
   let lastClickName = null, lastClickTime = 0;
+  // Only what is on screen can be hit: an entity counts when it and every ancestor is visible.
+  function shownInScene(el) {
+    let o = el.object3D;
+    if (!o) return false;
+    while (o) { if (!o.visible) return false; o = o.parent; }
+    return true;
+  }
   function clickFromHand(hand, label) {
+    if (performance.now() < clickMuteUntil) { setDebug(`select(${label}) -> muted`); return; }
     rayFromHand(hand);
-    const objs = Array.from(document.querySelectorAll('.clickable')).map((e) => e.object3D);
+    const objs = Array.from(scene.querySelectorAll('.clickable')).filter(shownInScene).map((e) => e.object3D);
     const hits = raycaster.intersectObjects(objs, true);
     if (!hits.length) { setDebug(`select(${label}) -> no target`); return; }
     const target = rootClickable(hits[0].object);
@@ -1560,8 +1674,8 @@ export async function buildGallery(AFRAME, container, opts = {}) {
   };
 
   const onKeyDown = (e) => { if ((e.key === 'r' || e.key === 'R') && window.__recenter) window.__recenter(); };
-  const onEnter = () => { attachXRInput(); onEnterVR && onEnterVR(); /* re-assert overlay visibility so it never gets stuck hidden across the XR transition */ renderFilterPanel(); renderSearchPanel(); renderDevicePanel(); };
-  const onExit = () => { detachXRInput(); onExitVR && onExitVR(); };
+  const onEnter = () => { attachXRInput(); onEnterVR && onEnterVR(); /* re-assert overlay visibility so it never gets stuck hidden across the XR transition */ renderFilterPanel(); renderSearchPanel(); renderDevicePanel(); renderMenuPanel(); };
+  const onExit = () => { detachXRInput(); onExitVR && onExitVR(); renderMenuPanel(); /* Exit VR turns disabled */ };
   scene.addEventListener('enter-vr', onEnter);
   scene.addEventListener('exit-vr', onExit);
   leftHand.addEventListener('thumbstickdown', () => { if (window.__recenter) window.__recenter(); });

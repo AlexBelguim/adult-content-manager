@@ -2,6 +2,9 @@
  * The Import page's server tab: the folders in "<library>/before upload", one tile each (FolderTile), and the sticky
  * bar that queues the ticked ones (POST /api/folders/local-import through queueLocal).
  *
+ * While the tab is shown it adds two sidebar groups (Show: All | Selected and the search; Server folder: what happens
+ * and Scan again) and the content line; the sticky bar stays at the bottom of the content: Import N is the main action.
+ *
  * Scans on mount and on Scan again (GET scan-before-upload); then reads each folder's details three at a time. Each scan
  * has its own AbortController, which a new scan aborts together with its detail reads. A folder's name can be changed
  * (the name it is imported as): the new name is checked (name-check) before it can be ticked.
@@ -16,16 +19,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Switch } from '@mui/material';
-import { EmptyState } from '../layout';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import {
+  EmptyState, SideGroup, SideSegment, SideSearch, SideNote, SideButtons, SideButton, ContentLine, SIDE
+} from '../layout';
 import { useAsk, useNotify, useToastLift, errorText, plural } from '../ui';
 import { TILE_GRID, TileSkeleton } from '../discover/Tile';
-import { FilterChip, SearchField, SmallButton } from '../discover/shared';
+import { SmallButton } from '../discover/shared';
 import Lightbox from '../discover/Lightbox';
 import FolderTile, { countsOf, folderFacts } from './FolderTile';
 import { scanFolders, folderDetails, checkName, queueLocal, nameError } from './importApi';
 import './import.css';
 
 const RESET = '\u0000reset';
+const SHOW_ICON = <FilterListIcon />;
+const SERVER_ICON = <FolderOpenIcon />;
 const AT_ONCE = 3;
 const LIFT = { xs: 'calc(150px + var(--nav-bottom, 0px))', sm: 'calc(88px + var(--nav-bottom, 0px))' };
 const switchSx = {
@@ -340,11 +349,49 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
     name: `${pictureFolder.name} · ${baseName(p)}`
   })), [pictureFolder]);
 
+  // ── the sidebar and the content line (only while the tab is shown) ──
+  const shownFilters = (q ? 1 : 0) + (onlySelected ? 1 : 0);
+  const side = active ? (
+    <>
+      {folders.length > 0 && (
+        <SideGroup
+          id="show"
+          title="Show"
+          icon={SHOW_ICON}
+          order={SIDE.show}
+          badge={shownFilters}
+          summary={[onlySelected ? 'selected only' : null, q ? `"${search.trim()}"` : null].filter(Boolean).join(' · ') || 'all folders'}
+        >
+          <SideSegment
+            label="Show"
+            value={onlySelected ? 'selected' : 'all'}
+            onChange={(id) => setOnlySelected(id === 'selected')}
+            options={[
+              { id: 'all', label: 'All', count: folders.length },
+              { id: 'selected', label: 'Selected', count: selected.size }
+            ]}
+          />
+          <SideSearch value={search} onChange={setSearch} placeholder="Search folders" />
+        </SideGroup>
+      )}
+      <SideGroup id="server" title="Server folder" icon={SERVER_ICON} summary={scanning ? 'scanning' : plural(folders.length, 'folder')}>
+        <SideNote>{LINE}</SideNote>
+        <SideButtons>
+          <SideButton onClick={scan} disabled={scanning} tip={beforePath || undefined}>{scanning ? 'Scanning…' : 'Scan again'}</SideButton>
+        </SideButtons>
+      </SideGroup>
+      <ContentLine
+        title="From the server folder"
+        meta={!scanned ? 'Scanning…' : `${plural(folders.length, 'folder')} · ${importableCount.toLocaleString()} can be imported`}
+      />
+    </>
+  ) : null;
+
   // ── render ──
   if (!scanned && folders.length === 0) {
     return (
       <div className="im-page">
-        <p className="im-line">{LINE}</p>
+        {side}
         <div className={TILE_GRID} aria-busy>
           {Array.from({ length: 6 }, (_, i) => <TileSkeleton key={i} meta controls />)}
         </div>
@@ -355,7 +402,7 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
   if (folders.length === 0) {
     return (
       <div className="im-page">
-        <p className="im-line">{LINE}</p>
+        {side}
         <EmptyState
           title="No folders in before upload"
           description={`Put one folder per performer in ${beforePath || '"before upload"'}, then scan again. Or upload one from this computer.`}
@@ -372,15 +419,7 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
 
   return (
     <div className="im-page">
-      <p className="im-line">{LINE}</p>
-
-      <div className="im-tools">
-        <FilterChip on={!onlySelected} onClick={() => setOnlySelected(false)}>All {folders.length}</FilterChip>
-        <FilterChip on={onlySelected} onClick={() => setOnlySelected(true)}>Selected {selected.size}</FilterChip>
-        <SearchField value={search} onChange={setSearch} placeholder="Search folders" />
-        <span className="im-total">{plural(folders.length, 'folder')} · {importableCount} can be imported</span>
-        <SmallButton sx={{ ml: 'auto' }} onClick={scan} disabled={scanning}>{scanning ? 'Scanning…' : 'Scan again'}</SmallButton>
-      </div>
+      {side}
 
       {visible.length === 0
         ? (

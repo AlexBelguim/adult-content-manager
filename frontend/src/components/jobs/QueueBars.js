@@ -7,7 +7,8 @@
  * also while its queue is stopped with videos waiting. onAction posts the bar's request; onAdd opens Labels &
  * funscripts…. With kind funpipe or pipeline, one dim line says how the two engines differ.
  * Compact (below 700px): short labels, the facts without their 'Queue:' and 'Worker:' words, and only the main
- * button; Review editor and Add… are on the Funscripts page and in the page bar menu, Space in the services sheet.
+ * button; Review editor is on the Funscripts page, Add… is the sidebar's Labels & funscripts… and Space its Re-encode for
+ * space (both in the Start group of the Filters sheet).
  */
 import React, { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';

@@ -1,28 +1,29 @@
 /**
- * The Gallery home's Performers tab: the toolbar (search, sort, Filters, and "New uploads N" while anyone has one), the
- * removable chips of the active search and filters, and the grid of the kept performer cards (PerformerCard in
+ * The Gallery home's Performers view: its Show group in the sidebar (search, sort, "New uploads only" while anyone
+ * has one, and the filter groups), the content line, and the grid of the kept performer cards (PerformerCard in
  * gallery mode, unchanged but for the New upload badge). newCount: how many of all performers have a new upload.
  * The list and its in-place updates come from homeData (useGalleryPerformers); GalleryView filters and sorts it.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
-import { Box, Button, IconButton, MenuItem, Select, Typography } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import CloseIcon from '@mui/icons-material/Close';
 import PerformerCard from '../PerformerCard';
 import PerformerSettingsModal from '../PerformerSettingsModal';
-import { Toolbar, Panel, EmptyState } from '../layout';
-import { FilterChip, SearchField, SmallButton, TotalText } from '../discover/shared';
+import {
+  Panel, EmptyState, SideGroup, SideSearch, SideSelect, SideChecks, SideButtons, SideButton, ContentLine, SIDE
+} from '../layout';
+import { SmallButton } from '../discover/shared';
 import { useNotify, errorText, plural } from '../ui';
 import { useOpen } from '../../nav';
 import { useMountNavType } from './useHomeQuery';
 import { galleryUrl } from './performerFacts';
-import { SORTS, countActive, activeChips, removeChip, isNewOnly, isNewOnlyChip, toggleNewOnly } from './filterModel';
+import { SORTS, countActive, isNewOnly, toggleNewOnly, lowerFirst } from './filterModel';
 import PerformerGrid, { GridSkeleton } from './PerformerGrid';
+import PerformerFilters from './PerformerFilters';
 
 const SCROLL_KEY = 'acm.home.scroll';
-
-const selectSx = { fontSize: '.84rem', height: 32, bgcolor: 'var(--surface)' };
+const SORT_OPTIONS = SORTS.map(s => ({ value: s.id, label: s.label }));
 
 function readScroll() {
   try {
@@ -39,25 +40,7 @@ const failText = (err, what) => (err?.message && err.name !== 'TypeError' ? `${w
 /** The error of a list, as text. */
 const listErrorText = (error) => (typeof error === 'string' ? error : errorText(error, 'The list did not load'));
 
-function RemovableChip({ label, onRemove }) {
-  return (
-    <Box sx={{
-      display: 'inline-flex', alignItems: 'center', height: 28, pl: 1.25, pr: 0.5, gap: 0.5, maxWidth: '100%',
-      borderRadius: 'var(--radius-sm, 4px)', border: '1px solid var(--line-strong)', bgcolor: 'var(--raised)',
-      fontSize: '.78rem', color: 'var(--text)'
-    }}>
-      <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Box>
-      <IconButton aria-label={`Remove filter: ${label}`} onClick={onRemove} sx={{
-        width: 22, height: 22, p: 0, color: 'var(--dim)', '&:hover': { color: 'var(--text)' },
-        '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: 0 }
-      }}>
-        <CloseIcon sx={{ fontSize: 14 }} />
-      </IconButton>
-    </Box>
-  );
-}
-
-export default function PerformersTab({ data, shown, total, newCount = 0, q, sort, filters, facets, onQuery, onOpenFilters, basePath }) {
+export default function PerformersTab({ data, shown, total, newCount = 0, q, sort, filters, facets, onQuery, basePath }) {
   const { performers, error, failures, reload, patch, remove, refreshOne } = data;
   const notify = useNotify();
   const open = useOpen();
@@ -70,8 +53,7 @@ export default function PerformersTab({ data, shown, total, newCount = 0, q, sor
   const query = String(q || '').trim();
   const shownCount = shown.main.length + shown.missing.length;
   const newOnly = isNewOnly(filters);
-  // the New uploads chip in the toolbar is the 'New upload' filter: not again as a removable chip
-  const chips = useMemo(() => activeChips(filters, facets).filter(c => !isNewOnlyChip(c)), [filters, facets]);
+  const badge = n + (query ? 1 : 0);
 
   // The latest list and search, for the stable callbacks below.
   const listRef = useRef(performers);
@@ -251,7 +233,6 @@ export default function PerformersTab({ data, shown, total, newCount = 0, q, sor
         action={(
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
             <SmallButton primary onClick={clearAll}>Clear search and filters</SmallButton>
-            {n > 0 && <SmallButton onClick={onOpenFilters}>Edit filters</SmallButton>}
           </Box>
         )}
       />
@@ -260,50 +241,44 @@ export default function PerformersTab({ data, shown, total, newCount = 0, q, sor
     content = <PerformerGrid sections={sections} itemKey={itemKey} renderItem={renderItem} onAuxOpen={auxOpen} />;
   }
 
+  const sortLabel = lowerFirst(SORTS.find(x => x.id === sort)?.label || '');
+  const narrowed = badge > 0 && performers != null;
+  const meta = performers == null ? null : [
+    narrowed ? `${shownCount.toLocaleString()} of ${total.toLocaleString()}` : total.toLocaleString(),
+    sortLabel
+  ].filter(Boolean).join(' · ');
+
   return (
     <>
-      <Toolbar>
-        <SearchField value={q} onChange={(v) => onQuery({ q: v })} placeholder="Search performers" />
-        <Select size="small" value={sort} onChange={(e) => onQuery({ sort: e.target.value })} inputProps={{ 'aria-label': 'Sort' }} sx={selectSx}>
-          {SORTS.map(s => <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>)}
-        </Select>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<FilterListIcon sx={{ fontSize: 16 }} />}
-          onClick={onOpenFilters}
-          aria-label={`Filters${n ? `, ${n} active` : ''}`}
-          sx={{
-            textTransform: 'none', fontSize: '.8rem', color: 'var(--text)', borderColor: 'var(--line-strong)', height: 32,
-            '&:hover': { borderColor: 'var(--line-strong)', bgcolor: 'var(--raised)' }
-          }}
-        >
-          Filters
-          {n > 0 && <Box component="span" sx={{ ml: 0.75, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>{n}</Box>}
-        </Button>
+      <SideGroup
+        id="show"
+        title="Show"
+        icon={<FilterListIcon />}
+        badge={badge}
+        summary={badge ? `${badge} on` : 'nothing on'}
+        order={SIDE.show}
+      >
+        <SideSearch value={q} onChange={(v) => onQuery({ q: v })} placeholder="Search performers" />
+        <SideSelect label="Sort" value={sort} onChange={(v) => onQuery({ sort: v })} options={SORT_OPTIONS} />
         {(newCount > 0 || newOnly) && (
-          <FilterChip on={newOnly} onClick={() => onQuery({ filters: toggleNewOnly(filters) })}
-            title={newOnly ? 'Showing only performers with a new upload: click to show everyone' : 'Show only performers with a new upload'}>
-            New uploads
-            <Box component="span" sx={{ ml: 0.75, fontVariantNumeric: 'tabular-nums' }}>{newCount}</Box>
-          </FilterChip>
+          <SideChecks items={[{
+            id: 'new',
+            label: 'New uploads only',
+            checked: newOnly,
+            count: newCount,
+            title: 'Performers with a new upload on Leakhaven',
+            onChange: () => onQuery({ filters: toggleNewOnly(filters) })
+          }]} />
         )}
-      </Toolbar>
+        {badge > 0 && (
+          <SideButtons>
+            <SideButton plain onClick={clearAll}>Clear all</SideButton>
+          </SideButtons>
+        )}
+        <PerformerFilters facets={facets} filters={filters} onChange={(next) => onQuery({ filters: next })} />
+      </SideGroup>
 
-      {(query || n > 0) && (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 2 }}>
-          {query && <RemovableChip label={`Search: "${query}"`} onRemove={() => onQuery({ q: '' })} />}
-          {chips.map(chip => (
-            <RemovableChip key={chip.id} label={chip.label} onRemove={() => onQuery({ filters: removeChip(filters, chip) })} />
-          ))}
-          <SmallButton onClick={clearAll}>Clear all</SmallButton>
-          {performers != null && (
-            <Box sx={{ ml: 'auto' }}>
-              <TotalText>{`Showing ${shownCount} of ${total}`}</TotalText>
-            </Box>
-          )}
-        </Box>
-      )}
+      <ContentLine title="Performers" meta={meta} />
 
       {content}
 

@@ -28,6 +28,47 @@ const trainingQueue = require('../services/trainingQueue');
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'];
 
+// The push routes' temp zips: one left by a crash or a restart mid-push is cleared at start-up, once it is an hour old.
+const TMP_ZIP = /^(training_push|labels_push)_\d+\.zip$/;
+(async () => {
+  try {
+    const tmp = os.tmpdir();
+    for (const name of await fs.readdir(tmp)) {
+      if (!TMP_ZIP.test(name)) continue;
+      try {
+        const file = path.join(tmp, name);
+        if (Date.now() - (await fs.stat(file)).mtimeMs > 60 * 60 * 1000) await fs.remove(file);
+      } catch (_) { /* best effort */ }
+    }
+  } catch (_) { /* best effort */ }
+})().catch(() => {});
+
+// ── Helper: count the training pictures per performer ────────
+// One counter for the data summary and the per-performer disk counts, built from collectTrainingImages so the counts
+// follow the same rules as push and export (every IMAGE_EXTS, the performer folder when it has no pics/).
+// Kept for PICTURE_TTL per base folder; fresh counts again.
+const PICTURE_TTL = 60 * 1000;
+const pictureMemo = new Map(); // basePath -> { at, value }
+function countTrainingPictures(basePath, { fresh = false } = {}) {
+  const memo = pictureMemo.get(basePath);
+  if (!fresh && memo && Date.now() - memo.at < PICTURE_TTL) return memo.value;
+  const images = collectTrainingImages(basePath);
+  const byPerformer = (list) => {
+    const counts = {};
+    for (const img of list) counts[img.performer] = (counts[img.performer] || 0) + 1;
+    return counts;
+  };
+  const value = { keep: byPerformer(images.keep), delete: byPerformer(images.delete) };
+  pictureMemo.set(basePath, { at: Date.now(), value });
+  return value;
+}
+
+/** a whole number from lo to hi, also from a numeric string; null when it isn't one */
+function wholeIn(v, lo, hi) {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
+}
+
 // ── GET /api/training/data-summary ───────────────────────────
 // Summary of all available training data
 router.get('/data-summary', (req, res) => {
@@ -45,7 +86,8 @@ router.get('/data-summary', (req, res) => {
       FROM pairwise_pairs
     `).get();
 
-    // Pictures: count files in the keep (after filter) and delete (training) folders, per performer too.
+    // Pictures: the files in the keep (after filter) and delete (training) folders, per performer too, counted the
+    // way push and export collect them (countTrainingPictures). ?fresh=1 counts again.
     // CLIP taste levels: kept performers with their deleted pictures, and delete-only performers, which
     // are disliked or blacklisted. No names: the page only counts them.
     let pictures = { keep: 0, delete: 0, performers: 0 };
@@ -53,23 +95,10 @@ router.get('/data-summary', (req, res) => {
     try {
       const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
       if (folder) {
-        // {performer folder: pictures in its pics/}
-        const countPics = (baseDir) => {
-          const counts = {};
-          if (!fs.existsSync(baseDir)) return counts;
-          for (const dir of fs.readdirSync(baseDir, { withFileTypes: true })) {
-            if (!dir.isDirectory() || dir.name.startsWith('.')) continue;
-            const picsDir = path.join(baseDir, dir.name, 'pics');
-            counts[dir.name] = fs.existsSync(picsDir) ? fs.readdirSync(picsDir).filter(f =>
-              ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
-            ).length : 0;
-          }
-          return counts;
-        };
-        const deleted = countPics(path.join(folder.path, 'deleted keep for training'));
-        const kept = countPics(path.join(folder.path, 'after filter performer'));
+        // {performer folder: pictures}
+        const { keep: kept, delete: deleted } = countTrainingPictures(folder.path, { fresh: req.query.fresh === '1' });
         const sum = counts => Object.values(counts).reduce((a, b) => a + b, 0);
-        pictures = { keep: sum(kept), delete: sum(deleted), performers: Object.keys(deleted).length };
+        pictures = { keep: sum(kept), delete: sum(deleted), performers: Object.values(deleted).filter(n => n > 0).length };
 
         const blacklisted = new Set(db.prepare('SELECT name FROM performers WHERE blacklisted = 1').all().map(p => p.name));
         const stars = collectPerformerRatings();
@@ -132,9 +161,8 @@ router.get('/data-summary', (req, res) => {
 router.get('/performer-stats', (req, res) => {
   try {
     const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
-    if (!folder) return res.json({ performers: [] });
+    if (!folder) return res.json({ performers: [], basePath: null });
     const basePath = folder.path;
-    const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 
     // Get all performers from DB
     const performers = db.prepare(`
@@ -168,36 +196,17 @@ router.get('/performer-stats', (req, res) => {
       filterCounts[r.performer_id] = { kept: r.kept, deleted: r.deleted };
     }
 
-    // Disk scan is optional (slow on network drives) — use ?scan_disk=true
+    // Disk scan is optional (slow on network drives) — use ?scan_disk=true (and &fresh=1 to count again). The counts
+    // are the data summary's (countTrainingPictures), so both follow what push and export take.
     const scanDisk = req.query.scan_disk === 'true';
     let keepDiskCounts = {}, deleteDiskCounts = {};
-    
+
     if (scanDisk) {
-      const afterDir = path.join(basePath, 'after filter performer');
-      const trainingDir = path.join(basePath, 'deleted keep for training');
-      
-      const scanDirCounts = (baseDir) => {
-        const counts = {};
-        try {
-          if (!fs.existsSync(baseDir)) return counts;
-          const dirs = fs.readdirSync(baseDir, { withFileTypes: true })
-            .filter(d => d.isDirectory() && !d.name.startsWith('.'));
-          for (const d of dirs) {
-            const picsDir = path.join(baseDir, d.name, 'pics');
-            try {
-              if (fs.existsSync(picsDir)) {
-                counts[d.name] = fs.readdirSync(picsDir).filter(f =>
-                  imageExts.includes(path.extname(f).toLowerCase())
-                ).length;
-              }
-            } catch (_e) { /* skip */ }
-          }
-        } catch (_e) { /* skip */ }
-        return counts;
-      };
-      
-      keepDiskCounts = scanDirCounts(afterDir);
-      deleteDiskCounts = scanDirCounts(trainingDir);
+      try {
+        const counts = countTrainingPictures(basePath, { fresh: req.query.fresh === '1' });
+        keepDiskCounts = counts.keep;
+        deleteDiskCounts = counts.delete;
+      } catch (_e) { /* skip: no disk counts */ }
     }
 
     const result = performers.map(p => {
@@ -266,10 +275,14 @@ router.get('/performer-stats', (req, res) => {
 
     res.json({
       performers: result,
+      basePath,
       summary: {
         total: result.length,
         withData: result.filter(p => p.quality > 0).length,
-        readyForKeepDelete: result.filter(p => p.disk.keep > 0 && p.disk.delete > 0).length,
+        // with the disk scan, performers with pictures on both sides; without it, the filter's own counts
+        readyForKeepDelete: scanDisk
+          ? result.filter(p => p.disk.keep > 0 && p.disk.delete > 0).length
+          : result.filter(p => p.filter.kept > 0 && p.filter.deleted > 0).length,
         readyForPairwise: result.filter(p => p.pairwise.total >= 10).length,
         avgQuality: result.length > 0 ? Math.round(result.reduce((s, p) => s + p.quality, 0) / result.length) : 0
       }
@@ -284,9 +297,25 @@ router.get('/performer-stats', (req, res) => {
 // A training run into the queue, with everything it trains with collected now. acm-gpu claims it when it's free
 // (routes/workers.js), so a second run waits instead of being turned away, and a run asked for while the PC is off
 // starts when it's back.
+// K's trainer fixes its run (3 epochs, batch 16, acm-gpu trainer.py) and ignores what is sent, so K stores just that.
+const K_RUN = { epochs: 3, batch_size: 16 };
 router.post('/start', async (req, res) => {
-  const { type = 'clip_siamese', epochs = 10, batch_size = 16, use_legacy = true } = req.body;
+  const { type = 'clip_siamese', use_legacy = true } = req.body;
   if (!trainingQueue.TRAINABLE.includes(type)) return res.status(400).json({ error: `Unknown training type: ${type}` });
+
+  let epochs = K_RUN.epochs, batch_size = K_RUN.batch_size, synthetic = null;
+  if (type !== 'clip_keepdelete') {
+    const bad = (field, lo, hi) => res.status(400).json({ error: `${field} must be a whole number from ${lo} to ${hi}` });
+    epochs = wholeIn(req.body.epochs ?? 10, 1, 50);
+    if (epochs === null) return bad('Epochs', 1, 50);
+    batch_size = wholeIn(req.body.batch_size ?? 16, 1, 64);
+    if (batch_size === null) return bad('Batch size', 1, 64);
+    const sp = req.body.synthetic_pairs_per_epoch;
+    if (sp !== undefined && sp !== null && sp !== '' && Number(sp) !== 0) {
+      synthetic = wholeIn(sp, 100, 5000);
+      if (synthetic === null) return bad('Pairs per performer', 100, 5000);
+    }
+  }
 
   try {
     const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
@@ -310,8 +339,8 @@ router.post('/start', async (req, res) => {
     }
 
     // Automatic pairs per performer per epoch for the CLIP models
-    if (req.body.synthetic_pairs_per_epoch) {
-      trainingPayload.synthetic_pairs_per_epoch = req.body.synthetic_pairs_per_epoch;
+    if (synthetic) {
+      trainingPayload.synthetic_pairs_per_epoch = synthetic;
     }
 
     const q = trainingQueue.enqueue(trainingPayload);
@@ -341,13 +370,46 @@ router.delete('/jobs/:id', queueRoute((req) => { trainingQueue.remove(jobId(req)
 
 // ── GET /api/training/models ─────────────────────────────────
 // List available models on the AI server
-router.get('/models', async (req, res) => {
-  const aiUrl = req.query.url || getAiServerUrl();
+// Each answer is kept (app_settings ai_models_snapshot, without the epoch histories), and returned as snapshot when
+// acm-gpu doesn't answer, so the page still shows the files and their figures. ?snapshot=1 returns only the snapshot.
+const MODELS_SNAPSHOT_KEY = 'ai_models_snapshot';
+const SNAPSHOT_KEYS = ['filename', 'type', 'size_mb', 'modified', 'created_at', 'val_acc', 'val_mae', 'samples', 'epochs', 'backbone'];
+function readModelsSnapshot() {
   try {
-    const response = await axios.get(`${aiUrl}/list_models`, { timeout: 5000 });
-    res.json(response.data);
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(MODELS_SNAPSHOT_KEY);
+    const snap = row?.value ? JSON.parse(row.value) : null;
+    return snap && typeof snap === 'object' && Array.isArray(snap.models) ? snap : null;
+  } catch (_) {
+    return null;
+  }
+}
+router.get('/models', async (req, res) => {
+  // ?snapshot=1: only the kept snapshot, without asking acm-gpu (the page shows it at once when acm-gpu is known to be off)
+  if (req.query.snapshot === '1') {
+    return res.json({ success: false, online: false, models: [], error: 'Snapshot only', snapshot: readModelsSnapshot() });
+  }
+  const aiUrl = getAiServerUrl();
+  try {
+    const response = await axios.get(`${aiUrl}/list_models`, { timeout: 30000 });
+    const data = response.data || {};
+    const snapshot = {
+      at: Date.now(),
+      current: data.active_model_file || null,
+      models: (Array.isArray(data.models) ? data.models : []).map(m => {
+        const out = {};
+        for (const k of SNAPSHOT_KEYS) out[k] = m?.[k] ?? null;
+        return out;
+      })
+    };
+    try {
+      db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+        .run(MODELS_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    } catch (e) {
+      console.warn('[Training] Could not keep the models snapshot:', e.message);
+    }
+    res.json({ ...data, success: true, online: true, at: snapshot.at });
   } catch (err) {
-    res.json({ success: false, models: [], error: err.message });
+    res.json({ success: false, online: false, models: [], error: err.message, snapshot: readModelsSnapshot() });
   }
 });
 
@@ -356,7 +418,7 @@ router.get('/models', async (req, res) => {
 // acm-gpu's live run when it's training; otherwise a run waiting in the queue reads as active (phase 'queued'), so the
 // dashboard keeps showing it until it has run.
 router.get('/status', async (req, res) => {
-  const aiUrl = req.query.url || getAiServerUrl();
+  const aiUrl = getAiServerUrl();
   const jobs = trainingQueue.list().jobs;
   const waiting = jobs.filter(j => j.status === 'queued');
   const running = jobs.find(j => j.status === 'running');
@@ -380,8 +442,8 @@ router.get('/status', async (req, res) => {
 // ── POST /api/training/test-model ────────────────────────────
 // Relay test request with local data to AI server
 router.post('/test-model', async (req, res) => {
-  const { model_id, sample_size = 100, ai_server_url } = req.body;
-  const aiUrl = ai_server_url || getAiServerUrl();
+  const { model_id, sample_size = 100 } = req.body;
+  const aiUrl = getAiServerUrl();
 
   try {
     const db = req.app.get('db');
@@ -538,6 +600,7 @@ function collectPerformerComparisonCounts() {
 router.get('/export-zip', async (req, res) => {
   const type = req.query.type || 'clip_siamese';
   const saveToDisk = req.query.saveToDisk === 'true';
+  if (!trainingQueue.TRAINABLE.includes(type)) return res.status(400).json({ error: 'Unknown training type' });
 
   try {
     const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
@@ -583,13 +646,18 @@ router.get('/export-zip', async (req, res) => {
 
     const zipFilename = `training_data_${type}_${Date.now()}.zip`;
     const archive = archiver('zip', { zlib: { level: 1 } });
-    archive.on('error', err => { throw err; });
 
     if (saveToDisk) {
       const exportDir = path.join(folder.path, 'training_exports');
       await fs.ensureDir(exportDir);
       const exportPath = path.join(exportDir, zipFilename);
       const output = fs.createWriteStream(exportPath);
+      // done only once the file is closed; an archive or a write error ends the request and removes the partial file
+      const closed = new Promise((resolve, reject) => {
+        output.on('close', resolve);
+        output.on('error', reject);
+        archive.on('error', reject);
+      });
 
       archive.pipe(output);
       archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
@@ -597,7 +665,14 @@ router.get('/export-zip', async (req, res) => {
         archive.file(img.absPath, { name: img.zipPath });
       }
 
-      await archive.finalize();
+      try {
+        await Promise.all([closed, archive.finalize()]);
+      } catch (err) {
+        console.error('[Training] Export ZIP to disk failed:', err.message);
+        try { archive.abort(); output.destroy(); } catch (_) { /* already ended */ }
+        await fs.remove(exportPath).catch(() => {});
+        return res.status(500).json({ error: err.message });
+      }
       console.log(`[Training] ZIP saved to disk: ${exportPath}`);
       return res.json({
         success: true,
@@ -610,6 +685,13 @@ router.get('/export-zip', async (req, res) => {
       // Stream ZIP to response
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+      // an archive error ends the request: a cut download once bytes went out, else a 500
+      archive.on('error', (err) => {
+        console.error('[Training] Export ZIP error:', err.message);
+        archive.unpipe(res);
+        if (res.headersSent) res.destroy(err);
+        else res.status(500).json({ error: err.message });
+      });
       archive.pipe(res);
       archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
       for (const img of [...images.keep, ...images.delete]) {
@@ -628,6 +710,7 @@ router.get('/export-zip', async (req, res) => {
 // Download only the manifest.json
 router.get('/export-manifest', async (req, res) => {
   const type = req.query.type || 'clip_siamese';
+  if (!trainingQueue.TRAINABLE.includes(type)) return res.status(400).json({ error: 'Unknown training type' });
   try {
     const folder = db.prepare('SELECT path FROM folders LIMIT 1').get();
     if (!folder) return res.status(400).json({ error: 'No base folder configured' });
@@ -684,8 +767,9 @@ router.get('/export-manifest', async (req, res) => {
 // ── POST /api/training/push-labels ───────────────────────────
 // Push only the manifest.json to the AI server
 router.post('/push-labels', async (req, res) => {
-  const { type = 'clip_siamese', ai_server_url } = req.body;
-  const aiUrl = ai_server_url || getAiServerUrl();
+  const { type = 'clip_siamese' } = req.body;
+  const aiUrl = getAiServerUrl();
+  let tmpZip = null;
 
   try {
     await axios.get(`${aiUrl}/health`, { timeout: 5000 });
@@ -723,7 +807,7 @@ router.post('/push-labels', async (req, res) => {
       manifest.pairwise_count = pairs.length;
     } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
 
-    const tmpZip = path.join(os.tmpdir(), `labels_push_${Date.now()}.zip`);
+    tmpZip = path.join(os.tmpdir(), `labels_push_${Date.now()}.zip`);
     const output = fs.createWriteStream(tmpZip);
     const archive = archiver('zip', { zlib: { level: 1 } });
 
@@ -747,8 +831,6 @@ router.post('/push-labels', async (req, res) => {
       timeout: 60000
     });
 
-    fs.removeSync(tmpZip);
-
     res.json({
       success: true,
       message: `Pushed manifest with ${manifest.pairwise_count} pairs to AI server`,
@@ -757,14 +839,17 @@ router.post('/push-labels', async (req, res) => {
   } catch (err) {
     console.error('[Training] Push labels error:', err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (tmpZip) fs.remove(tmpZip).catch(() => {});
   }
 });
 
 // ── POST /api/training/push-data ─────────────────────────────
 // Push training data to the AI server
 router.post('/push-data', async (req, res) => {
-  const { type = 'clip_siamese', ai_server_url } = req.body;
-  const aiUrl = ai_server_url || getAiServerUrl();
+  const { type = 'clip_siamese' } = req.body;
+  const aiUrl = getAiServerUrl();
+  let tmpZip = null;
 
   try {
     // Check AI server is online
@@ -810,7 +895,7 @@ router.post('/push-data', async (req, res) => {
     } catch (_) { manifest.pairwise_pairs = []; manifest.pairwise_count = 0; }
 
     // Create temp ZIP
-    const tmpZip = path.join(os.tmpdir(), `training_push_${Date.now()}.zip`);
+    tmpZip = path.join(os.tmpdir(), `training_push_${Date.now()}.zip`);
     const output = fs.createWriteStream(tmpZip);
     const archive = archiver('zip', { zlib: { level: 1 } });
 
@@ -841,9 +926,6 @@ router.post('/push-data', async (req, res) => {
       timeout: 600000 // 10 min for large uploads
     });
 
-    // Cleanup temp file
-    fs.removeSync(tmpZip);
-
     res.json({
       success: true,
       message: `Pushed ${allImages.length} images (${(zipSize / 1024 / 1024).toFixed(1)} MB) to AI server`,
@@ -854,6 +936,8 @@ router.post('/push-data', async (req, res) => {
   } catch (err) {
     console.error('[Training] Push error:', err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (tmpZip) fs.remove(tmpZip).catch(() => {});
   }
 });
 
@@ -991,7 +1075,7 @@ router.post('/export-performer-pairs', (req, res) => {
 
 // GET /api/training/ai-health
 router.get('/ai-health', async (req, res) => {
-  const aiUrl = req.query.url || getAiServerUrl();
+  const aiUrl = getAiServerUrl();
   try {
     const response = await axios.get(`${aiUrl}/health`, { timeout: 3000 });
     res.json(response.data);
@@ -1002,7 +1086,7 @@ router.get('/ai-health', async (req, res) => {
 
 // GET /api/training/ai-data-status
 router.get('/ai-data-status', async (req, res) => {
-  const aiUrl = req.query.url || getAiServerUrl();
+  const aiUrl = getAiServerUrl();
   try {
     const response = await axios.get(`${aiUrl}/training_data_status`, { timeout: 5000 });
     res.json(response.data);
@@ -1012,26 +1096,42 @@ router.get('/ai-data-status', async (req, res) => {
 });
 
 // POST /api/training/ai-load-model
+// (120 s, as filterService allows for the same call: a model takes a while to load)
+const isModelFile = (id) => typeof id === 'string' && id.endsWith('.pt');
 router.post('/ai-load-model', async (req, res) => {
-  const { url, model_id } = req.body;
-  const aiUrl = url || getAiServerUrl();
+  const { model_id } = req.body || {};
+  if (!isModelFile(model_id)) return res.status(400).json({ error: 'model_id must name a model file' });
+  const aiUrl = getAiServerUrl();
   try {
-    const response = await axios.post(`${aiUrl}/load_model`, { model_id }, { timeout: 10000 });
+    const response = await axios.post(`${aiUrl}/load_model`, { model_id }, { timeout: 120000 });
     res.json(response.data);
   } catch (err) {
-    res.status(err.response?.status || 500).json({ error: 'Failed to load model', message: err.response?.data?.message || err.message });
+    res.status(err.response?.status || 500).json({
+      error: 'Failed to load model',
+      message: err.response?.data?.message || err.response?.data?.error || err.message
+    });
   }
 });
 
 // POST /api/training/ai-delete-model
+// acm-gpu refuses the loaded file and the P / P2 files itself; the app refuses the K file the filter view uses.
 router.post('/ai-delete-model', async (req, res) => {
-  const { url, model_id } = req.body;
-  const aiUrl = url || getAiServerUrl();
+  const { model_id } = req.body || {};
+  if (!isModelFile(model_id)) return res.status(400).json({ error: 'model_id must name a model file' });
+  let preferredK = null;
+  try {
+    preferredK = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('preferred_clip_keepdelete_model')?.value || null;
+  } catch (_) { /* no setting */ }
+  if (preferredK && model_id === preferredK) {
+    const message = 'The filter view uses this file: choose another K file first';
+    return res.status(409).json({ error: message, message });
+  }
+  const aiUrl = getAiServerUrl();
   try {
     const response = await axios.post(`${aiUrl}/delete_model`, { model_id }, { timeout: 5000 });
     res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to delete model', message: err.response?.data?.error || err.message });
+    res.status(err.response?.status || 500).json({ error: 'Failed to delete model', message: err.response?.data?.error || err.message });
   }
 });
 

@@ -1,5 +1,6 @@
 /* Performer Management (pages/PerformerManagementPageNew.js): the list, her detail (PerformerDetail.js, pm-detail*:
-   inline under a row, or layout="panel" in the side panel, pm-detail-panel and pm-panel*), the filter tiles (StatFilters.js, pm-tile*) and the toolbar. The rows and pairs
+   inline under a row, or layout="panel" in the side panel, pm-detail-panel and pm-panel*). The sidebar and the content line come
+   from components/layout (SidebarPage). The rows and pairs
    style themselves with sx (PerformerRow.js, PairRow.js); pm-row* and pm-pair* are theirs if they need classes.
    Darkroom tokens only, no gradients, nothing under 12px (.75rem). Below 700px: the phone layout. */
 
@@ -137,60 +138,10 @@
   .pm-detail-panel .pm-detail-facts.pm-detail-facts-wide { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* ── the filter tiles: a grid of 64px tiles on PC ── */
-.pm-tiles {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0 0 16px;
-}
-.pm-tile.MuiButtonBase-root {
-  box-sizing: border-box; height: 64px; min-width: 0; padding: 8px 12px;
-  display: flex; flex-direction: column-reverse; align-items: flex-start; justify-content: center; gap: 2px;
-  text-align: left; font: inherit; color: var(--text);
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
-  transition: border-color .16s ease, background-color .16s ease;
-}
-@media (hover: hover) {
-  .pm-tile.MuiButtonBase-root:hover { border-color: var(--line-strong); background: var(--raised); }
-}
-.pm-tile.MuiButtonBase-root:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.pm-tile-count { font-size: 1.25rem; font-weight: 660; line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--text); }
-.pm-tile-label {
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: .75rem; line-height: 1.4; color: var(--dim);
-}
-.pm-tile.on.MuiButtonBase-root { border-color: var(--accent); background: var(--accent-quiet); }
-.pm-tile.on .pm-tile-count { color: var(--accent); }
-.pm-tile.on .pm-tile-label { color: var(--text); }
-
-/* ── the toolbar ── */
-.pm-search { display: flex; flex: 0 1 260px; min-width: 0; }
-.pm-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; min-width: 0; }
-
-/* the dot on the Updates tab */
-.pm-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--bad); vertical-align: middle; }
-
 /* ── phone ── */
 @media (max-width: 699.98px) {
   .pm-detail { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .pm-detail-card { padding: 12px; }
   .pm-detail-facts.pm-detail-facts-wide { grid-template-columns: minmax(0, 1fr); }
 
-  /* the tiles as one strip of compact chips: "Before 412" */
-  .pm-tiles {
-    display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 0 12px;
-    -webkit-overflow-scrolling: touch;
-  }
-  .pm-tiles::-webkit-scrollbar { display: none; }
-  .pm-tile.MuiButtonBase-root {
-    flex: none; height: 32px; padding: 0 10px; flex-direction: row; align-items: center; gap: 6px;
-    border-radius: var(--radius-sm); background: var(--raised);
-  }
-  .pm-tile-count { font-size: .8125rem; font-weight: 600; color: var(--muted); }
-  .pm-tile-label { font-size: .8125rem; font-weight: 560; color: var(--dim); overflow: visible; }
-  .pm-tile.on .pm-tile-label { color: var(--accent); }
-
-  .pm-search { flex: 1 1 100%; }
-  .pm-bulk { margin-left: 0; }
-}
-@media (max-width: 699.98px) and (pointer: coarse) {
-  .pm-tile.MuiButtonBase-root { height: 40px; }
 }

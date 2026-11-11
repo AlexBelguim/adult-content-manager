@@ -3,7 +3,7 @@ import {
   Box, Typography, InputBase, IconButton, CircularProgress, Menu, MenuItem, Button
 } from '@mui/material';
 import { Search, Sort, Refresh, Close, ArrowBack } from '@mui/icons-material';
-import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import MobilePerformerList from './MobilePerformerList';
 // The shared filter view carries its own phone layout (swipe, round buttons,
 // bottom sheet), so the phone shell no longer needs a separate sorter.
@@ -12,6 +12,7 @@ import MobileGallery from './MobileGallery';
 import BottomNav from './BottomNav';
 import MoreSheet from './MoreSheet';
 import { PhoneJobsProvider, JobsChip } from './PhoneJobs';
+import { PhoneViewTabs } from '../components/layout';
 import {
   libraryState, listPath, rememberLibraryMode, libraryHomePath, useShell
 } from '../nav';
@@ -407,33 +408,22 @@ export default function PhoneLibrary() {
               )}
             </Box>
 
-            <Box component="nav" aria-label="Library lists" sx={{ display: 'flex', gap: 1 }}>
-              {MODES.map((m) => {
-                const selected = mode === m.key;
-                return (
-                  <Button
-                    key={m.key}
-                    component={RouterLink}
-                    to={listPath(m.key)}
-                    replace={modeSwitch}
-                    state={{ modeSwitch: true }}
-                    aria-current={selected ? 'page' : undefined}
-                    size="small"
-                    sx={{
-                      flex: 1, minHeight: 38, textTransform: 'none', fontWeight: 600, fontSize: 14,
-                      borderRadius: 'var(--radius)',
-                      bgcolor: selected ? 'var(--accent)' : 'transparent',
-                      color: selected ? 'var(--on-accent)' : 'var(--dim)',
-                      border: '1px solid',
-                      borderColor: selected ? 'var(--accent)' : 'var(--line)',
-                      '&:hover': { bgcolor: selected ? 'var(--accent)' : 'var(--raised)' }
-                    }}
-                  >
-                    {m.label}
-                  </Button>
-                );
-              })}
-            </Box>
+            {/* The lists as a tab row; one history entry for any number of switches (replace once the entry came
+                from a switch). A count only for the list that is loaded. */}
+            <PhoneViewTabs
+              label="Library lists"
+              value={mode}
+              items={MODES.map((m) => ({
+                id: m.key,
+                label: m.label,
+                to: listPath(m.key),
+                replace: modeSwitch,
+                state: { modeSwitch: true },
+                count: !loading && !error && data.source === (m.key === 'filter' ? 'filter' : 'gallery') && m.key !== 'pairs'
+                  ? data.list.length : null
+              }))}
+              sx={{ m: '0 -8px -8px', px: '8px', borderBottom: 0 }}
+            />
           </Box>
 
           <Menu

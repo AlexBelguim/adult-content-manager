@@ -1,106 +1,90 @@
 import React from 'react';
+import { Slider } from '@mui/material';
+import PermMediaOutlinedIcon from '@mui/icons-material/PermMediaOutlined';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined';
+import VideocamOutlinedIcon from '@mui/icons-material/VideocamOutlined';
+import ViewTimelineOutlinedIcon from '@mui/icons-material/ViewTimelineOutlined';
+import { SideGroup, SideList, SideSegment, SideSelect, SideField, SIDE } from '../layout';
 
-const TABS = ['Pictures', 'Videos', 'Funscripts'];
+export const TAB_LABELS = ['Pictures', 'Videos', 'Funscripts'];
+const TAB_ICONS = [<ImageOutlinedIcon key="p" />, <VideocamOutlinedIcon key="v" />, <ViewTimelineOutlinedIcon key="f" />];
 const TAGGED_MODES = [
-  ['All', 'Show all files (physical and tagged)'],
-  ['Folder', 'Show only files physically in this folder'],
-  ['Tag', 'Show only files with this tag (not physically in folder)'],
+  { id: 0, label: 'All', title: 'Show all files (in the folder and tagged)' },
+  { id: 1, label: 'Folder', title: 'Show only files in this folder' },
+  { id: 2, label: 'Tag', title: 'Show only files tagged with this genre elsewhere' }
 ];
 
+const sliderSx = {
+  width: 132, color: 'var(--accent)', py: '10px',
+  '& .MuiSlider-rail': { bgcolor: 'var(--line-strong)', opacity: 1 },
+  '& .MuiSlider-thumb': {
+    width: 14, height: 14, bgcolor: 'var(--text)', border: '2px solid var(--accent)',
+    '&:hover, &.Mui-focusVisible': { boxShadow: '0 0 0 6px var(--accent-quiet)' }
+  }
+};
+
 /**
- * Sticky control row: tabs with live counts, All/Folder/Tag (genre), sort,
- * Filters button, Rank images, thumbnail size.
+ * The unified gallery's sidebar groups. Media: Pictures, Videos and Funscripts with their counts. Show: All /
+ * Folder / Tag (genre galleries), the sort, the thumbnail size (remembered on this device), then the tag and score
+ * filters (children) inline. filterCount: the active filters, the Show group's badge.
  */
 const GalleryToolbar = ({
   tab, onTabChange, tabCounts,
   showTaggedMode, taggedMode, onTaggedModeChange,
   sortValue, sortOptions, onSortChange,
-  filterCount, filtersOpen, onOpenFilters,
-  showRank, rankEnabled, onRank,
+  filterCount,
   size, minSize, maxSize, onSizeChange,
+  children
 }) => (
-  <div className="ug-bar">
-    <div className="ug-seg tabs" role="tablist" aria-label="Media type">
-      {TABS.map((label, i) => (
-        <button
-          key={label}
-          type="button"
-          role="tab"
-          aria-selected={tab === i}
-          className={tab === i ? 'on' : ''}
-          onClick={() => onTabChange(i)}
-        >
-          {label}<i>{tabCounts[i]}</i>
-        </button>
-      ))}
-    </div>
-
-    {showTaggedMode && (
-      <div className="ug-seg" role="group" aria-label="Folder or tag">
-        {TAGGED_MODES.map(([label, title], i) => (
-          <button
-            key={label}
-            type="button"
-            title={title}
-            aria-pressed={taggedMode === i}
-            className={taggedMode === i ? 'on' : ''}
-            onClick={() => onTaggedModeChange(i)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    )}
-
-    <span className="ug-grow" />
-
-    <label className="ug-sort">
-      Sort
-      <select value={sortValue} onChange={onSortChange}>
-        {sortOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select>
-    </label>
-
-    <button
-      type="button"
-      className={`ug-btn${filtersOpen ? ' on' : ''}${filterCount > 0 ? ' warn' : ''}`}
-      aria-haspopup="dialog"
-      aria-expanded={filtersOpen}
-      onClick={onOpenFilters}
+  <>
+    <SideGroup
+      id="show"
+      title="Show"
+      icon={<FilterListIcon />}
+      badge={filterCount}
+      summary={filterCount ? `${filterCount} on` : 'nothing on'}
+      order={SIDE.show}
     >
-      Filters{filterCount > 0 && <b>{filterCount}</b>}
-    </button>
-
-    {showRank && (
-      <button
-        type="button"
-        className="ug-btn"
-        onClick={onRank}
-        disabled={!rankEnabled}
-        title={rankEnabled ? 'Rank this performer\'s pictures against each other' : 'Available on the Pictures tab'}
-      >
-        🏆 Rank images
-      </button>
-    )}
-
-    <label className="ug-size" title="Thumbnail size — remembered on this device">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-        <rect width="5" height="5" /><rect x="7" width="5" height="5" /><rect y="7" width="5" height="5" /><rect x="7" y="7" width="5" height="5" />
-      </svg>
-      <input
-        type="range"
-        min={minSize}
-        max={maxSize}
-        step="2"
-        value={size}
-        onChange={(e) => onSizeChange(Number(e.target.value))}
-        aria-label="Thumbnail size"
+      {showTaggedMode && (
+        <SideSegment label="Folder or tag" value={taggedMode} onChange={onTaggedModeChange} options={TAGGED_MODES} />
+      )}
+      <SideSelect
+        label="Sort"
+        value={sortValue}
+        onChange={onSortChange}
+        options={sortOptions.map(([value, label]) => ({ value, label }))}
       />
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-        <rect width="16" height="16" rx="2" />
-      </svg>
-    </label>
-  </div>
+      <SideField label="Size">
+        <Slider
+          size="small"
+          min={minSize}
+          max={maxSize}
+          step={2}
+          value={size}
+          onChange={(_e, v) => onSizeChange(Array.isArray(v) ? v[0] : v)}
+          aria-label="Thumbnail size"
+          sx={sliderSx}
+        />
+      </SideField>
+      {children}
+    </SideGroup>
+
+    <SideGroup
+      id="media"
+      title="Media"
+      icon={<PermMediaOutlinedIcon />}
+      summary={`${TAB_LABELS[tab]} · ${(tabCounts[tab] || 0).toLocaleString()}`}
+      order={SIDE.list}
+    >
+      <SideList
+        label="Media"
+        items={TAB_LABELS.map((label, i) => ({ id: i, label, count: tabCounts[i], icon: TAB_ICONS[i] }))}
+        value={tab}
+        onChange={onTabChange}
+      />
+    </SideGroup>
+  </>
 );
 
 export default GalleryToolbar;

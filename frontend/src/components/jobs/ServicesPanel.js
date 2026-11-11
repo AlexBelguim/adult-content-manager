@@ -1,46 +1,17 @@
 /**
- * The things jobs depend on, and where new jobs start.
+ * The things jobs depend on, and where new jobs start. The Jobs page shows both in its sidebar (Services, Start).
  *
  *   <ServicesList services jobs />    five lines with tone dots (funpipe worker, GPU, scenetest, FFmpeg, AI server)
- *   <StartLinks onPipeline />         Labels & funscripts… and the pages that start jobs
- *   servicesSummary(services, jobs)   one short line for the narrow strip
+ *   <StartLinks onPipeline />         Labels & funscripts… and the pages that start jobs, as sidebar buttons
+ *   servicesSummary(services, jobs)   one short line: 'GPU free · worker online · FFmpeg ready'
+ *   servicesShort(services, jobs)     a few words for the rail: '2 offline', '1 warning', 'all running'
+ *   servicesTone(services, jobs)      the worst tone: 'off' | 'warn' | 'ok' | 'idle'
  *   gpuState(services, jobs)          { shared, warning, training } for the GPU line and the page's warning
- *   <RailItem />, railHeadSx          the rail's row and heading (also used for the kind list)
  */
 import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Box, ButtonBase } from '@mui/material';
-import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
-import { KIND_ICON } from './kinds';
-
-export const railHeadSx = {
-  fontSize: '.75rem', fontWeight: 600, letterSpacing: '.05em',
-  textTransform: 'uppercase', color: 'var(--muted)', mb: 0.5, px: 1
-};
-
-/** One rail row: icon, label, count. `dim` greys out a kind with no rows. */
-export function RailItem({ active, icon, label, count, dim, onClick, ...rest }) {
-  return (
-    <ButtonBase onClick={onClick} aria-pressed={active == null ? undefined : !!active} {...rest} sx={{
-      display: 'flex', alignItems: 'center', gap: 1, width: '100%', height: 32, justifyContent: 'flex-start',
-      textAlign: 'left', borderRadius: 'var(--radius, 6px)', px: 1, fontSize: '.8125rem',
-      color: active ? 'var(--text)' : dim ? 'var(--muted)' : 'var(--dim)',
-      bgcolor: active ? 'var(--accent-quiet)' : 'transparent',
-      boxShadow: active ? 'inset 2px 0 0 var(--accent)' : 'none',
-      '&:hover': { bgcolor: active ? 'var(--accent-quiet)' : 'var(--raised)', color: 'var(--text)' },
-      '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: -2 },
-      '& svg': { fontSize: 16, flexShrink: 0 }
-    }}>
-      {icon}
-      <Box component="span" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Box>
-      {count != null && (
-        <Box component="span" sx={{ fontSize: '.75rem', color: dim ? 'var(--faint)' : 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-          {count.toLocaleString()}
-        </Box>
-      )}
-    </ButtonBase>
-  );
-}
+import { Box } from '@mui/material';
+import { SideButtons, SideButton } from '../layout';
 
 const TONE = { ok: 'var(--ok)', warn: 'var(--warn)', off: 'var(--bad)', idle: 'var(--faint)' };
 
@@ -90,15 +61,15 @@ function lines(services, jobs) {
 
 export function ServicesList({ services, jobs }) {
   return (
-    <Box>
+    <Box role="list" aria-label="Services" sx={{ minWidth: 0 }}>
       {lines(services, jobs).map(([key, tone, label, value, title]) => (
-        <Box key={key} title={title || undefined} sx={{
-          display: 'flex', alignItems: 'center', gap: 1, height: 28, px: 1,
-          fontSize: '.8125rem', color: 'var(--dim)', minWidth: 0
+        <Box key={key} role="listitem" title={title || undefined} sx={{
+          display: 'flex', alignItems: 'center', gap: '8px', height: 26, px: '8px',
+          fontSize: 13, color: 'var(--dim)', minWidth: 0
         }}>
-          <Dot tone={tone} />
+          <Dot tone={tone} sx={{ width: 7, height: 7 }} />
           <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <Box component="span" sx={{ color: 'var(--text)' }}>{label}</Box> {value}
+            {label} <Box component="span" sx={{ color: 'var(--muted)' }}>{value}</Box>
           </Box>
         </Box>
       ))}
@@ -130,22 +101,31 @@ export function servicesTone(services, jobs) {
   return 'ok';
 }
 
+/** A few words for the rail's tooltip and the flyout's head: '2 offline', '1 warning', 'all running'. */
+export function servicesShort(services, jobs) {
+  if (!services) return 'checking';
+  const tones = lines(services, jobs).map(l => l[1]);
+  const off = tones.filter(t => t === 'off').length;
+  const warn = tones.filter(t => t === 'warn').length;
+  if (off) return `${off} offline${warn ? ` · ${warn} warning${warn === 1 ? '' : 's'}` : ''}`;
+  if (warn) return `${warn} warning${warn === 1 ? '' : 's'}`;
+  return 'all running';
+}
+
 const START = [
-  ['import', 'Import a folder', '/local-import'],
-  ['funpipe', 'Queue funscripts', '/funpipe'],
-  ['hash', 'Build hash databases', '/performer-management?view=duplicates'],
-  ['encode', 'Re-encode for space', '/settings/space'],
-  ['discover', 'Discover performers', '/discover']
+  ['Import a folder', '/local-import'],
+  ['Build hash databases', '/performer-management?view=duplicates'],
+  ['Re-encode for space', '/settings/space']
 ];
 
+/** Where new jobs start: the pipeline dialog first, then the pages that start the other kinds. */
 export function StartLinks({ onPipeline, onNavigate }) {
   return (
-    <Box>
-      <RailItem icon={<ViewTimelineIcon />} label="Labels & funscripts…" onClick={onPipeline} />
-      {START.map(([kind, label, to]) => {
-        const Icon = KIND_ICON[kind];
-        return <RailItem key={to} icon={<Icon />} label={label} component={RouterLink} to={to} onClick={onNavigate} />;
-      })}
-    </Box>
+    <SideButtons>
+      <SideButton onClick={onPipeline}>Labels &amp; funscripts…</SideButton>
+      {START.map(([label, to]) => (
+        <SideButton key={to} plain component={RouterLink} to={to} onClick={onNavigate}>{label}</SideButton>
+      ))}
+    </SideButtons>
   );
 }

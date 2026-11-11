@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Box, Typography, Button, Rating, Slider, IconButton, Menu, MenuItem, ListItemText, CircularProgress, useMediaQuery
+  Box, Typography, Button, Rating, Slider, IconButton, CircularProgress, useMediaQuery
 } from '@mui/material';
 import {
-  ArrowBack, ArrowUpward, ArrowDownward, Refresh, Undo, SkipNext, DragHandle, Check, MoreVert
+  ArrowBack, ArrowUpward, ArrowDownward, Refresh, Undo, SkipNext, DragHandle, Check, TuneOutlined, InsightsOutlined
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
-import { useBack, useChrome, usePageBar } from '../nav';
+import { useBack, useChrome } from '../nav';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LoadingState, EmptyState, iconBtnSx } from '../components/layout';
-import { AppDialog, useNotify, useToastLift, errorText } from '../components/ui';
-import RateTabs from '../components/rating/RateTabs';
-import { useVoteQueue, SaveChip, useSafeLeave } from '../components/rating/voteQueue';
+import {
+  SidebarPage, SideGroup, SideField, SideFacts, SideButtons, SideButton, SideNote, ContentLine, SIDE,
+  useSidebarMode, useSidebarSheet, visuallyHiddenSx, LoadingState, EmptyState, iconBtnSx
+} from '../components/layout';
+import { useNotify, useToastLift, errorText } from '../components/ui';
+import { RATE_VIEWS } from '../components/rating/RateTabs';
+import { useVoteQueue, useSafeLeave } from '../components/rating/voteQueue';
 import { useRatingReset } from '../components/rating/RatingReset';
 
 const CALIBRATION_THRESHOLD = 5; // duels a performer needs before proximity pairing
@@ -97,7 +100,6 @@ const chipSx = {
   fontSize: '12px', lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
   border: '1px solid var(--line-strong)', borderRadius: 'var(--radius-lg)', color: 'var(--dim)'
 };
-const accentChipSx = { ...chipSx, borderColor: 'var(--accent)', color: 'var(--accent)' };
 const warnChipSx = { ...chipSx, borderColor: 'var(--warn)', color: 'var(--warn)' };
 
 const kbdSx = {
@@ -167,6 +169,66 @@ const TEXT_INPUTS = new Set(['text', 'search', 'number', 'email', 'url', 'passwo
 const isTyping = (t) => !!t && (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
   || (t.tagName === 'INPUT' && TEXT_INPUTS.has((t.type || 'text').toLowerCase())));
 const inSlider = (t) => !!t && !!t.closest && !!(t.closest('[role="slider"]') || t.closest('.MuiSlider-root'));
+// A dialog, the rail's flyout or the phone sheet is open: it handles its own keys, Esc included.
+const overlayOpen = () => !!document.querySelector('[role="dialog"], .MuiModal-root:not(.MuiModal-hidden)');
+
+const valueSx = { color: 'var(--text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: '2ch', textAlign: 'right' };
+
+/** "Saved" / "Saving 2" / "2 not saved": the vote queue in words. */
+const saveWords = (c) => (c.failed > 0 ? `${c.failed} not saved` : c.unsent > 0 ? `Saving ${c.unsent}` : 'Saved');
+
+/**
+ * The one line over the compare area. Phone: a Filters button opens the sheet (the page draws its own, so the
+ * frame's search row stays off). Phone held sideways (bare): the page's own Back comes first.
+ */
+function CompareLine({ meta, bare, onBack, leaving }) {
+  const mode = useSidebarMode();
+  const sheet = useSidebarSheet();
+  const phone = mode === 'phone';
+  let filters = null;
+  if (phone && bare) {
+    filters = (
+      <IconButton onClick={sheet.open} aria-label="Filters" title="Filters" aria-haspopup="dialog"
+        sx={{ ...btnSx(30), color: 'var(--text)' }}>
+        <TuneOutlined />
+      </IconButton>
+    );
+  } else if (phone) {
+    filters = (
+      <Button variant="outlined" size="small" onClick={sheet.open} aria-haspopup="dialog"
+        startIcon={<TuneOutlined />}
+        sx={{ height: 32, fontSize: 13, color: 'var(--text)', borderColor: 'var(--line-strong)', textTransform: 'none' }}>
+        Filters
+      </Button>
+    );
+  }
+  const line = (
+    <ContentLine
+      title="Smart Compare"
+      meta={meta}
+      actions={filters}
+      sx={bare
+        ? { mb: 0, height: 'auto', minHeight: 34 }
+        : phone
+          ? { mb: 0, px: '12px', py: '6px', minHeight: 44 }
+          : { mb: 0, height: 48, px: '24px', borderBottom: '1px solid var(--line)' }}
+    />
+  );
+  if (!bare) return line;
+  return (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', gap: 1, flex: 'none', minWidth: 0,
+      px: 1, py: '2px', bgcolor: 'var(--surface)', borderBottom: '1px solid var(--line)'
+    }}>
+      {phone ? <Typography component="h1" sx={visuallyHiddenSx}>Smart Compare</Typography> : null}
+      <IconButton onClick={onBack} disabled={leaving} aria-label="Back" title={leaving ? 'Saving…' : 'Back'}
+        sx={{ ...btnSx(30), color: 'var(--text)' }}>
+        {leaving ? <CircularProgress size={16} sx={{ color: 'var(--dim)' }} /> : <ArrowBack />}
+      </IconButton>
+      <Box sx={{ flex: 1, minWidth: 0 }}>{line}</Box>
+    </Box>
+  );
+}
 
 /**
  * Smart Compare: two performers side by side with their photo grids, or 3–10
@@ -200,10 +262,8 @@ function SmartComparePage() {
   const [sessionCount, setSessionCount] = useState(0); // confirmed votes only
   const [history, setHistory] = useState([]); // [{ list, pics, voted, entry }]
   const [flash, setFlash] = useState(null);   // { id, index }
-  const [topOffset, setTopOffset] = useState(64);
   const [orderChanged, setOrderChanged] = useState(false);
   const [lookedLong, setLookedLong] = useState(false);
-  const [menuAnchor, setMenuAnchor] = useState(null);
 
   // Values the async paths (prefetch, vote results) read without going stale.
   const perfsRef = useRef([]);
@@ -224,24 +284,6 @@ function SmartComparePage() {
 
   // Toasts sit above the action bar (phone landscape has none: its actions are in the middle column).
   useToastLift(isLandscape ? null : 'calc(76px + var(--nav-bottom, env(safe-area-inset-bottom, 0px)))');
-
-  // On desktop the app toolbar is a sticky AppBar above this route; the page owns
-  // everything under it so the action bar can sit at the real bottom. The phone
-  // bars have fixed heights (see the top and bottom below); bare has none.
-  useEffect(() => {
-    if (chrome !== 'desktop') return undefined;
-    const el = document.querySelector('header.MuiAppBar-root');
-    if (!el) { setTopOffset(0); return undefined; }
-    const measure = () => setTopOffset(el.offsetHeight);
-    measure();
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    if (ro) ro.observe(el);
-    window.addEventListener('resize', measure);
-    return () => {
-      if (ro) ro.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [chrome]);
 
   useEffect(() => {
     mounted.current = true;
@@ -494,7 +536,6 @@ function SmartComparePage() {
   const strength = ((globalModel && globalModel.n_effective) || 0).toFixed(1);
 
   const handleRecalibrate = useCallback(async () => {
-    setMenuAnchor(null);
     setRecalibrating(true);
     try {
       const data = await postJson('/api/performers/calibrate', {});
@@ -517,10 +558,7 @@ function SmartComparePage() {
       fetchPerformers();
     }
   });
-  const handleReset = useCallback(() => {
-    setMenuAnchor(null);
-    resetAll();
-  }, [resetAll]);
+  const handleReset = useCallback(() => { resetAll(); }, [resetAll]);
 
   const changeCount = (v) => {
     setPerformerCount(v);
@@ -536,7 +574,6 @@ function SmartComparePage() {
     }, 250);
   };
 
-  const [photosOpen, setPhotosOpen] = useState(false);
   const changePics = (v) => {
     setPicsPerPerformer(v);
     picsRef.current = v;
@@ -560,8 +597,7 @@ function SmartComparePage() {
     draw: handleDraw,
     skip: handleSkip,
     undo: handleUndo,
-    save: handleSaveOrder,
-    blocked: !!menuAnchor
+    save: handleSaveOrder
   };
 
   useEffect(() => {
@@ -570,8 +606,7 @@ function SmartComparePage() {
       const t = e.target;
       if (isTyping(t)) return;
       const a = keyActions.current;
-      // A dialog or a menu is open: it handles its own keys, Esc included.
-      if (a.blocked || document.querySelector('[role="dialog"]')) return;
+      if (overlayOpen()) return;
       const k = (e.key || '').toLowerCase();
       // The arrows move a focused slider; the letters still act.
       if ((k === 'arrowleft' || k === 'arrowright') && inSlider(t)) return;
@@ -591,19 +626,6 @@ function SmartComparePage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-
-  // ── the phone page bar: title, Back (waits for unsent votes) and the More menu ──
-  const barMenu = useMemo(() => [
-    {
-      label: recalibrating ? 'Recalibrating…' : 'Recalibrate model',
-      hint: `Fits the AI score to your ratings · strength ${strength}`,
-      onClick: handleRecalibrate,
-      disabled: recalibrating
-    },
-    { label: `Photos: ${picsPerPerformer}`, hint: 'Pictures shown per performer', onClick: () => setPhotosOpen(true) },
-    { label: 'Reset all ratings…', danger: true, onClick: handleReset }
-  ], [recalibrating, strength, handleRecalibrate, handleReset, picsPerPerformer]);
-  usePageBar({ title: 'Smart Compare', onBack: leave, menu: barMenu });
 
   const saveTitle = compareList.length < 3 ? 'Only for 3 or more'
     : !saveReady ? 'Reorder first, or look a moment longer' : 'Save this order';
@@ -830,108 +852,71 @@ function SmartComparePage() {
     );
   }
 
-  const ctrlSx = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--dim)', whiteSpace: 'nowrap', flex: 'none' };
-  const valueSx = { color: 'var(--text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: '2ch', textAlign: 'right' };
-  const sliderWidth = compact ? 70 : 90;
+  const bare = chrome === 'bare';
+  const saveFailed = counts.failed > 0;
+  const slider = (label, min, max, value, onChange) => (
+    <>
+      <Slider size="small" min={min} max={max} step={1} value={value}
+        aria-label={label}
+        onChange={(_, v) => onChange(Array.isArray(v) ? v[0] : v)}
+        onChangeCommitted={blurActive}
+        sx={{ ...sliderSx, width: 120 }} />
+      <Box component="span" sx={valueSx}>{value}</Box>
+    </>
+  );
 
   return (
-    <Box sx={{
-      position: 'fixed', left: 0, right: 0,
-      // phone chrome: PhoneBar (48px row) above, BottomNav (56px) below
-      top: chrome === 'phone' ? 'calc(48px + env(safe-area-inset-top, 0px))' : chrome === 'bare' ? 0 : topOffset,
-      bottom: chrome === 'phone' ? 'calc(56px + env(safe-area-inset-bottom, 0px))' : 0,
-      bgcolor: 'var(--bg)', color: 'var(--text)', fontSize: 14,
-      display: 'flex', flexDirection: 'column', overflow: 'hidden'
-    }}>
-      <Typography component="h1" sx={{
-        position: 'absolute', width: '1px', height: '1px', p: 0, m: '-1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0
-      }}>
-        Smart Compare
-      </Typography>
+    <SidebarPage
+      title="Smart Compare"
+      views={RATE_VIEWS}
+      view="compare"
+      fill
+      onBack={leave}
+      phoneTabs={!bare}
+      phoneRow={false}
+      sx={{
+        bgcolor: 'var(--bg)', color: 'var(--text)', fontSize: 14,
+        // the compare area keeps the whole width and height: no content padding on this page
+        p: 0,
+        '& > [data-sidebar-content]': { p: 0 },
+        // phone: the tab row runs edge to edge, so it needs none of the padding it would undo
+        '& > nav': { m: 0 }
+      }}
+    >
+      <SideGroup id="show" title="Show" icon={<TuneOutlined />} order={SIDE.show}
+        summary={`${performerCount} performers · ${picsPerPerformer} photos`}>
+        <SideField label="Performers">{slider('Performers', 2, 10, performerCount, changeCount)}</SideField>
+        <SideField label="Photos">{slider('Photos per performer', 1, MAX_PICS, picsPerPerformer, changePics)}</SideField>
+      </SideGroup>
 
-      {/* the one control row */}
-      <Box sx={{
-        display: 'flex', alignItems: 'center', columnGap: 1, rowGap: '6px', flex: 'none', minWidth: 0,
-        flexWrap: 'wrap',
-        px: isLandscape ? 1 : '10px', py: isLandscape ? '2px' : '6px',
-        bgcolor: 'var(--surface)', borderBottom: '1px solid var(--line)'
-      }}>
-        {chrome === 'bare' && (
-          <IconButton onClick={leave} disabled={leaving} aria-label="Back" title={leaving ? 'Saving…' : 'Back'}
-            sx={{ ...btnSx(30), color: 'var(--text)' }}>
-            {leaving ? <CircularProgress size={16} sx={{ color: 'var(--dim)' }} /> : <ArrowBack />}
-          </IconButton>
-        )}
-        {chrome !== 'bare' && <RateTabs current="compare" />}
-        {chrome !== 'bare' && isPortraitPhone && <Box sx={{ flexBasis: '100%', height: 0 }} />}
-        <Box component="span" sx={accentChipSx}>{sessionCount} this session</Box>
-        {!compact && <Box component="span" sx={chipSx}>{globalModel ? 'Model active' : 'Default prior'}</Box>}
-        <SaveChip counts={counts} onRetry={() => queue.retry()} />
-        <Box sx={{ flex: 1, minWidth: 0 }} />
-        <Box sx={ctrlSx}>
-          <span id="sc-performers-label">Performers</span>
-          <Slider size="small" min={2} max={10} step={1} value={performerCount}
-            aria-labelledby="sc-performers-label"
-            onChange={(_, v) => changeCount(Array.isArray(v) ? v[0] : v)}
-            onChangeCommitted={blurActive}
-            sx={{ ...sliderSx, width: sliderWidth }} />
-          <Box component="span" sx={valueSx}>{performerCount}</Box>
-        </Box>
-        {!compact && (
-          <Box sx={ctrlSx}>
-            <span id="sc-photos-label">Photos</span>
-            <Slider size="small" min={1} max={MAX_PICS} step={1} value={picsPerPerformer}
-              aria-labelledby="sc-photos-label"
-              onChange={(_, v) => changePics(Array.isArray(v) ? v[0] : v)}
-              onChangeCommitted={blurActive}
-              sx={{ ...sliderSx, width: sliderWidth }} />
-            <Box component="span" sx={valueSx}>{picsPerPerformer}</Box>
-          </Box>
-        )}
-        {chrome !== 'phone' && (
-          <>
-            <IconButton aria-label="More" title="More" aria-haspopup="menu" aria-expanded={menuAnchor ? 'true' : undefined}
-              onClick={(e) => setMenuAnchor(e.currentTarget)} sx={btnSx(isLandscape ? 30 : 32)}>
-              <MoreVert />
-            </IconButton>
-            <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
-              <MenuItem onClick={handleRecalibrate} disabled={recalibrating}>
-                <ListItemText
-                  primary={recalibrating ? 'Recalibrating…' : 'Recalibrate model'}
-                  secondary={`Fits the AI score to your ratings · strength ${strength}`}
-                  slotProps={{
-                    primary: { sx: { fontSize: '14px' } },
-                    secondary: { sx: { fontSize: '12px', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' } }
-                  }} />
-              </MenuItem>
-              {compact && (
-                <MenuItem onClick={() => { setMenuAnchor(null); setPhotosOpen(true); }}>
-                  <ListItemText primary={`Photos: ${picsPerPerformer}`} secondary="Pictures shown per performer"
-                    slotProps={{
-                      primary: { sx: { fontSize: '14px', fontVariantNumeric: 'tabular-nums' } },
-                      secondary: { sx: { fontSize: '12px', color: 'var(--muted)' } }
-                    }} />
-                </MenuItem>
-              )}
-              <MenuItem onClick={handleReset}>
-                <ListItemText primary="Reset all ratings…" slotProps={{ primary: { sx: { fontSize: '14px', color: 'var(--bad)' } } }} />
-              </MenuItem>
-            </Menu>
-          </>
-        )}
-      </Box>
+      <SideGroup id="session" title="Session" icon={<InsightsOutlined />} dot={saveFailed ? 'bad' : null}
+        summary={`${sessionCount} this session · ${saveWords(counts)}`}>
+        <SideFacts rows={[
+          { label: 'This session', value: sessionCount.toLocaleString(), tone: 'accent' },
+          { label: 'Model', value: globalModel ? 'active' : 'default prior' },
+          {
+            label: 'Saving', value: saveWords(counts), tone: saveFailed ? 'bad' : undefined,
+            title: saveFailed ? 'They are tried again on their own. Retry sends them now.' : undefined
+          }
+        ]} />
+        <SideButtons>
+          {saveFailed ? <SideButton onClick={() => queue.retry()}>Retry</SideButton> : null}
+          <SideButton onClick={handleRecalibrate} disabled={recalibrating}>
+            {recalibrating ? 'Recalibrating…' : 'Recalibrate model'}
+          </SideButton>
+        </SideButtons>
+        <SideNote>{`Fits the AI score to your ratings · strength ${strength}`}</SideNote>
+        <SideButtons>
+          <SideButton danger plain onClick={handleReset}>Reset all ratings…</SideButton>
+        </SideButtons>
+      </SideGroup>
 
-      <AppDialog open={photosOpen} onClose={() => setPhotosOpen(false)} title="Photos" size="sm" cancelLabel="Close">
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: '14px', color: 'var(--dim)' }}>
-          <span id="sc-photos-dlg-label">Per performer</span>
-          <Slider min={1} max={MAX_PICS} step={1} value={picsPerPerformer}
-            aria-labelledby="sc-photos-dlg-label"
-            onChange={(_, v) => changePics(Array.isArray(v) ? v[0] : v)}
-            sx={{ ...sliderSx, flex: 1, minWidth: 0 }} />
-          <Box component="span" sx={valueSx}>{picsPerPerformer}</Box>
-        </Box>
-      </AppDialog>
+      <CompareLine
+        meta={compareList.length >= 2 ? `${compareList.length} performers · ${picsPerPerformer} photos each` : null}
+        bare={bare}
+        onBack={leave}
+        leaving={leaving}
+      />
 
       {/* body */}
       <Box sx={{
@@ -965,7 +950,7 @@ function SmartComparePage() {
           ))}
         </Box>
       )}
-    </Box>
+    </SidebarPage>
   );
 }
 

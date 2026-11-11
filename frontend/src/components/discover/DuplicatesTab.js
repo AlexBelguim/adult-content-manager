@@ -1,23 +1,32 @@
 /**
  * Discover → Duplicates: what is left to decide by hand. Liked performers whose pictures together fall below the keep line
  * (Keep liked: her best picture stands; Drop: no longer liked), and pairs that may be one performer (Combine: all of both,
- * her pictures judged together; Not the same: kept apart). Each is a card with the side performer cards and one action row.
- * No confirms: every decision has an Undo toast. A decided card stays where it is, marked, until the list is reloaded.
+ * her pictures judged together; Not the same: kept apart). Each is a card with every find side by side (the picture, its
+ * score, the site, what the find holds, Open ↗ to the find's link and Not her, which takes that find apart from her with
+ * an Undo), then one action row. A pair shows both sides' finds with a line between them. Clicking a picture opens her
+ * drawer. No confirms: every decision has an Undo toast. A decided card stays where it is, marked, until a reload.
+ *
+ * The sidebar: Show (search, sort, New only) and Kind (All / Below the line / May be one: ?kind= '', fallen, pair).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, MenuItem, Select } from '@mui/material';
-import { EmptyState, LoadingState, Panel, Toolbar } from '../layout';
+import { Tooltip } from '@mui/material';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import CategoryIcon from '@mui/icons-material/Category';
+import { ContentLine, EmptyState, LoadingState, SIDE, SideChecks, SideGroup, SideList, SideSearch, SideSelect } from '../layout';
 import {
-  Badge, FilterChip, ListError, LoadMore, post, SearchField, SmallButton, SortSelect, StalePill, TotalText, useList, useOverlay, useQueryState
+  Badge, dataLine, ListError, LoadMore, plural, post, SmallButton, SORT_OPTIONS, StalePill, useList, useOverlay, useQueryState
 } from './shared';
-import PerformerTile, { belongs } from './PerformerTile';
+import { TileChip } from './Tile';
+import { belongs } from './PerformerTile';
 import { PerformerDrawerHost } from './PerformerDrawer';
 import usePerformerActions from './usePerformerActions';
+import { sortText } from './PerformersTab';
 import './tabs.css';
 
 const DEFAULTS = { q: '', sort: 'score', new: '', kind: '' };
 const SORTS = ['score', 'scoreAsc', 'newest', 'name'];
 const KINDS = ['', 'fallen', 'pair'];
+const KIND_LABEL = { '': 'All', fallen: 'Below the line', pair: 'May be one' };
 const DONE = { combine: ['Combined', 'ok'], apart: ['Kept apart', 'dim'], keep: ['Kept liked', 'ok'], drop: ['Dropped', 'dim'] };
 
 const hasKey = (g, key) => g.id === key || g.members?.some(m => m.key === key);
@@ -27,7 +36,66 @@ const stillHere = (d) => (d.kind === 'pair'
   ? !d.groups.some(g => belongs(g, 'decided'))   // a pair goes when a side is deleted, removed or checked for good
   : belongs(d.groups[0], 'all'));               // below the line together: only while she is to decide
 
-export default function DuplicatesTab({ version, ask, notify, refresh, totals = {}, sourceLabel }) {
+/** Her facts: age, country, height, cup, ethnicity; else her profiles and posts */
+const factsOf = (g) => dataLine(g.data)
+  || [g.profiles ? plural(g.profiles, 'profile') : null, g.posts ? plural(g.posts, 'post') : null].filter(Boolean).join(' · ');
+
+/** "together 8.3 · best 84.9 · 3 finds" */
+const scoresOf = (g) => [
+  g.pool_score != null ? `together ${g.pool_score}` : g.pool_pending ? 'together not scored yet' : null,
+  g.best_score != null ? `best ${g.best_score}` : null,
+  plural(g.members?.length || 0, 'find')
+].filter(Boolean).join(' · ');
+
+/** What a find holds, as far as it is known: "103 pics · 24 vids · 5 GB"; a profile says so */
+function holdsOf(m) {
+  const info = m.info || {};
+  const parts = [
+    info.images != null && `${info.images.toLocaleString()} pics`,
+    info.videos != null && `${info.videos.toLocaleString()} vids`,
+    info.size_gb ? `${info.size_gb} GB` : null
+  ].filter(Boolean);
+  if (parts.length) return parts.join(' · ');
+  return m.type === 'profile' ? 'Profile' : '';
+}
+
+/** One find: its picture (opens her drawer), score, site, what it holds, Open ↗ and Not her */
+function Find({ m, g, sourceLabel, off, onOpen, onApart }) {
+  const [broken, setBroken] = useState(false);
+  const site = (sourceLabel ? sourceLabel(m.source) : '') || m.site || '';
+  const holds = holdsOf(m);
+  const name = g.names?.[0] || 'her';
+  const only = (g.members?.length || 0) < 2;
+  const apartTip = only ? 'Her only find: nothing to take apart' : `Not ${name}: takes this find apart from her (Undo in the toast)`;
+  return (
+    <div className="dt-find">
+      <button type="button" className="dt-find-pic" onClick={onOpen} aria-label={`${name}: open`} title={m.title || m.name || undefined}>
+        {m.image && !broken
+          ? <img src={m.image} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(true)} />
+          : <span className="dt-find-ph">{m.type === 'profile' ? 'Profile, no picture' : 'No picture'}</span>}
+        {m.score != null && (
+          <span className="dt-find-chip">
+            <TileChip tone={m.kept ? 'ok' : undefined} title={m.kept ? 'Above the line' : 'Below the line'}>{m.score}</TileChip>
+          </span>
+        )}
+      </button>
+      <span className="dt-find-site" title={site}>{site}</span>
+      <span className="dt-find-holds" title={holds || undefined}>{holds || ' '}</span>
+      <div className="dt-find-row">
+        {m.link
+          ? <a className="dt-fbtn" href={m.link} target="_blank" rel="noreferrer" title={m.link}>Open ↗</a>
+          : <span className="dt-fbtn off" aria-disabled="true" title="No link">Open ↗</span>}
+        <Tooltip title={apartTip}>
+          <span className="dt-fbtn-tip">
+            <button type="button" className="dt-fbtn" disabled={off || only} onClick={onApart}>Not her</button>
+          </span>
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
+export default function DuplicatesTab({ version, ask, notify, refresh, totals = {}, sourceLabel, threshold, isPhone }) {
   const [qs, setQs] = useQueryState(DEFAULTS);
   const sort = SORTS.includes(qs.sort) ? qs.sort : 'score';
   const kind = KINDS.includes(qs.kind) ? qs.kind : '';
@@ -129,25 +197,32 @@ export default function DuplicatesTab({ version, ask, notify, refresh, totals = 
 
   const filtered = !!q || qs.new === '1' || !!kind;
   const counts = { all: totals.duplicates ?? 0, fallen: totals.duplicates_fallen ?? 0, pair: totals.duplicates_pairs ?? 0 };
+  const showOn = [q, qs.new === '1'].filter(Boolean).length;
+
+  const what = !list.loaded ? 'Loading…'
+    : kind === 'fallen' ? `${plural(list.total, 'liked performer')} whose finds together score under ${threshold ?? 50}`
+      : kind === 'pair' ? `${plural(list.total, 'pair')} that may be one performer`
+        : `${list.total.toLocaleString()} to decide, below the line first`;
+  const meta = list.loaded ? `${what} · ${items.length.toLocaleString()} shown · ${sortText(sort)}` : what;
 
   return (
     <>
-      <Toolbar>
-        <Box className="dt-search">
-          <SearchField value={q} onChange={(q) => setQs({ q })} placeholder="Search names and aliases" />
-        </Box>
-        <SortSelect value={sort} onChange={(next) => setQs({ sort: next })} />
-        <Select size="small" value={kind} displayEmpty onChange={(e) => setQs({ kind: e.target.value })}
-          inputProps={{ 'aria-label': 'Duplicates: what to show' }} sx={{ fontSize: '.84rem', height: 32, bgcolor: 'var(--surface)', maxWidth: '100%' }}>
-          <MenuItem value="">{`Below the line first (${counts.all})`}</MenuItem>
-          <MenuItem value="fallen">{`Only below the line (${counts.fallen})`}</MenuItem>
-          <MenuItem value="pair">{`Only may be one (${counts.pair})`}</MenuItem>
-        </Select>
-        <FilterChip on={qs.new === '1'} onClick={() => setQs({ new: qs.new === '1' ? '' : '1' })} title="Only the performers not in the library yet">
-          New only
-        </FilterChip>
-        <TotalText>{`${items.length} of ${list.total}`}</TotalText>
-      </Toolbar>
+      <SideGroup id="show" title="Show" icon={<FilterListIcon />} badge={showOn} summary={showOn ? `${showOn} on` : 'no filters'} order={SIDE.show}>
+        <SideSearch value={q} onChange={(next) => setQs({ q: next })} placeholder="Search names and aliases" />
+        <SideSelect label="Sort" value={sort} onChange={(next) => setQs({ sort: next })} options={SORT_OPTIONS} />
+        <SideChecks items={[
+          { id: 'new', label: 'New only', checked: qs.new === '1', onChange: (v) => setQs({ new: v ? '1' : '' }), title: 'Only the performers not in the library yet' }
+        ]} />
+      </SideGroup>
+      <SideGroup id="kind" title="Kind" icon={<CategoryIcon />} badge={kind ? 1 : 0} summary={KIND_LABEL[kind]} order={SIDE.list}>
+        <SideList label="Kind" value={kind} onChange={(id) => setQs({ kind: id })} items={[
+          { id: '', label: 'All', count: counts.all, title: 'Below the line first, then the pairs' },
+          { id: 'fallen', label: 'Below the line', count: counts.fallen, title: 'Liked performers whose pictures together fall below the keep line' },
+          { id: 'pair', label: 'May be one', count: counts.pair, title: 'Pairs that may be one performer' }
+        ]} />
+      </SideGroup>
+
+      <ContentLine title={kind ? KIND_LABEL[kind] : 'Duplicates'} meta={meta} />
 
       <StalePill list={list} onReload={list.reload} />
       {list.error && <ListError error={list.error} onRetry={list.retry} />}
@@ -157,29 +232,62 @@ export default function DuplicatesTab({ version, ask, notify, refresh, totals = 
           : 'Performers that may be one, and liked performers whose pictures together fall below the keep line, show up here.'} />
       )}
 
-      <div className="dt-dups">
+      <div className={`dt-dups${isPhone ? ' phone' : ''}`}>
         {items.map(d => {
           const [a, b] = d.groups;
           const pair = d.kind === 'pair' && b;
           const off = busy.has(d.id);
           const made = done[d.id];
           const decidedElsewhere = !made && list.gone.has(d.id);   // a side decided in the drawer
-          const head = pair ? `May be one: ${(d.reasons || []).join('; ')}` : `Below the line together: ${a.pool_score} (best picture ${a.best_score})`;
           const sides = pair ? [a, b] : [a];
+          const reasons = (d.reasons || []).join('; ');
           const button = (action, label, tip, primary) => (
             <SmallButton primary={primary} disabled={off || !!made || decidedElsewhere} tip={decidedElsewhere ? 'Decided in the drawer: no longer here after a reload' : tip}
               onClick={() => decide(d, action)}>{label}</SmallButton>
           );
+          const aFacts = factsOf(a);
           return (
-            <Panel key={d.id} padded={false} className={`dt-dup ${pair ? 'pair' : 'fallen'}${made || decidedElsewhere ? ' done' : ''}`} style={{ '--cols': pair ? 2 : 1 }}>
+            <section key={d.id} aria-label={pair ? `May be one: ${a.names[0]} and ${b.names[0]}` : a.names[0]}
+              className={`dt-dup ${pair ? 'pair' : 'fallen'}${made || decidedElsewhere ? ' done' : ''}`}>
               <div className="dt-dup-head">
-                <span className={`dt-dup-text ${pair ? 'pair' : 'fallen'}`} title={head}>{head}</span>
-                {made && <Badge tone={DONE[made][1]}>{DONE[made][0]}</Badge>}
+                {pair ? (
+                  <>
+                    <b className="dt-dup-name">May be one</b>
+                    {reasons && <span className="dt-dup-meta" title={reasons}>{reasons}</span>}
+                  </>
+                ) : (
+                  <>
+                    <b className="dt-dup-name" title={(a.names || []).join(' · ')}>{a.names?.[0] || 'Unknown'}</b>
+                    {aFacts && <span className="dt-dup-meta" title={aFacts}>{aFacts}</span>}
+                    <span className="dt-dup-scores warn">{scoresOf(a)}</span>
+                  </>
+                )}
+                {made && <Badge tone={DONE[made][1]} sx={{ ml: pair ? 'auto' : 0 }}>{DONE[made][0]}</Badge>}
               </div>
-              <div className="dt-dup-body">
-                {sides.map(g => (
-                  <PerformerTile key={g.id} g={g} busy={off} sourceLabel={sourceLabel} controls={false} onOpen={(x) => drawer.open((x || g).id)} />
-                ))}
+              <div className="dt-finds">
+                {sides.map((g, i) => {
+                  const gOff = off || !!made || actions.busy.has(g.id);
+                  const facts = factsOf(g);
+                  return (
+                    <React.Fragment key={g.id}>
+                      {i > 0 && <div className="dt-divider" aria-hidden="true" />}
+                      <div className="dt-side">
+                        {pair && (
+                          <div className="dt-side-head" title={[(g.names || []).join(' · '), facts, scoresOf(g)].filter(Boolean).join(' · ')}>
+                            <b>{g.names?.[0] || 'Unknown'}</b>
+                            <span>{[facts, scoresOf(g)].filter(Boolean).join(' · ')}</span>
+                          </div>
+                        )}
+                        <div className="dt-side-finds">
+                          {(g.members || []).map(m => (
+                            <Find key={m.key} m={m} g={g} sourceLabel={sourceLabel} off={gOff}
+                              onOpen={() => drawer.open(g.id)} onApart={() => actions.takeApart(g, m)} />
+                          ))}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
               </div>
               <div className="dt-dup-actions">
                 {pair ? (
@@ -194,7 +302,7 @@ export default function DuplicatesTab({ version, ask, notify, refresh, totals = 
                   </>
                 )}
               </div>
-            </Panel>
+            </section>
           );
         })}
       </div>

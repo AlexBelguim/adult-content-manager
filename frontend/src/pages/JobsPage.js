@@ -4,30 +4,48 @@
  * Reads the shared jobs store (hooks/useJobs: GET /api/jobs?v=2, plus the browser uploads). The server says what
  * each row's six buttons may do (job.actions); components/jobs/jobActions carries them out. The page owns no queue.
  *
+ * Layout: SidebarPage. Its View list is the State (All, Running, Queued, Failed, Finished, with counts); then Kind,
+ * Services and Start. On the content line: Clear finished and Retry failed. On a phone the State is the tab row and
+ * the rest opens from Filters.
+ *
  * Route: /jobs   URL: ?kind=all|import|hash|…  &state=all|running|queued|failed|finished  &job=<row id>
  * (a legacy ?type= is read as kind).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, ButtonBase, useMediaQuery } from '@mui/material';
+import { Box, useMediaQuery } from '@mui/material';
 import ListAltIcon from '@mui/icons-material/ListAlt';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import TaskAltIcon from '@mui/icons-material/TaskAlt';
+import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
+import MonitorHeartOutlinedIcon from '@mui/icons-material/MonitorHeartOutlined';
+import AddIcon from '@mui/icons-material/Add';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { PageShell, PageHeader, Panel, EmptyState, LoadingState, SPACE } from '../components/layout';
-import { AppDialog, useAsk, useNotify, errorText } from '../components/ui';
-import { SmallButton, FilterChip, ListError, useQueryState } from '../components/discover/shared';
-import { useChrome } from '../nav';
+import {
+  SidebarPage, SideGroup, SideList, ContentLine, SIDE, Panel, EmptyState, LoadingState, SPACE
+} from '../components/layout';
+import { useAsk, useNotify, errorText } from '../components/ui';
+import { SmallButton, ListError, useQueryState } from '../components/discover/shared';
 import useJobs from '../hooks/useJobs';
 import PipelineDialog from '../components/PipelineDialog';
 import { useUploads } from '../components/import/UploadsProvider';
-import { KIND_ORDER, KIND_LABEL, KIND_ICON, STATE_FILTERS, inState } from '../components/jobs/kinds';
+import { KIND_ORDER, KIND_LABEL, KIND_SHORT, KIND_ICON, STATE_FILTERS, inState } from '../components/jobs/kinds';
 import JobRow, { detailText } from '../components/jobs/JobRow';
 import QueueBars from '../components/jobs/QueueBars';
-import { ServicesList, StartLinks, RailItem, railHeadSx, servicesSummary, servicesTone, gpuState, Dot } from '../components/jobs/ServicesPanel';
+import { ServicesList, StartLinks, servicesShort, servicesTone, gpuState } from '../components/jobs/ServicesPanel';
 import { runSlot, bulkClear, bulkRetry, post } from '../components/jobs/jobActions';
 
 const KINDS = new Set(['all', ...KIND_ORDER]);
 const STATES = new Set(STATE_FILTERS.map(([k]) => k));
+const STATE_LABEL = Object.fromEntries(STATE_FILTERS);
+const STATE_ICON = { all: ListAltIcon, running: PlayArrowIcon, queued: ScheduleIcon, failed: ErrorOutlineIcon, finished: TaskAltIcon };
+
+// The sidebar groups' icons: one element each, so the rail sees the same icon on every render.
+const KIND_GROUP_ICON = <LocalOfferOutlinedIcon />;
+const SERVICES_ICON = <MonitorHeartOutlinedIcon />;
+const START_ICON = <AddIcon />;
 
 const SECTIONS = [
   ['running', 'Running', null],
@@ -52,19 +70,12 @@ const sectionHeadSx = {
   fontSize: '.75rem', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)'
 };
 
-const chipRowSx = {
-  display: 'flex', gap: 0.75, overflowX: 'auto', flexWrap: 'nowrap', pb: 0.5, mb: SPACE.sm,
-  scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' }, '& > *': { flexShrink: 0 }
-};
-
 export default function JobsPage() {
   const { jobs, capped, services, loaded, error, updatedAt, refresh } = useJobs({ withServices: true });
   const uploads = useUploads();
   const ask = useAsk();
   const notify = useNotify();
   const navigate = useNavigate();
-  const phone = useChrome() === 'phone';
-  const narrow = useMediaQuery('(max-width:859.98px)');
   const compact = useMediaQuery('(max-width:699.98px)');
 
   const [q, setQ] = useQueryState({ kind: 'all', state: 'all', job: '', type: '' });
@@ -85,7 +96,6 @@ export default function JobsPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [barBusy, setBarBusy] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
-  const [servicesOpen, setServicesOpen] = useState(false);
   const [highlight, setHighlight] = useState(null);
 
   const offline = !!error && loaded;
@@ -178,21 +188,15 @@ export default function JobsPage() {
     return () => clearTimeout(t);
   }, [highlight]);
 
-  // ── header actions ────────────────────────────────────────
-  const clearLabel = `Clear finished (${clearN.toLocaleString()})`;
-  const retryLabel = `Retry failed (${retryN.toLocaleString()})`;
-  const barMenu = useMemo(() => (phone ? [
-    { label: clearLabel, onClick: clearFinished, disabled: clearN === 0 || bulkBusy },
-    { label: retryLabel, onClick: retryFailed, disabled: retryN === 0 || bulkBusy },
-    { label: 'Labels & funscripts…', onClick: () => setPipelineOpen(true) },
-    { label: 'Services', onClick: () => setServicesOpen(true) }
-  ] : undefined), [phone, clearLabel, retryLabel, clearN, retryN, bulkBusy, clearFinished, retryFailed]);
-
-  const headerActions = phone ? null : (
+  // ── the content line's actions ────────────────────────
+  const lineActions = (
     <>
-      <SmallButton disabled={clearN === 0 || bulkBusy} onClick={clearFinished}>{clearLabel}</SmallButton>
-      <SmallButton disabled={retryN === 0 || bulkBusy} onClick={retryFailed}>{retryLabel}</SmallButton>
-      <SmallButton onClick={() => setPipelineOpen(true)}>Labels &amp; funscripts…</SmallButton>
+      <SmallButton disabled={clearN === 0 || bulkBusy} onClick={clearFinished}>
+        Clear finished ({clearN.toLocaleString()})
+      </SmallButton>
+      <SmallButton disabled={retryN === 0 || bulkBusy} onClick={retryFailed}>
+        Retry failed ({retryN.toLocaleString()})
+      </SmallButton>
     </>
   );
 
@@ -226,85 +230,6 @@ export default function JobsPage() {
     </Panel>
   );
 
-  const tiles = (
-    <Box sx={{ display: 'flex', gap: 1, mb: SPACE.md, flexWrap: 'wrap' }}>
-      {STATE_FILTERS.map(([key, label]) => {
-        const on = state === key;
-        const count = stateCount(key);
-        return (
-          <ButtonBase key={key} aria-pressed={on} onClick={() => setState(on && key !== 'all' ? 'all' : key)} sx={{
-            display: 'block', textAlign: 'left', flex: '1 1 96px', minWidth: 96, maxWidth: 180, height: 56,
-            bgcolor: 'var(--surface)', border: '1px solid', borderColor: on ? 'var(--accent)' : 'var(--line)',
-            borderRadius: 'var(--radius-lg, 10px)', px: 1.5, py: 0.75,
-            '&:hover': { borderColor: on ? 'var(--accent)' : 'var(--line-strong)' },
-            '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: 2 }
-          }}>
-            <Box sx={{
-              fontSize: '1.125rem', fontWeight: 650, lineHeight: 1.3, fontVariantNumeric: 'tabular-nums',
-              color: key === 'failed' && count > 0 ? 'var(--bad)' : 'var(--text)'
-            }}>{count.toLocaleString()}</Box>
-            <Box sx={{ fontSize: '.75rem', color: 'var(--muted)' }}>{label}</Box>
-          </ButtonBase>
-        );
-      })}
-    </Box>
-  );
-
-  const narrowFilters = (
-    <>
-      <Box sx={chipRowSx} role="group" aria-label="Kind">
-        <FilterChip on={kind === 'all'} onClick={() => setKind('all')}>All {kindCount('all').toLocaleString()}</FilterChip>
-        {KIND_ORDER.filter(k => k === kind || kindCount(k) > 0).map(k => (
-          <FilterChip key={k} on={kind === k} onClick={() => setKind(k)}>{KIND_LABEL[k]} {kindCount(k).toLocaleString()}</FilterChip>
-        ))}
-      </Box>
-      <Box sx={chipRowSx} role="group" aria-label="State">
-        {STATE_FILTERS.map(([key, label]) => (
-          <FilterChip key={key} on={state === key} onClick={() => setState(key)}>{label} {stateCount(key).toLocaleString()}</FilterChip>
-        ))}
-      </Box>
-      <ButtonBase onClick={() => setServicesOpen(true)} sx={{
-        display: 'flex', alignItems: 'center', gap: 1, width: '100%', height: 36, px: 1.25, mb: SPACE.md,
-        justifyContent: 'flex-start', textAlign: 'left',
-        bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg, 10px)',
-        fontSize: '.8125rem', color: 'var(--dim)',
-        '&:hover': { borderColor: 'var(--line-strong)' },
-        '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: 2 }
-      }}>
-        <Dot tone={servicesTone(services, jobs)} />
-        <Box component="span" sx={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {servicesSummary(services, jobs)}
-        </Box>
-        <ChevronRightIcon sx={{ fontSize: 18, color: 'var(--muted)', flexShrink: 0 }} />
-      </ButtonBase>
-    </>
-  );
-
-  const rail = (
-    <Box component="aside" sx={{ display: 'flex', flexDirection: 'column', gap: SPACE.md, minWidth: 0 }}>
-      <Box role="group" aria-label="Kind">
-        <Box sx={railHeadSx}>Kind</Box>
-        <RailItem active={kind === 'all'} icon={<ListAltIcon />} label="All" count={kindCount('all')} onClick={() => setKind('all')} />
-        {KIND_ORDER.map(k => {
-          const Icon = KIND_ICON[k];
-          const count = kindCount(k);
-          return (
-            <RailItem key={k} active={kind === k} dim={count === 0} icon={<Icon />} label={KIND_LABEL[k]}
-              count={count} onClick={() => setKind(k)} />
-          );
-        })}
-      </Box>
-      <Box>
-        <Box sx={railHeadSx}>Services</Box>
-        <ServicesList services={services} jobs={jobs} />
-      </Box>
-      <Box>
-        <Box sx={railHeadSx}>Start something</Box>
-        <StartLinks onPipeline={() => setPipelineOpen(true)} />
-      </Box>
-    </Box>
-  );
-
   const cappedLine = (sectionKey) => typedExtras
     .filter(c => sectionOf(c.status) === sectionKey)
     .map(c => {
@@ -329,7 +254,7 @@ export default function JobsPage() {
     if (rows.length === 0 && extra === 0) return null;
     return (
       <Box component="section" key={key} aria-label={title}>
-        <Box sx={sectionHeadSx}>
+        <Box className="jobs-sec-head" sx={sectionHeadSx}>
           <span>{title} ({(rows.length + extra).toLocaleString()})</span>
           {hint && (
             <Box component="span" sx={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400, color: 'var(--muted)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -381,13 +306,80 @@ export default function JobsPage() {
           action={<SmallButton onClick={() => setQ({ kind: 'all', state: 'all', job: '' })}>Show all</SmallButton>}
         />
       )}
-      {loaded && sections}
+      {loaded && (
+        <Box sx={{ '& > section:first-of-type > .jobs-sec-head': { mt: 0 } }}>{sections}</Box>
+      )}
     </>
   );
 
-  const main = (
-    <Box sx={{ minWidth: 0 }}>
-      {narrow ? narrowFilters : tiles}
+  // ── the sidebar ───────────────────────────────────────────
+  const kindLink = kind === 'all' ? '' : `kind=${kind}`;
+  const views = STATE_FILTERS.map(([key, label]) => {
+    const Icon = STATE_ICON[key];
+    const count = stateCount(key);
+    const query = [key === 'all' ? '' : `state=${key}`, kindLink].filter(Boolean).join('&');
+    return {
+      id: key,
+      label,
+      count,
+      icon: <Icon />,
+      dot: key === 'failed' && count > 0 ? 'bad' : undefined,
+      to: `/jobs${query ? `?${query}` : ''}`,
+      replace: true,
+      onClick: (e) => {
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;   // a new tab: the link's own way
+        e.preventDefault();
+        setState(key);
+      }
+    };
+  });
+
+  const kindItems = [
+    { id: 'all', label: 'All', icon: <ListAltIcon />, count: kindCount('all') },
+    ...KIND_ORDER.map(k => {
+      const Icon = KIND_ICON[k];
+      const count = kindCount(k);
+      return { id: k, label: KIND_SHORT[k], title: KIND_LABEL[k], icon: <Icon />, count, dim: count === 0 };
+    })
+  ];
+
+  const tone = servicesTone(services, jobs);
+  const stateWord = STATE_LABEL[state] || 'All';
+  const lineTitle = kind === 'all'
+    ? `${stateWord} jobs`
+    : state === 'all' ? `${KIND_SHORT[kind]} jobs` : `${KIND_SHORT[kind]} · ${stateWord} jobs`;
+  const lineMeta = loaded ? `${stateCount(state).toLocaleString()} · newest first` : '';
+
+  return (
+    <SidebarPage title="Jobs" viewsTitle="State" views={views} view={state}>
+      <SideGroup
+        id="kind"
+        title="Kind"
+        icon={KIND_GROUP_ICON}
+        order={SIDE.list}
+        badge={kind === 'all' ? 0 : 1}
+        summary={kind === 'all' ? 'all kinds' : KIND_LABEL[kind]}
+      >
+        <SideList label="Kind" items={kindItems} value={kind} onChange={setKind} />
+      </SideGroup>
+
+      <SideGroup
+        id="services"
+        title="Services"
+        icon={SERVICES_ICON}
+        order={SIDE.list + 1}
+        dot={tone === 'off' ? 'bad' : tone === 'warn' ? 'warn' : null}
+        summary={servicesShort(services, jobs)}
+      >
+        <ServicesList services={services} jobs={jobs} />
+      </SideGroup>
+
+      <SideGroup id="start" title="Start" icon={START_ICON} order={SIDE.page} summary="where new jobs start">
+        <StartLinks onPipeline={() => setPipelineOpen(true)} />
+      </SideGroup>
+
+      <ContentLine title={lineTitle} meta={lineMeta} actions={lineActions} />
+
       {offlineBanner}
       {gpuBanner}
       <QueueBars
@@ -401,49 +393,12 @@ export default function JobsPage() {
         onAdd={() => setPipelineOpen(true)}
       />
       {list}
-    </Box>
-  );
-
-  return (
-    <PageShell>
-      <PageHeader
-        title="Jobs"
-        subtitle="Run by the server, so every browser and phone sees the same list"
-        actions={headerActions}
-        barMenu={barMenu}
-      />
-
-      {narrow ? main : (
-        <Box sx={{ display: 'grid', gridTemplateColumns: '220px minmax(0, 1fr)', gap: SPACE.lg, alignItems: 'start' }}>
-          <Box sx={{ pr: SPACE.md, borderRight: '1px solid var(--line)' }}>{rail}</Box>
-          {main}
-        </Box>
-      )}
-
-      <AppDialog
-        open={servicesOpen}
-        onClose={() => setServicesOpen(false)}
-        title="Services"
-        subtitle="What the jobs depend on, and where new ones start"
-        size="md"
-        sheet
-        cancelLabel="Close"
-      >
-        <Box sx={{ mx: -1 }}>
-          <ServicesList services={services} jobs={jobs} />
-          <Box sx={{ ...railHeadSx, mt: SPACE.md }}>Start something</Box>
-          <StartLinks
-            onPipeline={() => { setServicesOpen(false); setPipelineOpen(true); }}
-            onNavigate={() => setServicesOpen(false)}
-          />
-        </Box>
-      </AppDialog>
 
       <PipelineDialog
         open={pipelineOpen}
         onClose={() => setPipelineOpen(false)}
         onQueued={(msg) => { notify(msg); refresh(); }}
       />
-    </PageShell>
+    </SidebarPage>
   );
 }

@@ -11,7 +11,8 @@
  * the estimate, and the new file is thrown away when it isn't really 5% smaller. Every original is kept 14 days in
  * the base folder's .originals, with Undo.
  *
- * Route: /settings/space, the Space section of pages/SettingsPage.js
+ * Route: /settings/space, the Space section of pages/SettingsPage.js. Its figures (videos, could save, saved, queued),
+ * the scan line and Rescan sit in the sidebar's Space group while it is shown.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -27,11 +28,15 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import UndoIcon from '@mui/icons-material/Undo';
 import ReplayIcon from '@mui/icons-material/Replay';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { Section, Panel, StatRow, LoadingState, SPACE, iconBtnSx } from '../components/layout';
+import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
+import {
+  Section, Panel, LoadingState, SPACE, iconBtnSx, SideGroup, SideFacts, SideNote, SideButtons, SideButton
+} from '../components/layout';
 import { useAsk, useNotify } from '../components/ui';
 import { SmallButton } from '../components/discover/shared';
 
 const LIMIT = 30;
+const SPACE_ICON = <StorageOutlinedIcon />;
 const TOP_LABEL = { before: 'Before filter', after: 'After filter', content: 'Content' };
 
 // ── formatting ───────────────────────────────────────────────
@@ -400,21 +405,47 @@ export default function SpacePage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-        <Typography sx={{ ...meta, flex: 1 }}>
-          What the library's videos take up, where a re-encode saves the most, and the queue that does it.
-        </Typography>
-        <Tooltip title="Walk the library again and probe what's new or changed">
-          <span>
-            <Button size="small" variant="outlined" sx={smallBtnSx} startIcon={<RefreshIcon />} disabled={!!scan?.running}
-              onClick={() => post('/api/encode/space/rescan').then(loadSpace).catch(e => notify({ severity: 'error', message: e.message }))}>
-              Rescan
-            </Button>
-          </span>
-        </Tooltip>
-      </Box>
+      <SideGroup
+        id="space"
+        title="Space"
+        icon={SPACE_ICON}
+        summary={t ? `~${fmtSize(t.gain)} could be saved` : 'working it out'}
+      >
+        {t ? (
+          <SideFacts rows={[
+            { label: 'Videos in the library', value: fmtSize(t.size), title: `${files(t.files)}${t.unprobed ? ` · ${t.unprobed} not looked at yet` : ''} · pictures not counted` },
+            {
+              label: 'Could save', value: `~${fmtSize(t.gain)}`, tone: t.gain ? 'accent' : undefined,
+              title: `${files(t.gainFiles)} · ${cal?.jobs >= 3 ? `estimate corrected by ${cal.jobs} finished re-encodes (×${cal.factor.toFixed(2)})` : `rough estimate until ${3 - (cal?.jobs || 0)} more re-encodes finish`}`
+            },
+            {
+              label: 'Saved so far', value: fmtSize(t.saved), tone: t.saved ? 'ok' : undefined,
+              title: t.pending ? `${fmtSize(t.freed)} freed · ${fmtSize(t.held)} of originals still held in .originals, the first freed ${dateOf(t.nextFree)}`
+                : t.jobs ? `by ${t.jobs} re-encodes, all freed` : 'nothing re-encoded yet'
+            },
+            {
+              label: 'Queued', value: q ? String(q.counts.queued + q.counts.running) : '…',
+              title: q ? `${q.running ? 'running' : 'paused'}${q.active.length ? ` · ${q.active.length} encoding now` : ''}` : undefined
+            }
+          ]} />
+        ) : (
+          <SideNote>{error ? 'The figures could not be read.' : 'Working it out…'}</SideNote>
+        )}
+        {scan ? <SideNote>{scanLine}</SideNote> : null}
+        <SideButtons>
+          <SideButton
+            icon={<RefreshIcon />}
+            tip="Walk the library again and probe what's new or changed"
+            disabled={!!scan?.running}
+            onClick={() => post('/api/encode/space/rescan').then(loadSpace).catch(e => notify({ severity: 'error', message: e.message }))}
+          >
+            Rescan
+          </SideButton>
+        </SideButtons>
+      </SideGroup>
 
-      <Box sx={{ mb: SPACE.md, maxWidth: 900 }}>
+      <Box sx={{ mb: SPACE.md }}>
+        <Typography sx={meta}>What the library's videos take up, where a re-encode saves the most, and the queue that does it.</Typography>
         <Typography sx={meta}>Each new file is checked (length, start, tracks, HEVC) before it replaces the original.</Typography>
         <Typography sx={meta}>The original is kept 14 days in .originals, with Undo.</Typography>
         <Typography sx={meta}>HEVC files, VR videos and files that would not come out a fifth smaller are left alone. Videos above 1080p are scaled to 1080p.</Typography>
@@ -435,23 +466,6 @@ export default function SpacePage() {
       {error && <Alert severity="error" sx={{ mb: SPACE.md }}>{error}</Alert>}
       {!space && !error && <LoadingState label="Working it out…" />}
 
-      {t && (
-        <StatRow min={190} items={[
-          { label: 'Videos in the library', value: fmtSize(t.size), hint: `${files(t.files)}${t.unprobed ? ` · ${t.unprobed} not looked at yet` : ''} · pictures not counted` },
-          {
-            label: 'Could save', value: `~${fmtSize(t.gain)}`, tone: t.gain ? 'accent' : 'default',
-            hint: `${files(t.gainFiles)} · ${cal?.jobs >= 3 ? `estimate corrected by ${cal.jobs} finished re-encodes (×${cal.factor.toFixed(2)})` : `rough estimate until ${3 - (cal?.jobs || 0)} more re-encodes finish`}`
-          },
-          {
-            label: 'Saved so far', value: fmtSize(t.saved), tone: t.saved ? 'ok' : 'default',
-            hint: t.pending ? `${fmtSize(t.freed)} freed · ${fmtSize(t.held)} of originals still held in .originals, the first freed ${dateOf(t.nextFree)}`
-              : t.jobs ? `by ${t.jobs} re-encodes, all freed` : 'nothing re-encoded yet'
-          },
-          { label: 'Queued', value: q ? String(q.counts.queued + q.counts.running) : '…', hint: q ? `${q.running ? 'running' : 'paused'}${q.active.length ? ` · ${q.active.length} encoding now` : ''}` : '' }
-        ]} />
-      )}
-
-      {scan && <Typography sx={{ ...meta, mt: -1, mb: SPACE.md }}>{scanLine}</Typography>}
 
       <Box sx={{ display: 'grid', gap: SPACE.md, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 3fr) minmax(320px, 2fr)' }, alignItems: 'start' }}>
         <Section sx={{ mb: 0 }}>

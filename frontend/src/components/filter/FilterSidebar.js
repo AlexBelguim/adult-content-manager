@@ -1,6 +1,9 @@
 import React from 'react';
 import Icon from './Icon';
 import { TABS, TAB_LABEL, keyLabel } from './filterUtils';
+import { SideList } from '../layout';
+import { useLibraryViews } from '../home/homeData';
+import { useChrome } from '../../nav';
 
 const SORTS = [
   ['name', 'Name'],
@@ -8,10 +11,13 @@ const SORTS = [
   ['date', 'Date modified']
 ];
 
+const plainClick = (e) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+
 /**
- * Left column: Back / Next performer, title, the Progress card with the three
- * tabs as rows, whatever the parent puts in between (file card, funscripts,
- * panels), the View card and the Shortcuts card. On a phone it is the bottom sheet.
+ * Left column: the way back (desktop: the Library View list, Filter highlighted; phone: Back), Next performer,
+ * title, the Progress card with the three tabs as rows, whatever the parent puts in between (file card,
+ * funscripts, panels), the View card and the Shortcuts card. On a phone it is the bottom sheet.
+ * onView(item): a View list item was clicked (a plain click; ctrl and middle click open it in a new tab).
  */
 export default function FilterSidebar({
   performer,
@@ -19,6 +25,7 @@ export default function FilterSidebar({
   progress,
   onTab,
   onBack,
+  onView,
   onNextPerformer,
   backBusy,
   sortBy,
@@ -35,14 +42,30 @@ export default function FilterSidebar({
   children
 }) {
   const sorts = currentTab === 'funscript_vids' ? [...SORTS, ['funscript_count', 'Funscript count']] : SORTS;
+  // In the phone library there is no page bar: Back stays. On desktop the View list is the way back.
+  const phone = useChrome() === 'phone';
+  // load: false: her filter view fetches nothing for the counts; the Filter list keeps its count up to date.
+  const libraryViews = useLibraryViews({ load: false });
+  const views = libraryViews.map((it) => ({
+    ...it,
+    disabled: !!backBusy,
+    onClick: (e) => {
+      if (!plainClick(e)) return;
+      e.preventDefault();
+      onView?.(it);
+    }
+  }));
 
   return (
     <aside className={`fv-left${sheetOpen ? ' is-open' : ''}`}>
       <button type="button" className="pl-btn sm fv-sheet-x" onClick={onCloseSheet}>Close</button>
+      {!phone && <SideList label="Library" items={views} value="filter" sx={{ mx: '-4px' }} />}
       <div className="fv-navrow">
-        <button type="button" className="pl-btn sm" onClick={onBack} disabled={backBusy} title="Back to performers — trash is cleaned in the background">
-          <Icon name="back" size={16} /> Performers
-        </button>
+        {phone && (
+          <button type="button" className="pl-btn sm" onClick={onBack} disabled={backBusy} title="Back to performers — trash is cleaned in the background">
+            <Icon name="back" size={16} /> Performers
+          </button>
+        )}
         <span className="fv-grow" />
         <button type="button" className="pl-btn sm fv-go" onClick={onNextPerformer} title="Cleans the trash, then opens the next performer">
           Next performer <Icon name="right" size={14} />

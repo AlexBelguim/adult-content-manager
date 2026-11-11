@@ -1,112 +1,145 @@
 /**
- * What the AI & Training page says about the models: the types that can be trained, and what each one achieved.
+ * What the AI & Training page knows about the models: the five live ones (K, CLIP Siamese, CLIP Taste, P, P2), how each
+ * is measured, where the app uses it, and the history of the removed ones. The figures of a file come from acm-gpu
+ * (/list_models); the hand-written texts here say only what no file can.
  */
-import React from 'react';
-import { Psychology, FilterAlt, AutoAwesome } from '@mui/icons-material';
 
+// The one model setting with a reader: filterService.keepScores loads this K file for the filter view's AI toggle.
+export const PREFERRED_K_KEY = 'preferred_clip_keepdelete_model';
+
+export const TRAINABLE_TYPES = ['clip_keepdelete', 'clip_siamese', 'clip_taste'];
+export const LIVE_TYPES = ['clip_keepdelete', 'clip_siamese', 'clip_taste', 'performer_keep', 'performer_rank'];
+
+// The Train tab's model choice, in this order.
 export const MODEL_TYPES = [
-  { id: 'clip_siamese', name: 'CLIP Siamese (1st order)', icon: <AutoAwesome />, desc: 'Scores pictures so kept beats deleted and your hand-picked winners beat their losers, inside one performer. Best model so far.',
-    color: 'var(--accent)', requirements: 'Needs keep + delete folders pushed to the AI server; also uses your same-performer hand pairs: Rank images, the legacy pairwise.db import and the legacy old labeller file on the AI PC. The first run downloads CLIP ViT-L/14-336 (~1.7 GB) from Hugging Face.',
-    pros: ['Best on new performers', 'Fast: CLIP stays frozen'], cons: ['Scores are an order, not a %'] },
-  { id: 'clip_taste', name: 'CLIP Taste (2nd order)', icon: <Psychology />, desc: 'A keep % for any picture with a fixed 50% line. Learns kept vs deleted inside a performer and across performers: your disliked and blacklisted performers, and your stars.',
-    color: 'var(--chart-5)', requirements: 'Needs keep + delete folders pushed to the AI server. Performers with only deleted pictures count as disliked, or as blacklisted when blacklisted in the app; stars only pick pairs (2+ stars apart), they are no input. Uses every hand pair, across performers too. 15% of the performers of every level are held out.',
-    pros: ['Keep % with a 50% line', 'Knows disliked performers'], cons: ['Only 11 blacklisted performers'] },
-  { id: 'clip_keepdelete', name: 'K (keep / delete)', icon: <FilterAlt />, desc: 'A keep % for any picture with a fixed 50% line, learned from your keeps and deletes alone, so it grows as you filter. With the AI toggle in the filter view it refits every 10 decisions, with that performer\'s sorted pictures weighing 20x.',
-    color: 'var(--ok)', requirements: 'Needs keep + delete folders pushed to the AI server; uses the performers that have both. No pairs, no stars. Fine-tunes SigLIP-384 with a LoRA for 3 epochs, about 40 minutes (the epochs and batch size fields do not apply); it starts from ComfyUI\'s clip_vision/sigclip_vision_patch14_384 file on the AI PC. 15% of the performers are held out.',
-    pros: ['Learns the performer while you filter', 'Best inside a performer (AUC 0.779 vs 0.750 for CLIP)'], cons: ['Does not know disliked performers', 'About 40 minutes to train'] },
-];
-
-// What each model achieved so far (Claude's tests, 2026-10-16): keep vs delete on the 2,623 pictures of the
-// 38 performers added after the May training set, and Rank images pairs made after each model was trained.
-export const MODEL_NOTES = [
   {
-    name: 'CLIP Taste — 2nd order (keep %)', status: 'New', tone: 'warn', where: 'Train here',
-    result: 'Not trained yet: results on held-out performers come after the first GPU run',
-    data: 'Kept pictures (keep) against deleted pictures of kept performers and every picture of disliked (delete-only) and blacklisted performers; on 2026-10-17: 68 kept performers (6,891 pictures, 47 with 3,979 deletes), 49 disliked (2,925), 11 blacklisted (400). Pairs: kept > deleted, kept > disliked/blacklisted, disliked > blacklisted, stars 2+ apart, and every hand pair (legacy ones optional).',
-    how: 'The CLIP Siamese network (frozen CLIP ViT-L/14-336 + score head) with two losses: keep/delete (a real keep %, cut at a fixed 50%) and RankNet on the pairs. Stars only pick pairs, never kept vs kept: those would teach who, not what. 15% of the performers of every level are held out.',
-    better: ['Only 11 blacklisted performers have pictures (another 49 are blacklisted without any)', 'More hand pairs across performers'],
+    id: 'clip_keepdelete', name: 'K (keep / delete)',
+    does: 'Gives any picture a keep % with a fixed 50% line, learned from your keeps and deletes alone. Refits on the performer you are sorting every 10 decisions.',
+    requirements: 'Needs keep and delete folders pushed to the AI server; uses the performers that have both. No pairs, no stars. Fine-tunes SigLIP-384 with a LoRA, starting from ComfyUI\'s clip_vision/sigclip_vision_patch14_384 file on the AI PC. 15% of the performers are held out.',
+    fixedRun: 'Fixed run: 3 epochs, batch 16, about 40 minutes.',
   },
   {
-    name: 'CLIP Siamese — 1st order (within performer)', status: 'Best', tone: 'ok', where: 'Train here',
-    result: 'Keep vs delete AUC 0.82 on 38 new performers · 0.73 inside one performer · picks your winner in 66% of 1,091 later Rank images pairs',
-    data: '1,969 hand-made pairs from the old labeller (Dec 2025): 1,781 same performer, 188 across performers. 3 epochs. File: clip_siamese/clip_siamese_20251207.pt',
-    how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so a cut has to be picked per batch.',
-    better: [
-      'Retrain here: adds kept > deleted pairs of every performer plus your same-performer hand pairs, and holds performers out for an honest score',
-      'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from pairwise.db of the old pairwise service (785 of its 788, 764 of them same performer: 483 in the app DB, 302 of performers deleted from the app in a PC file); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
-      'A keep cut-off per performer, stricter for performers with fewer stars',
-      '2nd order (across performers) only from hand-made cross pairs (698 in the labeller file, 21 from pairwise.db); pairs made from stars teach the model who, not what',
-    ],
+    id: 'clip_siamese', name: 'CLIP Siamese',
+    does: 'Puts the pictures of one performer in order: kept beats deleted, and your hand-picked winners beat their losers. The scores are an order, not a %.',
+    requirements: 'Needs keep and delete folders pushed to the AI server; also uses your same-performer hand pairs: Rank images, the legacy pairwise.db import and the legacy old labeller file on the AI PC. The first run downloads CLIP ViT-L/14-336 (about 1.7 GB) from Hugging Face.',
+    fixedRun: null,
   },
   {
-    name: 'Simple Binary / Ranked Binary (DINO)', status: 'Removed', tone: 'bad', where: 'acm-gpu',
-    result: 'Keep vs delete AUC 0.74–0.77 on the same 38 new performers · 0.65–0.69 inside one performer',
-    data: 'Keep folder (after filter performer) vs delete folder (deleted keep for training), May 2026 set: about 4,700 keep + 5,800 delete pictures. 15% of performers held out. Ranked also gets the performer\'s stars.',
-    how: 'DINOv2-large picture embedding → small head → keep probability. The backbone unfreezes from epoch 3. At filter time Ranked got its stars from the Performer Ranker, which had no signal.',
-    better: [
-      'Learned one global "keep look", not your choice inside a performer; CLIP Siamese beat it on both, so both were taken out on 2026-11-02',
-      'The old 98.5% score came from a random picture split (same performers in train and val), not new performers',
-    ],
-  },
-  {
-    name: 'DINO Pairwise Preference', status: 'Removed', tone: 'bad', where: 'acm-gpu',
-    result: 'Keep vs delete AUC 0.75 · 0.68 inside one performer · 57% of 306 later Rank images pairs',
-    data: 'Your Rank images pairs. File: pairwise/pairwise_rating.pt',
-    how: 'The same pair idea as CLIP Siamese, on a DINOv2-large embedding with a margin loss.',
-    better: ['CLIP Siamese does the same job better, so it was taken out on 2026-11-02; your pairs train the CLIP models'],
-  },
-  {
-    name: 'Performer Ranker', status: 'Removed', tone: 'bad', where: 'acm-gpu',
-    result: 'Right in 49% of your Smart Compare duels (chance is 50%)',
-    data: 'Every picture of a rated performer gets that performer\'s stars (53 rated performers).',
-    how: 'DINOv2-large → small head → stars (0–5), regression. A performer\'s stars are the average over their pictures.',
-    better: [
-      'The real sample size was the number of rated performers (53), not the pictures, so it learned who, not what',
-      'Would need hundreds of rated performers, so it was taken out on 2026-11-02, with Smart Compare\'s Ask AI and Rate Performer (AI) that ran on it',
-    ],
-  },
-  {
-    name: 'Qwen keep/delete and Qwen Taste', status: 'Removed', tone: 'bad', where: 'scenetest test, then acm-gpu',
-    result: 'Keep vs delete AUC 0.65–0.69 on 16 performers; Qwen Taste over 46 performers (5 folds, 2026-10-26): 0.724 inside one performer, against K 0.779 and CLIP Taste 0.730',
-    data: 'Keep and delete pictures of 16, then 46 performers.',
-    how: 'Qwen3.5-9B with a LoRA reads one picture and answers keep or delete. A two-step version (performer score from 8 pictures, then picture + score) collapsed to the average.',
-    better: ['No higher than the CLIP models and 0.25 s a picture on the GPU, so it was taken out of acm-gpu on 2026-10-26; K is the keep/delete model'],
-  },
-  {
-    name: 'P and P2 — performers (profile page)', status: 'Live', tone: 'ok', where: 'acm-gpu, by itself', live: 'profile',
-    result: 'No numbers yet: P and P2 retrain while acm-gpu runs',
-    data: 'P: your keep / love / delete on the profile page, plus this app\'s performers (keep folder = keep, delete-only = delete) counted 10x. P2: your profile duels, plus your sorted lists at half weight.',
-    how: 'A performer is the mean CLIP ViT-L/14-336 embedding of her pictures. P: a class-balanced logistic regression on it, her keep chance. P2: a score learned from who wins your duels. acm-gpu retrains both on every new verdict or duel, cross-validates every 25 and saves models/performer_keep/performer_keep.pt and models/performer_rank/performer_rank.pt.',
-    better: ['More duels: P2 learns slowly from about 270', 'Pictures only: the site fields (hair, cup, ethnicity) never beat them'],
-  },
-  {
-    name: 'Profile labeller (race, hair colour, age…)', status: 'Works', tone: 'ok', where: 'scenetest',
-    result: '83% of fields right on 8 held-out performers (81% before tuning)',
-    data: '30 performers labelled by Claude, 8 pictures each.',
-    how: 'Qwen3.5-9B looks at 8 pictures of a performer and fills in the profile fields; LoRA fine-tune.',
-    better: ['Habits to fix: hair length ("shoulder"), age ("mid 20s"), ethnicity', 'More labelled performers', 'Useful as input for taste models only once many more performers are rated'],
-  },
-  {
-    name: 'Scene labeller', status: 'Works', tone: 'ok', where: 'scenetest',
-    result: '86% of fields right on 104 held-out looks · solo dildo ride 46% → 95%',
-    data: '711 checked looks from 30 videos (the gold set).',
-    how: 'Qwen3.5-9B with a QLoRA fine-tune, merged as models/merged_261016_1331; the scenetest app uses it since 2026-10-16.',
-    better: ['Webcam framing: with only a head in frame it invents acts and calls bare shoulders topless', 'Grow the gold set from the scripted library; keep a frozen test set'],
+    id: 'clip_taste', name: 'CLIP Taste',
+    does: 'Gives any picture a keep % with a fixed 50% line, inside a performer and across performers. Knows your disliked and blacklisted performers.',
+    requirements: 'Needs keep and delete folders pushed to the AI server. Performers with only deleted pictures count as disliked, or as blacklisted when blacklisted in the app; stars only pick pairs (2+ stars apart), they are no input. Uses every hand pair, across performers too. 15% of the performers of every level are held out.',
+    fixedRun: null,
   },
 ];
 
-export const NOTE_TONE = {
-  ok: { color: 'var(--ok)', bg: 'var(--ok-quiet)' },
-  warn: { color: 'var(--warn)', bg: 'var(--warn-quiet)' },
-  bad: { color: 'var(--bad)', bg: 'var(--bad-quiet)' },
+const NAMES = {
+  clip_keepdelete: 'K (keep / delete)',
+  clip_siamese: 'CLIP Siamese',
+  clip_taste: 'CLIP Taste',
+  performer_keep: 'P (performer keep %)',
+  performer_rank: 'P2 (performer ranking)',
+  binary: 'Simple Binary',
+  ranked_binary: 'Ranked Binary',
+  pairwise: 'DINO Pairwise',
+  performer_ranker: 'Performer Ranker',
+  unknown: 'Unknown',
 };
 
-// Training-type → settings key of its default model (the filter view's AI loads K's)
-export const PREFERRED_KEYS = {
-  clip_siamese: 'preferred_clip_siamese_model',
-  clip_taste: 'preferred_clip_taste_model',
-  clip_keepdelete: 'preferred_clip_keepdelete_model',
+export function modelName(type) {
+  return NAMES[type] || type || 'Unknown';
+}
+
+const isNum = (v) => v != null && v !== '' && typeof v !== 'boolean' && Number.isFinite(Number(v));
+const signed = (n, text) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${text}`;
+
+const auc = (text) => ({
+  label: 'AUC',
+  format: (v) => (isNum(v) ? Number(v).toFixed(2) : '–'),
+  diff: (a, b) => {
+    if (!isNum(a) || !isNum(b)) return '';
+    const d = Math.round((Number(a) - Number(b)) * 100) / 100;
+    return signed(d, Math.abs(d).toFixed(2));
+  },
+  chance: 0.5,
+  text,
+});
+
+const percent = (label, text) => ({
+  label,
+  format: (v) => (isNum(v) ? `${Math.round(Number(v) * 100)}%` : '–'),
+  diff: (a, b) => {
+    if (!isNum(a) || !isNum(b)) return '';
+    const d = Math.round(Number(a) * 100) - Math.round(Number(b) * 100);
+    return signed(d, `${Math.abs(d)} ${Math.abs(d) === 1 ? 'point' : 'points'}`);
+  },
+  chance: 0.5,
+  text,
+});
+
+/** How a type's saved figure (val_acc, or the profile's figures for P and P2) reads: its name, format and test set. */
+export function metricOf(type) {
+  switch (type) {
+    case 'clip_keepdelete':
+      return auc('Keep vs delete inside one performer, on the 15% of performers held out of training');
+    case 'clip_taste':
+      return auc('Keep vs delete on the 15% of performers of every level held out of training');
+    case 'clip_siamese':
+      return percent('pairs right', 'Held-out pairs put in the right order: kept > deleted and the hand pairs of the performers held out of training');
+    case 'performer_keep':
+      return auc('Your profile-page verdicts, cross-validated');
+    case 'performer_rank':
+      return percent('of held-out duels right', 'Duels left out of training, cross-validated');
+    default:
+      return percent('saved figure', 'The figure saved with the file');
+  }
+}
+
+/** What a file trained on: P and P2 save their samples by kind ({ 'page judged': 2329, ... }), the trainer one count. */
+export function samplesText(type, samples) {
+  if (samples == null) return '';
+  if (typeof samples === 'object') {
+    return Object.entries(samples)
+      .map(([k, n]) => `${isNum(n) ? Number(n).toLocaleString() : n} ${k}`)
+      .join(', ');
+  }
+  const n = isNum(samples) ? Number(samples).toLocaleString() : String(samples);
+  if (type === 'clip_keepdelete') return `${n} pictures`;
+  if (type === 'clip_siamese') return `${n} training pairs`;
+  if (type === 'clip_taste') return `${n} pairs and pictures`;
+  return `${n} samples`;
+}
+
+const validDate = (d) => (d instanceof Date && !Number.isNaN(d.getTime()) ? d : null);
+
+/** When a file was made: the trainer saves created_at as epoch seconds, P2 as an ISO string; else the file's mtime. */
+export function fileDate(m) {
+  if (!m) return null;
+  const c = m.created_at;
+  if (c != null && c !== '') {
+    if (typeof c === 'number') return validDate(new Date(c * 1000));
+    return validDate(new Date(c));
+  }
+  if (isNum(m.modified)) return validDate(new Date(Number(m.modified) * 1000));
+  return null;
+}
+
+const asDate = (d) => {
+  if (d == null || d === '') return null;
+  return validDate(d instanceof Date ? d : new Date(d));
 };
+
+/** '3 Nov 2026' from a Date or epoch ms; '' for none. */
+export function fmtDay(d) {
+  const x = asDate(d);
+  return x ? x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+}
+
+/** '3 Nov 2026, 21:40' from a Date or epoch ms; '' for none. */
+export function fmtWhen(d) {
+  const x = asDate(d);
+  if (!x) return '';
+  return `${fmtDay(x)}, ${x.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+}
 
 /**
  * Hand-pair sources: Rank images (source NULL), the pairwise.db import, and the old labeller's file on the AI PC.
@@ -131,3 +164,76 @@ export function pairSourcesOf(training, aiTrainingData) {
 }
 
 export const sumPairs = (sources, key) => sources.reduce((n, s) => n + (s[key] || 0), 0);
+
+// The one figure CLIP Siamese's newest file has: it saved none of its own (trained before the held-out split).
+export const HAND_TEST = {
+  file: 'clip_siamese/clip_siamese_20251207.pt',
+  type: 'clip_siamese',
+  value: 0.73,
+  label: 'AUC',
+  text: 'Hand test, 16 Oct 2026: keep vs delete inside one performer, on 38 performers added after it was trained (2,623 pictures)',
+};
+
+export const HAND_TEST_INTRO = 'Tested 16 Oct 2026 on pictures none of the models trained on: keep vs delete for the 2,623 pictures of 38 performers added after the May training set, and Rank images pairs made after each model was trained. AUC: 0.50 is chance, 1.00 is perfect.';
+
+// Removed types (their old files can still be deleted) and the two labellers of the scenetest app.
+export const HISTORY = [
+  {
+    name: 'Simple Binary / Ranked Binary (DINO)', state: 'Removed 2 Nov 2026', types: ['binary', 'ranked_binary'],
+    result: 'Keep vs delete AUC 0.74–0.77 on 38 new performers and 0.65–0.69 inside one performer; CLIP Siamese beat it on both.',
+  },
+  {
+    name: 'DINO Pairwise Preference', state: 'Removed 2 Nov 2026', types: ['pairwise'],
+    result: 'Keep vs delete AUC 0.75, 0.68 inside one performer and 57% of 306 later Rank images pairs; CLIP Siamese does the same job better.',
+  },
+  {
+    name: 'Performer Ranker', state: 'Removed 2 Nov 2026', types: ['performer_ranker'],
+    result: 'Right in 49% of your Smart Compare duels (chance is 50%): it learned from 53 rated performers, so it learned who, not what.',
+  },
+  {
+    name: 'Qwen keep/delete and Qwen Taste', state: 'Removed 26 Oct 2026', types: [],
+    result: 'Keep vs delete AUC 0.65–0.69 on 16 performers; Qwen Taste 0.724 inside one performer over 46 performers, against K 0.779.',
+  },
+  {
+    name: 'Profile labeller', state: 'Another app: scenetest', types: [],
+    result: '83% of the profile fields right on 8 held-out performers.',
+  },
+  {
+    name: 'Scene labeller', state: 'Another app: scenetest', types: [],
+    result: '86% of the fields right on 104 held-out looks.',
+  },
+];
+
+// Per live type: where the app uses it (to = a route, href = a static page) and the "How it works" lines.
+export const LIVE_INFO = {
+  clip_keepdelete: {
+    usedIn: [{ label: 'Filter view, AI toggle', to: '/filter' }],
+    trainsOn: 'Keep and delete folders pushed to the AI server, for performers that have both. No pairs, no stars.',
+    how: 'Fine-tunes SigLIP-384 with a LoRA for 3 epochs, about 40 minutes. 15% of the performers are held out.',
+    better: 'It does not know disliked performers.',
+  },
+  clip_siamese: {
+    usedIn: [],
+    trainsOn: 'Kept > deleted pairs of every performer, plus your same-performer hand pairs (Rank images, legacy imports).',
+    how: 'Frozen CLIP ViT-L/14-336 and a small score head, trained on pairs (RankNet).',
+    better: 'Retrain it here with held-out performers for an honest figure.',
+  },
+  clip_taste: {
+    usedIn: [],
+    trainsOn: 'Kept pictures against deleted ones, disliked (delete-only) and blacklisted performers, stars 2+ apart, and every hand pair.',
+    how: 'The CLIP Siamese network with two losses: keep/delete and RankNet. 15% of the performers of every level are held out.',
+    better: 'Only 11 blacklisted performers have pictures.',
+  },
+  performer_keep: {
+    usedIn: [{ label: 'Profile page', href: '/profile.html' }, { label: 'Discover judge', to: '/discover' }],
+    trainsOn: 'Your keep / love / delete on the profile page, plus this app\'s performers counted 10x.',
+    how: 'A class-balanced logistic regression on the mean CLIP embedding of her pictures.',
+    better: 'The site fields (hair, cup, ethnicity) never beat the pictures.',
+  },
+  performer_rank: {
+    usedIn: [{ label: 'Profile duels', href: '/profile.html#duels' }],
+    trainsOn: 'Your profile duels, plus your sorted lists at half weight.',
+    how: 'A score per performer learned from who wins your duels, on the mean CLIP embedding of her pictures.',
+    better: 'More duels: it learns slowly below about 270.',
+  },
+};

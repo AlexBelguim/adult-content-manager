@@ -1,5 +1,5 @@
 /**
- * Filter groups for FiltersDrawer.
+ * Filter groups, drawn inline in a sidebar Show group (SidebarPage).
  *
  * ChipGroup        tri-state chips (off -> include -> exclude -> off), optional
  *                  collapse ("N more") and a filter box for long lists.
@@ -12,7 +12,7 @@ import { Box, ButtonBase, Slider, TextField } from '@mui/material';
 import { TriChip } from './FiltersDrawer';
 
 const sectionSx = {
-  py: 1.75,
+  py: '10px',
   borderBottom: '1px solid var(--line)',
   '&:last-of-type': { borderBottom: 0 }
 };
@@ -216,7 +216,7 @@ function BoundField({ label, bound, propValue, onChange, min, max, step }) {
           'aria-label': `${label} ${bound === 'min' ? 'minimum' : 'maximum'}`
         }
       }}
-      sx={{ width: 96, ...inputSx }}
+      sx={{ width: 88, ...inputSx }}
     />
   );
 }

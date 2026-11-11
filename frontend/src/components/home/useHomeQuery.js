@@ -1,10 +1,12 @@
 /**
  * The Gallery home's state in the URL (replace, never push): tab, q, sort, the filter groups, gq, gsort.
- * The overlays `filters` and `show` are pushed by useOverlay and kept untouched here.
+ * The overlay `show` (the slideshow) is pushed by useOverlay and kept untouched here; `filters` (the old filter
+ * drawer's overlay) is still kept out of the stored query, so an old link does not bring it back.
  *
  * The last home query (without the overlays) is kept in sessionStorage 'acm.home.query' and put back when `/` is
- * reached with an empty search (the Gallery segment, the logo, Back). The last performer sort is also kept in
- * localStorage 'galleryPerformerSortBy', as the default when the URL has none.
+ * reached with an empty search (the logo, Back), or from the sidebar's View list (state.libraryView 'performers' or
+ * 'genres', with no more than the tab in the URL): then on the tab that was clicked. The last performer sort is also
+ * kept in localStorage 'galleryPerformerSortBy', as the default when the URL has none.
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
@@ -94,18 +96,25 @@ export default function useHomeQuery() {
     nav.current({ pathname: loc.pathname, search, hash: loc.hash }, { replace: true, state: loc.state });
   }, []);
 
-  // On the first mount only: an empty search on `/` gets the last query back.
+  // On the first mount only: an empty search on `/` gets the last query back (a View list click: on its tab).
   const restored = useRef(false);
   const skipSave = useRef(false);
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
     const loc = here.current;
-    if (loc.pathname !== '/' || loc.search !== '') return;
+    if (loc.pathname !== '/') return;
+    const view = loc.state?.libraryView;
+    const tabOnly = [...new URLSearchParams(loc.search).keys()].every(k => k === 'tab');
+    if (!(loc.search === '' || ((view === 'performers' || view === 'genres') && tabOnly))) return;
     const saved = readSession();
     if (!saved || saved === '?') return;
-    const search = saved.startsWith('?') ? saved : `?${saved}`;
-    skipSave.current = true;   // do not store the empty search this mount started with
+    const params = new URLSearchParams(saved);
+    if (view === 'genres') params.set('tab', 'genres');
+    else if (view === 'performers') params.delete('tab');
+    const search = searchOf(params);
+    if (search === loc.search) return;
+    skipSave.current = true;   // do not store the search this mount started with
     here.current = { ...loc, search };
     nav.current({ pathname: loc.pathname, search, hash: loc.hash }, { replace: true, state: loc.state });
   }, []);

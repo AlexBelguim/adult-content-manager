@@ -9,6 +9,8 @@
  *
  * registerVRComponents(AFRAME) is idempotent — safe to call on every VR route mount.
  */
+import { darkroom } from '../styles/tokens';
+
 export function registerVRComponents(AFRAME) {
   if (registerVRComponents._done) return;
   const THREE = AFRAME.THREE;
@@ -64,14 +66,16 @@ export function registerVRComponents(AFRAME) {
   /* ---- force-laser: only show the raycaster line once the controller connects ----
      laser-controls + raycaster(showLine:true) draw a line for BOTH hands immediately, so an
      unused controller (e.g. only one held) still projects a stray laser. Start with the line
-     OFF; turn it on (and re-assert our styling) only when this hand actually connects. */
+     OFF; turn it on (and re-assert our styling) only when this hand actually connects.
+     `color` is the palette accent from buildGallery; empty keeps the raycaster's own colour. */
   reg('force-laser', {
+    schema: { color: { type: 'string', default: '' } },
     init() {
       // line off until a real controller is connected for this hand
       this.el.setAttribute('raycaster', 'showLine', false);
       const enable = () => {
         this.el.setAttribute('raycaster', 'showLine', true);
-        this.el.setAttribute('raycaster', 'lineColor', '#007acc');
+        if (this.data.color) this.el.setAttribute('raycaster', 'lineColor', this.data.color);
         this.el.setAttribute('raycaster', 'lineOpacity', 0.9);
       };
       this.el.addEventListener('controllerconnected', enable);
@@ -119,7 +123,7 @@ export function registerVRComponents(AFRAME) {
       width: { default: 1 },
       height: { default: 1 },
       radius: { default: 0.05 },
-      color: { default: '#1a1a1a' },
+      color: { default: darkroom.surface },
       opacity: { default: 1 },
     },
     init() {
@@ -192,7 +196,7 @@ export function registerVRComponents(AFRAME) {
         else if ('encoding' in tex && THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
         tex.needsUpdate = true;
         mesh.material.map = tex;
-        mesh.material.color.set('#ffffff');
+        mesh.material.color.setRGB(1, 1, 1); // white tint, so the texture shows as is
         mesh.material.needsUpdate = true;
       };
 

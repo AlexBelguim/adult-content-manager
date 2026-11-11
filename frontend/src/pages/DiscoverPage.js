@@ -5,8 +5,12 @@
  * Reads GET /api/discovery/summary (the totals, the watchers, the two runs and the timer) every few seconds while a run goes
  * and less often otherwise, and at once when the page comes back into view. A run that ends or a new keep line bumps
  * `version`: the open tab then offers "New results · Reload" (it never reloads by itself). The tabs are in
- * components/discover/. Under the run line, six stat tiles (Performers, Liked, New liked, Duplicates, Judged, Kept by P);
- * the ones with a tab of their own open it.
+ * components/discover/.
+ *
+ * Layout: SidebarPage. The tabs are its View list (with their counts); each tab draws its own Show group and the one
+ * content line; the Watch section (RunControls: the keep line, the timer, the run facts, Scan now, Older posts,
+ * Re-judge, Log) is the page's own section. On a phone the View list is the tab row, the rest is in the Filters sheet
+ * and Scan now is in the page bar.
  *
  * Routes: /discover/<performers|liked|kept|duplicates|watchers|upload>, /discover/watchers/<watcherId>. /discover goes to the
  * tab used last. Each tab keeps its filters in its own query string; switching tabs comes back to the query a tab had last
@@ -14,15 +18,19 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Alert, Button, IconButton, Tooltip } from '@mui/material';
-import TuneIcon from '@mui/icons-material/Tune';
-import { PageShell, PageHeader, Section, LoadingState, SPACE } from '../components/layout';
-import { get, plural, post, sourceLabels, TabBar, useAsk, useOverlay, useToast } from '../components/discover/shared';
+import { Alert, Button } from '@mui/material';
+import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined';
+import { SidebarPage, LoadingState, SPACE } from '../components/layout';
+import { get, post, sourceLabels, useAsk, useToast } from '../components/discover/shared';
 import PerformersTab from '../components/discover/PerformersTab';
 import DuplicatesTab from '../components/discover/DuplicatesTab';
 import WatchersTab from '../components/discover/WatchersTab';
 import UploadTab from '../components/discover/UploadTab';
-import RunLine from '../components/discover/RunLine';
 import RunControls from '../components/discover/RunControls';
 import useIsPhone from '../mobile/useIsPhone';
 import '../components/discover/page.css';
@@ -62,56 +70,6 @@ function endsOf(s, prev) {
   return { ...ends, key: `${ends.hand}|${ends.timer}|${ends.threshold}` };
 }
 
-const percent = (part, whole) => (whole ? `${Math.round(part / whole * 100)}%` : '');
-
-/**
- * The six totals of the old page. Judged and Kept by P add up the watchers (checked: judged or skipped; kept: above the
- * line). `to` is the tab a tile opens, with its own filter (New liked: Liked with New only); a tile without one is plain.
- */
-function statsOf(t, watchers) {
-  const checked = watchers.reduce((n, w) => n + (w.checked || 0), 0);
-  const kept = watchers.reduce((n, w) => n + (w.kept || 0), 0);
-  const performers = t.performers || 0;
-  const liked = t.performers_with_keeps || 0;
-  const fresh = t.new_performers || 0;
-  const fallen = t.duplicates_fallen || 0;
-  return [
-    { id: 'performers', label: 'Performers', value: performers, hint: `${(t.performers_with_data || 0).toLocaleString()} with profile data`, to: ['performers'] },
-    { id: 'liked', label: 'Liked', value: liked, tone: 'ok', hint: performers ? `${percent(liked, performers)} of performers` : '', to: ['liked'] },
-    { id: 'new', label: 'New liked', value: fresh, tone: 'accent', hint: `${Math.max(0, liked - fresh).toLocaleString()} already in library`, to: ['liked', { new: '1' }] },
-    {
-      id: 'duplicates', label: 'Duplicates', value: t.duplicates || 0, tone: fallen ? 'warn' : undefined,
-      hint: fallen ? `${plural(t.duplicates_pairs || 0, 'pair')}, ${fallen.toLocaleString()} below the line` : 'to combine or keep apart',
-      to: ['duplicates']
-    },
-    { id: 'judged', label: 'Judged', value: checked, hint: `by ${plural(watchers.length, 'watcher')}` },
-    { id: 'kept', label: 'Kept by P', value: kept, tone: 'ok', hint: checked ? `${percent(kept, checked)} of judged` : '', to: ['liked'] }
-  ];
-}
-
-/** The stat tiles: six across on a wide screen, three by two below 1200px and on a phone; the hint wraps to two lines at most. */
-function StatTiles({ items, onOpen }) {
-  return (
-    <div className="dp-stats" role="group" aria-label="Totals">
-      {items.map((it) => {
-        const body = (
-          <>
-            <span className={`dp-stat-value${it.tone ? ` ${it.tone}` : ''}`}>{it.value.toLocaleString()}</span>
-            <span className="dp-stat-label">{it.label}</span>
-            {it.hint && <span className="dp-stat-hint">{it.hint}</span>}
-          </>
-        );
-        const full = `${it.label}: ${it.value.toLocaleString()}${it.hint ? `, ${it.hint}` : ''}`;
-        return it.to ? (
-          <button key={it.id} type="button" className="dp-stat link" title={full} onClick={() => onOpen(...it.to)}>{body}</button>
-        ) : (
-          <div key={it.id} className="dp-stat" title={full}>{body}</div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function DiscoverPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -127,7 +85,6 @@ export default function DiscoverPage() {
   // On a phone the drawers are full width: the toast goes above their bottom bar, so it never covers a control
   const overlays = new URLSearchParams(location.search);
   const [notify, toastNode] = useToast({ lift: isPhone && (overlays.has('p') || overlays.has('u')) });
-  const sheet = useOverlay('sheet');
   const alive = useRef(true);
   const wasRunning = useRef(false);
   const loaded = useRef(false);
@@ -242,55 +199,36 @@ export default function DiscoverPage() {
     navigate(`/discover/${id}${memory.current[id] || ''}`);
   };
 
-  // A stat tile opens its tab showing what it counts: the tab's last sort, no other filter but the tile's own
-  const openStat = (id, filter = {}) => {
-    const sort = new URLSearchParams(memory.current[id] || '').get('sort');
-    const query = new URLSearchParams({ ...(sort ? { sort } : {}), ...filter }).toString();
-    navigate(`/discover/${id}${query ? `?${query}` : ''}`);
-  };
-
   const t = summary?.totals || {};
   const run = summary?.run || {};
-  const busy = running(summary);
   const threshold = summary?.threshold ?? run.threshold ?? 50;
 
-  // The counts are in the stat tiles under the run line; the subtitle only names the model
-  const model = run.current_model || (run.models || []).join(', ') || '—';
-  const subtitleText = summary ? `P model ${model}` : 'Loading…';
-  const subtitle = isPhone ? <span className="dp-subtitle" title={subtitleText}>{subtitleText}</span> : subtitleText;
-
-  const scanTip = `Runs every watcher on watch now${busy ? ' (a run is going)' : ''}`;
-  const actions = summary && (isPhone ? (
-    <>
-      <Tooltip title={scanTip}>
-        <span className="dp-tip">
-          <Button variant="contained" disableElevation className="dp-run-btn contained lg" disabled={busy} onClick={() => act('/scan', {})}>Scan now</Button>
-        </span>
-      </Tooltip>
-      <Tooltip title="Runs">
-        <IconButton aria-label="Runs" className="dp-icon-btn" onClick={() => sheet.open('runs')}><TuneIcon /></IconButton>
-      </Tooltip>
-    </>
-  ) : (
-    <RunControls summary={summary} layout="bar" ask={ask} notify={notify} act={act} />
-  ));
-
-  const tabs = [
-    { id: 'performers', label: 'Performers', count: t.performers },
-    { id: 'liked', label: 'Liked', count: t.performers_with_keeps },
-    { id: 'kept', label: 'Kept', count: t.kept_tab },
-    { id: 'duplicates', label: 'Duplicates', count: t.duplicates },
-    { id: 'watchers', label: 'Watchers', count: summary ? watchers.length : undefined },
-    { id: 'upload', label: 'Upload', count: summary?.uploads }
-  ];
+  // The tabs as the View list: a link each (a middle click opens a new tab), switched in place to keep each tab's filters.
+  // On a watcher's page Watchers stays highlighted, and a click on it goes back to the grid.
+  const count = (n) => (summary ? n ?? 0 : null);
+  const views = [
+    { id: 'performers', label: 'Performers', icon: <GridViewOutlinedIcon />, count: count(t.performers) },
+    { id: 'liked', label: 'Liked', icon: <FavoriteBorderIcon />, count: count(t.performers_with_keeps) },
+    { id: 'kept', label: 'Kept', icon: <CheckCircleOutlineIcon />, count: count(t.kept_tab) },
+    { id: 'duplicates', label: 'Duplicates', icon: <ContentCopyIcon />, count: count(t.duplicates) },
+    { id: 'watchers', label: 'Watchers', icon: <VisibilityOutlinedIcon />, count: count(watchers.length) },
+    { id: 'upload', label: 'Upload', icon: <FileUploadOutlinedIcon />, count: count(summary?.uploads) }
+  ].map(v => ({
+    ...v,
+    to: `/discover/${v.id}${v.id === tab && !watcherId ? filtersOf(location.search) : memory.current[v.id] || ''}`,
+    title: v.id === 'watchers' && watcherId ? 'Back to all watchers' : undefined,
+    onClick: (e) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button > 0) return;   // a new tab or window: the link's own way
+      e.preventDefault();
+      goTab(v.id);
+    }
+  }));
 
   const shared = { version, ask, notify, refresh, sourceLabel, watchers, totals: summary?.totals || {}, threshold, isPhone };
+  const watcherPage = tab === 'watchers' && !!watcherId;
 
   return (
-    <PageShell className="dp-page">
-      {/* On a phone the page bar holds Back, the title, Scan now and Runs on one row; Back follows the back rule */}
-      <PageHeader title="Discover" subtitle={subtitle} actions={isPhone ? undefined : actions} barActions={isPhone ? actions : undefined} />
-
+    <SidebarPage title="Discover" className="dp-page" views={views} view={tab}>
       {error && (
         <Alert severity="error" sx={{ mb: SPACE.md }}
           action={<Button color="inherit" size="small" onClick={loadSummary}>Retry</Button>}>
@@ -301,21 +239,18 @@ export default function DiscoverPage() {
 
       {summary && (
         <>
-          <RunLine summary={summary} onPause={(slot) => act('/pause', { slot })} />
-          <StatTiles items={statsOf(t, watchers)} onOpen={openStat} />
-          <TabBar label="Discover" tabs={tabs} value={tab} onChange={goTab} />
-          <Section sx={{ mb: 0 }}>
-            {(tab === 'performers' || tab === 'liked' || tab === 'kept') && <PerformersTab key={tab} tab={tab} {...shared} />}
-            {tab === 'duplicates' && <DuplicatesTab {...shared} />}
-            {tab === 'watchers' && <WatchersTab summary={summary} watcherId={watcherId} {...shared} />}
-            <UploadTab active={tab === 'upload'} {...shared} />
-          </Section>
-          {isPhone && <RunControls summary={summary} layout="sheet" ask={ask} notify={notify} act={act} />}
+          {/* The page's own section; a watcher's page has its own main action (Run now), so Scan now is a plain button there */}
+          <RunControls summary={summary} ask={ask} notify={notify} act={act}
+            compact={tab === 'duplicates' || watcherPage} main={!watcherPage} />
+          {(tab === 'performers' || tab === 'liked' || tab === 'kept') && <PerformersTab key={tab} tab={tab} {...shared} />}
+          {tab === 'duplicates' && <DuplicatesTab {...shared} />}
+          {tab === 'watchers' && <WatchersTab summary={summary} watcherId={watcherId} {...shared} />}
+          <UploadTab active={tab === 'upload'} {...shared} />
         </>
       )}
 
       {askDialog}
       {toastNode}
-    </PageShell>
+    </SidebarPage>
   );
 }

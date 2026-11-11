@@ -4,6 +4,11 @@
  * One run of the duplicate check, paged by group on the server. Every
  * Keep / Remove choice is saved at once; removal moves files to her trash
  * folder (never saved for training), with Undo while the toast shows; then they are deleted.
+ *
+ * The frame is SidebarPage, in every state: its View list is Performer Management's views (Duplicates highlighted,
+ * the way back), then Show (the filters) and This check (its facts, Verified, Check again). The content is one
+ * ContentLine (the title, when it was checked, the pager), the banners, the groups and the orphan section; the
+ * selection bar is its last child, sticky at the foot of the window.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -14,23 +19,26 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CloseIcon from '@mui/icons-material/Close';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import {
-  PageShell, PageHeader, Section, EmptyState, LoadingState
+  ContentLine, EmptyState, LoadingState, SIDE, SidebarPage, SideButton, SideButtons, SideFacts, SideField, SideGroup
 } from '../components/layout';
 import {
   hashGet, hashPost, formatAgo, formatBytes, formatDate, plural,
   reasonText, skipShortText
 } from '../components/hash/hashApi';
 import useRunData, { useOrphans } from '../components/hash/results/useRunData';
-import FilterRow, { MIN_TO_DISTANCE } from '../components/hash/results/FilterRow';
+import { MIN_TO_DISTANCE, ShowFilters } from '../components/hash/results/FilterRow';
 import GroupCard from '../components/hash/results/GroupCard';
 import SelectionBar from '../components/hash/results/SelectionBar';
 import OrphanSection from '../components/hash/results/OrphanSection';
 import PreviewDialog from '../components/hash/results/PreviewDialog';
 import RemoveDialog from '../components/hash/results/RemoveDialog';
 import { useNotify, useToastLift } from '../components/ui';
+import { performerViews, rememberedViewCounts } from '../components/performers/model';
 import '../components/hash/hash.css';
+
 
 const DEFAULTS = { kind: 'all', media: 'all', size: 'all', min: 86, page: 1 };
 const PAGE_SIZE = 20;
@@ -80,6 +88,9 @@ function negate(d) {
 
 export default function HashResultsPage() {
   const { runId } = useParams();
+  // Performer Management's views as plain links (pushed), with the counts it last showed in this tab (none if it has
+  // not loaded: this page fetches nothing for them)
+  const performerViewList = useMemo(() => performerViews(rememberedViewCounts()), []);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = readFilters(searchParams);
@@ -152,7 +163,7 @@ export default function HashResultsPage() {
     if (listTopRef.current) listTopRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [updateParams]);
 
-  /* ─── title, back ─── */
+  /* ─── title ─── */
   const source = run?.source;
   const target = run?.target;
   const isCompare = run?.kind === 'compare';
@@ -176,13 +187,6 @@ export default function HashResultsPage() {
   useEffect(() => { document.title = titleText; }, [titleText]);
 
   const sourceId = source?.id;
-  const goBack = useCallback(() => {
-    if ((window.history.state?.idx ?? 0) > 0) navigate(-1);
-    else navigate(sourceId ? `/performer-management?performer=${sourceId}` : '/performer-management', { replace: true });
-  }, [navigate, sourceId]);
-  const toManagement = useCallback(() => {
-    navigate(sourceId ? `/performer-management?performer=${sourceId}` : '/performer-management');
-  }, [navigate, sourceId]);
 
   const ctx = useMemo(() => ({
     kind: isCompare ? 'compare' : 'internal',
@@ -483,50 +487,41 @@ export default function HashResultsPage() {
   }, [skippedMap]);
 
   /* ─── rendering ─── */
-  const back = { back: true, onBack: goBack };
+  // The frame in every state: the performer views as the View list (Duplicates highlighted: the way back), the
+  // filters (Show) and this check's facts and controls (This check) in the sidebar.
+  const frame = (content, { show = null, check = null, bar = null } = {}) => (
+    <SidebarPage title={titleText} className="hr-page" views={performerViewList} view="duplicates">
+      {show}
+      {check}
+      {content}
+      {bar ? <div className="hr-foot" aria-hidden /> : null}
+      {bar}
+    </SidebarPage>
+  );
 
   if (status === 'loading' || (status === 'ready' && !run)) {
-    return (
-      <>
-        <PageShell className="hr-page">
-          <PageHeader title="Duplicates" {...back} />
-          <LoadingState label="Loading the check…" />
-        </PageShell>
-      </>
-    );
+    return frame(<LoadingState label="Loading the check…" />);
   }
 
   if (status === 'notfound') {
-    return (
+    return frame(
       <>
-        <PageShell className="hr-page">
-          <PageHeader title="Duplicates" subtitle="Check not found" {...back} />
-          <EmptyState
-            title="This check no longer exists"
-            description="It was removed, or replaced by a newer check. Nothing was changed on disk."
-            action={(
-              <button type="button" className="hr-btn" onClick={() => navigate('/performer-management')}>
-                <ArrowBackIcon />Back to Performer Management
-              </button>
-            )}
-          />
-        </PageShell>
+        <ContentLine title="Duplicates" meta="Check not found" />
+        <EmptyState
+          title="This check no longer exists"
+          description="It was removed, or replaced by a newer check. Nothing was changed on disk."
+        />
       </>
     );
   }
 
   if (status === 'error') {
-    return (
-      <>
-        <PageShell className="hr-page">
-          <PageHeader title="Duplicates" {...back} />
-          <EmptyState
-            title="Could not load this check"
-            description={error?.message}
-            action={<button type="button" className="hr-btn" onClick={runData.reload}><RefreshIcon />Retry</button>}
-          />
-        </PageShell>
-      </>
+    return frame(
+      <EmptyState
+        title="Could not load this check"
+        description={error?.message}
+        action={<button type="button" className="hr-btn" onClick={runData.reload}><RefreshIcon />Retry</button>}
+      />
     );
   }
 
@@ -544,64 +539,13 @@ export default function HashResultsPage() {
 
   const createdAt = run.createdAt;
   const when = createdAt ? `${formatAgo(createdAt)} (${formatDate(createdAt)})` : '';
-  const subtitle = (
-    <span className="hr-subtitle">
-      {isCompare ? `Compared ${when}` : `Her own files · checked ${when}`}
-      {run.status !== 'pending' && run.status !== 'failed' && ` · ${plural(totals.groups || 0, 'group')} · ${plural(totals.files || 0, 'file')}`}
-    </span>
-  );
   const title = (
     <span className="hr-title">
-      {titleText}
+      <span className="hr-name">{titleText}</span>
       {verified && <span className="hr-badge ok">Verified</span>}
     </span>
   );
-
-  const actions = (
-    <>
-      <span
-        className={`hr-control${isCompare ? ' disabled' : ''}`}
-        title={isCompare
-          ? "Verified applies to one performer's own files"
-          : 'Mark as verified: you have looked at every group and what is left is kept on purpose'}
-      >
-        <Switch
-          size="small"
-          checked={verified}
-          disabled={isCompare}
-          onChange={toggleVerified}
-          slotProps={{ input: { 'aria-label': 'Verified' } }}
-        />
-        Verified
-      </span>
-      {checkBtn()}
-    </>
-  );
-
-  const header = (
-    <PageHeader
-      title={title}
-      titleIsInfo
-      subtitle={subtitle}
-      actions={<div className="hr-actions">{actions}</div>}
-      {...back}
-    />
-  );
-
-  if (run.status === 'pending' || run.status === 'failed') {
-    return (
-      <>
-        <PageShell className="hr-page">
-          {header}
-          {run.status === 'pending' ? (
-            <LoadingState label="This check is still running" />
-          ) : (
-            <EmptyState title="This check failed" description={run.error || undefined} action={checkBtn('hr-btn')} />
-          )}
-        </PageShell>
-      </>
-    );
-  }
+  const settled = run.status !== 'pending' && run.status !== 'failed';
 
   const groups = data.groups || [];
   const curPage = data.page || 1;
@@ -611,6 +555,93 @@ export default function HashResultsPage() {
   const from = groups.length ? (curPage - 1) * pageSize + 1 : 0;
   const to = groups.length ? from + groups.length - 1 : 0;
   const libraryReachable = run.libraryReachable !== false;
+  const reviewing = settled && !allResolved;
+
+  // ── This check: the facts, Verified, Check again ──
+  const verifiedTitle = isCompare
+    ? "Verified applies to one performer's own files"
+    : 'Mark as verified: you have looked at every group and what is left is kept on purpose';
+  const checkGroup = (
+    <SideGroup
+      id="check"
+      title="This check"
+      icon={<FactCheckOutlinedIcon />}
+      order={SIDE.page}
+      dot={verified ? 'ok' : null}
+      summary={reviewing
+        ? `${plural(selection.count || 0, 'file')} to remove${verified ? ' · verified' : ''}`
+        : (verified ? 'Verified' : '')}
+    >
+      {reviewing && (
+        <SideFacts rows={[
+          { label: 'Groups', value: `${(totals.groups || 0).toLocaleString()} · ${groups.length.toLocaleString()} on this page` },
+          {
+            label: 'Files to remove',
+            value: `${(selection.count || 0).toLocaleString()} of ${(totals.removable || 0).toLocaleString()}`,
+            tone: 'accent',
+            title: 'Keepers are not counted'
+          },
+          { label: 'Exact copies', value: (totals.exact || 0).toLocaleString(), tone: 'bad', title: 'Ticked by default' },
+          { label: 'Similar', value: (totals.similar || 0).toLocaleString(), tone: 'warn', title: 'Not ticked by default' },
+          { label: 'Space to free', value: formatBytes(selection.bytes || 0), title: 'With the current selection' }
+        ]} />
+      )}
+      <SideField label="Verified">
+        <span title={verifiedTitle} style={{ display: 'inline-flex' }}>
+          <Switch
+            size="small"
+            checked={verified}
+            disabled={isCompare}
+            onChange={toggleVerified}
+            slotProps={{ input: { 'aria-label': 'Verified' } }}
+          />
+        </span>
+      </SideField>
+      <SideButtons>
+        <SideButton
+          icon={checking ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon />}
+          disabled={checking}
+          tip={checkTitle}
+          onClick={checkAgain}
+        >
+          {checking ? 'Checking…' : checkLabel}
+        </SideButton>
+      </SideButtons>
+    </SideGroup>
+  );
+
+  // ── Show: the filters (only while there are groups to review) ──
+  const changed = ['kind', 'media', 'size', 'min'].filter(k => String(filters[k]) !== String(DEFAULTS[k])).length;
+  const showGroup = reviewing && totals.groups > 0 ? (
+    <SideGroup
+      id="show"
+      title="Show"
+      icon={<FilterListIcon />}
+      order={SIDE.show}
+      badge={changed}
+      summary={changed ? `${changed} on` : 'Everything'}
+    >
+      <ShowFilters filters={filters} onChange={changeFilters} />
+      {changed > 0 && (
+        <SideButtons>
+          <SideButton plain onClick={resetFilters}>Show all</SideButton>
+        </SideButtons>
+      )}
+    </SideGroup>
+  ) : null;
+
+  // ── the content line ──
+  let range = null;
+  if (reviewing && totals.groups > 0) {
+    if (!groups.length) range = 'no group matches';
+    else range = `${from.toLocaleString()} to ${to.toLocaleString()} of ${plural(filtered, 'group')}`;
+  }
+  const meta = [
+    isCompare ? `Compared ${when}` : `Her own files · checked ${when}`,
+    settled && plural(totals.groups || 0, 'group'),
+    settled && plural(totals.files || 0, 'file'),
+    range
+  ].filter(Boolean).join(' · ');
 
   const pager = where => (pageCount > 1 ? (
     <div className={`hr-pager${where === 'bottom' ? ' bottom' : ''}`}>
@@ -624,171 +655,132 @@ export default function HashResultsPage() {
     </div>
   ) : null);
 
-  return (
+  const line = (
     <>
-      <PageShell className="hr-page">
-        {header}
+      <div ref={listTopRef} className="hr-anchor" />
+      <ContentLine title={title} meta={meta} actions={reviewing && totals.groups > 0 ? pager('top') : null} />
+    </>
+  );
 
-        {isCompare && (
-          <p className="hr-infoline">
-            <InfoOutlinedIcon />
-            {`Only ${source.name}'s files can be removed here. ${target?.name}'s files are shown for reference and are never touched.`}
-          </p>
-        )}
-
-        {!libraryReachable && (
-          <div className="hr-banner bad" role="alert">
-            <WarningAmberIcon />
-            <div className="hr-grow">The library folder cannot be reached. Nothing can be removed until it is back.</div>
-          </div>
-        )}
-
-        {skipBanner && (
-          <div className="hr-banner" role="status">
-            <WarningAmberIcon />
-            <div className="hr-grow">
-              <b>{`${plural(skipBanner.length, 'file was', 'files were')} not moved and ${skipBanner.length === 1 ? 'stays' : 'stay'} in review.`}</b>
-              <ul>
-                {skipBanner.slice(0, 50).map((s, i) => (
-                  <li key={`${s.itemId}-${i}`}><b>{s.name}</b>{s.message ? `: ${s.message}` : ''}</li>
-                ))}
-                {skipBanner.length > 50 && <li>{`and ${(skipBanner.length - 50).toLocaleString()} more`}</li>}
-              </ul>
-            </div>
-            <button type="button" className="hr-ibtn" title="Dismiss" aria-label="Dismiss" onClick={() => setSkipBanner(null)}>
-              <CloseIcon />
-            </button>
-          </div>
-        )}
-
-        {oldRemoved && (
-          <div className="hr-banner" role="status">
-            <WarningAmberIcon />
-            <div className="hr-grow">
-              <b>{`${plural(oldRemoved.length, 'file')} from the old Recently removed could not go to a trash folder: ${oldRemoved.length === 1 ? 'its' : 'their'} performer folder is gone.`}</b>
-              {' They are still here and are deleted 30 days after they were removed. To keep one, move it back by hand before then.'}
-              <ul>
-                {oldRemoved.slice(0, 50).map(o => <li key={o.id}>{o.storedPath}</li>)}
-                {oldRemoved.length > 50 && <li>{`and ${(oldRemoved.length - 50).toLocaleString()} more`}</li>}
-              </ul>
-            </div>
-            <button type="button" className="hr-ibtn" title="Dismiss" aria-label="Dismiss" onClick={() => setOldRemoved(null)}>
-              <CloseIcon />
-            </button>
-          </div>
-        )}
-
-        {allResolved ? (
-          <EmptyState
-            title={run.removedCount > 0 ? 'No duplicates left' : 'No duplicates in this check'}
-            description={run.removedCount > 0
-              ? `All groups are resolved. ${plural(run.removedCount, 'file was', 'files were')} removed.`
-              : undefined}
-            action={(
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                {checkBtn('hr-btn outlined')}
-                <button type="button" className="hr-btn" onClick={toManagement}>
-                  <ArrowBackIcon />Back to Performer Management
-                </button>
-              </div>
-            )}
-          />
+  if (!settled) {
+    return frame(
+      <>
+        {line}
+        {run.status === 'pending' ? (
+          <LoadingState label="This check is still running" />
         ) : (
-          <>
-            <div className="hr-stats">
-              <div className="hr-stat">
-                <b>{(totals.groups || 0).toLocaleString()}</b>
-                <span>Groups</span>
-                <em>{`${groups.length.toLocaleString()} on this page`}</em>
-              </div>
-              <div className="hr-stat accent">
-                <b>{(selection.count || 0).toLocaleString()} <small>{`of ${(totals.removable || 0).toLocaleString()}`}</small></b>
-                <span>Files to remove</span>
-                <em>keepers not counted</em>
-              </div>
-              <div className="hr-stat bad">
-                <b>{(totals.exact || 0).toLocaleString()}</b>
-                <span>Exact copies</span>
-                <em>ticked by default</em>
-              </div>
-              <div className="hr-stat warn">
-                <b>{(totals.similar || 0).toLocaleString()}</b>
-                <span>Similar</span>
-                <em>not ticked by default</em>
-              </div>
-              <div className="hr-stat space">
-                <b>{formatBytes(selection.bytes || 0)}</b>
-                <span>Space to free</span>
-                <em>with the current selection</em>
-              </div>
-            </div>
-
-            {totals.groups > 0 && (
-              <>
-                <FilterRow filters={filters} matchCount={filtered} onChange={changeFilters} />
-                <div ref={listTopRef} className="hr-anchor" />
-                <Section
-                  title="To review"
-                  description={<span className="hr-num">{`${from.toLocaleString()} to ${to.toLocaleString()} of ${plural(filtered, 'group')}`}</span>}
-                  actions={pager('top')}
-                >
-                  <div className={`hr-list${refreshing ? ' hr-refreshing' : ''}`} aria-busy={refreshing || undefined}>
-                    {groups.length === 0 ? (
-                      <EmptyState
-                        title="No groups match these filters"
-                        action={<button type="button" className="hr-btn outlined" onClick={resetFilters}>Show all</button>}
-                      />
-                    ) : (
-                      <div className="hr-groups">
-                        {groups.map(g => (
-                          <GroupCard
-                            key={g.key}
-                            group={g}
-                            ctx={ctx}
-                            busy={busyKeys.has(g.key)}
-                            skipped={skippedFor(g)}
-                            onToggle={onToggle}
-                            onMakeKeeper={onMakeKeeper}
-                            onPreview={onPreview}
-                            onKeepAll={onKeepAll}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {pager('bottom')}
-                  </div>
-                </Section>
-              </>
-            )}
-
-            {totals.orphanGroups > 0 && (
-              <OrphanSection
-                count={totals.orphanGroups}
-                open={orphansOpen}
-                onOpenChange={setOrphansOpen}
-                orphans={orphans}
-                ctx={ctx}
-                busyKeys={busyKeys}
-                onToggle={onToggle}
-                onDismiss={onDismiss}
-                onPreview={onPreview}
-              />
-            )}
-          </>
+          <EmptyState title="This check failed" description={run.error || undefined} action={checkBtn('hr-btn')} />
         )}
-      </PageShell>
+      </>,
+      { check: checkGroup }
+    );
+  }
 
-      {!allResolved && (
-        <SelectionBar
-          selection={selection}
-          offScreen={offScreen}
-          waiting={waitingMembers.length}
-          showCount={selectShownIds.length}
-          libraryReachable={libraryReachable}
-          onClear={clearSelection}
-          onSelectShown={selectShown}
-          onRemove={() => setRemoveOpen(true)}
+  const content = (
+    <>
+      {line}
+
+      {isCompare && (
+        <p className="hr-infoline">
+          <InfoOutlinedIcon />
+          {`Only ${source.name}'s files can be removed here. ${target?.name}'s files are shown for reference and are never touched.`}
+        </p>
+      )}
+
+      {!libraryReachable && (
+        <div className="hr-banner bad" role="alert">
+          <WarningAmberIcon />
+          <div className="hr-grow">The library folder cannot be reached. Nothing can be removed until it is back.</div>
+        </div>
+      )}
+
+      {skipBanner && (
+        <div className="hr-banner" role="status">
+          <WarningAmberIcon />
+          <div className="hr-grow">
+            <b>{`${plural(skipBanner.length, 'file was', 'files were')} not moved and ${skipBanner.length === 1 ? 'stays' : 'stay'} in review.`}</b>
+            <ul>
+              {skipBanner.slice(0, 50).map((s, i) => (
+                <li key={`${s.itemId}-${i}`}><b>{s.name}</b>{s.message ? `: ${s.message}` : ''}</li>
+              ))}
+              {skipBanner.length > 50 && <li>{`and ${(skipBanner.length - 50).toLocaleString()} more`}</li>}
+            </ul>
+          </div>
+          <button type="button" className="hr-ibtn" title="Dismiss" aria-label="Dismiss" onClick={() => setSkipBanner(null)}>
+            <CloseIcon />
+          </button>
+        </div>
+      )}
+
+      {oldRemoved && (
+        <div className="hr-banner" role="status">
+          <WarningAmberIcon />
+          <div className="hr-grow">
+            <b>{`${plural(oldRemoved.length, 'file')} from the old Recently removed could not go to a trash folder: ${oldRemoved.length === 1 ? 'its' : 'their'} performer folder is gone.`}</b>
+            {' They are still here and are deleted 30 days after they were removed. To keep one, move it back by hand before then.'}
+            <ul>
+              {oldRemoved.slice(0, 50).map(o => <li key={o.id}>{o.storedPath}</li>)}
+              {oldRemoved.length > 50 && <li>{`and ${(oldRemoved.length - 50).toLocaleString()} more`}</li>}
+            </ul>
+          </div>
+          <button type="button" className="hr-ibtn" title="Dismiss" aria-label="Dismiss" onClick={() => setOldRemoved(null)}>
+            <CloseIcon />
+          </button>
+        </div>
+      )}
+
+      {allResolved ? (
+        <EmptyState
+          title={run.removedCount > 0 ? 'No duplicates left' : 'No duplicates in this check'}
+          description={run.removedCount > 0
+            ? `All groups are resolved. ${plural(run.removedCount, 'file was', 'files were')} removed.`
+            : undefined}
+          action={checkBtn('hr-btn outlined')}
         />
+      ) : (
+        <>
+          {totals.groups > 0 && (
+            <div className={`hr-list${refreshing ? ' hr-refreshing' : ''}`} aria-busy={refreshing || undefined}>
+              {groups.length === 0 ? (
+                <EmptyState
+                  title="No groups match these filters"
+                  action={<button type="button" className="hr-btn outlined" onClick={resetFilters}>Show all</button>}
+                />
+              ) : (
+                <div className="hr-groups">
+                  {groups.map(g => (
+                    <GroupCard
+                      key={g.key}
+                      group={g}
+                      ctx={ctx}
+                      busy={busyKeys.has(g.key)}
+                      skipped={skippedFor(g)}
+                      onToggle={onToggle}
+                      onMakeKeeper={onMakeKeeper}
+                      onPreview={onPreview}
+                      onKeepAll={onKeepAll}
+                    />
+                  ))}
+                </div>
+              )}
+              {pager('bottom')}
+            </div>
+          )}
+
+          {totals.orphanGroups > 0 && (
+            <OrphanSection
+              count={totals.orphanGroups}
+              open={orphansOpen}
+              onOpenChange={setOrphansOpen}
+              orphans={orphans}
+              ctx={ctx}
+              busyKeys={busyKeys}
+              onToggle={onToggle}
+              onDismiss={onDismiss}
+              onPreview={onPreview}
+            />
+          )}
+        </>
       )}
 
       <PreviewDialog
@@ -812,4 +804,19 @@ export default function HashResultsPage() {
       />
     </>
   );
+
+  const bar = allResolved ? null : (
+    <SelectionBar
+      selection={selection}
+      offScreen={offScreen}
+      waiting={waitingMembers.length}
+      showCount={selectShownIds.length}
+      libraryReachable={libraryReachable}
+      onClear={clearSelection}
+      onSelectShown={selectShown}
+      onRemove={() => setRemoveOpen(true)}
+    />
+  );
+
+  return frame(content, { show: showGroup, check: checkGroup, bar });
 }

@@ -1,16 +1,25 @@
 /**
  * Settings as a page: /settings and /settings/<section>.
  *
- * Desktop (900px and wider): /settings goes to /settings/library; a 200px section list on the left acts as tabs
- * (its links replace, so Back leaves Settings in one step) and the section on the right.
- * Phone: /settings is a list of the sections (links push); /settings/<id> shows one section, titled by it.
+ * Desktop (900px and wider): /settings goes to /settings/library. SidebarPage: the sections are its View list (the
+ * links replace, so Back leaves Settings in one step); a section may add its own sidebar group while it is shown
+ * (Space: its figures).
+ * Phone: /settings is a list of the sections (links push); /settings/<id> shows one section in SidebarPage, titled by
+ * it, with the sections as the tab row (links replace).
  * Every setting saves when it changes (components/settings/kit: useSave, SaveNote).
  */
 import React, { useEffect } from 'react';
 import { Navigate, Link as RouterLink, useParams } from 'react-router-dom';
 import { Box } from '@mui/material';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { PageShell, PageHeader } from '../components/layout';
+import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
+import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
+import KeyboardOutlinedIcon from '@mui/icons-material/KeyboardOutlined';
+import MemoryOutlinedIcon from '@mui/icons-material/MemoryOutlined';
+import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
+import PaletteOutlinedIcon from '@mui/icons-material/PaletteOutlined';
+import SettingsSuggestOutlinedIcon from '@mui/icons-material/SettingsSuggestOutlined';
+import { PageShell, PageHeader, SidebarPage, ContentLine } from '../components/layout';
 import { useIsPhone } from '../nav';
 import { Rows } from '../components/settings/kit';
 import LibrarySection from '../components/settings/LibrarySection';
@@ -32,24 +41,22 @@ export const SETTINGS_SECTIONS = [
 ];
 
 const SUBTITLE = 'Saved on the server for every browser unless a row says this browser only.';
+const LINE_META = 'Each change saves at once · saved on the server for every browser unless a row says this browser only';
 
-const navLinkSx = (active) => ({
-  display: 'flex',
-  alignItems: 'center',
-  height: 36,
-  px: 1.5,
-  borderRadius: 'var(--radius, 6px)',
-  fontSize: 13.5,
-  color: active ? 'var(--text)' : 'var(--dim)',
-  fontWeight: active ? 600 : 400,
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  bgcolor: active ? 'var(--accent-quiet)' : 'transparent',
-  boxShadow: active ? 'inset 2px 0 0 var(--accent)' : 'none',
-  '&:hover': { bgcolor: active ? 'var(--accent-quiet)' : 'var(--raised)' },
-  '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: -2 }
+const SECTION_ICON = {
+  library: FolderOutlinedIcon,
+  tags: LocalOfferOutlinedIcon,
+  shortcuts: KeyboardOutlinedIcon,
+  workers: MemoryOutlinedIcon,
+  space: StorageOutlinedIcon,
+  appearance: PaletteOutlinedIcon,
+  system: SettingsSuggestOutlinedIcon
+};
+
+/** The sections as the View list (desktop) and the tab row (phone). The links replace. */
+const VIEWS = SETTINGS_SECTIONS.map(s => {
+  const Icon = SECTION_ICON[s.id];
+  return { id: s.id, label: s.label, title: s.hint, icon: <Icon />, to: `/settings/${s.id}`, replace: true };
 });
 
 const phoneRowSx = {
@@ -80,65 +87,34 @@ export default function SettingsPage() {
   if (parts.length > 1) return <Navigate to={`/settings/${parts[0]}`} replace />;
   if (id && !section) return <Navigate to="/settings" replace />;
 
-  if (!isPhone) {
-    if (!section) return <Navigate to="/settings/library" replace />;
+  if (!isPhone && !section) return <Navigate to="/settings/library" replace />;
+
+  if (section) {
     const { Component } = section;
     return (
-      <PageShell>
-        <PageHeader title="Settings" back parent="/" subtitle={`${SUBTITLE} Each change saves at once.`} />
-        <Box sx={{ display: 'grid', gridTemplateColumns: '200px minmax(0,1fr)', gap: 3, alignItems: 'start' }}>
-          <Box
-            component="nav"
-            aria-label="Settings sections"
-            sx={{ position: 'sticky', top: 72, display: 'flex', flexDirection: 'column', gap: 0.25 }}
-          >
-            {SETTINGS_SECTIONS.map(s => (
-              <Box
-                key={s.id}
-                component={RouterLink}
-                to={`/settings/${s.id}`}
-                replace
-                aria-current={s.id === id ? 'page' : undefined}
-                sx={navLinkSx(s.id === id)}
-              >
-                {s.label}
-              </Box>
-            ))}
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Component key={id} />
-          </Box>
-        </Box>
-      </PageShell>
+      <SidebarPage title={isPhone ? section.label : 'Settings'} views={VIEWS} view={id}>
+        <ContentLine title={section.label} meta={LINE_META} />
+        <Component key={id} />
+      </SidebarPage>
     );
   }
 
-  if (!section) {
-    return (
-      <PageShell>
-        <PageHeader title="Settings" subtitle={SUBTITLE} />
-        <Rows>
-          {SETTINGS_SECTIONS.map(s => (
-            <Box key={s.id} component={RouterLink} to={`/settings/${s.id}`} sx={phoneRowSx}>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Box sx={{ fontSize: 14, color: 'var(--text)', fontWeight: 550 }}>{s.label}</Box>
-                <Box sx={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {s.hint}
-                </Box>
-              </Box>
-              <ChevronRightIcon sx={{ color: 'var(--muted)', fontSize: 20, flexShrink: 0 }} />
-            </Box>
-          ))}
-        </Rows>
-      </PageShell>
-    );
-  }
-
-  const { Component } = section;
   return (
-    <PageShell>
-      <PageHeader title={section.label} />
-      <Component key={id} />
+    <PageShell full>
+      <PageHeader title="Settings" subtitle={SUBTITLE} />
+      <Rows>
+        {SETTINGS_SECTIONS.map(s => (
+          <Box key={s.id} component={RouterLink} to={`/settings/${s.id}`} sx={phoneRowSx}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Box sx={{ fontSize: 14, color: 'var(--text)', fontWeight: 550 }}>{s.label}</Box>
+              <Box sx={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {s.hint}
+              </Box>
+            </Box>
+            <ChevronRightIcon sx={{ color: 'var(--muted)', fontSize: 20, flexShrink: 0 }} />
+          </Box>
+        ))}
+      </Rows>
     </PageShell>
   );
 }

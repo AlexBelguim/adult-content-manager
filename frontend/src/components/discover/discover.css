@@ -2,8 +2,10 @@
    Darkroom tokens only (styles/tokens.js publishes them as CSS variables). No gradients, nothing under 12px (.75rem).
    Prefix: dv-. Imported by Tile.js. The feel follows components/hash/hash.css (the accepted dense tile). */
 
-/* ── grid: every column the same width, so every picture (3/4) and every tile the same height ── */
-.dv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 10px; }
+/* ── grid: every column the same width, so every picture (3/4) and every tile the same height; the columns fill the row,
+   so it meets both edges of the content (12px apart, 8px on a phone). 200px at least: narrower, the Keep and
+   Delete labels in the control row get cut ── */
+.dv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 @media (max-width: 600px) {
   .dv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 }

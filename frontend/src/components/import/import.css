@@ -11,26 +11,17 @@
 /* the one dim line under each tab: what happens */
 .im-line { margin: 0 0 12px; font-size: .85rem; line-height: 1.45; color: var(--dim); }
 
-/* ── server tab: toolbar ── */
-.im-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; min-width: 0; }
-.im-total { font-size: .78rem; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-
 /* ── the sticky action bar: after the grid, always on screen while the tab has folders.
-   Its sides undo PageShell's padding (8px under 600px, 16px to 900px, 24px above) so it runs edge to edge and its
-   content lines up with the page's. ── */
+   Its sides undo the content column's padding (SidebarPage: 24px beside the sidebar, 12px on a phone) so it runs
+   across the content column, edge to edge, and its content lines up with the page's. ── */
 .im-bar {
   position: sticky; bottom: var(--nav-bottom, 0px); z-index: 15;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; box-sizing: border-box;
-  padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
-  margin: 16px -8px -8px;
+  padding: 10px 24px calc(10px + env(safe-area-inset-bottom));
+  margin: 16px -24px -24px;
   background: var(--surface); border-top: 1px solid var(--line-strong);
 }
-@media (min-width: 600px) {
-  .im-bar { padding-left: 16px; padding-right: 16px; margin: 16px -16px -16px; }
-}
-@media (min-width: 900px) {
-  .im-bar { padding-left: 24px; padding-right: 24px; margin: 16px -24px -24px; }
-}
+[data-sidebar-mode="phone"] .im-bar { padding-left: 12px; padding-right: 12px; margin: 16px -12px -12px; }
 .im-count { min-width: 0; font-size: .9rem; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .im-count small { display: block; font-size: .75rem; font-weight: 400; color: var(--muted); }
 .im-barbtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }

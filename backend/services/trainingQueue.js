@@ -7,11 +7,15 @@
  * next only when the last has ended. Cancel stops a waiting run at once and a running one on its next report.
  *
  * A running run whose worker hasn't reported for STALE_MS failed (training can't pick up where it stopped): Retry puts
- * it back in the queue.
+ * it back in the queue. Not in the first STALE_MS after this process starts, so a restart of the app fails nothing.
  */
 const db = require('../db');
 
 const STALE_MS = 10 * 60 * 1000;
+// A running run whose worker has been silent this long ends at once on Cancel: no report will come to stop it.
+const SILENT_MS = 60 * 1000;
+// When this process started: after a restart, failStale waits STALE_MS so a worker that is still training can report first.
+const STARTED = Date.now();
 const ACTIVE = "('queued','running')";
 
 // What can still be trained. Runs of the types taken out on 2026-11-02 stay in the history under their labels (TITLE),
@@ -29,7 +33,8 @@ const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return n
 /** a run at the end of the queue: { id, position } */
 function enqueue(payload) {
   const pos = db.prepare(`SELECT COALESCE(MAX(position), 0) AS p FROM training_jobs WHERE status IN ${ACTIVE}`).get().p + 1;
-  const label = `${titleOf(payload.type)} · ${payload.epochs || '?'} epochs`;
+  // K always trains a fixed run (acm-gpu's trainer sets it), so its label names no epochs
+  const label = payload.type === 'clip_keepdelete' ? titleOf(payload.type) : `${titleOf(payload.type)} · ${payload.epochs || '?'} epochs`;
   const r = db.prepare('INSERT INTO training_jobs (type, label, payload, status, position, created_at) VALUES (?, ?, ?, \'queued\', ?, ?)')
     .run(payload.type, label, JSON.stringify(payload), pos, Date.now());
   const ahead = db.prepare(`SELECT COUNT(*) AS n FROM training_jobs WHERE status IN ${ACTIVE} AND id != ?`).get(Number(r.lastInsertRowid)).n;
@@ -37,6 +42,7 @@ function enqueue(payload) {
 }
 
 function failStale() {
+  if (Date.now() - STARTED < STALE_MS) return;
   db.prepare("UPDATE training_jobs SET status = 'failed', error = 'acm-gpu stopped reporting (restarted or switched off): Retry runs it again', finished_at = ?, phase = NULL WHERE status = 'running' AND heartbeat_at < ?")
     .run(Date.now(), Date.now() - STALE_MS);
 }
@@ -60,14 +66,21 @@ function list() {
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 
-/** Cancel: a waiting run leaves the queue; a running one is stopped on its worker's next report */
+/**
+ * Cancel: a waiting run leaves the queue; a running one is stopped on its worker's next report, or at once when its
+ * worker has been silent for SILENT_MS (gone: no report would ever come)
+ */
 function cancel(id) {
   const r = db.prepare('SELECT * FROM training_jobs WHERE id = ?').get(id);
   if (!r) throw err(404, 'No such training run');
   if (r.status === 'queued') {
     db.prepare("UPDATE training_jobs SET status = 'cancelled', finished_at = ? WHERE id = ?").run(Date.now(), id);
   } else if (r.status === 'running') {
-    db.prepare('UPDATE training_jobs SET cancel = 1 WHERE id = ?').run(id);
+    if ((r.heartbeat_at || r.started_at || 0) < Date.now() - SILENT_MS) {
+      db.prepare("UPDATE training_jobs SET status = 'cancelled', finished_at = ?, phase = NULL, cancel = 0 WHERE id = ?").run(Date.now(), id);
+    } else {
+      db.prepare('UPDATE training_jobs SET cancel = 1 WHERE id = ?').run(id);
+    }
   } else {
     throw err(409, 'That run has already ended');
   }

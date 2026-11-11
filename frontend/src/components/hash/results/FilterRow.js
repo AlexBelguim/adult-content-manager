@@ -1,59 +1,57 @@
 import React from 'react';
-import { plural } from '../hashApi';
+import { SideNote, SideSegment } from '../../layout';
 
-const KIND = [['all', 'All'], ['exact', 'Exact'], ['similar', 'Similar']];
-const MEDIA = [['all', 'Pictures and videos'], ['pics', 'Pictures'], ['vids', 'Videos']];
-const SIZE = [['all', 'Pairs and groups'], ['pairs', 'Pairs'], ['groups', 'Groups']];
-const MIN = [86, 90, 95];
+/**
+ * The filters of the duplicates page (/hash-results/:runId), for the sidebar's Show group: Match, Media, Size and
+ * Lowest similarity as segmented choices. Filters only change what is shown, never what is selected. The option
+ * lists are exported for the page.
+ *
+ *   <ShowFilters filters={{ kind, media, size, min }} onChange={(patch) => …} />
+ */
+export const KIND_OPTIONS = [
+  { id: 'all', label: 'All' },
+  { id: 'exact', label: 'Exact' },
+  { id: 'similar', label: 'Similar' }
+];
+export const MEDIA_OPTIONS = [
+  { id: 'all', label: 'Both', title: 'Pictures and videos' },
+  { id: 'pics', label: 'Pictures' },
+  { id: 'vids', label: 'Videos' }
+];
+export const SIZE_OPTIONS = [
+  { id: 'all', label: 'Both', title: 'Pairs and groups' },
+  { id: 'pairs', label: 'Pairs', title: 'Two files' },
+  { id: 'groups', label: 'Groups', title: 'Three files or more' }
+];
+export const MIN_VALUES = [86, 90, 95];
 
 /** 86 → 9, 90 → 6, 95 → 3 (dHash bits out of 64). */
 export const MIN_TO_DISTANCE = { 86: 9, 90: 6, 95: 3 };
 
-function ChipGroup({ label, options, value, onChange }) {
-  return (
-    <span className="hr-chipgroup" role="group" aria-label={label}>
-      {options.map(([v, text]) => (
-        <button
-          key={v}
-          type="button"
-          className={`hr-fchip${value === v ? ' on' : ''}`}
-          aria-pressed={value === v}
-          onClick={() => onChange(v)}
-        >{text}</button>
-      ))}
-    </span>
-  );
-}
+const headSx = { mb: '-4px' };
 
-/**
- * One chip row (phone: one horizontal scrolling row). Filters only change
- * what is shown, never what is selected.
- */
-export default function FilterRow({ filters, matchCount, onChange }) {
+export function ShowFilters({ filters, onChange }) {
   const { kind, media, size, min } = filters;
+  const exactOnly = kind === 'exact';
+  const minOptions = MIN_VALUES.map(v => ({
+    id: v,
+    label: `${v}%`,
+    disabled: exactOnly,
+    title: exactOnly ? 'Only exact copies are shown' : `Similar at least ${v}%`
+  }));
   return (
     <>
-      <div className="hr-chips">
-        <ChipGroup label="Match" options={KIND} value={kind} onChange={v => onChange({ kind: v })} />
-        <span className="hr-vsep" />
-        <ChipGroup label="Media" options={MEDIA} value={media} onChange={v => onChange({ media: v })} />
-        <span className="hr-vsep" />
-        <ChipGroup label="Group size" options={SIZE} value={size} onChange={v => onChange({ size: v })} />
-        <span className="hr-vsep" />
-        <select
-          className="hr-select"
-          aria-label="Lowest similarity shown"
-          value={min}
-          disabled={kind === 'exact'}
-          title={kind === 'exact' ? 'Only exact copies are shown' : 'This check holds matches of 86% and up'}
-          onChange={e => onChange({ min: Number(e.target.value) })}
-        >
-          {MIN.map(v => <option key={v} value={v}>{`Similar at least ${v}%`}</option>)}
-        </select>
-        <span className="hr-grow" />
-        <span className="hr-match">{`${plural(matchCount, 'group')} ${matchCount === 1 ? 'matches' : 'match'}`}</span>
-      </div>
-      <p className="hr-hint">Filters change what is shown, never what is selected.</p>
+      <SideNote sx={headSx}>Match</SideNote>
+      <SideSegment label="Match" value={kind} options={KIND_OPTIONS} onChange={v => onChange({ kind: v })} />
+      <SideNote sx={headSx}>Media</SideNote>
+      <SideSegment label="Media" value={media} options={MEDIA_OPTIONS} onChange={v => onChange({ media: v })} />
+      <SideNote sx={headSx}>Size</SideNote>
+      <SideSegment label="Group size" value={size} options={SIZE_OPTIONS} onChange={v => onChange({ size: v })} />
+      <SideNote sx={headSx}>Lowest similarity</SideNote>
+      <SideSegment label="Lowest similarity shown" value={min} options={minOptions} onChange={v => onChange({ min: Number(v) })} />
+      <SideNote>Filters change what is shown, never what is selected.</SideNote>
     </>
   );
 }
+
+export default ShowFilters;

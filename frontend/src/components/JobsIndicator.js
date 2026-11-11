@@ -1,17 +1,35 @@
 /**
- * JobsIndicator — the app-bar chip: 'N running', else 'M queued', else a tick; '· K failed' in red when anything
- * failed; 'Offline' when the server does not answer. Its popover lists the failed and the running jobs, each a
- * link to that row on the Jobs page.
+ * JobsIndicator — the app bar's Jobs item: 'N running' (a spinner), else 'M queued' (an accent dot), else 'No jobs'
+ * (a green dot); '· K failed' in red when anything failed; 'Offline' when the server does not answer. Its popover
+ * lists the failed and the running jobs, each a link to that row on the Jobs page.
+ *
+ * barGhostSx is the one style of the bar's right-hand items (Jobs, Handy, More): no border, no box, a hover background.
  *
  * Reads the shared jobs store (hooks/useJobs), slower than the page: it is on every screen.
  */
 import React, { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Box, ButtonBase, Button, Popover, CircularProgress } from '@mui/material';
-import CheckIcon from '@mui/icons-material/Check';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import useJobs from '../hooks/useJobs';
 import { iconOf, jobPercent, JobBar } from './jobs/kinds';
+
+/** The bar's right-hand items: Jobs, the Handy gear and More. */
+export const barGhostSx = (active = false) => ({
+  display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0, height: 32, minWidth: 0, px: '10px',
+  border: 0, bgcolor: 'transparent', borderRadius: 'var(--radius)', boxShadow: 'none',
+  fontSize: 13, fontWeight: 500, fontFamily: 'inherit', lineHeight: 1, textTransform: 'none', whiteSpace: 'nowrap',
+  color: active ? 'var(--text)' : 'var(--dim)', fontVariantNumeric: 'tabular-nums', cursor: 'pointer',
+  '& .MuiSvgIcon-root': { fontSize: 18 },
+  '& .MuiButton-startIcon': { m: 0 },
+  '& .MuiButton-startIcon > .MuiSvgIcon-root': { fontSize: 18 },
+  '&:hover': { bgcolor: 'var(--raised)', color: 'var(--text)' },
+  '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '2px' }
+});
+
+const barDot = (color) => (
+  <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+);
 
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const jobLink = (id) => `/jobs?job=${encodeURIComponent(id)}`;
@@ -49,20 +67,19 @@ export default function JobsIndicator() {
 
   const close = () => setAnchor(null);
 
-  let icon = <CheckIcon sx={{ fontSize: 14, color: 'var(--muted)' }} />;
+  let icon = barDot('var(--ok)');
   let label;
-  let wideOnly = false;
   if (offline) {
-    icon = <CloudOffIcon sx={{ fontSize: 14, color: 'var(--warn)' }} />;
+    icon = <CloudOffIcon sx={{ color: 'var(--warn)' }} />;
     label = 'Offline';
   } else if (busy) {
-    icon = <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)' }} />;
+    icon = <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)', flexShrink: 0 }} />;
     label = `${runningN.toLocaleString()} running`;
   } else if (queuedN > 0) {
+    icon = barDot('var(--accent)');
     label = `${queuedN.toLocaleString()} queued`;
   } else {
     label = 'No jobs';
-    wideOnly = true;   // the tick says it; the words only fit on a wide bar
   }
 
   return (
@@ -71,17 +88,10 @@ export default function JobsIndicator() {
         onClick={(e) => setAnchor(e.currentTarget)}
         aria-label={`Background jobs: ${label}${failedN ? `, ${failedN} failed` : ''}`}
         aria-haspopup="dialog"
-        sx={{
-          display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0, height: 28,
-          border: '1px solid', borderColor: offline ? 'var(--warn)' : busy ? 'var(--accent)' : 'var(--line-strong)',
-          borderRadius: 99, px: '11px', bgcolor: 'var(--surface)',
-          color: 'var(--text)', fontSize: '.8125rem', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-          '&:hover': { bgcolor: 'var(--raised)' },
-          '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: 2 }
-        }}
+        sx={barGhostSx(!!anchor)}
       >
         {icon}
-        <Box component="span" sx={wideOnly ? { display: { xs: 'none', lg: 'inline' } } : undefined}>{label}</Box>
+        <Box component="span">{label}</Box>
         {failedN > 0 && (
           <Box component="span" sx={{ color: 'var(--bad)' }}>· {failedN.toLocaleString()} failed</Box>
         )}

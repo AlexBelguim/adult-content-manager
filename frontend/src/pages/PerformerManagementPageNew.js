@@ -7,20 +7,24 @@
  *   Duplicates  hash duplicates: open duplicates in her own files, no hash database yet
  *               (/hash-management redirects here; the old ?view=duplicates&f=pairs goes to the Library)
  *
- * No title block: the app bar has the page name (on phones the page bar does, through usePageBar), and the total is
- * in the tiles. The URL holds the state (all replace): view, f (filter), sort, q (search); performer=<id> is the record
- * whose detail is open in the side panel (pushed, so Back closes it). Changing the view clears f and sort; an unknown
- * value falls back to the view's first. The panel opens over the list, whatever the list shows, and the list stays
- * where it was.
+ * The frame is SidebarPage (components/layout). Its View list is the three views with a count each (Library: every
+ * record, Updates: new uploads, Duplicates: needs attention; model.js performerViews). Then, in the sidebar (the
+ * rail's flyouts, the phone's Filters sheet): Show (search, sort), the view's filters as a list with counts (Where,
+ * Link or Kind) and Records (Reload; on Updates the update check as the main action and its last result). The content
+ * is one ContentLine naming what is shown, then the list at full width.
+ *
+ * The URL holds the state (all replace): view, f (filter), sort, q (search); performer=<id> is the record whose detail
+ * is open in the side panel (pushed, so Back closes it). Changing the view clears f and sort; an unknown value falls
+ * back to the view's first. The panel opens over the list, whatever the list shows, and the list stays where it was.
  *
  * On the Library a pair is shown whole, in the pairs section, when EITHER of her two records passes the filter and the
- * search (model.js libraryPairs); its records are not listed again below. The tiles count records.
+ * search (model.js libraryPairs); its records are not listed again below. The filter list counts records.
  *
  * This file only wires the parts together; it renders no row, detail or dialog of its own:
  *   components/performers/usePerformers.js   the one store (GET /api/performer-management/all, refreshOne, patch)
  *   components/performers/model.js          views, filters, sorts, pairs, the actions of a row and their disabled reasons
  *   components/performers/useRowActions.js  what each action does, the update check, the dialogs
- *   components/performers/PerformerRow.js, PairRow.js (PairSection), PerformerDetail.js, DuplicatesView.js, StatFilters.js
+ *   components/performers/PerformerRow.js, PairRow.js (PairSection), PerformerDetail.js, DuplicatesView.js
  *   components/hash/useHashActions.js       hash databases, through the server's hash queue
  * A row refreshes itself when the server says her hash job ended (socket performers_updated), and when a hash build of
  * hers in the jobs list ends (done, failed or cancelled).
@@ -33,14 +37,22 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Box, Drawer, IconButton, MenuItem, Select, Tooltip } from '@mui/material';
+import { Box, Drawer, IconButton, Tooltip } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { EmptyState, LoadingState, PageShell, Panel } from '../components/layout';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
+import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
+import CategoryIcon from '@mui/icons-material/Category';
+import TuneIcon from '@mui/icons-material/Tune';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import SyncIcon from '@mui/icons-material/Sync';
+import StopIcon from '@mui/icons-material/Stop';
 import {
-  ListError, SearchField, SmallButton, TabBar, TotalText, useOverlay, useQueryState
-} from '../components/discover/shared';
+  ContentLine, EmptyState, LoadingState, Panel, SIDE, SidebarPage, SideButton, SideButtons, SideFacts, SideGroup,
+  SideList, SideMain, SideNote, SideSearch, SideSelect
+} from '../components/layout';
+import { ListError, SmallButton, useOverlay, useQueryState } from '../components/discover/shared';
 import { useNotify } from '../components/ui';
-import { useChrome, usePageBar } from '../nav';
 import useHashActions from '../components/hash/useHashActions';
 import usePerformers from '../components/performers/usePerformers';
 import useRowActions from '../components/performers/useRowActions';
@@ -48,15 +60,14 @@ import PerformerRow from '../components/performers/PerformerRow';
 import { PairSection, SectionTitle } from '../components/performers/PairRow';
 import PerformerDetail from '../components/performers/PerformerDetail';
 import DuplicatesView from '../components/performers/DuplicatesView';
-import StatFilters from '../components/performers/StatFilters';
 import {
-  buildCtx, FILTERS, filterCounts, libraryPairs, newCount, resolveFilter, resolveSort, resolveView, SORTS, viewList, VIEWS
+  buildCtx, FILTERS, filterCounts, libraryPairs, newCount, performerViews, rememberViewCounts, resolveFilter, resolveSort, resolveView, SORTS,
+  viewList
 } from '../components/performers/model';
 import '../components/performers/performers.css';
 
 const TITLE = 'Performer Management';
 const PAGE_ROWS = 100;
-const sortSx = { fontSize: '.84rem', height: 32, bgcolor: 'var(--surface)' };
 const quiet = (promise) => { Promise.resolve(promise).catch(() => {}); };
 
 // the side panel: about 760px on PC, the whole screen on a phone
@@ -78,6 +89,20 @@ const panelBodySx = {
   p: 2, pt: 'calc(16px + env(safe-area-inset-top))', pb: 'calc(16px + env(safe-area-inset-bottom))',
   [FULL]: { p: 1.5, pt: 'calc(12px + env(safe-area-inset-top))', pb: 'calc(12px + env(safe-area-inset-bottom))' }
 };
+
+/** The view's filter list in the sidebar: its group id, title and icon. */
+const FILTER_GROUP = {
+  library: { id: 'where', title: 'Where', icon: <PlaceOutlinedIcon /> },
+  updates: { id: 'link', title: 'Link', icon: <LinkOutlinedIcon /> },
+  duplicates: { id: 'kind', title: 'Kind', icon: <CategoryIcon /> },
+};
+
+/** What the content line calls a filter (else the filter's own label). */
+const SHOWN_TITLE = {
+  library: { all: 'All performers' },
+  updates: { linked: 'Linked performers', new: 'New uploads' },
+};
+const shownTitle = (view, filter) => SHOWN_TITLE[view]?.[filter] || FILTERS[view].find(f => f.id === filter)?.label || '';
 
 /** What an empty filter says (the search has its own line). */
 const NOTHING = {
@@ -103,7 +128,6 @@ const NOTHING = {
 };
 
 export default function PerformerManagementPage({ basePath }) {
-  const isPhone = useChrome() === 'phone';
   const notify = useNotify();
   const store = usePerformers();
   const storeRef = useRef(store);
@@ -155,7 +179,9 @@ export default function PerformerManagementPage({ basePath }) {
   const filter = resolveFilter(view, qs.f);
   const sort = resolveSort(view, qs.sort);
   const q = qs.q;
-  const setView = (v) => { if (v !== view) setQs({ view: v, f: '', sort: '' }); };
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const setView = useCallback((v) => { if (v !== viewRef.current) setQs({ view: v, f: '', sort: '' }); }, [setQs]);
   // the view's first filter and sort stay out of the URL
   const setFilter = (id) => setQs({ f: id === FILTERS[view][0].id ? '' : id });
   const setSort = (id) => setQs({ sort: id === SORTS[view][0].id ? '' : id });
@@ -176,7 +202,16 @@ export default function PerformerManagementPage({ basePath }) {
   const shown = viewList(list, { view, filter, sort, q }, ctx);
   // the Library's pairs (whole, when either record is shown) and the rows in no pair
   const { pairs, rest } = view === 'library' ? libraryPairs(shown, ctx) : { pairs: [], rest: shown };
-  const anyNew = newCount(list) > 0;
+
+  // the View list's counts: every record, the new uploads, what needs attention in Duplicates
+  const dupCount = useMemo(() => filterCounts(list, 'duplicates').all ?? 0, [list]);
+  const newUploads = useMemo(() => newCount(list), [list]);
+  const viewCounts = useMemo(
+    () => (store.loaded ? { library: list.length, updates: newUploads, duplicates: dupCount } : null),
+    [store.loaded, list.length, newUploads, dupCount]
+  );
+  useEffect(() => { if (viewCounts) rememberViewCounts(viewCounts); }, [viewCounts]);
+  const views = performerViews(viewCounts || {}, setView);
 
   // the first 100 rows, then 100 more at a time; back to 100 when the view, filter, sort or search change
   const listKey = `${view}|${filter}|${sort}|${q}`;
@@ -221,16 +256,6 @@ export default function PerformerManagementPage({ basePath }) {
 
   const reload = useCallback(() => quiet(storeRef.current.reload()), []);
 
-  // ── the page bar (phones): the title, and Reload in its menu; on PC Reload is in the toolbar ──
-  const barMenu = useMemo(() => (isPhone
-    ? [{ label: store.refreshing ? 'Reloading…' : 'Reload', onClick: reload, disabled: store.refreshing }]
-    : undefined), [isPhone, store.refreshing, reload]);
-  usePageBar({ title: TITLE, menu: barMenu });
-
-  const reloadButton = isPhone ? null : (
-    <SmallButton onClick={reload} disabled={store.refreshing}>{store.refreshing ? 'Reloading…' : 'Reload'}</SmallButton>
-  );
-
   // the detail's own header names her (layout 'panel'); the drawer adds only Close
   const panelName = panelPerformer ? (panelPerformer.name || 'Unnamed') : '';
   const panel = (
@@ -258,53 +283,89 @@ export default function PerformerManagementPage({ basePath }) {
     </>
   );
 
+  // ── the sidebar: Records (Reload, and on Updates the update check) ──
+  const recordsGroup = (extra = null, summary = '') => (
+    <SideGroup id="page" title="Records" icon={<TuneIcon />} order={SIDE.page}
+      summary={store.refreshing ? 'Reloading' : summary}>
+      {extra}
+      <SideButtons>
+        <SideButton icon={<RefreshIcon />} onClick={reload} disabled={store.refreshing}>
+          {store.refreshing ? 'Reloading…' : 'Reload'}
+        </SideButton>
+      </SideButtons>
+    </SideGroup>
+  );
+
   // ── first load, and a first load that failed: nothing else ──
-  if (store.error && list.length === 0) {
+  if ((store.error && list.length === 0) || !store.loaded) {
     return (
-      <PageShell>
-        <ListError error={store.error} onRetry={reload} />
+      <SidebarPage title={TITLE} views={views} view={view}>
+        {store.error && list.length === 0
+          ? <ListError error={store.error} onRetry={reload} />
+          : <LoadingState label="Loading performers…" />}
         {tail}
-      </PageShell>
-    );
-  }
-  if (!store.loaded) {
-    return (
-      <PageShell>
-        <LoadingState label="Loading performers…" />
-        {tail}
-      </PageShell>
+      </SidebarPage>
     );
   }
 
-  const tabs = VIEWS.map(v => ({
-    id: v.id,
-    label: v.id === 'updates' && anyNew
-      ? <>{v.label}<span className="pm-dot" role="img" aria-label="new uploads" /></>
-      : v.label,
-  }));
-  const tiles = FILTERS[view].map(f => ({ ...f, count: counts[f.id] ?? 0 }));
+  // the view's filters as a list with their counts (Where, Link or Kind)
+  const fg = FILTER_GROUP[view];
+  const firstFilter = FILTERS[view][0].id;
+  const filterLabel = FILTERS[view].find(f => f.id === filter)?.label || '';
+  const sortLabel = SORTS[view].find(s => s.id === sort)?.label || '';
+  const filterGroup = (
+    <SideGroup key={fg.id} id={fg.id} title={fg.title} icon={fg.icon} order={SIDE.list}
+      badge={filter !== firstFilter ? 1 : 0} summary={filterLabel}>
+      <SideList label={fg.title} value={filter} onChange={setFilter}
+        items={FILTERS[view].map(f => ({ id: f.id, label: f.label, count: counts[f.id] ?? 0 }))} />
+    </SideGroup>
+  );
+  const showGroup = (
+    <SideGroup id="show" title="Show" icon={<FilterListIcon />} order={SIDE.show}
+      badge={q ? 1 : 0} summary={q ? `"${q.trim()}" · ${sortLabel}` : sortLabel}>
+      <SideSearch value={q} onChange={setSearch} placeholder="Search names and aliases" />
+      <SideSelect label="Sort" value={sort} onChange={setSort}
+        options={SORTS[view].map(s => ({ value: s.id, label: s.label }))} />
+    </SideGroup>
+  );
 
-  // ── the view's bulk control, right of the toolbar (Duplicates has "Build missing" on its own line) ──
+  // Updates: the update check is the page's main action, its last result the facts under it
+  // (Duplicates has "Build missing" on its own line, in DuplicatesView)
   const check = actions.check;
-  let bulk = null;
+  let records = recordsGroup();
   if (view === 'updates') {
     const linked = counts.linked ?? 0;
-    bulk = (
+    const last = check.result && !check.running ? check.result : null;
+    records = recordsGroup(
       <>
-        {check.result && !check.running && (
-          <TotalText>{`Last check: ${check.result.done} checked, ${check.result.newCount} new, ${check.result.failed} failed`}</TotalText>
-        )}
         {check.running
-          ? <SmallButton onClick={() => check.stop()}>{`Stop · ${check.done} of ${check.total}`}</SmallButton>
+          ? <SideMain icon={<StopIcon />} label={`Stop · ${check.done} of ${check.total}`} onClick={() => check.stop()} />
           : (
-            <SmallButton onClick={() => check.start()} disabled={linked === 0}
-              tip={linked === 0 ? 'No performer has a Leakhaven link' : undefined}>
-              {`Check updates (${linked})`}
-            </SmallButton>
+            <SideMain icon={<SyncIcon />} label={`Check updates (${linked})`} onClick={() => check.start()}
+              disabled={linked === 0} tip={linked === 0 ? 'No performer has a Leakhaven link' : undefined} />
           )}
-      </>
+        {last && (
+          <>
+            <SideNote>Last check</SideNote>
+            <SideFacts rows={[
+              { label: 'Checked', value: Number(last.done || 0).toLocaleString() },
+              { label: 'New', value: Number(last.newCount || 0).toLocaleString(), tone: 'accent' },
+              { label: 'Failed', value: Number(last.failed || 0).toLocaleString(), tone: last.failed > 0 ? 'bad' : undefined },
+            ]} />
+          </>
+        )}
+      </>,
+      check.running ? `Checking ${check.done} of ${check.total}` : `${linked.toLocaleString()} linked`
     );
   }
+
+  // ── the content line: what is shown ──
+  const total = counts[filter] ?? 0;
+  const meta = [
+    `${q ? `${shown.length.toLocaleString()} of ` : ''}${total.toLocaleString()} ${total === 1 ? 'performer' : 'performers'}`,
+    view === 'library' && pairs.length > 0 ? `${pairs.length.toLocaleString()} in both Before and After` : null,
+  ].filter(Boolean).join(' · ');
+  const line = <ContentLine title={shownTitle(view, filter)} meta={meta} />;
 
   // ── the list, or why it is empty ──
   let body;
@@ -348,24 +409,14 @@ export default function PerformerManagementPage({ basePath }) {
   }
 
   return (
-    <PageShell>
-      <TabBar label="Views" tabs={tabs} value={view} onChange={setView} />
-      <StatFilters label="Filter" items={tiles} value={filter} onChange={setFilter} />
-
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 2, minWidth: 0 }}>
-        <div className="pm-search">
-          <SearchField value={q} onChange={setSearch} placeholder="Search names and aliases" />
-        </div>
-        <Select size="small" value={sort} onChange={(e) => setSort(e.target.value)} inputProps={{ 'aria-label': 'Sort' }} sx={sortSx}>
-          {SORTS[view].map(s => <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>)}
-        </Select>
-        {q && <TotalText>{`${shown.length.toLocaleString()} of ${(counts[filter] ?? 0).toLocaleString()}`}</TotalText>}
-        {(bulk || reloadButton) && <div className="pm-bulk">{bulk}{reloadButton}</div>}
-      </Box>
-
+    <SidebarPage title={TITLE} views={views} view={view}>
+      {showGroup}
+      {filterGroup}
+      {records}
+      {line}
       {body}
       {panel}
       {tail}
-    </PageShell>
+    </SidebarPage>
   );
 }

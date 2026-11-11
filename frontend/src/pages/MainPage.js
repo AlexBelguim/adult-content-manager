@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import FolderAdder from '../components/FolderAdder';
 import FilterView from '../components/FilterView';
 import GalleryView from '../components/GalleryView';
-import { PageShell, EmptyState, LoadingState } from '../components/layout';
+import { PageShell, EmptyState, LoadingState, SidebarPage } from '../components/layout';
 import { SmallButton } from '../components/discover/shared';
 import { useNotify, errorText } from '../components/ui';
+import { useLibraryViews, libraryViewOf } from '../components/home/homeData';
 import './MainPage.css';
 
 async function fetchFolders() {
@@ -18,10 +20,22 @@ async function fetchFolders() {
 // The last folder list, kept across remounts (Back from a gallery remounts this page): shown at once, then refetched.
 let lastFolders = null;
 
+/** The Library frame of '/' and '/filter': one SidebarPage, so the sidebar stays mounted across the switch. */
+function LibraryFrame({ root, children }) {
+  const location = useLocation();
+  const views = useLibraryViews({ root });
+  return (
+    <SidebarPage title="Library" views={views} view={libraryViewOf(location.pathname, location.search)}>
+      {children}
+    </SidebarPage>
+  );
+}
+
 /**
- * The library home at 900px and wider: the folder check, then Filter or the Gallery. It stays mounted across
- * / and /filter. The library is never scanned here: onFolderAdded (which runs scan-after) is called only after
- * a folder was added.
+ * The library home at 900px and wider: the folder check, then Filter or the Gallery inside one SidebarPage (the
+ * View list switches Performers, Genres and Filter), which stays mounted across / and /filter. One performer's
+ * filter view (/filter/:id) is a work view with its own left column: no sidebar there. The library is never
+ * scanned here: onFolderAdded (which runs scan-after) is called only after a folder was added.
  */
 function MainPage({ mode, performerId = null, basePath, handyIntegration, handyConnected, onFolderAdded }) {
   const [folders, setFoldersState] = useState(lastFolders);
@@ -64,14 +78,14 @@ function MainPage({ mode, performerId = null, basePath, handyIntegration, handyC
 
   if (foldersError) {
     return (
-      <PageShell>
+      <PageShell full>
         <EmptyState title="Could not reach the server" description={foldersError}
           action={<SmallButton onClick={loadFolders}>Retry</SmallButton>} />
       </PageShell>
     );
   }
   if (folders === null) {
-    return <PageShell><LoadingState label="Loading the library…" /></PageShell>;
+    return <PageShell full><LoadingState label="Loading the library…" /></PageShell>;
   }
   if (folders.length === 0) {
     return (
@@ -83,27 +97,24 @@ function MainPage({ mode, performerId = null, basePath, handyIntegration, handyC
 
   const root = basePath || folders[0].path;
 
-  if (mode === 'filter') {
-    return (
-      <div className="main-page">
-        <div className="main-content">
-          <FilterView
-            performerId={performerId}
-            basePath={root}
-            handyIntegration={handyIntegration}
-            handyConnected={handyConnected}
-            cachedPerformers={filterCache}
-            onPerformersUpdate={setFilterCache}
-          />
-        </div>
-      </div>
-    );
-  }
+  const filterView = (
+    <FilterView
+      performerId={performerId}
+      basePath={root}
+      handyIntegration={handyIntegration}
+      handyConnected={handyConnected}
+      cachedPerformers={filterCache}
+      onPerformersUpdate={setFilterCache}
+    />
+  );
+
+  // Her filter view fills the window under the app bar by itself.
+  if (mode === 'filter' && performerId) return filterView;
 
   return (
-    <div className="main-page">
-      <GalleryView basePath={root} />
-    </div>
+    <LibraryFrame root={root}>
+      {mode === 'filter' ? filterView : <GalleryView basePath={root} />}
+    </LibraryFrame>
   );
 }
 

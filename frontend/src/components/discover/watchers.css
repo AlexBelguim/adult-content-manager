@@ -104,37 +104,8 @@
 .dw-nb { white-space: nowrap; }
 .dw-card-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* ── one watcher ── */
+/* ── one watcher (its facts, site and Run now are in the sidebar) ── */
 .dw-detail { min-width: 0; }
-.dw-back {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px 0 4px; margin: 0 0 8px -4px;
-  border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim);
-  font: inherit; font-size: .82rem; cursor: pointer;
-}
-.dw-back:hover { color: var(--text); background: var(--raised); }
-.dw-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.dw-back svg { width: 16px; height: 16px; }
-
-.dw-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 6px; min-width: 0; }
-.dw-head h2 {
-  margin: 0; min-width: 0; max-width: 100%; overflow-wrap: anywhere;
-  font-size: 1.1rem; font-weight: 640; letter-spacing: -0.015em; color: var(--text);
-}
-.dw-url {
-  flex: 1 1 140px; min-width: 0; max-width: 100%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: .75rem; color: var(--muted);
-}
-.dw-url > a { font-size: inherit; }
-/* the text shrinks with an ellipsis, the external-link icon after it stays */
-.dw-url-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dw-head-run { margin-left: auto; flex: none; }
-
-.dw-line { font-size: .78rem; line-height: 1.5; color: var(--dim); margin-bottom: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-
-.dw-full { flex: 1 1 100%; min-width: 0; }
-.dw-full > * { width: 100%; }
-.dw-count { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .dw-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
 /* ── What it read ── */
