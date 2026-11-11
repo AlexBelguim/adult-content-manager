@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Snackbar, useMediaQuery } from '@mui/material';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useMediaQuery } from '@mui/material';
 import { DEFAULT_SHORTCUTS, loadShortcuts } from '../utils/settings';
 import { MediaStage, ScenesPanel, TagPanel, isVideoItem, useScenes } from './player';
 import DecisionBar from './filter/DecisionBar';
@@ -12,6 +13,8 @@ import QueueRail from './filter/QueueRail';
 import useKeepScores, { K_READY, kZone } from './filter/useKeepScores';
 import useSwipeStage from './filter/useSwipeStage';
 import { ACTION_LABEL, TABS, TAB_LABEL, errorMessage, matchesKey, mediaItemFor, tabProgress } from './filter/filterUtils';
+import { fvDepth, stackedState } from './filter/filterHistory';
+import { useNotify, useToastLift } from './ui';
 import './filter/filter.css';
 
 const FLASH_MS = 450;
@@ -32,8 +35,38 @@ const listOf = (data) => (Array.isArray(data) ? data : data?.files || []);
  * Keep / delete / move for one performer, on the shared player
  * (docs/redesign/SPEC.md, filter-redesign-mockup.html). Mounted by FilterView.
  */
-function PerformerFilterView({ performer, onBack, onNext, handyIntegration, handyConnected, initialTab }) {
-  const [currentTab, setCurrentTab] = useState(initialTab || 'pics');
+function PerformerFilterView({ performer, onBack, onNext, handyIntegration, handyConnected }) {
+  // The tab and the sorted view live in the URL: ?tab= (replaced) and ?view=sorted (an entry of its own,
+  // marked { sorted: true }), so Back, a reload and a shared link all land in the same place.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tabParam = searchParams.get('tab');
+  const currentTab = TABS.includes(tabParam) ? tabParam : 'pics';
+  const sortOpen = currentTab === 'pics' && searchParams.get('view') === 'sorted';
+  const withParams = useCallback((change) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(change).forEach(([key, value]) => (value == null ? next.delete(key) : next.set(key, value)));
+    return next;
+  }, [searchParams]);
+  // Another tab ends the sorted view too (it is for pictures only); one replace does both. The entry keeps
+  // its depth (filter/filterHistory.js), so Back still leaves the filter view in one step.
+  const depthState = useCallback(() => {
+    const depth = fvDepth(location);
+    return depth > 1 ? { fvDepth: depth } : null;
+  }, [location]);
+  const setCurrentTab = useCallback((tab) => {
+    setSearchParams(withParams({ tab, view: null }), { replace: true, state: depthState() });
+  }, [setSearchParams, withParams, depthState]);
+  const openSortView = useCallback(() => {
+    if (searchParams.get('view') === 'sorted') return;
+    setSearchParams(withParams({ view: 'sorted' }), { state: stackedState(location, { sorted: true }) });
+  }, [searchParams, setSearchParams, withParams, location]);
+  const closeSortView = useCallback(() => {
+    if (searchParams.get('view') !== 'sorted') return;
+    if (location.state?.sorted) navigate(-1);
+    else setSearchParams(withParams({ view: null }), { replace: true, state: depthState() });
+  }, [searchParams, location.state, navigate, setSearchParams, withParams, depthState]);
   const [files, setFiles] = useState([]);
   const [totalFiles, setTotalFiles] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -52,7 +85,8 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const [uploading, setUploading] = useState(null);
   const [lastScriptPrompt, setLastScriptPrompt] = useState(null); // { folderName, path }
   const [backBusy, setBackBusy] = useState(false);
-  const [snack, setSnack] = useState(null); // { severity, msg }
+  // Back is busy until the history moves; if the view is still mounted after that, Back works again.
+  useEffect(() => { setBackBusy(false); }, [location.key]);
   const [flash, setFlash] = useState(null); // { kind, n }
   const [sheetOpen, setSheetOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
@@ -60,9 +94,15 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const [loop, setLoop] = useState(false);
   const [mediaInfo, setMediaInfo] = useState(null);
   const [ai, setAi] = useState(() => localStorage.getItem('performerFilterAI') === '1');
-  const [sortOpen, setSortOpen] = useState(false);
   const [sortProgress, setSortProgress] = useState(null); // { done, total } while the sorted view scores the rest
   const [applyBusy, setApplyBusy] = useState(false);
+  const [sortResults, setSortResults] = useState({}); // zone -> { kept, deleted, failed } of its last apply
+  const [kChoice, setKChoice] = useState({}); // the sorted view's choices and flips, path -> keep | delete
+  // A one-by-one pass over a chosen set (the sorted view's Uncertain): only those files are in the list, the rest
+  // wait in `stash` and come back when the pass ends.
+  const [pass, setPass] = useState(null); // { label, total, keep, delete }
+  const passStash = useRef(null);
+  const passPaths = useRef(null); // the pass's files, so a reload (after Undo) keeps the pass
 
   const rootRef = useRef(null);
   const videoRef = useRef(null);
@@ -73,7 +113,6 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const serverStats = useRef(null);
   const flashTimer = useRef(null);
   const historyId = useRef(0);
-  const kOffered = useRef(false); // the sorted view was offered for this performer
 
   const phone = useMediaQuery('(max-width:760px)');
   const file = files[currentIndex] || null;
@@ -82,7 +121,13 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   const scenes = useScenes(isVideo ? item.path : null);
   const info = mediaInfo && item && mediaInfo.path === item.path ? mediaInfo : null;
 
-  const notify = useCallback((severity, msg) => setSnack({ severity, msg }), []);
+  // Toasts go to the app's one host and sit 12px above the decision bar at the bottom of the stage, so they never
+  // cover Keep or Delete: on a phone the bar is about 87px high (62px buttons, 2px + 6px row padding, 8px + 8px
+  // padding, 1px border), on wider screens about 71px (54px buttons).
+  const say = useNotify();
+  const lastToast = useRef(null); // close() of the last toast, so opening the sorted view can clear it
+  const notify = useCallback((severity, msg) => { lastToast.current = say({ severity, message: msg }); }, [say]);
+useToastLift(phone ? 'calc(99px + env(safe-area-inset-bottom, 0px))' : '83px');
 
   /* ── the sticky app bar above us ── */
   useEffect(() => {
@@ -100,11 +145,8 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (initialTab) setCurrentTab(initialTab);
-  }, [initialTab]);
-
-  // FilterView reuses this instance for the next performer: session state starts over.
+  // A parent may reuse this instance for the next performer: session state starts over.
+  // (The sorted view is in the URL, which changes with her.)
   useEffect(() => {
     setHistory([]);
     setTally(ZERO_TALLY);
@@ -112,9 +154,30 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     setStats(null);
     serverStats.current = null;
     setMediaInfo(null);
-    setSortOpen(false);
-    kOffered.current = false;
+    setSortResults({});
+    setKChoice({});
+    setPass(null);
+    passStash.current = null;
+    passPaths.current = null;
   }, [performer.id]);
+
+  // Leaving her any other way than Back or Next here (browser Back, the system gesture, a link out)
+  // runs the same trash cleanup as the in-page Back. Those two set `left` and start their own.
+  const left = useRef(false);
+  useEffect(() => {
+    left.current = false;
+    const id = performer.id;
+    return () => {
+      if (!left.current) {
+        fetch(`/api/performers/${id}/cleanup-trash-async`, { method: 'POST', keepalive: true }).catch(() => {});
+      }
+    };
+  }, [performer.id]);
+
+  // A link straight to the sorted view: it needs K's scores
+  useEffect(() => {
+    if (sortOpen && !ai) setAi(true);
+  }, [sortOpen, ai]);
 
   useEffect(() => localStorage.setItem('performerFilterSortBy', sortBy), [sortBy]);
   useEffect(() => localStorage.setItem('performerFilterAI', ai ? '1' : '0'), [ai]);
@@ -152,6 +215,9 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     setTotalFiles(0);
     setCurrentIndex(0);
     setLastScriptPrompt(null);
+    setPass(null); // a fresh list (another tab, sort or performer) ends a pass
+    passStash.current = null;
+    passPaths.current = null;
     loadRef.current = { offset: 0 };
 
     const page = async (limit, offset) => {
@@ -182,10 +248,16 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
           if (aborted()) return;
           const got = data.files || [];
           if (got.length > 0) {
-            setFiles((prev) => {
-              const seen = new Set(prev.map((f) => f.path));
-              return [...prev, ...got.filter((f) => !seen.has(f.path))];
-            });
+            if (passStash.current) {
+              // During a pass the list holds only the pass's files; the rest waits for its end.
+              const seen = new Set(passStash.current.map((f) => f.path));
+              passStash.current.push(...got.filter((f) => !seen.has(f.path)));
+            } else {
+              setFiles((prev) => {
+                const seen = new Set(prev.map((f) => f.path));
+                return [...prev, ...got.filter((f) => !seen.has(f.path))];
+              });
+            }
           }
           loaded += got.length;
           loadRef.current.offset += batch;
@@ -209,9 +281,13 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     abortRef.current?.abort();
     const res = await fetch(filesUrl());
     if (!res.ok) throw new Error(await errorMessage(res));
-    const list = listOf(await res.json());
+    const all = listOf(await res.json());
+    // During a pass (Uncertain) the list keeps only the pass's files; the rest goes back to the stash.
+    const inPass = passPaths.current;
+    const list = inPass ? all.filter((f) => inPass.has(f.path)).sort((a, b) => inPass.get(a.path) - inPass.get(b.path)) : all;
+    if (inPass) passStash.current = all.filter((f) => !inPass.has(f.path));
     setFiles(list);
-    setTotalFiles(list.length);
+    setTotalFiles(all.length);
     setLoadingMore(false);
     return list;
   }, [filesUrl]);
@@ -260,7 +336,8 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     if (tab !== 'funscript_vids' && sortBy === 'funscript_count') setSortBy('name');
     setCurrentTab(tab);
     setSheetOpen(false);
-  }, [currentTab, sortBy]);
+    // (setCurrentTab also ends the sorted view: it is for pictures only)
+  }, [currentTab, sortBy, setCurrentTab]);
 
   const goTo = useCallback((n) => {
     if (n >= 0 && n < files.length) setCurrentIndex(n);
@@ -276,6 +353,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
 
   const decide = useCallback(async (action, fromX = 0) => {
     const target = files[currentIndex];
+    if (passDoneRef.current) return; // the pass end card is showing
     if (!target || inflight.current.has(target.path)) return;
     if (action === 'move_to_funscript' && currentTab !== 'vids') return;
     inflight.current.add(target.path);
@@ -294,12 +372,15 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
       if (index < files.length - 1) setCurrentIndex(index + 1);
     }
     setHistory((h) => [entry, ...h].slice(0, HISTORY_MAX));
+    // Totals are the files she had at the start, so a decision only moves "done". A video moved to the
+    // funscript folder still counts as decided in Videos, and arrives as a new file in Funscript videos.
     setDelta((d) => {
       let next = bump(d, tab, 'done', 1);
-      if (action === 'move_to_funscript') next = bump(next, 'vids', 'total', -1);
+      if (action === 'move_to_funscript') next = bump(next, 'funscript_vids', 'total', 1);
       return next;
     });
     if (action !== 'move_to_funscript') setTally((t) => bump(t, tab, action, 1));
+    if (action !== 'move_to_funscript') setPass((p) => (p ? { ...p, [action]: p[action] + 1 } : p));
     setFlash({ kind: action, n: entry.id });
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
@@ -313,17 +394,11 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
         body: JSON.stringify({ performerId: performer.id, filePath: target.path, action })
       });
       if (!res.ok) throw new Error(await errorMessage(res));
-      const result = await res.json();
+      await res.json();
       // The server's list just lost this file: keep the background loader aligned.
       if (removes) loadRef.current.offset = Math.max(0, loadRef.current.offset - 1);
-      // Moving to a funscript folder hands the video to funpipe for script
-      // generation — report whether that actually took.
-      if (action === 'move_to_funscript' && result.funpipe) {
-        const fp = result.funpipe;
-        if (fp.queued) notify('success', 'Queued with funpipe for funscript generation');
-        else if (fp.skipped) notify('info', `Not queued — ${fp.skipped}`);
-        else if (fp.error) notify('warning', `Moved, but funpipe didn't take it: ${fp.error}`);
-      }
+      // A move only moves the video; scripts are started from the Funpipe page.
+      if (action === 'move_to_funscript') notify('success', 'Moved to the funscript folder');
       refreshStatsSoon();
     } catch (err) {
       // Put the file back where it was.
@@ -331,10 +406,11 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
       setHistory((h) => h.filter((x) => x.id !== entry.id));
       setDelta((d) => {
         let next = bump(d, tab, 'done', -1);
-        if (action === 'move_to_funscript') next = bump(next, 'vids', 'total', 1);
+        if (action === 'move_to_funscript') next = bump(next, 'funscript_vids', 'total', -1);
         return next;
       });
       if (action !== 'move_to_funscript') setTally((t) => bump(t, tab, action, -1));
+      if (action !== 'move_to_funscript') setPass((p) => (p ? { ...p, [action]: Math.max(0, p[action] - 1) } : p));
       if (removes) {
         setFiles((prev) => {
           if (prev.some((f) => f.path === target.path)) return prev;
@@ -361,6 +437,9 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
       const entry = history[0] || null;
       if (entry) {
         setHistory((h) => h.slice(1));
+        if (passPaths.current?.has(entry.file.path) && entry.action !== 'move_to_funscript') {
+          setPass((p) => (p ? { ...p, [entry.action]: Math.max(0, p[entry.action] - 1) } : p));
+        }
         setDelta((d) => bump(d, entry.tab, 'done', -1));
         if (entry.action !== 'move_to_funscript') setTally((t) => bump(t, entry.tab, entry.action, -1));
       }
@@ -385,35 +464,46 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     enabled: ai && currentTab === 'pics',
     files,
     currentIndex,
-    decisions: tally.pics.keep + tally.pics.delete
+    decisions: tally.pics.keep + tally.pics.delete,
+    frozen: sortOpen
   });
 
-  const openSort = useCallback(async () => {
-    setSnack(null);
-    setSortOpen(true);
-    const paths = files.map((f) => f.path);
+  // The sorted view scores every picture still to decide. Kept ones are not in it: there is nothing left to choose.
+  const sortable = useMemo(() => files.filter((f) => !f.filtered), [files]);
+  const scoring = useRef(false); // one scoring run at a time
+  const scoreRest = useCallback(async ({ fresh = false } = {}) => {
+    if (scoring.current) return;
+    scoring.current = true;
+    const paths = (passStash.current ? [...sortable, ...passStash.current.filter((f) => !f.filtered)] : sortable).map((f) => f.path);
     setSortProgress({ done: 0, total: paths.length });
     try {
-      await k.scoreAll(paths, (done) => setSortProgress({ done, total: paths.length }));
+      await k.scoreAll(paths, (done) => setSortProgress({ done, total: paths.length }), { fresh });
     } catch (err) {
       notify('error', `K could not score her pictures: ${err.message}`);
     } finally {
+      scoring.current = false;
       setSortProgress(null);
     }
-  }, [files, k, notify]);
+  }, [sortable, k, notify]);
 
-  // Once K has learned from enough of her pictures, offer the sorted view for the rest.
+  const openSort = useCallback(() => {
+    if (currentTab !== 'pics' || sortOpen) return;
+    lastToast.current?.();
+    setSheetOpen(false);
+    if (!ai) setAi(true);
+    openSortView();
+  }, [currentTab, ai, sortOpen, openSortView]);
+
+  // Whenever the sorted view opens (the switch, or back from the Uncertain pass), score what has no score yet.
+  // One by one, K's refit may have cleared the scores in the meantime.
   useEffect(() => {
-    if (!ai || currentTab !== 'pics' || sortOpen || kOffered.current || k.learned < K_READY || files.length < 2) return;
-    kOffered.current = true;
-    setSnack({
-      severity: 'info',
-      msg: `K has learned from ${k.learned} of her pictures — sort the remaining ${files.length}?`,
-      action: { label: 'Sort the rest', onClick: openSort }
-    });
-  }, [ai, currentTab, sortOpen, k.learned, files.length, openSort]);
+    if (sortOpen && sortable.some((f) => k.scores[f.path] == null)) scoreRest();
+  // only on opening: scoring itself changes k.scores
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortOpen]);
 
-  const applySorted = useCallback(async (results, corrections) => {
+  // Applies one zone. Failed pictures stay in the view, and the zone says which ones failed.
+  const applySorted = useCallback(async (zone, results, corrections) => {
     setApplyBusy(true);
     try {
       const res = await fetch('/api/filter/apply-smart-batch', {
@@ -423,9 +513,11 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
       });
       if (!res.ok) throw new Error(await errorMessage(res));
       const { summary } = await res.json();
-      const done = new Set(results.map((r) => r.path));
-      const kept = new Set(results.filter((r) => r.decision === 'keep').map((r) => r.path));
-      const removed = results.filter((r) => r.decision === 'delete' || hideKeptFiles).length;
+      const failed = new Set(summary.failed || []);
+      const ok = results.filter((r) => !failed.has(r.path));
+      const done = new Set(ok.map((r) => r.path));
+      const kept = new Set(ok.filter((r) => r.decision === 'keep').map((r) => r.path));
+      const removed = ok.filter((r) => r.decision === 'delete' || hideKeptFiles).length;
       setFiles((prev) => prev
         .filter((f) => !done.has(f.path) || (kept.has(f.path) && !hideKeptFiles))
         .map((f) => (kept.has(f.path) ? { ...f, filtered: 'keep' } : f)));
@@ -433,24 +525,50 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
       loadRef.current.offset = Math.max(0, loadRef.current.offset - removed);
       setDelta((d) => bump(d, 'pics', 'done', summary.kept + summary.deleted));
       setTally((t) => bump(bump(t, 'pics', 'keep', summary.kept), 'pics', 'delete', summary.deleted));
-      notify(summary.errors ? 'warning' : 'success',
-        `Kept ${summary.kept}, deleted ${summary.deleted}${summary.errors ? `, ${summary.errors} failed` : ''}`);
+      setSortResults((r) => ({ ...r, [zone]: { kept: summary.kept, deleted: summary.deleted, failed: [...failed] } }));
+      notify(failed.size ? 'warning' : 'success',
+        `Kept ${summary.kept}, deleted ${summary.deleted}${failed.size ? `, ${failed.size} failed (still in the view)` : ''}`);
       refreshStatsSoon();
+      return true;
     } catch (err) {
       notify('error', `Could not apply the sorted pictures: ${err.message}`);
+      return false;
     } finally {
       setApplyBusy(false);
     }
   }, [performer.id, performer.name, hideKeptFiles, notify, refreshStatsSoon]);
 
-  // The uncertain ones back to one by one, most unsure first.
+  // Uncertain back to one by one, as a pass of its own: only those pictures, most unsure first, and an end card.
   const oneByOne = useCallback((list) => {
+    if (!list.length) return;
     const order = [...list].sort((a, b) => Math.abs(k.scores[a.path] - 50) - Math.abs(k.scores[b.path] - 50));
-    const ids = new Set(order.map((f) => f.path));
-    setFiles((prev) => [...order, ...prev.filter((f) => !ids.has(f.path))]);
+    const rank = new Map(order.map((f, i) => [f.path, i])); // the pass's files, most unsure first
+    passStash.current = files.filter((f) => !rank.has(f.path));
+    passPaths.current = rank;
+    setFiles(order);
+    setPass({ label: 'Uncertain', total: order.length, keep: 0, delete: 0 });
     setCurrentIndex(0);
-    setSortOpen(false);
-  }, [k.scores]);
+    closeSortView();
+  }, [k.scores, files, closeSortView]);
+
+  const endPass = useCallback((thenSorted) => {
+    const rest = passStash.current || [];
+    passStash.current = null;
+    passPaths.current = null;
+    setPass(null);
+    const seen = new Set(files.map((f) => f.path));
+    const merged = [...files, ...rest.filter((f) => !seen.has(f.path))];
+    setFiles(merged);
+    // carry on with the first picture still to decide, not one kept during the pass
+    const next = merged.findIndex((f) => !f.filtered);
+    setCurrentIndex(next < 0 ? 0 : next);
+    if (thenSorted) openSortView();
+  }, [files, openSortView]);
+
+  const passLeft = pass ? files.filter((f) => !f.filtered).length : 0;
+  const passDone = !!pass && passLeft === 0 && !loadingFiles;
+  const passDoneRef = useRef(false);
+  passDoneRef.current = passDone;
 
   /* ── funscript tab ── */
   const funscriptAction = useCallback(async (action, script, options) => {
@@ -541,6 +659,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   /* ── leaving ── */
   const handleBack = useCallback(async () => {
     if (backBusy) return;
+    left.current = true; // this cleanup, not the unmount one
     setBackBusy(true);
     abortRef.current?.abort();
     try {
@@ -555,6 +674,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   }, [backBusy, performer.id, onBack, notify]);
 
   const handleNextPerformer = useCallback(async () => {
+    left.current = true; // this cleanup, not the unmount one
     try {
       await fetch(`/api/performers/${performer.id}/cleanup-trash`, { method: 'POST' });
       onNext(performer.id);
@@ -566,7 +686,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
   /* ── keys ── */
   const keyActions = useRef({});
   keyActions.current = {
-    blocked: sortOpen, // the sorted view has no current file to decide on
+    blocked: sortOpen || passDone, // the sorted view has no current file; the pass end card waits for a choice
     decide,
     undo,
     goPrev,
@@ -619,7 +739,26 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
     : '';
 
   let stateNode = null;
-  if (!file) {
+  if (passDone) {
+    const rest = passStash.current ? passStash.current.filter((f) => !f.filtered).length : 0;
+    stateNode = (
+      <div className="fv-state">
+        <div>
+          <span className="fv-sub">{pass.label} pass</span>
+          <h2>{pass.label} done: kept {pass.keep}, deleted {pass.delete}</h2>
+          <p className="fv-sub">{pass.total} pictures K was not sure about. {rest} other picture{rest === 1 ? '' : 's'} still to decide.</p>
+          <div className="fv-row">
+            <button type="button" className="pl-btn" onClick={() => endPass(true)}>
+              <Icon name="sort" size={14} /> Back to Sorted by K
+            </button>
+            <button type="button" className="pl-btn fv-go" onClick={() => endPass(false)}>
+              Continue one by one <Icon name="right" size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  } else if (!file) {
     if (loadingFiles) {
       stateNode = <div className="fv-state"><p className="fv-sub">Loading the first file…</p></div>;
     } else {
@@ -687,11 +826,8 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
           <section className="pl-pn" data-panel="ai">
             <h4>AI · K</h4>
             <p className="pl-hint">
-              {k.error ? `K is not available: ${k.error}` : `Learned from ${k.learned} of her sorted pictures; it refits every 10 decisions.`}
+              {k.error ? `K is not available: ${k.error}` : `K guesses keep or delete from what you decided for her (${k.learned} so far); it learns again every 10 decisions. "Sorted by K" above the picture shows all of them at once.`}
             </p>
-            {!sortOpen && files.length > 1 && !k.error && (
-              <button type="button" className="pl-btn sm" style={{ marginTop: 8 }} onClick={openSort}>Sort the rest with K</button>
-            )}
           </section>
         )}
         {item && tagsOpen && <TagPanel item={item} />}
@@ -720,16 +856,52 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
           <span className="fv-chip">{p.pct}%</span>
           <button type="button" className="pl-ib" onClick={() => setSheetOpen(true)} aria-label="Progress, file details and options"><Icon name="menu" size={18} /></button>
         </div>
+        {/* How to work through this tab: one by one, or all of it sorted by K. Always here, in the same place;
+            when the sorted view cannot be used the button is disabled and says why. */}
+        <div className="fv-mode">
+          {pass ? (
+            <span className="fv-chip-pass">
+              {pass.label}: {Math.max(0, pass.total - passLeft)} / {pass.total}
+              <button type="button" className="pl-btn sm" onClick={() => endPass(false)} title="Stop the pass; the other pictures come back">Stop pass</button>
+            </span>
+          ) : null}
+          <div className="fv-seg" role="group" aria-label="How to filter">
+            <button type="button" className={!sortOpen ? 'on' : ''} onClick={closeSortView}>One by one</button>
+            <button
+              type="button"
+              className={sortOpen ? 'on' : ''}
+              disabled={currentTab !== 'pics' || !!pass || (sortable.length < 2 && !sortOpen)}
+              title={currentTab !== 'pics' ? 'Pictures only: K scores pictures, not videos'
+                : pass ? 'Finish or stop the Uncertain pass first'
+                  : sortable.length < 2 && !sortOpen ? 'Fewer than two pictures left to decide' : 'See every picture left, sorted by K into Keep, Uncertain and Delete'}
+              onClick={openSort}
+            >
+              <Icon name="sort" size={14} /> Sorted by K
+            </button>
+          </div>
+          {currentTab === 'pics' && (() => {
+            if (!ai) return <button type="button" className="fv-kstate off" onClick={() => setAi(true)} title="Turn on K's keep % for her pictures">K off · turn on</button>;
+            if (k.error) return <button type="button" className="fv-kstate bad" onClick={k.retry} title={k.error}>K offline · retry</button>;
+            if (sortProgress) return <span className="fv-kstate">Scoring {sortProgress.done} / {sortProgress.total}</span>;
+            if (k.learned < K_READY) return <span className="fv-kstate" title="K works from the start, and gets better as you decide more of her pictures">K learning · {k.learned} / {K_READY}</span>;
+            return <span className="fv-kstate ok">K ready · {sortable.length} to sort</span>;
+          })()}
+        </div>
         {sortOpen ? (
           <KSortView
-            files={files}
+            files={sortable}
             scores={k.scores}
             learned={k.learned}
             progress={sortProgress}
             busy={applyBusy}
+            results={sortResults}
+            choice={kChoice}
+            setChoice={setKChoice}
+            shortcuts={shortcuts}
             onApply={applySorted}
             onOneByOne={oneByOne}
-            onClose={() => setSortOpen(false)}
+            onRescore={() => scoreRest({ fresh: true })}
+            onClose={closeSortView}
           />
         ) : (
         <MediaStage
@@ -758,7 +930,7 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
           actionBar={(
             <DecisionBar
               shortcuts={shortcuts}
-              hasItem={!!file}
+              hasItem={!!file && !passDone}
               canPrev={currentIndex > 0}
               canNext={currentIndex < files.length - 1}
               canMove={!!file && currentTab === 'vids'}
@@ -780,32 +952,9 @@ function PerformerFilterView({ performer, onBack, onNext, handyIntegration, hand
         files={files}
         currentTab={currentTab}
         currentIndex={currentIndex}
-        onPick={(i) => { setSortOpen(false); goTo(i); }}
+        onPick={(i) => { closeSortView(); goTo(i); }}
         kScores={ai && currentTab === 'pics' ? k.scores : null}
       />
-
-      <Snackbar
-        open={!!snack}
-        autoHideDuration={snack?.action ? null : 4000}
-        onClose={(e, reason) => { if (reason !== 'clickaway' || !snack?.action) setSnack(null); }}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      >
-        {snack ? (
-          <Alert
-            severity={snack.severity}
-            variant="filled"
-            onClose={() => setSnack(null)}
-            action={snack.action ? (
-              <>
-                <button type="button" className="pl-btn sm" onClick={snack.action.onClick}>{snack.action.label}</button>
-                <button type="button" className="pl-btn sm" onClick={() => setSnack(null)}>Later</button>
-              </>
-            ) : undefined}
-          >
-            {snack.msg}
-          </Alert>
-        ) : undefined}
-      </Snackbar>
     </div>
   );
 }

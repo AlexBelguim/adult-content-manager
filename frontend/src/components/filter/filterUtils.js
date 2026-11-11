@@ -18,7 +18,8 @@ export function tabProgress(stats, delta, tab) {
   const d = delta?.[tab] || { done: 0, total: 0 };
   const total = Math.max(0, (Number(stats?.[`${p}Total`]) || 0) + d.total);
   const done = Math.min(total, Math.max(0, (Number(stats?.[`${p}Processed`]) || 0) + d.done));
-  const pct = stats ? (total === 0 ? 100 : Math.round((done / total) * 100)) : 0;
+  // rounded down like the server, so 100% means every file is decided
+  const pct = stats ? (total === 0 ? 100 : Math.floor((done / total) * 100)) : 0;
   return { total, done, left: Math.max(0, total - done), pct };
 }
 

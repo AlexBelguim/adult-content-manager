@@ -115,7 +115,7 @@
 
 .progress-btn {
   background: var(--accent);
-  color: var(--on-fill, var(--bg));
+  color: var(--on-accent);
   border-radius: var(--radius, 6px);
 }
 
@@ -124,12 +124,6 @@
 }
 
 /* ─── MUI surfaces that these cards live inside ───────────────── */
-.MuiDialog-paper {
-  background-color: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg, 10px);
-}
-
 .MuiChip-filled {
   background-color: var(--raised);
   color: var(--text);

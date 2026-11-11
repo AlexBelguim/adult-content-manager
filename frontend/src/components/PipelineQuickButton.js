@@ -1,25 +1,29 @@
 import React, { useState } from 'react';
-import { IconButton, Tooltip, Menu, MenuItem, Divider, CircularProgress, Snackbar, Alert, ListItemText } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import { IconButton, Tooltip, Menu, MenuItem, Divider, CircularProgress, ListItemText } from '@mui/material';
 import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
 import { queuePipeline } from '../utils/pipelines';
+import { useNotify } from './ui';
 
 /**
  * One button for labels / labels + funscripts on a target (performers, content folders or videos, as
- * queuePipeline takes them): a small menu, the result in its own snackbar. `onMore` adds "Choose more…"
+ * queuePipeline takes them): a small menu, the result as a toast with Open Jobs. `onMore` adds "Choose more…"
  * (the full picker); `hint` is a line under the menu title, e.g. how many videos are still unlabelled.
  */
 export default function PipelineQuickButton({ target, title = 'Labels & funscripts', hint, onMore, sx, fontSize, color }) {
   const [anchor, setAnchor] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState(null);
+  const navigate = useNavigate();
+  const notify = useNotify();
 
   const run = async (steps) => {
     setAnchor(null);
     setBusy(true);
     try {
-      setNote({ severity: 'success', msg: `${await queuePipeline({ ...target, steps })} — follow them on the Jobs page` });
+      const note = await queuePipeline({ ...target, steps });
+      notify({ message: note, action: { label: 'Open Jobs', onClick: () => navigate('/jobs') } });
     } catch (err) {
-      setNote({ severity: 'error', msg: err.message });
+      notify({ severity: 'error', message: err.message });
     } finally {
       setBusy(false);
     }
@@ -43,9 +47,6 @@ export default function PipelineQuickButton({ target, title = 'Labels & funscrip
         {onMore && <Divider />}
         {onMore && <MenuItem onClick={() => { setAnchor(null); onMore(); }}>Choose more…</MenuItem>}
       </Menu>
-      <Snackbar open={!!note} autoHideDuration={6000} onClose={() => setNote(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        {note ? <Alert severity={note.severity} onClose={() => setNote(null)}>{note.msg}</Alert> : undefined}
-      </Snackbar>
     </>
   );
 }

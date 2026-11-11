@@ -16,6 +16,7 @@
  * The creator profiles (leakshaven.com/models) are listed by api.leakshaven.com/profile/list, and judged the same way.
  */
 const { cleanScrapeResult, formatHeight, formatWeight } = require('../../utils/scraperNormalizer');
+const { warn } = require('../discover/runLog');
 
 const SITE = 'https://leakshaven.com';
 const API = 'https://api.leakshaven.com';

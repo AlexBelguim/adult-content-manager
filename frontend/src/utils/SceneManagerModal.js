@@ -17,13 +17,10 @@ import {
   Chip,
   Paper,
   Grid,
-  Divider,
   Alert,
   Autocomplete,
   Select,
-  MenuItem,
-  FormControl,
-  InputLabel
+  MenuItem
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -40,9 +37,19 @@ import {
   SkipNext as SkipNextIcon,
   SkipPrevious as SkipPreviousIcon
 } from '@mui/icons-material';
+import { useAsk, useNotify, errorText, plural } from '../components/ui';
 
+// A failed request as an error: what we tried, then the server's own words.
+const failure = async (response, what) => {
+  const payload = await response.json().catch(() => ({}));
+  return new Error(payload.error ? `${what}: ${payload.error}` : what);
+};
+
+const fileNameOfPath = (p) => String(p || '').split(/[\\/]/).pop();
 
 const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal' }) => {
+  const ask = useAsk();
+  const notify = useNotify();
   const videoRef = useRef(null);
   const pendingSeekRef = useRef(null); // For seeking after stream reload
   const streamOffsetRef = useRef(0); // Current stream offset for event handlers
@@ -109,49 +116,59 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   // Merge Scenes
   const mergeSelectedScenes = async () => {
     if (selectedScenes.size < 2) return;
-    
-    if (!window.confirm(`Merge ${selectedScenes.size} scenes into one?`)) return;
-    
-    setLoading(true);
-    try {
-      // Get selected scene objects
-      const selected = scenes.filter(s => selectedScenes.has(s.id));
-      // Sort by start time
-      selected.sort((a, b) => a.startTime - b.startTime);
-      
-      const first = selected[0];
-      const last = selected[selected.length - 1];
-      
-      // Update first scene
-      const updatedScene = {
-        ...first,
-        endTime: last.endTime,
-      };
-      
-      await fetch('/api/scenes/update', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneId: first.id, scene: updatedScene })
-      });
-      
-      // Delete others
-      for (let i = 1; i < selected.length; i++) {
-        await fetch('/api/scenes/delete', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sceneId: selected[i].id })
-        });
-      }
-      
-      await loadScenes();
-      setSelectedScenes(new Set());
-      
-    } catch (err) {
-      console.error('Merge failed', err);
-      setError('Failed to merge scenes');
-    } finally {
-      setLoading(false);
-    }
+    const count = selectedScenes.size;
+
+    const merged = await ask({
+      title: `Merge ${count} scenes into one?`,
+      text: 'The first is stretched to the end of the last; the others are deleted.',
+      okLabel: `Merge ${count} scenes`,
+      busyLabel: 'Merging…',
+      run: async () => {
+        setLoading(true);
+        try {
+          // Selected scene objects, by start time
+          const selected = scenes.filter(s => selectedScenes.has(s.id));
+          selected.sort((a, b) => a.startTime - b.startTime);
+
+          const first = selected[0];
+          const last = selected[selected.length - 1];
+
+          // Stretch the first scene to the end of the last
+          const updatedScene = {
+            ...first,
+            endTime: last.endTime,
+          };
+
+          const updated = await fetch('/api/scenes/update', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sceneId: first.id, scene: updatedScene })
+          });
+          if (!updated.ok) throw await failure(updated, 'Could not merge the scenes');
+
+          // Delete the others (the id goes in the path). A 404 means it is already gone,
+          // so trying again after a failure goes through.
+          try {
+            for (let i = 1; i < selected.length; i++) {
+              const removed = await fetch(`/api/scenes/delete/${selected[i].id}`, { method: 'DELETE' });
+              if (!removed.ok && removed.status !== 404) {
+                throw await failure(removed, `Could not delete the scene "${selected[i].name}"`);
+              }
+            }
+          } finally {
+            // The first scene is stretched by now, whatever happened after
+            await loadScenes();
+          }
+          setSelectedScenes(new Set());
+        } catch (err) {
+          console.error('Merge failed', err);
+          throw new Error(errorText(err, 'Could not merge the scenes'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+    if (merged) notify(`Merged ${count} scenes`);
   };
 
   const handleMouseDown = (e) => {
@@ -192,6 +209,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
       loadAllTags();
       loadAvailableFunscripts();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loads again only for a new video
   }, [open, filePath]);
 
   // Calculate effective duration - use cached duration (most reliable), or last scene end time
@@ -296,6 +314,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-attaches when a new <video> element is in the ref
   }, [videoRef.current]);
 
   // Keyboard shortcuts
@@ -361,6 +380,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the handler reads the video through its ref
   }, [open]);
 
   const loadScenes = async () => {
@@ -872,7 +892,14 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   };
 
   const deleteScene = async (sceneId) => {
-    if (!window.confirm('Are you sure you want to delete this scene?')) return;
+    const scene = scenes.find(s => s.id === sceneId);
+    const sure = await ask({
+      title: scene ? `Delete the scene "${scene.name}"?` : 'Delete this scene?',
+      text: 'Only the scene marker goes; the video is not touched.',
+      okLabel: 'Delete scene',
+      danger: true,
+    });
+    if (!sure) return;
 
     setLoading(true);
     setError('');
@@ -884,7 +911,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
 
       if (response.ok) {
         await loadScenes();
-        
+
         // Notify FunscriptPlayer components about scene changes
         window.dispatchEvent(new CustomEvent('scenesUpdated'));
       } else {
@@ -902,102 +929,100 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
     const scene = scenes.find(s => s.id === sceneId);
     if (!scene) return;
 
-    const confirmMessage = `⚠️ WARNING: This will permanently cut scene "${scene.name}" from the original video file!\n\n` +
-      `This action will:\n` +
-      `• Remove the scene (${formatTime(scene.startTime)} - ${formatTime(scene.endTime)}) from the video\n` +
-      `• Adjust timestamps of all subsequent scenes\n` +
-      `• Update the funscript file if present\n` +
-      `• Delete the backup after successful completion\n\n` +
-      `This cannot be undone.\n\n` +
-      `Are you absolutely sure you want to proceed?`;
+    let result = null;
+    const done = await ask({
+      title: `Cut "${scene.name}" out of the video?`,
+      rows: [
+        ['Video', fileNameOfPath(filePath)],
+        ['Part', `${formatTime(scene.startTime)} – ${formatTime(scene.endTime)}`],
+      ],
+      text: 'The original file is rewritten without this part. Later scenes and the funscript shift to match. ' +
+        'Scenes that overlap this part lose that footage and no longer line up. Cannot be undone.',
+      okLabel: 'Cut from the video',
+      danger: true,
+      busyLabel: 'Cutting…',
+      run: async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/scenes/cut', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoPath: filePath,
+              sceneId
+            })
+          });
+          if (!response.ok) throw await failure(response, 'Could not cut the scene');
+          result = await response.json();
 
-    if (!window.confirm(confirmMessage)) return;
+          // Reload scenes to reflect the updated timestamps
+          await loadScenes();
 
-    setLoading(true);
-    setError('');
+          // Notify FunscriptPlayer components about scene changes
+          window.dispatchEvent(new CustomEvent('scenesUpdated'));
+        } catch (err) {
+          throw new Error(errorText(err, 'Could not cut the scene'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+    if (!done) return;
 
-    try {
-      const response = await fetch('/api/scenes/cut', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoPath: filePath,
-          sceneId
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(`Scene cut successfully!\n\n${result.message}`);
-        
-        // Reload scenes to reflect the updated timestamps
-        await loadScenes();
-        
-        // Notify FunscriptPlayer components about scene changes
-        window.dispatchEvent(new CustomEvent('scenesUpdated'));
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to cut scene');
-      }
-    } catch (err) {
-      setError('Failed to cut scene');
-    } finally {
-      setLoading(false);
-    }
+    const shifted = result?.updatedScenes > 0 ? `; ${plural(result.updatedScenes, 'later scene')} shifted` : '';
+    notify(`Cut "${scene.name}" from the video${shifted}`);
   };
 
   const cutMultipleScenes = async () => {
     if (selectedScenes.size === 0) return;
 
-    const scenesToCut = Array.from(selectedScenes).map(id => 
+    const scenesToCut = Array.from(selectedScenes).map(id =>
       scenes.find(s => s.id === id)
     ).filter(Boolean);
+    const count = scenesToCut.length;
+    const inOrder = [...scenesToCut].sort((a, b) => a.startTime - b.startTime);
 
-    const sceneNames = scenesToCut.map(s => s.name).join(', ');
-    const confirmMessage = `⚠️ WARNING: This will permanently cut ${scenesToCut.length} scene(s) from the original video file!\n\n` +
-      `Scenes to cut: ${sceneNames}\n\n` +
-      `This action will:\n` +
-      `• Remove all selected scenes from the video\n` +
-      `• Adjust timestamps of all subsequent scenes\n` +
-      `• Update the funscript file if present\n` +
-      `• Delete the backup after successful completion\n\n` +
-      `This cannot be undone.\n\n` +
-      `Are you absolutely sure you want to proceed?`;
+    const done = await ask({
+      title: `Cut ${count} scenes out of the video?`,
+      rows: [
+        ['Video', fileNameOfPath(filePath)],
+        ...inOrder.map(s => [s.name, `${formatTime(s.startTime)} – ${formatTime(s.endTime)}`]),
+      ],
+      text: 'The original file is rewritten without these parts. Later scenes and the funscript shift to match. ' +
+        'Scenes that overlap a part lose that footage and no longer line up, and scenes between two cut parts end up too early. ' +
+        'Cannot be undone.',
+      okLabel: `Cut ${count} scenes`,
+      danger: true,
+      busyLabel: 'Cutting…',
+      run: async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/scenes/cut', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoPath: filePath,
+              sceneIds: Array.from(selectedScenes)
+            })
+          });
+          if (!response.ok) throw await failure(response, 'Could not cut the scenes');
 
-    if (!window.confirm(confirmMessage)) return;
+          // Clear selection and reload scenes
+          setSelectedScenes(new Set());
+          await loadScenes();
 
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/scenes/cut', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoPath: filePath,
-          sceneIds: Array.from(selectedScenes)
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(`Multiple scenes cut successfully!\n\n${result.message}`);
-        
-        // Clear selection and reload scenes
-        setSelectedScenes(new Set());
-        await loadScenes();
-        
-        // Notify FunscriptPlayer components about scene changes
-        window.dispatchEvent(new CustomEvent('scenesUpdated'));
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to cut scenes');
-      }
-    } catch (err) {
-      setError('Failed to cut scenes');
-    } finally {
-      setLoading(false);
-    }
+          // Notify FunscriptPlayer components about scene changes
+          window.dispatchEvent(new CustomEvent('scenesUpdated'));
+        } catch (err) {
+          throw new Error(errorText(err, 'Could not cut the scenes'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+    if (done) notify(`Cut ${count} scenes from the video`);
   };
 
   const toggleSceneSelection = (sceneId) => {
@@ -1038,7 +1063,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
 
       if (response.ok) {
         const result = await response.json();
-        alert(`Scene exported successfully to: ${result.exportPath}`);
+        notify(`Exported to ${result.exportPath}`);
         // Reload exported files to show the new export
         await loadExportedFiles();
       } else {
@@ -1097,44 +1122,40 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
 
   const deleteExportedFile = async (fileId) => {
     const file = exportedFiles.find(f => f.id === fileId);
-    const fileName = file ? file.name : 'this file';
-    
-    if (!window.confirm(`Are you sure you want to delete the exported file "${fileName}"?\n\nThis will permanently delete the physical video file from disk and cannot be undone.`)) return;
+    const fileName = file ? file.name : 'the file';
 
-    setLoading(true);
-    setError('');
+    let result = null;
+    const done = await ask({
+      title: file ? `Delete the exported file "${fileName}"?` : 'Delete this exported file?',
+      text: 'The video file and its funscript are deleted from disk. ' +
+        'When it sits in its own funscript folder, that whole folder goes, with everything in it.',
+      okLabel: 'Delete file',
+      danger: true,
+      busyLabel: 'Deleting…',
+      run: async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch(`/api/scenes/exported-file/${fileId}`, {
+            method: 'DELETE'
+          });
+          if (!response.ok) throw await failure(response, 'Could not delete the file');
+          result = await response.json();
+          await loadExportedFiles();
+        } catch (err) {
+          throw new Error(errorText(err, 'Could not delete the file'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+    if (!done) return;
 
-    try {
-      const response = await fetch(`/api/scenes/exported-file/${fileId}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        let message = `File "${fileName}" has been successfully deleted from disk.`;
-        
-        if (result.funscriptDeleted) {
-          message += '\nAssociated funscript file was also deleted.';
-        }
-        
-        if (result.folderDeleted) {
-          message += '\nThe funscript folder was also removed as it was empty.';
-        }
-        
-        if (result.fileDeleted) {
-          alert(message);
-        } else {
-          alert(`Database record removed, but file may not have been deleted from disk.`);
-        }
-        await loadExportedFiles();
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to delete exported file');
-      }
-    } catch (err) {
-      setError('Failed to delete exported file');
-    } finally {
-      setLoading(false);
+    if (result?.fileDeleted) {
+      const also = result.folderDeleted ? ' and its folder' : result.funscriptDeleted ? ' and its funscript' : '';
+      notify(`Deleted ${fileName}${also}`);
+    } else {
+      notify({ severity: 'warning', message: 'The record is gone, but the file may still be on disk' });
     }
   };
 
@@ -1148,118 +1169,101 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
   const moveToFunscript = async () => {
     if (!filePath) return;
 
-    const confirmMessage = `Move this video to the funscript section?\n\n` +
-      `This will:\n` +
-      `• Create a funscript folder in the current directory\n` +
-      `• Create a subfolder with the video's name inside the funscript folder\n` +
-      `• Copy all funscript files from exported scenes to this new folder\n` +
-      `• Keep the main video file in its current location\n` +
-      `• Update all scene data to track the new funscript locations\n` +
-      `• Preserve all your work on this video\n\n` +
-      `Continue?`;
+    const videoName = fileNameOfPath(filePath).replace(/\.[^.]+$/, '');
+    let result = null;
+    const done = await ask({
+      title: 'Move this video to the funscript section?',
+      text: `The video and the funscripts named like it move to funscript/${videoName}/ in its folder, ` +
+        'and the funscripts of its exported scenes are copied there. Scenes and exported files follow it.',
+      okLabel: 'Move video',
+      busyLabel: 'Moving…',
+      run: async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/scenes/video/move-to-funscript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoPath: filePath,
+              copyExportedFunscripts: true
+            })
+          });
+          if (!response.ok) throw await failure(response, 'Could not move the video');
+          result = await response.json();
 
-    if (!window.confirm(confirmMessage)) return;
+          // Reload data to reflect new paths
+          await loadScenes();
+          await loadExportedFiles();
 
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/scenes/video/move-to-funscript', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoPath: filePath,
-          copyExportedFunscripts: true
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log('Move to funscript result:', result); // Debug log
-        let successMessage = `✅ Video moved successfully!\n\nNew location: ${result.newVideoPath}\n\nAll scenes and exported files have been updated to the new location.`;
-        
-        if (result.funscriptsCopied && result.funscriptsCopied > 0) {
-          successMessage += `\n\n📁 ${result.funscriptsCopied} funscript file(s) copied from exported scenes to the main video folder.`;
-        } else {
-          successMessage += `\n\n📁 No funscript files were copied from exported scenes.`;
+          // Notify parent components about the change
+          window.dispatchEvent(new CustomEvent('videoMoved', {
+            detail: {
+              oldPath: filePath,
+              newPath: result.newVideoPath
+            }
+          }));
+        } catch (err) {
+          console.error('Move to funscript error:', err);
+          throw new Error(errorText(err, 'Could not move the video'));
+        } finally {
+          setLoading(false);
         }
-        
-        alert(successMessage);
-        
-        // Reload data to reflect new paths
-        await loadScenes();
-        await loadExportedFiles();
-        
-        // Notify parent components about the change
-        window.dispatchEvent(new CustomEvent('videoMoved', { 
-          detail: { 
-            oldPath: filePath, 
-            newPath: result.newVideoPath 
-          } 
-        }));
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to move video to funscript folder');
-      }
-    } catch (err) {
-      setError('Failed to move video to funscript folder');
-      console.error('Move to funscript error:', err);
-    } finally {
-      setLoading(false);
-    }
+      },
+    });
+    if (!done) return;
+
+    const copied = result?.funscriptsCopied > 0 ? `, ${plural(result.funscriptsCopied, 'funscript')} copied` : '';
+    notify(`Moved to ${result?.newVideoPath}${copied}`);
   };
 
   // Move video back from funscript folder
   const moveFromFunscript = async () => {
     if (!filePath) return;
 
-    const confirmMessage = `Move this video back to the regular video section?\n\n` +
-      `This will:\n` +
-      `• Move the video file out of the funscript folder structure\n` +
-      `• Move any associated funscript files with it\n` +
-      `• Update all scene data and exported files to track the new location\n` +
-      `• Preserve all your work on this video\n\n` +
-      `Continue?`;
+    let result = null;
+    const done = await ask({
+      title: 'Move this video back to the videos section?',
+      text: 'The video and the funscripts named like it move out of the funscript folder. ' +
+        'Afterwards the server deletes every funscript named like the video in the target folder, ' +
+        'which includes the ones it just moved.',
+      okLabel: 'Move back',
+      danger: true,
+      busyLabel: 'Moving…',
+      run: async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/scenes/video/move-from-funscript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoPath: filePath
+            })
+          });
+          if (!response.ok) throw await failure(response, 'Could not move the video back');
+          result = await response.json();
 
-    if (!window.confirm(confirmMessage)) return;
+          // Reload data to reflect new paths
+          await loadScenes();
+          await loadExportedFiles();
 
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/scenes/video/move-from-funscript', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoPath: filePath
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(`✅ Video moved successfully!\n\nNew location: ${result.newVideoPath}\n\nAll scenes and exported files have been updated to the new location.`);
-        
-        // Reload data to reflect new paths
-        await loadScenes();
-        await loadExportedFiles();
-        
-        // Notify parent components about the change
-        window.dispatchEvent(new CustomEvent('videoMoved', { 
-          detail: { 
-            oldPath: filePath, 
-            newPath: result.newVideoPath 
-          } 
-        }));
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to move video from funscript folder');
-      }
-    } catch (err) {
-      setError('Failed to move video from funscript folder');
-      console.error('Move from funscript error:', err);
-    } finally {
-      setLoading(false);
-    }
+          // Notify parent components about the change
+          window.dispatchEvent(new CustomEvent('videoMoved', {
+            detail: {
+              oldPath: filePath,
+              newPath: result.newVideoPath
+            }
+          }));
+        } catch (err) {
+          console.error('Move from funscript error:', err);
+          throw new Error(errorText(err, 'Could not move the video back'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+    if (done) notify(`Moved to ${result?.newVideoPath}`);
   };
 
   const formatTime = (seconds) => {
@@ -1395,15 +1399,6 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
       );
     });
   };
-
-  const handleCloseClick = (event) => {
-    event?.preventDefault();
-    if (onClose) {
-      onClose();
-    }
-  };
-
-  const closeLabel = variant === 'page' ? 'Close' : '×';
 
   const header = null;
 
@@ -1670,7 +1665,7 @@ const SceneManagerModal = ({ open, onClose, videoSrc, filePath, variant = 'modal
                       {scene.funscriptPath ? (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Chip
-                            label={scene.funscriptPath.split(/[\\\/]/).pop()}
+                            label={scene.funscriptPath.split(/[\\/]/).pop()}
                             size="small"
                             sx={{
                               backgroundColor: 'success.main',

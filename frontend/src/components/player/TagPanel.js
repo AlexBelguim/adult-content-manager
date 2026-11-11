@@ -1,17 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { extractGenreFromPath } from '../../utils/tagModal';
+import { extractGenreFromPath } from './playerUtils';
+import { useShell } from '../../nav';
 import './player.css';
+import './panels.css';
 
 const NONE = [];
+const CREATE = Symbol('create');
 
 /**
  * Inline tag editor for a file (videos and pictures): filter box, click to toggle,
  * assigned tags first, the genre-from-path tag is locked.
+ * A filter text that is no tag yet offers 'Create "<text>"' (in the shell's library folder), which also assigns it.
  * Dispatches `tag-modal-closed` (what the gallery listens to) once, when tags were
  * changed and the item changes or the panel unmounts.
+ *
+ *   <TagPanel item onTagsChange={(tags, path) => …} />   onTagsChange is optional
  */
 export default function TagPanel({ item, onTagsChange }) {
   const path = item?.path;
+  const { basePath } = useShell();
   const [state, setState] = useState({ path: null, fileTags: NONE, auto: NONE });
   const [allTags, setAllTags] = useState(NONE);
   const [filter, setFilter] = useState('');
@@ -70,33 +77,64 @@ export default function TagPanel({ item, onTagsChange }) {
 
   const auto = current ? state.auto : NONE;   // set by a tag rule from labelmaster's scenes
 
-  const sorted = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    return [
-      ...fileTags,
-      ...allTags.filter((t) => !fileTags.includes(t))
-    ].filter((t) => !q || String(t).toLowerCase().includes(q));
-  }, [fileTags, allTags, filter]);
+  const q = filter.trim();
+  const lowerQ = q.toLowerCase();
+  const sorted = useMemo(() => [
+    ...fileTags,
+    ...allTags.filter((t) => !fileTags.includes(t))
+  ].filter((t) => !lowerQ || String(t).toLowerCase().includes(lowerQ)), [fileTags, allTags, lowerQ]);
 
-  const toggle = async (tag) => {
-    const assigned = fileTags.includes(tag);
+  const canCreate = !!q && !!basePath && !!path
+    && ![...allTags, ...fileTags].some((t) => String(t).toLowerCase() === lowerQ);
+
+  const toggle = async (tag, assignedNow = fileTags.includes(tag)) => {
+    const assigned = assignedNow;
+    const forPath = path;
     setBusyTag(tag);
     setError('');
     try {
       const res = await fetch(assigned ? '/api/tags/remove-file' : '/api/tags/assign-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, tag })
+        body: JSON.stringify({ path: forPath, tag })
       });
       if (!res.ok) throw new Error();
-      dirty.current = true;
+      // Moved on meanwhile: the item change has gone by, so the gallery hears of it now.
+      if (latestPath.current === forPath) dirty.current = true;
+      else window.dispatchEvent(new Event('tag-modal-closed'));
+      // loadFileTags of this render reads forPath and only updates the panel while forPath is shown.
       const next = await loadFileTags();
-      if (next) onTagsChange?.(next);
+      if (next) onTagsChange?.(next, forPath);
     } catch (e) {
-      setError(assigned ? 'Failed to remove tag' : 'Failed to assign tag');
+      if (latestPath.current === forPath) setError(assigned ? 'Failed to remove tag' : 'Failed to assign tag');
     } finally {
       setBusyTag(null);
     }
+  };
+
+  const create = async () => {
+    const tag = q;
+    const forPath = path;
+    setBusyTag(CREATE);
+    setError('');
+    let made;
+    try {
+      const res = await fetch('/api/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ basePath, tag })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to create the tag');
+      made = data.tag || tag;
+    } catch (e) {
+      if (latestPath.current === forPath) setError(e.message || 'Failed to create the tag');
+      setBusyTag(null);
+      return;
+    }
+    setAllTags((prev) => (prev.includes(made) ? prev : [...prev, made]));
+    if (latestPath.current === forPath) setFilter('');
+    await toggle(made, false);
   };
 
   return (
@@ -112,6 +150,17 @@ export default function TagPanel({ item, onTagsChange }) {
         aria-label="Filter tags"
       />
       <div className="pl-chips">
+        {canCreate && (
+          <button
+            type="button"
+            className="pl-tg is-new"
+            disabled={busyTag === CREATE}
+            title="Make a new tag and put it on this file"
+            onClick={create}
+          >
+            {busyTag === CREATE ? 'Creating…' : `Create "${q}"`}
+          </button>
+        )}
         {sorted.map((tag) => {
           const isGenre = !!genre && String(tag).toLowerCase() === genre;
           const isAuto = auto.includes(tag);
@@ -120,7 +169,7 @@ export default function TagPanel({ item, onTagsChange }) {
               key={tag}
               type="button"
               className={`pl-tg${fileTags.includes(tag) ? ' is-on' : ''}`}
-              disabled={isGenre || busyTag === tag || !current}
+              disabled={isGenre || busyTag === tag}
               title={isGenre ? 'Genre tag — comes from the folder' : isAuto ? 'Set from the video’s scenes (tag rule); take it off and it stays off' : undefined}
               aria-pressed={fileTags.includes(tag)}
               onClick={() => toggle(tag)}
@@ -129,7 +178,7 @@ export default function TagPanel({ item, onTagsChange }) {
             </button>
           );
         })}
-        {current && sorted.length === 0 && (
+        {sorted.length === 0 && !canCreate && current && (
           <p className="pl-hint">{allTags.length ? 'No tag matches the filter.' : 'No tags defined yet.'}</p>
         )}
       </div>

@@ -1,18 +1,26 @@
 import React, { useState } from 'react';
-import { Box, Card, Typography, TextField, Button, List, ListItem, ListItemText, ListItemIcon } from '@mui/material';
+import { Box, Card, Typography, TextField, Button, List, ListItem, ListItemText } from '@mui/material';
 import { CreateNewFolder, FolderOpen, AddCircle } from '@mui/icons-material';
+import { useAsk } from './ui';
 
 function FolderAdder({ onAdd }) {
   const [folderPath, setFolderPath] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const ask = useAsk();
 
-  const handleAddFolder = () => {
+  const handleAddFolder = async () => {
     if (folderPath.trim()) {
       onAdd(folderPath.trim());
       setFolderPath('');
       setIsCreating(false);
     } else {
-      const path = prompt('Enter folder path:');
+      // POST /api/folders/add creates the missing subfolders (also "content" and "before upload").
+      const path = await ask({
+        title: 'Add a library folder',
+        text: 'The folder that holds "before filter performer" and "after filter performer". Missing subfolders are created.',
+        input: { label: 'Folder path', placeholder: 'C:\\content', validate: (v) => (v.trim() ? null : 'Enter a path') },
+        okLabel: 'Add folder'
+      });
       if (path) {
         onAdd(path);
       }

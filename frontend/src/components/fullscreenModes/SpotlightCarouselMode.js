@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { AnimatePresence, motion } from 'framer-motion';
 import useGalleryImages, { imageUrlForPath } from './useGalleryImages';
+import { overlayChipSx } from '../layout';
 
 /**
  * "Spotlight Carousel" — one big hero image cross-dissolving every few seconds.
@@ -9,10 +10,14 @@ import useGalleryImages, { imageUrlForPath } from './useGalleryImages';
  * ambient cinematic feel. Side rail shows next/prev thumbnails.
  */
 export default function SpotlightCarouselMode({ performers, onPhotoClick, active }) {
-  const { items } = useGalleryImages(performers, { perPerformerMax: 5, active });
+  const { items, loading } = useGalleryImages(performers, { perPerformerMax: 5, active });
   const [idx, setIdx] = useState(0);
   const timerRef = useRef(null);
   const userInteractedRef = useRef(0);
+  // Until the first load has started, a non-empty list still counts as loading
+  const startedRef = useRef(false);
+  if (loading) startedRef.current = true;
+  const pending = loading || (!startedRef.current && Array.isArray(performers) && performers.length > 0);
 
   // Shuffle for a varied sequence
   const ordered = useMemo(() => {
@@ -37,20 +42,50 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
     return () => clearTimeout(timerRef.current);
   }, [active, ordered.length]);
 
-  if (!active || ordered.length === 0) {
+  const count = ordered.length;
+  const advance = useCallback((delta) => {
+    if (!count) return;
+    userInteractedRef.current = Date.now() + 8000;
+    setIdx((i) => (i + delta + count) % count);
+  }, [count]);
+
+  // Arrow keys step back and forward
+  useEffect(() => {
+    if (!active || count === 0) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'ArrowLeft') advance(-1);
+      else if (e.key === 'ArrowRight') advance(1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active, count, advance]);
+
+  if (!active) return null;
+
+  if (count === 0) {
     return (
-      <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'var(--bg)' }} />
+      <Box
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          bgcolor: 'var(--bg)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Typography sx={{ color: 'var(--dim)', fontSize: '.9rem' }}>
+          {pending ? 'Loading pictures…' : 'No pictures to show'}
+        </Typography>
+      </Box>
     );
   }
 
-  const current = ordered[idx];
-  const prev = ordered[(idx - 1 + ordered.length) % ordered.length];
-  const next = ordered[(idx + 1) % ordered.length];
-
-  const advance = (delta) => {
-    userInteractedRef.current = Date.now() + 8000;
-    setIdx((i) => (i + delta + ordered.length) % ordered.length);
-  };
+  // The list can shrink while pictures stream in; keep the index in range.
+  const at = idx % count;
+  const current = ordered[at];
+  const prev = ordered[(at - 1 + count) % count];
+  const next = ordered[(at + 1) % count];
 
   return (
     <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', background: 'var(--bg)' }}>
@@ -78,8 +113,8 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
         sx={{
           position: 'absolute',
           inset: 0,
-          background:
-            'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.55) 90%)',
+          background: 'var(--bg)',
+          opacity: 0.35,
         }}
       />
 
@@ -104,7 +139,7 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
               position: 'relative',
               maxWidth: '70vw',
               maxHeight: '78vh',
-              boxShadow: '0 30px 90px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.08)',
+              boxShadow: 'var(--shadow-md), 0 0 0 1px var(--line-strong)',
               borderRadius: 6,
               overflow: 'hidden',
               cursor: 'pointer',
@@ -131,8 +166,8 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
                 bottom: 0,
                 left: 0,
                 right: 0,
-                p: '24px 28px 22px',
-                background: 'linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 100%)',
+                p: '10px 16px',
+                background: 'var(--scrim-strong)',
                 color: 'var(--text)',
               }}
             >
@@ -159,7 +194,7 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
           opacity: 0.45,
           cursor: 'pointer',
           transition: 'opacity 0.25s, transform 0.25s',
-          boxShadow: '0 8px 30px rgba(0,0,0,0.7)',
+          boxShadow: 'var(--shadow-md)',
           '&:hover': { opacity: 0.85, transform: 'translateY(-50%) scale(1.04)' },
         }}
       >
@@ -183,7 +218,7 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
           opacity: 0.45,
           cursor: 'pointer',
           transition: 'opacity 0.25s, transform 0.25s',
-          boxShadow: '0 8px 30px rgba(0,0,0,0.7)',
+          boxShadow: 'var(--shadow-md)',
           '&:hover': { opacity: 0.85, transform: 'translateY(-50%) scale(1.04)' },
         }}
       >
@@ -194,31 +229,20 @@ export default function SpotlightCarouselMode({ performers, onPhotoClick, active
         />
       </Box>
 
-      {/* Progress dots */}
+      {/* Position counter */}
       <Box
+        aria-live="polite"
         sx={{
           position: 'absolute',
-          bottom: 18,
+          top: 16,
           left: '50%',
           transform: 'translateX(-50%)',
-          display: 'flex',
-          gap: '6px',
           zIndex: 5,
+          ...overlayChipSx('var(--text)'),
+          fontSize: '.8rem',
         }}
       >
-        {Array.from({ length: Math.min(ordered.length, 18) }).map((_, i) => (
-          <Box
-            key={i}
-            sx={{
-              width: i === idx % 18 ? 22 : 6,
-              height: 6,
-              borderRadius: 3,
-              background:
-                i === idx % 18 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.3)',
-              transition: 'width 0.4s, background 0.4s',
-            }}
-          />
-        ))}
+        {`${at + 1} / ${count}`}
       </Box>
     </Box>
   );

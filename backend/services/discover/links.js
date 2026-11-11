@@ -7,4 +7,9 @@ const siteLink = (url) => typeof url === 'string'
   ? url.replace(/^https:\/\/(?:www\.)?leakshaven\.com\/model\/([^/?#]+)\/?$/i, 'https://leakshaven.com/?q=$1')
   : url;
 
-module.exports = { siteLink };
+/** A part of a link decoded, or as it is when it is not valid percent-encoding ("100%" in a name) */
+const safeDecode = (s) => {
+  try { return decodeURIComponent(s); } catch { return s; }
+};
+
+module.exports = { siteLink, safeDecode };

@@ -2,209 +2,248 @@ const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
 const { adoptOrphanedHashes } = require('./performerRecords');
-const { findThumbnail, scanPerformerFolderEnhanced } = require('./importer');
 const { scanPerformerFolder } = require('./fileScanner');
-const { findPerformerByNameOrAlias } = require('../utils/performerMatcher');
-const { createHashDB } = require('./hashService');
+const {
+    SUPPORTED, kindOf, isJunk, requireLibrary, httpError, performerNameError, checkFolder,
+    resolveImportName, safeRel, placeFile, sameContent
+} = require('./importGuard');
 
-/**
- * Handle upload-based performer import
- * Files are uploaded via multipart form data and organized into the proper structure
- */
-// Global progress tracking map
+// Progress of the running import, keyed by its queue job id (read by the upload queue)
 const uploadProgressMap = new Map();
 
+const LIST_CAP = 200;
+
+function newReport(performerName, requestedName) {
+    return {
+        performerName,
+        requestedName,
+        matched: null,
+        isUpdate: false,
+        imported: 0,
+        identical: 0,
+        renamed: 0,
+        unsupported: 0,
+        failed: 0,
+        lists: { identical: [], renamed: [], unsupported: [], failed: [] },
+        leftIn: null,
+        coverKept: false,
+        hashing: 'off',
+        hashError: null
+    };
+}
+
+// Counts are true totals; each list keeps the first LIST_CAP items
+function note(report, key, item) {
+    report[key]++;
+    if (report.lists[key] && report.lists[key].length < LIST_CAP) report.lists[key].push(item);
+}
+
+const posixRel = (from, to) => path.relative(from, to).split(path.sep).join('/');
+
 /**
- * Handle upload-based performer import
- * Files are uploaded via multipart form data and organized into the proper structure
+ * The name checks of an import, before any file is touched: the library row, the name rule and the blacklist.
+ * Returns { lib, match }; throws an Error with .code ('no-library', 'unknown-library', 'invalid', 'blacklisted').
  */
-async function uploadImportPerformer(performerName, basePath, files, uploadId, createHashes = false) {
-    console.log(`Starting upload import for performer: ${performerName} (ID: ${uploadId})`);
-    console.log(`Received ${files.length} files`);
-
-    // Initialize progress
-    if (uploadId) {
-        uploadProgressMap.set(uploadId, {
-            status: 'processing',
-            processed: 0,
-            total: files.length,
-            currentFile: 'Starting import...'
-        });
+function checkImport(performerName, basePath) {
+    const lib = requireLibrary(basePath);
+    const nameErr = performerNameError(performerName);
+    if (nameErr) throw httpError(400, 'invalid', nameErr);
+    const match = resolveImportName(performerName);
+    if (match.kind === 'invalid') throw httpError(400, 'invalid', match.reason);
+    if (match.kind === 'blacklisted') {
+        throw httpError(409, 'blacklisted', `"${match.name}" is blacklisted${match.reason ? `: ${match.reason}` : ''}`);
     }
+    // The canonical name of a matched performer becomes a folder name too
+    const canonicalErr = performerNameError(match.name);
+    if (canonicalErr) throw httpError(400, 'invalid', `The matched performer "${match.name}" has a name that cannot be a folder: ${canonicalErr}`);
+    return { lib, match };
+}
 
-    // Validate performer name
-    if (!performerName || !performerName.trim()) {
-        throw new Error('Performer name is required');
-    }
-
-    let finalName = performerName.trim();
-
-    // Try to find existing performer to use canonical name
-    const existingMatch = findPerformerByNameOrAlias(finalName);
-    if (existingMatch) {
-        console.log(`Matched "${finalName}" to existing performer "${existingMatch.name}"`);
-        finalName = existingMatch.name;
-
-        if (existingMatch.blacklisted) {
-            throw new Error(`Performer "${finalName}" is blacklisted and cannot be imported.`);
-        }
-    }
-
-    // Create performer folder structure
-    const performerPath = path.join(basePath, 'before filter performer', finalName);
-    const picsPath = path.join(performerPath, 'pics');
-    const vidsPath = path.join(performerPath, 'vids');
-    const funscriptPath = path.join(vidsPath, 'funscript');
-
-    // Check if folder already exists
-    if (await fs.pathExists(performerPath)) {
-        console.log(`Performer folder "${finalName}" already exists. Merging new files...`);
-    }
-
-    // Create folder structure
-    await fs.ensureDir(picsPath);
-    await fs.ensureDir(vidsPath);
-    await fs.ensureDir(funscriptPath);
-
-    // File extension categories
-    const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-    const videoExts = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'];
-    const funscriptExt = '.funscript';
-
-    // Track stats
-    const stats = {
-        pics_count: 0,
-        vids_count: 0,
-        funscript_vids_count: 0,
-        funscript_files_count: 0,
-        total_size_gb: 0
+/**
+ * Import files into "before filter performer/<name>".
+ * files: [{ path, originalname, rel, size?, buffer? }]; rel is the path inside the source ('set1/001.jpg').
+ * opts: { requestedName, source: 'local'|'upload', sourceDir, onStage, resume }.
+ * resume: an earlier run of this job moved files already, so the record, the cache and the hashes are finished
+ * even when nothing is left to move.
+ * Nothing is ever overwritten: same bytes are skipped (the source copy is removed), other same names are renamed.
+ * A failed file is reported and the next one goes on.
+ */
+async function uploadImportPerformer(performerName, basePath, files, progressId, createHashes = false, opts = {}) {
+    const onStage = typeof opts.onStage === 'function' ? opts.onStage : () => {};
+    const setProgress = (processed, total, currentFile) => {
+        if (progressId) uploadProgressMap.set(progressId, { status: 'processing', processed, total, currentFile });
     };
 
-    // Group files to detect funscript video pairs
-    const filesByBasename = new Map();
+    // (a) Checks first: nothing is touched before these pass
+    const { lib, match } = checkImport(performerName, basePath);
+    const finalName = match.name;
+    const requestedName = (opts.requestedName || performerName || '').trim();
+    const report = newReport(finalName, requestedName);
+    if (match.kind === 'existing') report.matched = { by: match.by, performerId: match.performerId };
+
+    console.log(`[Import] "${requestedName}" as "${finalName}" (${opts.source || 'upload'}): ${files.length} files`);
+    setProgress(0, files.length, 'Starting import...');
+
+    // Sort the files: supported by kind, the rest reported and left where they are
+    const entries = [];
     for (const file of files) {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const basename = path.basename(file.originalname, ext);
-
-        if (!filesByBasename.has(basename)) {
-            filesByBasename.set(basename, []);
-        }
-        filesByBasename.get(basename).push({ file, ext });
-    }
-
-    // Process each file
-    let processedCount = 0;
-    for (const file of files) {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const basename = path.basename(file.originalname, ext);
-        const filename = file.originalname;
-
-        // Update progress
-        if (uploadId) {
-            uploadProgressMap.set(uploadId, {
-                status: 'processing',
-                processed: processedCount,
-                total: files.length,
-                currentFile: `Importing: ${filename}`
-            });
-        }
-
-        // Get file size - either from file object or from disk
-        let fileSize = file.size;
-        if (!fileSize && file.path) {
-            try {
-                const fileStat = await fs.stat(file.path);
-                fileSize = fileStat.size;
-            } catch (e) {
-                console.warn(`Could not get size for ${file.originalname}:`, e.message);
-                fileSize = 0;
-            }
-        }
-        stats.total_size_gb += (fileSize || 0) / (1024 * 1024 * 1024);
-
-        let targetPath;
-
-        if (imageExts.includes(ext)) {
-            // Image file -> pics folder
-            targetPath = path.join(picsPath, filename);
-            stats.pics_count++;
-        } else if (videoExts.includes(ext)) {
-            // Check if this video has an associated funscript
-            const relatedFiles = filesByBasename.get(basename) || [];
-            const hasFunscript = relatedFiles.some(f => f.ext === funscriptExt);
-
-            if (hasFunscript) {
-                // Video with funscript -> funscript folder
-                targetPath = path.join(funscriptPath, filename);
-                stats.funscript_vids_count++;
-                stats.vids_count++;
-            } else {
-                // Regular video -> vids folder
-                targetPath = path.join(vidsPath, filename);
-                stats.vids_count++;
-            }
-        } else if (ext === funscriptExt) {
-            // Funscript file -> funscript folder
-            targetPath = path.join(funscriptPath, filename);
-            stats.funscript_files_count++;
-        } else {
-            // Unknown file type - skip or put in root
-            console.log(`Skipping unknown file type: ${filename}`);
-            processedCount++;
+        const rel = safeRel(file.rel || file.originalname || (file.path ? path.basename(file.path) : ''));
+        const base = safeRel(file.originalname || rel).split('/').pop() || '';
+        if (isJunk(base)) continue;
+        const kind = kindOf(base);
+        if (!kind) {
+            note(report, 'unsupported', { from: rel || base, ext: path.extname(base).toLowerCase() });
             continue;
         }
+        const ext = path.extname(base);
+        const stem = path.basename(base, ext);
+        const dir = path.posix.dirname(rel);
+        entries.push({ file, rel: rel || base, base, kind, stem, key: `${dir}/${stem}`.toLowerCase() });
+    }
+    // (b) The performer folder
+    const performerPath = path.join(lib.path, 'before filter performer', finalName);
+    const picsPath = path.join(performerPath, 'pics');
+    const vidsPath = path.join(performerPath, 'vids');
+    const funscriptRoot = path.join(vidsPath, 'funscript');
+    const existedBefore = await fs.pathExists(performerPath);
+    // A resumed job finishes the record only when the earlier run left a performer folder to finish
+    const resume = !!opts.resume && existedBefore;
 
-        // Move the file from temp location to target (or copy buffer if in memory)
-        try {
-            if (file.path) {
-                // Disk storage - move from temp
-                await fs.move(file.path, targetPath, { overwrite: true });
-            } else if (file.buffer) {
-                // Memory storage fallback
-                await fs.writeFile(targetPath, file.buffer);
-            }
-            console.log(`Processed file: ${filename} -> ${targetPath}`);
-        } catch (err) {
-            console.error(`Failed to process file ${filename}:`, err.message);
-            throw new Error(`Failed to move file ${filename}: ${err.message}`);
-        }
+    if (!entries.length && !resume) {
+        const err = httpError(400, 'nothing', 'Nothing here can be imported');
+        err.report = report;
+        throw err;
+    }
+    await fs.ensureDir(picsPath);
+    await fs.ensureDir(vidsPath);
+    await fs.ensureDir(funscriptRoot);
 
-        processedCount++;
+    // A video and a .funscript with the same stem in the same folder are a pair
+    const groups = new Map();
+    for (const e of entries) {
+        if (e.kind === 'image') continue;
+        if (!groups.has(e.key)) groups.set(e.key, { videos: [], scripts: [] });
+        groups.get(e.key)[e.kind === 'video' ? 'videos' : 'scripts'].push(e);
     }
 
-    // Scan folder to get accurate stats (merges old + new counts)
-    console.log(`Scanning folder to update stats: ${performerPath}`);
+    let processed = 0;
+    let placed = 0;
+    const tick = (e) => setProgress(processed, entries.length, `Importing: ${e.base}`);
+
+    // One file: placeFile, then the report; a failure is noted and the import goes on
+    const place = async (e, dir, base = e.base) => {
+        tick(e);
+        try {
+            let src = e.file.path;
+            if (!src && e.file.buffer) {
+                // From memory: written beside the target under a name nobody uses, then placed like any file
+                src = path.join(dir, `.importing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+                await fs.ensureDir(dir);
+                await fs.writeFile(src, e.file.buffer);
+            }
+            if (!src) throw new Error('No file data');
+            const { outcome, target } = await placeFile(src, dir, base);
+            const inPerformer = posixRel(performerPath, target);
+            if (outcome === 'imported') report.imported++;
+            else if (outcome === 'identical') note(report, 'identical', { from: e.rel, same: inPerformer });
+            else note(report, 'renamed', { from: e.rel, to: inPerformer });
+            placed++;
+            return { outcome, target };
+        } catch (err) {
+            console.warn(`[Import] Could not move ${e.rel}: ${err.message}`);
+            note(report, 'failed', { from: e.rel, error: err.message });
+            return null;
+        } finally {
+            processed++;
+        }
+    };
+
+    // A free folder for a pair: vids/funscript/<stem>, or "<stem> (n)" when that one holds another video, or a
+    // script of the pair's name with other bytes (the pair's own script would land beside it, renamed)
+    const sameFileName = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    const pairDir = async (video, scripts) => {
+        for (let n = 1; n < 10000; n++) {
+            const dir = path.join(funscriptRoot, n === 1 ? video.stem : `${video.stem} (${n})`);
+            if (!await fs.pathExists(dir)) return dir;
+            const inside = await fs.readdir(dir).catch(() => []);
+            let clash = false;
+            for (const s of scripts) {
+                const there = inside.find(f => sameFileName(f, `${video.stem}${path.extname(s.base)}`));
+                if (there && !(s.file.path && await sameContent(s.file.path, path.join(dir, there)))) { clash = true; break; }
+            }
+            if (clash) continue;
+            const sameName = inside.find(f => sameFileName(f, video.base));
+            if (sameName) {
+                if (video.file.path && await sameContent(video.file.path, path.join(dir, sameName))) return dir;
+                continue;
+            }
+            if (!inside.some(f => kindOf(f) === 'video')) return dir;
+        }
+        return path.join(funscriptRoot, video.stem);
+    };
+
+    const done = new Set();
+    for (const e of entries) {
+        if (done.has(e)) continue;
+        if (e.kind === 'image') {
+            done.add(e);
+            await place(e, picsPath);
+            continue;
+        }
+        const g = groups.get(e.key);
+        for (const m of [...g.videos, ...g.scripts]) done.add(m);
+        if (g.videos.length && g.scripts.length) {
+            // (X2-33) The pair goes to vids/funscript/<stem>/, the funscript keeping the video's final stem
+            const dir = await pairDir(g.videos[0], g.scripts);
+            let stem = g.videos[0].stem;
+            for (const v of g.videos) {
+                const r = await place(v, dir);
+                if (v === g.videos[0] && r) stem = path.basename(r.target, path.extname(r.target));
+            }
+            for (const s of g.scripts) await place(s, dir, `${stem}${path.extname(s.base)}`);
+        } else {
+            for (const v of g.videos) await place(v, vidsPath);
+            for (const s of g.scripts) await place(s, path.join(funscriptRoot, s.stem));
+        }
+    }
+
+    if (!placed && !resume) {
+        // Nothing moved: no performer record for an empty folder
+        if (!existedBefore) await removeEmptyTree(performerPath);
+        const first = report.lists.failed[0];
+        const err = httpError(500, 'move-failed', `None of the files could be moved${first ? `: ${first.error}` : ''}`);
+        err.report = report;
+        throw err;
+    }
+
+    // (d) Stats of the whole folder (old and new files)
     const finalStats = await scanPerformerFolder(performerPath);
 
-    // Find thumbnail (first image) - try to find one if we didn't have one before
-    const thumbnail = await findThumbnailFromPath(picsPath);
-
-    // Get folder ID
-    const folder = db.prepare('SELECT id FROM folders WHERE path = ?').get(basePath);
-    if (!folder) {
-        throw new Error(`Base folder not found in database: ${basePath}`);
-    }
-
-    // Check if performer already exists in "before filter" (not the "after" row
-    // of the same name, which a plain name lookup finds first)
+    // The record in "before filter" (not the "after" row of the same name, which a plain name lookup finds first)
     const existingPerformer = db.prepare('SELECT * FROM performers WHERE name = ? AND moved_to_after = 0').get(finalName);
 
+    // (e) Cover: the existing one while its file is there, else the first picture
+    let thumbnail = null;
+    if (existingPerformer && existingPerformer.thumbnail && await fs.pathExists(existingPerformer.thumbnail)) {
+        thumbnail = existingPerformer.thumbnail;
+        report.coverKept = true;
+    } else {
+        thumbnail = await findThumbnailFromPath(picsPath);
+    }
+
+    // (f) The record
     let resultId;
     let isUpdate = false;
-
     if (existingPerformer) {
-        // UPDATE existing record in "before filter"
-        console.log(`Updating existing performer "${finalName}" (ID: ${existingPerformer.id}) with new stats`);
-
         db.prepare(`
-            UPDATE performers SET 
-                thumbnail = ?, 
+            UPDATE performers SET
+                thumbnail = ?,
                 pics_count = ?, vids_count = ?, funscript_vids_count = ?, funscript_files_count = ?, total_size_gb = ?,
                 pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
                 last_scan_date = ?
             WHERE id = ?
         `).run(
-            thumbnail || existingPerformer.thumbnail,
+            thumbnail,
             finalStats.pics_count,
             finalStats.vids_count,
             finalStats.funscript_vids_count,
@@ -216,24 +255,20 @@ async function uploadImportPerformer(performerName, basePath, files, uploadId, c
             new Date().toISOString(),
             existingPerformer.id
         );
-
         resultId = existingPerformer.id;
         isUpdate = true;
     } else {
-        // INSERT new record (or if existing was in "after filter", allow new "before" record)
-        console.log(`Inserting new performer record for "${finalName}"`);
-
         const now = new Date().toISOString();
         const result = db.prepare(`
             INSERT INTO performers (
-              name, folder_id, thumbnail, pics_count, vids_count, 
+              name, folder_id, thumbnail, pics_count, vids_count,
               funscript_vids_count, funscript_files_count, total_size_gb,
               pics_original_count, vids_original_count, funscript_vids_original_count,
               last_scan_date, cached_pics_path, cached_vids_path, cached_funscript_path
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             finalName,
-            folder.id,
+            lib.id,
             thumbnail,
             finalStats.pics_count,
             finalStats.vids_count,
@@ -246,103 +281,80 @@ async function uploadImportPerformer(performerName, basePath, files, uploadId, c
             now,
             picsPath,
             vidsPath,
-            funscriptPath
+            funscriptRoot
         );
-
         resultId = result.lastInsertRowid;
         // Hashes left behind by an earlier performer of this name (deleted files)
         adoptOrphanedHashes(resultId, finalName);
     }
+    report.isUpdate = isUpdate;
 
-    // Optional: Create Hashes
+    // The cached file lists of this performer are stale now (F11-09)
+    try {
+        db.prepare('DELETE FROM performer_file_cache WHERE performer_id = ?').run(resultId);
+    } catch (err) {
+        console.warn(`[Import] Could not clear the file cache of ${finalName}: ${err.message}`);
+    }
+
+    // (g) Hashes: a failure is reported, the import still completes
     if (createHashes) {
-        console.log(`Creating hashes for performer ${finalName} (ID: ${resultId})`);
-        if (uploadId) {
-            uploadProgressMap.set(uploadId, {
-                status: 'processing',
-                processed: 0,
-                total: 100, // Arbitrary for now until hash job reports
-                currentFile: 'Generating hashes...'
-            });
-        }
-
         try {
-            // We'll hook into the hash service progress
-            // However createHashDB creates its own "activeJobs" entry.
-            // We can just rely on awaiting it. 
-            // Better: update uploadProgressMap periodically if we could, but createHashDB provides a callback!
-
-            // Re-discover files for hashing to ensure we get everything
-            const hashJobId = `hash-${Date.now()}`;
-            await createHashDB(resultId, basePath, hashJobId, 'append', (processed, total) => {
-                if (uploadId) {
-                    uploadProgressMap.set(uploadId, {
-                        status: 'processing',
-                        processed: processed,
-                        total: total,
-                        currentFile: `Generating hashes (${processed}/${total})`
-                    });
-                }
+            // One build at a time, through the server's hash queue: an import waits behind at most the running one
+            onStage('waiting for hashing');
+            setProgress(0, 100, 'Waiting for the hash queue...');
+            await require('./hashQueue').enqueueAndWait({
+                performerId: resultId, mode: 'append', origin: 'import',
+                onStart: () => { onStage('hashing'); setProgress(0, 100, 'Generating hashes...'); },
+                onProgress: (done, total) => setProgress(done, total, `Generating hashes (${done}/${total})`)
             });
-            console.log('Hash creation completed');
+            report.hashing = 'done';
 
-            // After hash creation, run internal duplicate check
-            if (uploadId) {
-                uploadProgressMap.set(uploadId, {
-                    status: 'processing',
-                    processed: 0,
-                    total: 100,
-                    currentFile: 'Checking for duplicates...'
-                });
-            }
-
+            onStage('checking duplicates');
+            setProgress(0, 100, 'Checking for duplicates...');
             try {
                 const { checkInternalDuplicates } = require('./hashService');
                 const dupResult = await checkInternalDuplicates(resultId);
-                console.log(`Internal dup check completed: ${dupResult.duplicateCount} duplicates found`);
+                console.log(`[Import] Internal duplicate check: ${dupResult.duplicateCount} duplicates found`);
             } catch (dupErr) {
-                console.error('Internal dup check failed:', dupErr);
-                // Don't fail the import if dup check fails
+                console.error('[Import] Internal duplicate check failed:', dupErr.message);
             }
         } catch (hashErr) {
-            console.error('Hash creation failed:', hashErr);
-            // We don't fail the whole import if hashing fails, just log it
+            console.error('[Import] Hash creation failed:', hashErr.message);
+            report.hashing = 'failed';
+            report.hashError = hashErr.message || String(hashErr);
         }
     }
 
-    // Complete progress
-    if (uploadId) {
-        uploadProgressMap.set(uploadId, {
-            status: 'completed',
-            processed: files.length,
-            total: files.length,
-            currentFile: 'Done'
-        });
+    if (progressId) {
+        uploadProgressMap.set(progressId, { status: 'completed', processed: entries.length, total: entries.length, currentFile: 'Done' });
     }
 
-    console.log(`Upload import completed for ${finalName}:`, finalStats);
+    console.log(`[Import] Done "${finalName}": ${report.imported} imported, ${report.identical} identical, ${report.renamed} renamed, ${report.unsupported} unsupported, ${report.failed} failed`);
 
     return {
         id: resultId,
         name: finalName,
         ...finalStats,
         thumbnail,
-        isUpdate
+        isUpdate,
+        report
     };
 }
 
 /**
- * Local import - import performer from "before upload" folder (no HTTP upload needed)
- * Files are already on the filesystem, so we just build file infos and call uploadImportPerformer
+ * Local import: a folder in "before upload" is moved into the library (not copied).
+ * Hidden entries are not imported and stay. The folder is removed when only junk and empty folders are left.
  */
-async function localImportPerformer(folderName, performerName, basePath, uploadId, createHashes = false) {
-    const sourceDir = path.join(basePath, 'before upload', folderName);
+async function localImportPerformer(folderName, performerName, basePath, progressId, createHashes = false, opts = {}) {
+    const lib = requireLibrary(basePath);
+    const problem = await checkFolder(lib.path, folderName);
+    if (problem) throw httpError(problem.code === 'missing' ? 404 : 400, problem.code, problem.error);
+    checkImport(performerName, lib.path);
 
-    if (!await fs.pathExists(sourceDir)) {
-        throw new Error(`Folder not found: ${sourceDir}`);
-    }
+    const sourceDir = path.join(lib.path, 'before upload', folderName);
+    const leftIn = `before upload/${folderName}`;
 
-    // Recursively collect all files (ignoring empty dirs)
+    // Every file, recursively, with its path inside the folder; hidden entries stay
     const fileInfos = [];
     async function collectFiles(dir) {
         const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -351,77 +363,103 @@ async function localImportPerformer(folderName, performerName, basePath, uploadI
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 await collectFiles(fullPath);
-            } else if (entry.isFile()) {
-                fileInfos.push({
-                    path: fullPath,
-                    originalname: entry.name
-                });
+            } else if (entry.isFile() && !isJunk(entry.name)) {
+                fileInfos.push({ path: fullPath, originalname: entry.name, rel: posixRel(sourceDir, fullPath) });
             }
         }
     }
     await collectFiles(sourceDir);
 
-    // If the source folder is empty (e.g., a previous interrupted import already moved the files
-    // but failed before cleanup), just remove the empty shell and return — no work to do.
-    if (fileInfos.length === 0) {
-        console.log(`[LocalImport] Source folder "${sourceDir}" is already empty — cleaning up shell.`);
-        await tryRemoveIfEmpty(sourceDir);
-        return { name: performerName, alreadyEmpty: true };
+    // Already empty (an earlier import moved the files): remove the shell when it is only junk, nothing else to do
+    // (A retried job whose earlier run moved everything goes on below, to finish the record.)
+    if (fileInfos.length === 0 && !opts.resume) {
+        console.log(`[LocalImport] "${sourceDir}" is already empty`);
+        const kept = await cleanupSource(sourceDir);
+        const report = newReport(performerName, performerName);
+        report.leftIn = kept ? leftIn : null;
+        return { name: performerName, alreadyEmpty: true, report };
     }
-
-    console.log(`[LocalImport] Found ${fileInfos.length} files for "${performerName}" in before upload folder`);
 
     let result;
     try {
-        // Use the existing import pipeline (files will be MOVED to before filter performer)
-        result = await uploadImportPerformer(performerName, basePath, fileInfos, uploadId, createHashes);
-    } finally {
-        // Always try cleanup — if the import was partially successful and the source folder is
-        // now empty, removing it prevents the "empty-but-not-removed" zombie state. If files
-        // remain, tryRemoveIfEmpty leaves them alone.
-        await tryRemoveIfEmpty(sourceDir);
+        result = await uploadImportPerformer(performerName, lib.path, fileInfos, progressId, createHashes, {
+            ...opts,
+            requestedName: opts.requestedName || performerName,
+            source: 'local',
+            sourceDir
+        });
+    } catch (err) {
+        // Whatever was moved stays moved; the folder goes only when nothing but junk is left
+        const kept = await cleanupSource(sourceDir);
+        if (fileInfos.length === 0 && err.code === 'nothing') {
+            // A retry of an empty folder with no performer folder to finish: nothing to do, as on a first run
+            const report = newReport(performerName, performerName);
+            report.leftIn = kept ? leftIn : null;
+            return { name: performerName, alreadyEmpty: true, report };
+        }
+        if (err.report) err.report.leftIn = kept ? leftIn : null;
+        throw err;
     }
-
+    const kept = await cleanupSource(sourceDir);
+    result.report.leftIn = kept ? leftIn : null;
     return result;
 }
 
 /**
- * Remove a directory only if it (and its subdirectories) contain no files.
- * Safe to call after a partial import — won't delete folders that still have content.
+ * Remove the source folder when nothing but junk (.DS_Store, Thumbs.db, desktop.ini, ._*) and empty folders is left.
+ * Hidden files and folders count as content. Returns true when the folder is still there.
  */
-async function tryRemoveIfEmpty(dir) {
+async function cleanupSource(dir) {
     try {
-        if (!await fs.pathExists(dir)) return;
-        const remaining = [];
+        if (!await fs.pathExists(dir)) return false;
+        let content = 0;
         async function walk(d) {
             const entries = await fs.readdir(d, { withFileTypes: true });
             for (const entry of entries) {
-                if (entry.name.startsWith('.')) continue;
+                if (content) return;
+                if (isJunk(entry.name)) continue;
+                if (entry.name.startsWith('.')) { content++; return; }
                 const full = path.join(d, entry.name);
                 if (entry.isDirectory()) await walk(full);
-                else if (entry.isFile()) remaining.push(full);
+                else content++;
             }
         }
         await walk(dir);
-        if (remaining.length === 0) {
-            await fs.remove(dir);
-            console.log(`[LocalImport] Cleaned up empty source folder: ${dir}`);
-        } else {
-            console.log(`[LocalImport] Source folder still has ${remaining.length} file(s); leaving in place: ${dir}`);
+        if (content) {
+            console.log(`[LocalImport] Files stay in ${dir}`);
+            return true;
         }
-    } catch (cleanErr) {
-        console.warn(`[LocalImport] Cleanup check failed for ${dir}: ${cleanErr.message}`);
+        await fs.remove(dir);
+        console.log(`[LocalImport] Removed the emptied source folder ${dir}`);
+        return false;
+    } catch (err) {
+        console.warn(`[LocalImport] Cleanup check failed for ${dir}: ${err.message}`);
+        return fs.pathExists(dir).catch(() => true);
+    }
+}
+
+// Remove a folder tree that holds no files at all (the performer folder of an import that moved nothing)
+async function removeEmptyTree(dir) {
+    try {
+        let files = 0;
+        async function walk(d) {
+            for (const entry of await fs.readdir(d, { withFileTypes: true })) {
+                if (entry.isDirectory()) await walk(path.join(d, entry.name));
+                else files++;
+            }
+        }
+        await walk(dir);
+        if (!files) await fs.remove(dir);
+    } catch (err) {
+        // Left as it is
     }
 }
 
 async function findThumbnailFromPath(picsPath) {
     try {
         if (!await fs.pathExists(picsPath)) return null;
-
-        const pics = await fs.readdir(picsPath);
-        const imageFile = pics.find(file =>
-            ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(path.extname(file).toLowerCase())
-        );
+        const pics = (await fs.readdir(picsPath)).sort();
+        const imageFile = pics.find(file => !file.startsWith('.') && SUPPORTED.images.includes(path.extname(file).toLowerCase()));
         return imageFile ? path.join(picsPath, imageFile) : null;
     } catch (error) {
         return null;

@@ -1,713 +1,369 @@
-const express = require('express');
-const router = express.Router();
-const crypto = require('crypto');
-const hashService = require('../services/hashService');
-const quarantineService = require('../services/quarantineService');
-const db = require('../db');
-
 /**
- * GET /api/hashes/performers
- * Get all performers with their hash database status
+ * /api/hashes: hash databases, duplicate checks and the duplicates page (/hash-results/:runId).
+ * Errors are { error, code?, ...extra } with a non-2xx status; every 2xx body has success: true
+ * (GET /performers answers a bare array).
+ *
+ * Builds go through the server's hash queue (services/hashQueue.js, one at a time):
+ *   POST /queue { items: [{ performerId, mode? }] }   queue 1 to 1000 builds; answers { queued, skipped }
+ *   POST /create { performer_id, mode }               queue one build after checking her folder
+ *   GET  /status/:jobId                               one build (status queued|running|completed|failed)
+ *   POST /job/:jobId/cancel|remove|retry|front        stop, take out, run again, run next
  */
+const express = require('express');
+const fsp = require('fs').promises;
+const db = require('../db');
+const hashService = require('../services/hashService');
+const hashQueue = require('../services/hashQueue');
+const hashReview = require('../services/hashReview');
+const hashRemovals = require('../services/hashRemovals');
+
+const router = express.Router();
+const { HashError } = hashService;
+
+function fail(res, err, what) {
+  if (!err.status || err.status >= 500) console.error(`${what}:`, err);
+  res.status(err.status || 500).send({ error: err.message, code: err.code, ...(err.extra || {}) });
+}
+
+function idParam(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n)) throw new HashError(400, 'bad_request', 'The id must be a whole number');
+  return n;
+}
+
+function performerOr404(id) {
+  const p = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
+  if (!p) throw new HashError(404, 'performer_not_found', 'Performer not found');
+  return p;
+}
+
+// ── performers and builds ──────────────────────────────────────
+
+/** GET /performers: every performer with her hash database state. */
 router.get('/performers', (req, res) => {
   try {
-    // Optimized query to fetch performers with hash/clip stats in one go
-    const performers = db.prepare(`
-      SELECT 
-        p.*,
-        f.path as folder_path,
-        (SELECT COUNT(*) FROM performer_file_hashes WHERE performer_id = p.id) as hash_file_count,
-        (SELECT MAX(seen_at) FROM performer_file_hashes WHERE performer_id = p.id) as hash_last_updated,
-        (
-          SELECT COUNT(DISTINCT ci.id) 
-          FROM content_items ci 
-          JOIN content_clip_embeddings cce ON ci.id = cce.content_item_id 
-          WHERE ci.performer_id = p.id
-        ) as clip_files_count,
-        (
-          SELECT MAX(cce.generated_at) 
-          FROM content_items ci 
-          JOIN content_clip_embeddings cce ON ci.id = cce.content_item_id 
-          WHERE ci.performer_id = p.id
-        ) as clip_last_updated
+    const rows = db.prepare(`
+      SELECT p.id, p.name, p.moved_to_after, p.hash_verified, h.file_count, h.last_seen
       FROM performers p
-      LEFT JOIN folders f ON p.folder_id = f.id
+      LEFT JOIN (
+        SELECT performer_id,
+               SUM(CASE WHEN deleted_flag = 0 THEN 1 ELSE 0 END) AS file_count,
+               MAX(seen_at) AS last_seen
+        FROM performer_file_hashes WHERE performer_id IS NOT NULL GROUP BY performer_id
+      ) h ON h.performer_id = p.id
+      ORDER BY p.name COLLATE NOCASE
     `).all();
-
-    const performersWithHashStatus = performers.map(performer => {
-      const hasHashDB = performer.hash_file_count > 0;
-      const hasClipDB = performer.clip_files_count > 0;
-
-      // Determine location from moved_to_after flag or thumbnail path
-      let location = 'unknown';
-      let folderPath = performer.folder_path;
-
-      // Check moved_to_after flag first (most reliable)
-      if (performer.moved_to_after === 1) {
-        location = 'after';
-      } else if (performer.moved_to_after === 0) {
-        location = 'before';
-      } else if (performer.thumbnail) {
-        // Fallback: check thumbnail path
-        const lowerPath = performer.thumbnail.toLowerCase();
-        if (lowerPath.includes('before filter performer')) {
-          location = 'before';
-        } else if (lowerPath.includes('after filter performer')) {
-          location = 'after';
-        }
-      }
-
-      // Build full performer path
-      if (folderPath && performer.name) {
-        const pathSep = folderPath.includes('\\') ? '\\' : '/';
-        const subfolder = location === 'after' ? 'after filter performer' : 'before filter performer';
-        folderPath = `${folderPath}${pathSep}${subfolder}${pathSep}${performer.name}`;
-      }
-
-      // Convert Unix timestamp to ISO string if available
-      let lastUpdated = null;
-      if (hasHashDB && performer.hash_last_updated) {
-        lastUpdated = new Date(performer.hash_last_updated * 1000).toISOString();
-      }
-
-      let clipLastUpdated = null;
-      if (hasClipDB && performer.clip_last_updated) {
-        clipLastUpdated = new Date(performer.clip_last_updated * 1000).toISOString();
-      }
-
-      return {
-        id: performer.id,
-        canonical_name: performer.name,
-        folder_path: folderPath,
-        location: location,
-        has_hash_db: hasHashDB,
-        file_count: performer.hash_file_count,
-        last_updated: lastUpdated,
-        has_clip_db: hasClipDB,
-        files_with_clip: performer.clip_files_count,
-        clip_last_updated: clipLastUpdated,
-        // Include other performer fields that might be needed
-        thumbnail: performer.thumbnail,
-        target_stats: {
-          vids_count: performer.vids_count,
-          pics_count: performer.pics_count,
-          total_size_gb: performer.total_size_gb
-        },
-        ...performer // Spread the rest of the raw performer data just in case
-      };
-    });
-
-    res.send(performersWithHashStatus);
+    res.send(rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      location: r.moved_to_after === 1 ? 'after' : 'before',
+      has_hash_db: (r.file_count || 0) > 0,
+      file_count: r.file_count || 0,
+      last_updated: r.last_seen ? new Date(r.last_seen * 1000).toISOString() : null,
+      hash_verified: r.hash_verified || 0,
+    })));
   } catch (err) {
-    console.error('Error fetching performers with hash status:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error listing performers with hash state');
   }
 });
 
-/**
- * POST /api/hashes/create
- * Create hash database for a performer
- */
+/** POST /queue { items: [{ performerId, mode? }] }: queue builds; a performer already queued or running gets no new row. */
+router.post('/queue', (req, res) => {
+  try {
+    const items = req.body && req.body.items;
+    if (!Array.isArray(items) || items.length === 0 || items.length > 1000) {
+      throw new HashError(400, 'bad_request', 'items must be a list of 1 to 1000 performers');
+    }
+    const r = hashQueue.enqueue(items.map((i) => ({ performerId: Number(i && i.performerId), mode: i && i.mode })), { origin: 'user' });
+    res.send({ success: true, ...r });
+  } catch (err) {
+    fail(res, err, 'Error queueing hash builds');
+  }
+});
+
+/** POST /create { performer_id, mode }: queue building her hash database (the folder comes from her record). */
 router.post('/create', async (req, res) => {
   try {
-    const { performer_id, basePath, mode } = req.body; // mode: 'append'|'replace'
+    const body = req.body || {};
+    if (body.performer_id == null || body.performer_id === '') throw new HashError(400, 'bad_request', 'performer_id is required');
+    const id = idParam(body.performer_id);
+    const mode = body.mode == null ? 'append' : body.mode;
+    if (mode !== 'append' && mode !== 'replace') throw new HashError(400, 'bad_request', "mode must be 'append' or 'replace'");
+    const performer = performerOr404(id);
 
-    if (!performer_id) {
-      return res.status(400).send({ error: 'performer_id is required' });
+    const dir = hashService.performerDirOf(performer);
+    let readable = false;
+    if (dir) {
+      try {
+        const st = await fsp.stat(dir);
+        if (st.isDirectory()) { await fsp.readdir(dir); readable = true; }
+      } catch (_) { readable = false; }
+    }
+    if (!readable) {
+      throw new HashError(409, 'folder_missing', `Her folder was not found: ${dir || 'no library folder is set'}`);
     }
 
-    if (!basePath) {
-      return res.status(400).send({ error: 'basePath is required' });
-    }
-
-    // Check if performer exists
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performer_id);
-    if (!performer) {
-      return res.status(404).send({ error: 'Performer not found' });
-    }
-
-    // Generate job ID
-    const jobId = crypto.randomBytes(16).toString('hex');
-
-    // Start hash creation in background (pass mode parameter)
-    hashService.createHashDB(performer_id, basePath, jobId, mode || 'append')
-      .catch(err => {
-        console.error('Hash creation error:', err);
-      });
-
+    const r = hashQueue.enqueue([{ performerId: id, mode }]);
+    if (r.skipped.length > 0) throw new HashError(409, 'not_queued', r.skipped[0].reason);
+    const q = r.queued[0];
     res.send({
-      success: true,
-      jobId,
-      message: 'Hash creation started',
+      success: true, jobId: q.jobId, queued: true,
+      alreadyRunning: q.already === 'running', alreadyQueued: q.already === 'queued',
     });
   } catch (err) {
-    console.error('Error creating hash DB:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error queueing a hash build');
   }
 });
 
+const OLD_STATUS = { done: 'completed', cancelled: 'failed' };
+
+/** GET /status/:jobId: the old shape; done reads 'completed', cancelled reads 'failed' with error 'Cancelled'. */
+router.get('/status/:jobId', (req, res) => {
+  try {
+    const job = hashQueue.get(req.params.jobId);
+    if (!job) throw new HashError(404, 'job_not_found', 'Job not found');
+    const cancelled = job.status === 'cancelled';
+    const error = cancelled ? 'Cancelled' : job.error;
+    res.send({ success: true, status: { ...job, status: OLD_STATUS[job.status] || job.status, error }, error });
+  } catch (err) {
+    fail(res, err, 'Error reading a hash job');
+  }
+});
+
+/** POST /job/:jobId/cancel: a running build stops after the files it is reading now and ends as cancelled. */
+router.post('/job/:jobId/cancel', (req, res) => {
+  try {
+    res.send({ success: true, status: hashQueue.cancel(req.params.jobId) });
+  } catch (err) {
+    fail(res, err, 'Error cancelling a hash job');
+  }
+});
+
+/** POST /job/:jobId/remove: a row that is not running; a queued one answers its undo { performerId, mode }. */
+router.post('/job/:jobId/remove', (req, res) => {
+  try {
+    res.send({ success: true, ...hashQueue.remove(req.params.jobId) });
+  } catch (err) {
+    fail(res, err, 'Error removing a hash job');
+  }
+});
+
+/** POST /job/:jobId/retry: a failed or cancelled build goes to the end of the queue. */
+router.post('/job/:jobId/retry', (req, res) => {
+  try {
+    res.send({ success: true, status: hashQueue.retry(req.params.jobId) });
+  } catch (err) {
+    fail(res, err, 'Error retrying a hash job');
+  }
+});
+
+/** POST /job/:jobId/front: a waiting build runs next. */
+router.post('/job/:jobId/front', (req, res) => {
+  try {
+    res.send({ success: true, status: hashQueue.front(req.params.jobId) });
+  } catch (err) {
+    fail(res, err, 'Error moving a hash job');
+  }
+});
 
 /**
- * DELETE /api/hashes/performer/:id
- * Delete hash DB entries for a performer
+ * DELETE /performer/:id: her runs and her live hash rows go; history (deleted before, removed as a duplicate)
+ * stays so re-downloads are still recognised.
  */
 router.delete('/performer/:id', (req, res) => {
   try {
-    const { id } = req.params;
-    const result = db.prepare('DELETE FROM performer_file_hashes WHERE performer_id = ?').run(id);
-    res.send({ success: true, deleted: result.changes });
+    const id = idParam(req.params.id);
+    performerOr404(id);
+    if (hashService.runningJobFor(id)) {
+      throw new HashError(409, 'job_running', 'Her hash database is being built. Cancel that job first.');
+    }
+    const result = db.transaction(() => {
+      const runs = db.prepare('SELECT run_id FROM hash_runs WHERE source_performer_id = ? OR target_performer_id = ?').all(id, id);
+      const delItems = db.prepare('DELETE FROM hash_run_items WHERE run_id = ?');
+      const delRun = db.prepare('DELETE FROM hash_runs WHERE run_id = ?');
+      for (const r of runs) { delItems.run(r.run_id); delRun.run(r.run_id); }
+      // items of any other run that still point at her live rows
+      db.prepare(`
+        DELETE FROM hash_run_items
+        WHERE file_id_ref IN (SELECT id FROM performer_file_hashes WHERE performer_id = ? AND deleted_flag = 0)
+           OR candidate_id IN (SELECT id FROM performer_file_hashes WHERE performer_id = ? AND deleted_flag = 0)
+      `).run(id, id);
+      const deleted = db.prepare('DELETE FROM performer_file_hashes WHERE performer_id = ? AND deleted_flag = 0').run(id).changes;
+      const kept = db.prepare('SELECT COUNT(*) AS n FROM performer_file_hashes WHERE performer_id = ? AND deleted_flag IN (1, 2)').get(id);
+      db.prepare('UPDATE performers SET latest_internal_run_id = NULL, internal_duplicate_count = 0, hash_verified = 0 WHERE id = ?').run(id);
+      return { deleted, keptHistory: kept ? kept.n : 0, runsDeleted: runs.length };
+    })();
+    hashService.notify({ performerId: id, type: 'hash_updated' });
+    res.send({ success: true, ...result });
   } catch (err) {
-    console.error('Error deleting performer hash DB:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error deleting a hash database');
   }
 });
 
-/**
- * POST /api/hashes/performer/:id/internal-check
- * Run internal duplicate check for a performer (self-comparison at 90% threshold)
- */
+/** POST /performer/:id/internal-check: her own files against each other. */
 router.post('/performer/:id/internal-check', async (req, res) => {
   try {
-    const { id } = req.params;
-
-    // Check if performer exists
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
-    if (!performer) {
-      return res.status(404).send({ error: 'Performer not found' });
-    }
-
-    const result = await hashService.checkInternalDuplicates(parseInt(id));
-
+    const id = idParam(req.params.id);
+    performerOr404(id);
+    const r = await hashService.checkInternalDuplicates(id);
     res.send({
-      success: true,
-      ...result,
+      success: true, runId: r.runId, groupCount: r.groupCount, itemCount: r.itemCount,
+      exact: r.exact, similar: r.similar, duplicateCount: r.duplicateCount,
     });
   } catch (err) {
-    console.error('Error running internal check:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error running an internal check');
   }
 });
 
-/**
- * POST /api/hashes/performer/:id/verify
- * Toggle hash_verified status for a performer
- */
+/** POST /performer/:id/verify { verified } */
 router.post('/performer/:id/verify', (req, res) => {
   try {
-    const { id } = req.params;
-    const { verified } = req.body;
-
-    // Check if performer exists
-    const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
-    if (!performer) {
-      return res.status(404).send({ error: 'Performer not found' });
-    }
-
-    const result = hashService.setHashVerified(parseInt(id), verified);
-
-    res.send({
-      success: true,
-      ...result,
-    });
+    const id = idParam(req.params.id);
+    performerOr404(id);
+    const verified = !!(req.body && req.body.verified);
+    hashService.setHashVerified(id, verified);
+    hashService.notify({ performerId: id, type: 'hash_updated' });
+    res.send({ success: true, verified });
   } catch (err) {
-    console.error('Error toggling verified status:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error setting verified');
   }
 });
 
-/**
- * GET /api/hashes/performer/:id/status
- * Get performer's hash status (verified, dup count, run id)
- */
+/** GET /performer/:id/status */
 router.get('/performer/:id/status', (req, res) => {
   try {
-    const { id } = req.params;
-
-    const status = hashService.getPerformerHashStatus(parseInt(id));
-
+    const id = idParam(req.params.id);
+    performerOr404(id);
+    const job = hashQueue.jobFor(id);
     res.send({
       success: true,
-      ...status,
+      ...hashService.getPerformerHashStatus(id),
+      job: job ? { jobId: job.jobId, status: job.status, processed: job.processed, total: job.total } : null,
     });
   } catch (err) {
-    console.error('Error getting performer hash status:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error reading hash status');
   }
 });
 
-/**
- * GET /api/hashes/status/:jobId
- * Get status of a hash creation job
- */
-router.get('/status/:jobId', (req, res) => {
-  try {
-    const { jobId } = req.params;
-    const status = hashService.getJobStatus(jobId);
-
-    if (!status) {
-      return res.status(404).send({ error: 'Job not found' });
-    }
-
-    res.send({
-      success: true,
-      status,
-    });
-  } catch (err) {
-    console.error('Error getting job status:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-/**
- * POST /api/hashes/check
- * Check for duplicates between two performers
- */
+/** POST /check { source_performer_id, target_performer_id }: the same id twice is an internal check. */
 router.post('/check', async (req, res) => {
   try {
-    const { source_performer_id, target_performer_id, runId } = req.body;
-
-    if (!source_performer_id || !target_performer_id) {
-      return res.status(400).send({
-        error: 'source_performer_id and target_performer_id are required'
-      });
+    const body = req.body || {};
+    if (body.source_performer_id == null || body.target_performer_id == null) {
+      throw new HashError(400, 'bad_request', 'source_performer_id and target_performer_id are required');
     }
-
-    // Check if performers exist
-    const sourcePerformer = db.prepare('SELECT * FROM performers WHERE id = ?').get(source_performer_id);
-    const targetPerformer = db.prepare('SELECT * FROM performers WHERE id = ?').get(target_performer_id);
-
-    if (!sourcePerformer || !targetPerformer) {
-      return res.status(404).send({ error: 'One or both performers not found' });
-    }
-
-    // Generate run ID if not provided
-    const actualRunId = runId || crypto.randomBytes(16).toString('hex');
-
-    // Start comparison
-    const result = await hashService.checkDuplicates(
-      source_performer_id,
-      target_performer_id,
-      actualRunId
-    );
-
-    res.send({
-      success: true,
-      ...result,
-    });
+    const sourceId = idParam(body.source_performer_id);
+    const targetId = idParam(body.target_performer_id);
+    performerOr404(sourceId);
+    performerOr404(targetId);
+    const r = sourceId === targetId
+      ? await hashService.checkInternalDuplicates(sourceId)
+      : await hashService.checkDuplicates(sourceId, targetId);
+    const out = { success: true, runId: r.runId, groupCount: r.groupCount, itemCount: r.itemCount, exact: r.exact, similar: r.similar };
+    if (r.duplicateCount != null) out.duplicateCount = r.duplicateCount;
+    res.send(out);
   } catch (err) {
-    console.error('Error checking duplicates:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error checking duplicates');
   }
 });
 
-/**
- * GET /api/hashes/run/:runId
- * Get results for a hash comparison run
- */
-router.get('/run/:runId', (req, res) => {
+// ── runs ───────────────────────────────────────────────────────
+
+/** GET /run/:runId?section&page&pageSize&kind&media&size&maxDistance */
+router.get('/run/:runId', async (req, res) => {
   try {
-    const { runId } = req.params;
-    const { maxHammingDistance, limit, offset } = req.query;
-
-    const options = {
-      maxHammingDistance: maxHammingDistance ? parseInt(maxHammingDistance) : 10,
-      limit: limit ? parseInt(limit) : 100,
-      offset: offset ? parseInt(offset) : 0,
-    };
-
-    const results = hashService.getRunResults(runId, options);
-
-    if (!results.run) {
-      return res.status(404).send({ error: 'Run not found' });
-    }
-
-    res.send({
-      success: true,
-      ...results,
-    });
+    res.send(await hashReview.getRunView(req.params.runId, req.query));
   } catch (err) {
-    console.error('Error getting run results:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error reading a check');
   }
 });
 
-/**
- * POST /api/hashes/run/:runId/update-selection
- * Update selected items in a run
- */
-router.post('/run/:runId/update-selection', (req, res) => {
+/** POST /run/:runId/selection { itemIds, selected } | { all: true, selected: false } | { restore: [{ itemId, selectedBy }] } (Undo of a clear) */
+router.post('/run/:runId/selection', (req, res) => {
   try {
-    const { runId } = req.params;
-    const { itemIds, selected } = req.body;
-
-    if (!Array.isArray(itemIds)) {
-      return res.status(400).send({ error: 'itemIds must be an array' });
-    }
-
-    const selectedValue = selected ? 1 : 0;
-
-    const updateStmt = db.prepare(`
-      UPDATE hash_run_items 
-      SET selected = ? 
-      WHERE run_id = ? AND id = ?
-    `);
-
-    const updateMany = db.transaction((ids) => {
-      for (const id of ids) {
-        updateStmt.run(selectedValue, runId, id);
-      }
-    });
-
-    updateMany(itemIds);
-
-    res.send({
-      success: true,
-      updated: itemIds.length,
-    });
+    res.send(hashReview.setSelection(req.params.runId, req.body || {}));
   } catch (err) {
-    console.error('Error updating selection:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error saving a selection');
   }
 });
 
-/**
- * POST /api/hashes/run/:runId/commit
- * Commit action for selected items (quarantine or delete)
- */
-router.post('/run/:runId/commit', async (req, res) => {
+/** GET /run/:runId/selection: the effective selection, for the remove dialog. */
+router.get('/run/:runId/selection', (req, res) => {
   try {
-    const { runId } = req.params;
-    const { action, selectedItems } = req.body;
-
-    if (!action || !['quarantine', 'delete'].includes(action)) {
-      return res.status(400).send({
-        error: 'action must be either "quarantine" or "delete"'
-      });
-    }
-
-    if (!Array.isArray(selectedItems) || selectedItems.length === 0) {
-      return res.status(400).send({ error: 'selectedItems must be a non-empty array' });
-    }
-
-    const result = await quarantineService.commitBatchAction(runId, action, selectedItems);
-
-    res.send({
-      success: true,
-      ...result,
-    });
+    res.send(hashReview.getSelectionList(req.params.runId));
   } catch (err) {
-    console.error('Error committing action:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error reading a selection');
   }
 });
 
-/**
- * POST /api/hashes/run/:runId/switch
- * Switch the keeper in a group: swap all items in the group so the chosen file
- * becomes the new candidate (keeper) and the old candidate becomes a removal item.
- */
-router.post('/run/:runId/switch', (req, res) => {
+/** POST /run/:runId/keeper { groupKey, fileId } */
+router.post('/run/:runId/keeper', async (req, res) => {
   try {
-    const { runId } = req.params;
-    const { candidateId, chosenFileId } = req.body; // candidateId = current keeper id, chosenFileId = file id to promote
-
-    if (!candidateId || !chosenFileId) {
-      return res.status(400).send({ error: 'candidateId and chosenFileId are required' });
-    }
-
-    // Ensure run exists
-    const run = db.prepare('SELECT * FROM hash_runs WHERE run_id = ?').get(runId);
-    if (!run) {
-      return res.status(404).send({ error: 'Run not found' });
-    }
-
-    // Get all items in this group (all items with the same candidate_id)
-    const groupItems = db.prepare(`
-      SELECT * FROM hash_run_items
-      WHERE run_id = ? AND candidate_id = ?
-    `).all(runId, candidateId);
-
-    if (groupItems.length === 0) {
-      return res.status(400).send({ error: 'No items found for this candidate' });
-    }
-
-    // Get the file path for the new keeper
-    const newKeeperFile = db.prepare('SELECT * FROM performer_file_hashes WHERE id = ?').get(chosenFileId);
-    if (!newKeeperFile) {
-      return res.status(404).send({ error: 'Chosen file not found in performer_file_hashes' });
-    }
-
-    // Get the file path for the old keeper
-    const oldKeeperFile = db.prepare('SELECT * FROM performer_file_hashes WHERE id = ?').get(candidateId);
-    if (!oldKeeperFile) {
-      return res.status(404).send({ error: 'Old keeper file not found in performer_file_hashes' });
-    }
-
-    // Swap the group in a transaction
-    const swapTransaction = db.transaction(() => {
-      // For each item in the group, swap file_id_ref and candidate_id
-      for (const item of groupItems) {
-        if (item.file_id_ref === chosenFileId) {
-          // This is the item we're promoting - delete it since it becomes the keeper
-          db.prepare('DELETE FROM hash_run_items WHERE id = ?').run(item.id);
-        } else {
-          // Swap: make this item point to the new keeper
-          db.prepare(`
-            UPDATE hash_run_items 
-            SET candidate_id = ?
-            WHERE id = ?
-          `).run(chosenFileId, item.id);
-        }
-      }
-
-      // Add a new item for the old keeper (now marked for removal)
-      // Find a reference item to get the match metadata
-      const refItem = groupItems[0];
-
-      const result = db.prepare(`
-        INSERT INTO hash_run_items (run_id, file_path, file_id_ref, candidate_id, exact_match, hamming_distance, selected)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        runId,
-        oldKeeperFile.file_path,
-        candidateId,
-        chosenFileId,
-        refItem.exact_match || 0,
-        refItem.hamming_distance || 0,
-        1 // selected for removal
-      );
-
-      return result.lastInsertRowid;
-    });
-
-    const newItemId = swapTransaction();
-
-    // Get the updated group items with full details
-    const updatedItems = db.prepare(`
-      SELECT 
-        ri.*,
-        sf.file_path as source_path,
-        sf.file_size as source_size,
-        sf.perceptual_hash as source_hash,
-        sf.deleted_flag as source_deleted,
-        tf.file_path as target_path,
-        tf.file_size as target_size,
-        tf.perceptual_hash as target_hash,
-        tf.deleted_flag as target_deleted
-      FROM hash_run_items ri
-      JOIN performer_file_hashes sf ON ri.file_id_ref = sf.id
-      JOIN performer_file_hashes tf ON ri.candidate_id = tf.id
-      WHERE ri.run_id = ? AND ri.candidate_id = ?
-    `).all(runId, chosenFileId);
-
-    res.send({ success: true, message: 'Switch applied', updatedItems, newItemId });
+    const body = req.body || {};
+    res.send(await hashReview.setKeeper(req.params.runId, body.groupKey, body.fileId));
   } catch (err) {
-    console.error('Error switching run items:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error changing a keeper');
   }
 });
 
-/**
- * GET /api/hashes/run/:runId/export
- * Export run results as JSON
- */
-router.get('/run/:runId/export', (req, res) => {
+/** POST /run/:runId/dismiss { groupKey }: drop the match from the check; no file is touched. */
+router.post('/run/:runId/dismiss', (req, res) => {
   try {
-    const { runId } = req.params;
-
-    const run = db.prepare('SELECT * FROM hash_runs WHERE run_id = ?').get(runId);
-    if (!run) {
-      return res.status(404).send({ error: 'Run not found' });
-    }
-
-    const items = db.prepare(`
-      SELECT 
-        ri.*,
-        sf.file_path as source_path,
-        sf.file_size as source_size,
-        tf.file_path as target_path,
-        tf.file_size as target_size
-      FROM hash_run_items ri
-      JOIN performer_file_hashes sf ON ri.file_id_ref = sf.id
-      JOIN performer_file_hashes tf ON ri.candidate_id = tf.id
-      WHERE ri.run_id = ?
-    `).all(runId);
-
-    const exportData = {
-      run,
-      items,
-      exportedAt: Date.now(),
-    };
-
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', `attachment; filename="hash-run-${runId}.json"`);
-    res.send(exportData);
+    const body = req.body || {};
+    res.send(hashReview.dismissGroup(req.params.runId, body.groupKey));
   } catch (err) {
-    console.error('Error exporting run:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error dismissing a match');
   }
 });
 
 /**
- * DELETE /api/hashes/run/:runId
- * Delete/expire a hash run
+ * POST /run/:runId/remove { itemIds }: move the ticked files to her trash folder, each checked again first. They are
+ * marked so the trash cleanup deletes them and never saves them for training. Answers a batchId for Undo.
  */
+router.post('/run/:runId/remove', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!Array.isArray(body.itemIds) || body.itemIds.length === 0) throw new HashError(400, 'empty', 'Nothing to remove.');
+    res.send(await hashReview.removeItems(req.params.runId, body.itemIds));
+  } catch (err) {
+    fail(res, err, 'Error removing duplicates');
+  }
+});
+
+/** POST /run/:runId/undo { batchId }: the toast's Undo; the files come back from her trash while they are there. */
+router.post('/run/:runId/undo', async (req, res) => {
+  try {
+    const body = req.body || {};
+    res.send(await hashReview.undoRemove(req.params.runId, body.batchId));
+  } catch (err) {
+    fail(res, err, 'Error undoing a removal');
+  }
+});
+
+/** DELETE /run/:runId: the run and its items; files already removed are not affected. */
 router.delete('/run/:runId', (req, res) => {
   try {
-    const { runId } = req.params;
-
-    // Delete run items first (cascade)
-    db.prepare('DELETE FROM hash_run_items WHERE run_id = ?').run(runId);
-
-    // Delete run
-    const result = db.prepare('DELETE FROM hash_runs WHERE run_id = ?').run(runId);
-
-    if (result.changes === 0) {
-      return res.status(404).send({ error: 'Run not found' });
-    }
-
-    res.send({
-      success: true,
-      message: 'Run deleted',
-    });
+    const runId = String(req.params.runId);
+    const changes = db.transaction(() => {
+      db.prepare('DELETE FROM hash_run_items WHERE run_id = ?').run(runId);
+      return db.prepare('DELETE FROM hash_runs WHERE run_id = ?').run(runId).changes;
+    })();
+    if (changes === 0) throw new HashError(404, 'run_not_found', 'Run not found');
+    db.prepare('UPDATE performers SET latest_internal_run_id = NULL, internal_duplicate_count = 0 WHERE latest_internal_run_id = ?').run(runId);
+    res.send({ success: true, message: 'Run deleted' });
   } catch (err) {
-    console.error('Error deleting run:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error deleting a run');
   }
 });
 
-/**
- * GET /api/hashes/runs
- * List all hash runs
- */
-router.get('/runs', (req, res) => {
+// ── the old Recently removed store ─────────────────────────────
+
+/** GET /old-removed: files of the old 30-day store that could not go to a trash folder (her folder is gone). */
+router.get('/old-removed', (req, res) => {
   try {
-    const { status, limit, offset } = req.query;
-
-    let query = 'SELECT * FROM hash_runs';
-    const params = [];
-
-    if (status) {
-      query += ' WHERE status = ?';
-      params.push(status);
-    }
-
-    query += ' ORDER BY created_at DESC';
-
-    if (limit) {
-      query += ' LIMIT ?';
-      params.push(parseInt(limit));
-
-      if (offset) {
-        query += ' OFFSET ?';
-        params.push(parseInt(offset));
-      }
-    }
-
-    const runs = db.prepare(query).all(...params);
-
-    // Get item counts for each run
-    const runsWithCounts = runs.map(run => {
-      const counts = db.prepare(`
-        SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN exact_match = 1 THEN 1 ELSE 0 END) as exact,
-          SUM(CASE WHEN selected = 1 THEN 1 ELSE 0 END) as selected
-        FROM hash_run_items
-        WHERE run_id = ?
-      `).get(run.run_id);
-
-      return {
-        ...run,
-        itemCounts: counts,
-      };
-    });
-
-    res.send({
-      success: true,
-      runs: runsWithCounts,
-    });
+    res.send({ success: true, ...hashRemovals.listOldRemovals() });
   } catch (err) {
-    console.error('Error listing runs:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-/**
- * GET /api/hashes/stats/:performerId
- * Get hash statistics for a performer
- */
-router.get('/stats/:performerId', (req, res) => {
-  try {
-    const { performerId } = req.params;
-
-    const stats = db.prepare(`
-      SELECT 
-        COUNT(*) as total_files,
-        COUNT(CASE WHEN exact_hash IS NOT NULL THEN 1 END) as files_with_exact_hash,
-        COUNT(CASE WHEN perceptual_hash IS NOT NULL THEN 1 END) as files_with_perceptual_hash,
-        COUNT(CASE WHEN deleted_flag = 1 THEN 1 END) as deleted_files,
-        SUM(file_size) as total_size
-      FROM performer_file_hashes
-      WHERE performer_id = ?
-    `).get(performerId);
-
-    res.send({
-      success: true,
-      stats,
-    });
-  } catch (err) {
-    console.error('Error getting stats:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-/**
- * GET /api/quarantine/list
- * List quarantined files
- */
-router.get('/quarantine/list', async (req, res) => {
-  try {
-    const result = await quarantineService.listQuarantinedFiles();
-    res.send(result);
-  } catch (err) {
-    console.error('Error listing quarantined files:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-/**
- * POST /api/quarantine/restore
- * Restore a file from quarantine
- */
-router.post('/quarantine/restore', async (req, res) => {
-  try {
-    const { quarantinePath } = req.body;
-
-    if (!quarantinePath) {
-      return res.status(400).send({ error: 'quarantinePath is required' });
-    }
-
-    const result = await quarantineService.restoreFromQuarantine(quarantinePath);
-
-    res.send(result);
-  } catch (err) {
-    console.error('Error restoring from quarantine:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-/**
- * POST /api/quarantine/cleanup
- * Clean up old quarantined files
- */
-router.post('/quarantine/cleanup', async (req, res) => {
-  try {
-    const result = await quarantineService.cleanupOldQuarantineFiles();
-    res.send(result);
-  } catch (err) {
-    console.error('Error cleaning up quarantine:', err);
-    res.status(500).send({ error: err.message });
+    fail(res, err, 'Error listing the old removed files');
   }
 });
 

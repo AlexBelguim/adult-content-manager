@@ -104,23 +104,33 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
     return placed;
   }, [canvasW, canvasH, items, size.w, size.h]);
 
+  // Keep the featured photo in range when the layout shrinks
+  useEffect(() => {
+    if (layout.length && featuredIdx >= layout.length) setFeaturedIdx(0);
+  }, [layout.length, featuredIdx]);
+
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+
   // Auto-tour: pick a new focus every 4.5s, preferring a distant photo so
   // each camera move is dramatic.
   useEffect(() => {
     if (!active || layout.length === 0) return;
     const tick = () => {
+      const items = layoutRef.current;   // the latest layout, without restarting the tour
       if (Date.now() < userControlRef.current.until) return;
       setFeaturedIdx((prev) => {
-        if (layout.length <= 1) return prev;
-        const cur = layout[prev];
+        if (items.length <= 1) return prev;
+        const cur = items[prev] || items[0];
+        if (!cur) return prev;
         const curCx = cur.x + cur.w / 2;
         const curCy = cur.y + cur.h / 2;
         // Prefer candidates at least ~30% of canvas diag away
         const minDist = Math.min(canvasW, canvasH) * 0.3;
         const far = [];
-        for (let i = 0; i < layout.length; i++) {
+        for (let i = 0; i < items.length; i++) {
           if (i === prev) continue;
-          const p = layout[i];
+          const p = items[i];
           const dx = (p.x + p.w / 2) - curCx;
           const dy = (p.y + p.h / 2) - curCy;
           if (Math.hypot(dx, dy) > minDist) far.push(i);
@@ -128,7 +138,7 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
         if (far.length > 0) return far[Math.floor(Math.random() * far.length)];
         // Fallback: any different photo
         let next = prev;
-        while (next === prev) next = Math.floor(Math.random() * layout.length);
+        while (next === prev) next = Math.floor(Math.random() * items.length);
         return next;
       });
     };
@@ -179,7 +189,7 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
         position: 'absolute',
         inset: 0,
         overflow: 'hidden',
-        background: 'radial-gradient(ellipse at center, #0c0c12 0%, #050507 80%)',
+        background: 'var(--bg)',
         cursor: 'none',
       }}
     >
@@ -217,10 +227,10 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
                 borderRadius: 6,
                 overflow: 'hidden',
                 cursor: 'pointer',
-                background: '#111',
+                background: 'var(--surface)',
                 boxShadow: isFeatured
-                  ? '0 30px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.15)'
-                  : '0 6px 22px rgba(0,0,0,0.5)',
+                  ? 'var(--shadow-md), 0 0 0 1px var(--line-strong)'
+                  : 'var(--shadow-md)',
                 zIndex: isFeatured ? 50 : 1,
                 transformOrigin: 'center center',
               }}
@@ -249,14 +259,14 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
                     bottom: 0,
                     left: 0,
                     right: 0,
-                    padding: '22px 22px 18px',
-                    background: 'linear-gradient(to top, rgba(0,0,0,0.88) 0%, transparent 100%)',
-                    color: 'white',
+                    padding: '10px 14px',
+                    background: 'var(--scrim-strong)',
+                    color: 'var(--text)',
                     pointerEvents: 'none',
                   }}
                 >
                   <div style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     letterSpacing: 3,
                     textTransform: 'uppercase',
                     opacity: 0.65,
@@ -294,8 +304,8 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
             width: 52,
             height: 52,
             borderRadius: '50%',
-            border: '1.5px solid rgba(255, 255, 255, 0.9)',
-            boxShadow: '0 0 30px 10px rgba(255,255,255,0.35)',
+            border: '1.5px solid var(--text)',
+            boxShadow: '0 0 0 4px var(--line-strong)',
           }}
           animate={{
             scale: [1, 1.18, 1],
@@ -312,8 +322,7 @@ export default function MomentsMode({ performers, onPhotoClick, active }) {
             width: 6,
             height: 6,
             borderRadius: '50%',
-            background: 'white',
-            boxShadow: '0 0 12px 2px rgba(255,255,255,0.9)',
+            background: 'var(--text)',
           }}
         />
       </motion.div>

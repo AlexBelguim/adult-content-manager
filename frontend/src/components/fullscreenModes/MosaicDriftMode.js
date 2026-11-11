@@ -94,7 +94,7 @@ export default function MosaicDriftMode({ performers, onPhotoClick, active }) {
         position: 'absolute',
         inset: 0,
         overflow: 'hidden',
-        background: '#070707',
+        background: 'var(--bg)',
       }}
     >
       <Box
@@ -124,12 +124,12 @@ export default function MosaicDriftMode({ performers, onPhotoClick, active }) {
               overflow: 'hidden',
               borderRadius: '4px',
               cursor: 'pointer',
-              boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
-              background: '#111',
+              boxShadow: 'var(--shadow-md)',
+              background: 'var(--surface)',
               transition: 'transform 0.3s ease, box-shadow 0.3s ease',
               '&:hover': {
                 transform: 'scale(1.03)',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.7), 0 0 0 2px rgba(255,255,255,0.2)',
+                boxShadow: 'var(--shadow-md), 0 0 0 2px var(--line-strong)',
                 zIndex: 50,
               },
             }}

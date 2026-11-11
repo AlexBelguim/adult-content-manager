@@ -1,0 +1,28 @@
+/* Score, tags and the delete dialog of the player (RatingPanel, TagPanel, DeleteDialog). Darkroom tokens only. */
+
+/* Score panel */
+.pl-ico { flex: none; display: block; }
+.pl-rp-del { margin-top: 10px; }
+
+/* Tags: the "Create" chip */
+.pl-tg.is-new { color: var(--accent); border-color: var(--accent); border-style: dashed; }
+.pl-tg.is-new:hover { background: var(--accent-quiet); border-color: var(--accent); }
+
+/* Delete dialog (rendered in a portal, so not under .pl-pn) */
+.pl-dd-file { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 0 0 12px; }
+.pl-dd-thumb { flex: none; width: 64px; height: 40px; object-fit: cover; border-radius: var(--radius); background: var(--raised); display: block; }
+.pl-dd-thumb.is-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.pl-dd-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pl-dd-name { color: var(--text); font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-dd-file .pl-dd-name { font-weight: 650; }
+.pl-dd-sub { color: var(--dim); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-dd-sub.is-warn { color: var(--warn); }
+.pl-dd-label { margin: 0 0 6px; color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.pl-dd-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.pl-dd-row { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 10px; box-sizing: border-box; }
+.pl-dd-row + .pl-dd-row { border-top: 1px solid var(--line); }
+.pl-dd-size { flex: none; color: var(--dim); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.pl-dd-badge { flex: none; color: var(--bad); background: var(--bad-quiet); border-radius: var(--radius-sm); padding: 2px 6px; font-size: .75rem; font-weight: 600; }
+.pl-dd-note { margin: 6px 0 12px; color: var(--dim); font-size: .75rem; }
+.pl-dd-where { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--dim); font-size: .8125rem; }
+.pl-dd-where svg { flex: none; margin-top: 1px; color: var(--muted); }

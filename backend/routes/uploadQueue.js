@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { addToQueue, getQueueStatus, removeJob, clearCompleted } = require('../services/uploadQueue');
+const { addToQueue, getQueueStatus, retryJob, removeJob, clearCompleted } = require('../services/uploadQueue');
 
 /**
  * Get queue status
@@ -12,25 +12,32 @@ router.get('/', (req, res) => {
 });
 
 /**
- * Add job to queue (called when all batches have been uploaded)
- * POST /api/upload-queue
+ * Hand an upload over to the queue (after every batch is on the server)
+ * POST /api/upload-queue  { uploadId, performerName, totalFiles, totalBatches, createHashes, sourceLabel?, basePath? }
  */
-router.post('/', (req, res) => {
-    const { performerName, basePath, uploadId, totalFiles, createHashes } = req.body;
-
-    if (!performerName || !basePath || !uploadId) {
-        return res.status(400).json({ error: 'performerName, basePath, and uploadId are required' });
+router.post('/', async (req, res) => {
+    try {
+        const result = await addToQueue(req.body || {});
+        if (result.existing) return res.json({ success: true, jobId: result.jobId, existing: true });
+        res.json({ success: true, jobId: result.jobId, files: result.files });
+    } catch (err) {
+        if (!err.status) console.error('[UploadQueue] Hand-over failed:', err);
+        res.status(err.status || 500).json({ error: err.message, code: err.code, missing: err.missing, have: err.have, want: err.want });
     }
+});
 
-    const jobId = addToQueue({
-        performerName,
-        basePath,
-        uploadId,
-        totalFiles: totalFiles || 0,
-        createHashes: !!createHashes
-    });
-
-    res.json({ success: true, jobId });
+/**
+ * Run a failed job again
+ * POST /api/upload-queue/:id/retry
+ */
+router.post('/:id/retry', async (req, res) => {
+    try {
+        const result = await retryJob(req.params.id);
+        if (result.success) return res.json({ success: true, jobId: result.jobId });
+        res.status(result.status || 400).json({ error: result.error, code: result.code });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 /**
@@ -39,11 +46,8 @@ router.post('/', (req, res) => {
  */
 router.delete('/:id', (req, res) => {
     const result = removeJob(req.params.id);
-    if (result.success) {
-        res.json(result);
-    } else {
-        res.status(400).json(result);
-    }
+    if (result.success) return res.json(result);
+    res.status(result.status || 400).json({ error: result.error, code: result.code });
 });
 
 /**

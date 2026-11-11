@@ -27,6 +27,8 @@ const unreachable = (err) => err.name === 'TimeoutError' || err.name === 'AbortE
 const waiting = () => Object.assign(new Error('nobody can judge right now: acm-gpu and the NAS\'s CPU service are both away'), { waiting: true });
 
 const readWeights = () => { try { return JSON.parse(fs.readFileSync(WEIGHTS, 'utf8')); } catch { return null; } };
+/** The checkpoint P judges with now: the one acm-gpu last named, or the default before it ever answered */
+const currentModel = () => readWeights()?.model || 'performer_keep.pt';
 function saveWeights(w) {
   fs.mkdirSync(ROOT, { recursive: true });
   fs.writeFileSync(WEIGHTS + '.tmp', JSON.stringify(w));
@@ -56,7 +58,7 @@ function createJudge({ threshold = 50, why = 'Discover' } = {}) {
   let gpuAwayUntil = 0;
   let cpuAwayUntil = 0;
   const judge = {
-    file: readWeights()?.model || 'performer_keep.pt',
+    file: currentModel(),
     threshold,
     done: { gpu: 0, cpu: 0 },
     cpuSeconds: 0,
@@ -117,4 +119,4 @@ function createJudge({ threshold = 50, why = 'Discover' } = {}) {
   return judge;
 }
 
-module.exports = { createJudge };
+module.exports = { createJudge, currentModel };

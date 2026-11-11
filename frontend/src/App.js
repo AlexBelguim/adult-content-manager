@@ -1,33 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, createTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Link, Typography, CircularProgress, Box, Alert, Divider } from '@mui/material';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { ThemeProvider } from '@mui/material';
 import Toolbar from './components/Toolbar';
 import MainPage from './pages/MainPage';
-import MobileShell from './mobile/MobileShell';
-import useIsPhone from './mobile/useIsPhone';
+import PhoneLibrary from './mobile/PhoneLibrary';
+import PhoneFrame from './mobile/PhoneFrame';
 import UnifiedGalleryPage from './pages/UnifiedGalleryPage';
 
 import HashResultsPage from './pages/HashResultsPage';
 import PerformerManagementPage from './pages/PerformerManagementPageNew';
 import ThumbnailSelectorWrapper from './components/ThumbnailSelectorWrapper';
-import AdminPage from './pages/AdminPage';
 import { Provider } from 'react-redux';
 import store from './redux/store';
 import { HandyIntegration } from './utils/HandyIntegration';
-import SceneManagerWrapper from './utils/SceneManagerWrapper';
 import SceneManagerPage from './pages/SceneManagerPage';
-// Pairwise Labeler (integrated from vision-llm-pairwise)
-import PairwisePage from './pages/PairwisePage';
 import './App.css';
-// One token-driven stylesheet replaces the five per-theme files
-// (gamerEdge / gamer / tokyoNight / cinematic / cleanSplit), which declared
-// the same 26 selectors five times over with hardcoded colours. Those files
-// are still on disk but no longer imported — delete them once you're happy.
+// One token-driven stylesheet for the shared component classes (the per-theme files are gone).
 import './styles/components.css';
 import './styles/darkPanel.css';
 import LocalImportPage from './pages/LocalImportPage';
-import TinderSortingPage from './pages/TinderSortingPage';
-import PairwiseMobilePage from './pages/PairwiseMobilePage';
 import RankingInsightPage from './pages/RankingInsightPage';
 import GroupRatePage from './pages/GroupRatePage';
 import SmartComparePage from './pages/SmartComparePage';
@@ -37,98 +28,19 @@ import FunpipePage from './pages/FunpipePage';
 import VRPage from './pages/VRPage';
 import PlayerPage from './pages/PlayerPage';
 import JobsPage from './pages/JobsPage';
-import SpacePage from './pages/SpacePage';
+import SettingsPage from './pages/SettingsPage';
 import DiscoverPage from './pages/DiscoverPage';
+import NotFoundPage from './pages/NotFoundPage';
+import UpdateNotice from './pwa/UpdateNotice';
+import { FeedbackProvider, CloseAsksOnRouteChange } from './components/ui';
+import { UploadsProvider } from './components/import/UploadsProvider';
+import { LoadingState, PageShell } from './components/layout';
+import { ShellProvider, ChromeProvider, useShell, useIsPhone, libraryState } from './nav';
 
 
 import CssBaseline from '@mui/material/CssBaseline';
 import { getThemeById, getStoredThemeId, setStoredThemeId, getTokensById } from './theme';
 import { applyTokens } from './styles/tokens';
-
-function LicenseModal({ open, onSubmit, onCancel, defaultKey, verifying, error }) {
-  const [key, setKey] = useState(defaultKey || '');
-  useEffect(() => setKey(defaultKey || ''), [defaultKey]);
-
-  const isOverLimit = error && error.includes('limit exceeded');
-
-  return (
-    <Dialog open={open} disableEscapeKeyDown>
-      <DialogTitle>
-        {isOverLimit ? '⚠️ Activation Limit Exceeded' : 'Activate Your License'}
-      </DialogTitle>
-      <DialogContent>
-        {isOverLimit ? (
-          <>
-            <Alert severity="error" sx={{ mb: 2 }}>
-              <strong>{error}</strong>
-            </Alert>
-            <Typography gutterBottom>
-              This license key has been activated on too many devices. To continue:
-            </Typography>
-            <Box sx={{ mt: 2, mb: 2 }}>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                1. Manage your device activations through Gumroad:
-              </Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                href="https://app.gumroad.com/library"
-                target="_blank"
-                rel="noopener noreferrer"
-                fullWidth
-                sx={{ mb: 2 }}
-              >
-                Open Gumroad Library →
-              </Button>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                2. Or view activation details in the admin dashboard:
-              </Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                href="/admin"
-                target="_blank"
-                fullWidth
-              >
-                Open Admin Dashboard →
-              </Button>
-            </Box>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" color="text.secondary">
-              If you believe this is an error, try entering your license key again:
-            </Typography>
-          </>
-        ) : (
-          <>
-            <Typography gutterBottom>
-              Please enter your Gumroad license key to continue. You can get or purchase a key here:
-            </Typography>
-            <Link href="https://leakscriptsieve.gumroad.com/l/wrjde" target="_blank" rel="noopener">
-              https://leakscriptsieve.gumroad.com/l/wrjde
-            </Link>
-          </>
-        )}
-        <Box mt={2}>
-          <TextField
-            label="License Key"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            fullWidth
-            autoFocus={!isOverLimit}
-            error={!!error && !isOverLimit}
-            helperText={!isOverLimit && error ? error : ''}
-          />
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel} disabled={verifying}>Quit</Button>
-        <Button onClick={() => onSubmit(key)} variant="contained" disabled={!key || verifying}>
-          {verifying ? <><CircularProgress size={18} sx={{ mr: 1 }} /> Validating...</> : 'Validate'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
 
 const PHONE_LANDSCAPE = '(max-height:500px) and (orientation: landscape)';
 
@@ -149,10 +61,130 @@ function usePhoneLandscape() {
   return matches;
 }
 
+/**
+ * The chrome around one page (nav/routes.js has the kind of every route):
+ *   'page'    desktop: the app bar; phone: page bar, bottom navigation and More sheet (PhoneFrame)
+ *   'bare'    nothing; the page draws its own Back
+ *   'compare' like 'page', but bare on a phone held sideways (Smart Compare needs the height)
+ * The page always sits at the same place in the tree, so a chrome flip (a rotation, a resize) never
+ * remounts it.
+ */
+function Frame({ kind = 'page', children }) {
+  const isPhone = useIsPhone();
+  const phoneLandscape = usePhoneLandscape();
+  const isBare = kind === 'bare' || (kind === 'compare' && phoneLandscape);
+  const chrome = isBare ? 'bare' : isPhone ? 'phone' : 'desktop';
+  return (
+    <ChromeProvider value={chrome}>
+      {chrome === 'desktop' ? <Toolbar /> : null}
+      <PhoneFrame active={chrome === 'phone'}>{children}</PhoneFrame>
+    </ChromeProvider>
+  );
+}
+
+const page = (el) => <Frame kind="page">{el}</Frame>;
+const bare = (el) => <Frame kind="bare">{el}</Frame>;
+
+/** /p/:id on desktop: the desktop has no per-performer gallery route, so replace to the unified gallery. */
+function PerformerGalleryRedirect({ id }) {
+  const navigate = useNavigate();
+  const { basePath } = useShell();
+  const [performer, setPerformer] = useState(null);
+  const [missing, setMissing] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setPerformer(null);
+    setMissing(false);
+    fetch(`/api/performers/${encodeURIComponent(id)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((p) => {
+        if (!alive) return;
+        if (p && p.name) setPerformer(p);
+        else setMissing(true);
+      })
+      .catch(() => { if (alive) setMissing(true); });
+    return () => { alive = false; };
+  }, [id]);
+
+  // The performer's own library folder; else the app's, once /api/folders has answered.
+  const root = performer ? (performer.folder_path || basePath) : null;
+  useEffect(() => {
+    if (!performer || !root) return;
+    navigate(
+      `/unified-gallery?performer=${encodeURIComponent(performer.name)}&basePath=${encodeURIComponent(root)}`,
+      { replace: true }
+    );
+  }, [performer, root, navigate]);
+
+  if (missing) return <NotFoundPage />;
+  return <PageShell><LoadingState label="Opening the gallery…" /></PageShell>;
+}
+
+/**
+ * The library routes (/, /filter, /filter/:performerId, /pairs, /p/:performerId) share this one
+ * element, so the phone library (its list, scroll and search) stays mounted while its sub-views
+ * open and close, and the desktop MainPage stays mounted across a Gallery/Filter switch.
+ */
+function LibraryRoute({ mainProps }) {
+  const { pathname } = useLocation();
+  const isPhone = useIsPhone();
+  const lib = libraryState(pathname) || { list: 'gallery', performerId: null, galleryId: null };
+
+  if (isPhone) {
+    return (
+      <ChromeProvider value="phone">
+        <PhoneLibrary />
+      </ChromeProvider>
+    );
+  }
+  if (lib.list === 'pairs') return <Navigate to="/" replace />;
+  return (
+    <ChromeProvider value="desktop">
+      <Toolbar />
+      {lib.galleryId ? (
+        <PerformerGalleryRedirect id={lib.galleryId} />
+      ) : (
+        <MainPage
+          mode={lib.list}
+          performerId={lib.performerId}
+          subMode="performer"
+          {...mainProps}
+        />
+      )}
+    </ChromeProvider>
+  );
+}
+
+/** The old scene-editor address: /scene-manager?filePath=<path>&videoSrc=/api/files/raw?path=<path>. */
+function SceneManagerRedirect() {
+  const [sp] = useSearchParams();
+  let p = sp.get('filePath');
+  if (!p) {
+    const src = sp.get('videoSrc');
+    if (src) {
+      try {
+        p = new URL(src, window.location.origin).searchParams.get('path');
+      } catch {
+        p = null;
+      }
+    }
+  }
+  return <Navigate to={p ? `/scene-editor?video=${encodeURIComponent(p)}` : '/scene-editor'} replace />;
+}
+
+/** Hands the router's navigate to the shell value, which is built above the Router (openSettings). */
+function NavBridge({ navRef }) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    navRef.current = navigate;
+    return () => { if (navRef.current === navigate) navRef.current = null; };
+  }, [navigate, navRef]);
+  return null;
+}
+
 // Component that uses the theme
 function AppContent({ onThemeChange, currentThemeId }) {
-  const [mode, setMode] = useState('gallery'); // 'gallery' or 'filter'
-  const [subMode, setSubMode] = useState('performer'); // 'performer' or 'content'
   const [handyCode, setHandyCode] = useState('');
   const [handyConnected, setHandyConnected] = useState(false);
   // The connection only lives in this component's state, so a fresh document
@@ -170,70 +202,10 @@ function AppContent({ onThemeChange, currentThemeId }) {
   });
   const [basePath, setBasePath] = useState(null);
   const [handyIntegration, setHandyIntegration] = useState(null);
-  // License check disabled
-  const [licenseChecked, setLicenseChecked] = useState(true);
-  const [licenseValid, setLicenseValid] = useState(true);
-  const [showLicenseModal, setShowLicenseModal] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [licenseError, setLicenseError] = useState('');
-  const [cachedKey, setCachedKey] = useState('');
-  const [onScanPerformers, setOnScanPerformers] = useState(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [showUploadImport, setShowUploadImport] = useState(false);
-
-  // Global queue state for hash and CLIP creation (persists across pages)
-  const [hashQueue, setHashQueue] = useState(() => {
-    try {
-      const saved = localStorage.getItem('hashQueue');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [showGlobalQueue, setShowGlobalQueue] = useState(false);
-  const currentJobRef = useRef(null);
-  const pollingIntervalRef = useRef(null);
-
-
-
-  // License: initial status check — DISABLED
-  // useEffect(() => { ... }, []);
-
-  // Silent license refresh — DISABLED
-  // useEffect(() => { ... }, [licenseChecked, licenseValid]);
-
-  const handleLicenseSubmit = async (key) => {
-    setVerifying(true);
-    setLicenseError('');
-    try {
-      const res = await fetch('/api/license/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ licenseKey: key })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        const errorMsg = data.message || data.error || 'License validation failed';
-        setLicenseError(errorMsg);
-        setVerifying(false);
-        // Keep modal open so user can see the error with links
-        return;
-      }
-      setLicenseValid(true);
-      setShowLicenseModal(false);
-      setLicenseError('');
-      localStorage.setItem('licenseKey', key);
-    } catch (e) {
-      setLicenseError('Network error validating license');
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const handleLicenseCancel = () => {
-    window.close();
-  };
+  // MainPage hands these up; nothing reads them since the app bar lost its scan button.
+  const [, setOnScanPerformers] = useState(null);
+  const [, setIsScanning] = useState(false);
+  const navRef = useRef(null);
 
   // Expose Handy connection state globally for web components
   useEffect(() => {
@@ -324,6 +296,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
         }, 10000);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per restore; the timer checks the SDK itself
   }, [restoreHandyCode]);
 
   useEffect(() => {
@@ -338,190 +311,6 @@ function AppContent({ onThemeChange, currentThemeId }) {
       .catch(err => console.error('Error loading folders:', err));
   }, []);
 
-  // Persist hash queue to localStorage
-  useEffect(() => {
-    localStorage.setItem('hashQueue', JSON.stringify(hashQueue));
-  }, [hashQueue]);
-
-
-
-  // Helper to poll job status
-  const pollHashJobStatus = (frontendJobId, backendJobId, setHashQueue, currentJobRef, pollingIntervalRef, onComplete) => {
-    currentJobRef.current = frontendJobId;
-
-    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/hashes/status/${backendJobId}`);
-        const data = await res.json();
-
-        if (data.success && data.status) {
-          setHashQueue(prev => prev.map(j => {
-            if (j.id !== frontendJobId) return j;
-            return {
-              ...j,
-              progress: data.status.progress,
-              processed: data.status.processed,
-              total: data.status.total,
-              status: data.status.state === 'completed' ? 'completed' :
-                data.status.state === 'error' ? 'error' : 'processing',
-              error: data.status.error
-            };
-          }));
-
-          if (data.status.state === 'completed' || data.status.state === 'error') {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-            currentJobRef.current = null;
-            if (onComplete) onComplete();
-          }
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 1000);
-  };
-
-  // Helper to start hash creation
-  const startHashCreation = async (job, basePath, setHashQueue, currentJobRef, onPollStart) => {
-    // Optimistic update
-    setHashQueue(prev => prev.map(j =>
-      j.id === job.id ? { ...j, status: 'processing', progress: 0 } : j
-    ));
-
-    try {
-      const response = await fetch('/api/hashes/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          performer_id: job.performerId,
-          basePath,
-          mode: job.mode || 'append'
-        })
-      });
-      const data = await response.json();
-
-      if (data.success) {
-        // Update with backend ID
-        setHashQueue(prev => prev.map(j =>
-          j.id === job.id ? { ...j, backendJobId: data.jobId } : j
-        ));
-
-        // Start polling
-        onPollStart(job.id, data.jobId);
-      } else {
-        throw new Error(data.error || 'Failed to start hash creation');
-      }
-    } catch (err) {
-      console.error('Failed to start hash job:', err);
-      setHashQueue(prev => prev.map(j =>
-        j.id === job.id ? { ...j, status: 'error', error: err.message } : j
-      ));
-    }
-  };
-
-  // Clean up completed/error jobs on startup and restore polling for processing jobs
-  useEffect(() => {
-    // Remove completed and error jobs from queues on mount
-    setHashQueue(prev => prev.filter(j => j.status === 'processing' || j.status === 'queued'));
-    // FIXME: setClipQueue is not defined - commenting out to prevent crash
-    // setClipQueue(prev => prev.filter(j => j.status === 'processing' || j.status === 'queued'));
-
-    const processingHashJob = hashQueue.find(j => j.status === 'processing');
-    if (processingHashJob && !processingHashJob.backendJobId) {
-      // the page closed before the server answered: nothing to poll, and it would block the queue
-      setHashQueue(prev => prev.map(j =>
-        j.id === processingHashJob.id ? { ...j, status: 'error', error: 'Never started on the server; run it again' } : j
-      ));
-    } else if (processingHashJob) {
-      // Resume polling for this job
-      currentJobRef.current = processingHashJob.id;
-      pollHashJobStatus(
-        processingHashJob.id,
-        processingHashJob.backendJobId,
-        setHashQueue,
-        currentJobRef,
-        pollingIntervalRef,
-        null
-      );
-    }
-  }, []); // Only run on mount
-
-  // Process hash queue when it changes
-  useEffect(() => {
-    const processingJob = hashQueue.find(j => j.status === 'processing');
-    if (!processingJob) {
-      const nextJob = hashQueue.find(j => j.status === 'queued');
-      if (nextJob) {
-        startHashCreation(
-          nextJob,
-          basePath,
-          setHashQueue,
-          currentJobRef,
-          (jobId, backendJobId) => pollHashJobStatus(
-            jobId,
-            backendJobId,
-            setHashQueue,
-            currentJobRef,
-            pollingIntervalRef,
-            null // onComplete callback not needed in global context
-          )
-        );
-      }
-    }
-  }, [hashQueue, basePath]);
-
-
-
-  const handleModeChange = (newMode) => {
-    setMode(newMode);
-  };
-
-  const handleSubModeChange = (newSubMode) => {
-    setSubMode(newSubMode);
-  };
-
-  const handleHandyConnect = async (code) => {
-    if (!handyIntegration) {
-      alert('Handy SDK not loaded. Please refresh the page and try again.');
-      return;
-    }
-
-    if (!window.Handy) {
-      alert('Handy SDK not available. Please check your internet connection and refresh the page.');
-      return;
-    }
-
-    try {
-      const success = await handyIntegration.connect(code);
-
-      if (success) {
-        setHandyCode(code);
-        setHandyConnected(true);
-        console.log('✅ Connected to Handy');
-      } else {
-        alert('Failed to connect to Handy. Please check your connection code and try again.');
-      }
-    } catch (error) {
-      console.error('❌ Error connecting to Handy:', error);
-      alert('Error connecting to Handy: ' + error.message);
-    }
-  };
-
-  const handleHandyDisconnect = async () => {
-    if (handyIntegration) {
-      try {
-        await handyIntegration.disconnect();
-        setHandyConnected(false);
-        setHandyCode('');
-        console.log('✅ Disconnected from Handy');
-      } catch (error) {
-        console.error('Error disconnecting from Handy:', error);
-      }
-    }
-  };
-
   const handleFolderAdded = (path) => {
     setBasePath(path);
     // Trigger a scan of the after folder to pick up existing performers
@@ -535,7 +324,7 @@ function AppContent({ onThemeChange, currentThemeId }) {
       .catch(err => console.error('Error scanning after folder:', err));
   };
 
-  const handleFolderDeleted = () => {
+  const reloadFolders = useCallback(() => {
     // Reset the basePath and check if any folders remain
     setBasePath(null);
     fetch('/api/folders')
@@ -546,145 +335,88 @@ function AppContent({ onThemeChange, currentThemeId }) {
         }
       })
       .catch(err => console.error('Error loading folders after deletion:', err));
+  }, []);
+
+  const openSettings = useCallback((section) => {
+    const to = typeof section === 'string' && section ? `/settings/${section}` : '/settings';
+    if (navRef.current) navRef.current(to); else window.location.assign(to);
+  }, []);
+
+  // What every page can read through useShell() (nav/shell.js).
+  const shellValue = useMemo(() => ({
+    basePath,
+    handy: { integration: handyIntegration, code: handyCode, connected: handyConnected },
+    openSettings,
+    reloadFolders,
+    themeId: currentThemeId,
+    setTheme: onThemeChange
+  }), [basePath, handyIntegration, handyCode, handyConnected, openSettings, reloadFolders, currentThemeId, onThemeChange]);
+
+  const handyProps = { handyIntegration, handyCode, handyConnected };
+  const mainProps = {
+    basePath,
+    ...handyProps,
+    onFolderAdded: handleFolderAdded,
+    setOnScanPerformers,
+    setIsScanning
   };
 
-  // Every route that keeps the app chrome renders the same Toolbar with the
-  // same thirteen props. That block was copy-pasted five times, so adding a
-  // prop meant editing five call sites and missing one failed silently. One
-  // object, one helper — and adding chrome to a route is now a one-line change.
-  const isPhone = useIsPhone();
-  // A phone held sideways has ~390px of height; the app bar wraps to two rows
-  // there and leaves the duel almost no room, so Smart Compare drops the
-  // chrome in that case (its own Back button still leads out).
-  const phoneLandscape = usePhoneLandscape();
-  const toolbarProps = {
-    mode, subMode,
-    onModeChange: handleModeChange, onSubModeChange: handleSubModeChange,
-    onHandyConnect: handleHandyConnect, onHandyDisconnect: handleHandyDisconnect,
-    handyCode, handyConnected,
-    basePath, onFolderDeleted: handleFolderDeleted,
-    onScanPerformers, isScanning,
-    onThemeChange, currentThemeId,
-    hashQueue
-  };
-  // Plain function, not a component — returning JSX inline keeps the element
-  // identity React already had. A nested component defined here would remount
-  // its whole subtree on every App render.
-  const shell = (page, extra) => (
-    <>
-      <Toolbar {...toolbarProps} {...extra} />
-      {page}
-    </>
-  );
-
+  // nav/routes.js holds each route's title, section, chrome and parent: keep the two in step.
   return (
     <Router>
-      <div className="App">
-        {!licenseChecked ? (
-          <Box p={4} display="flex" alignItems="center" justifyContent="center">
-            <CircularProgress />
-          </Box>
-        ) : (
-          <Routes>
-            {/* Chrome-free by design: immersive or standalone surfaces where the
-                app bar would be in the way — /vr (WebXR), the scene editor and
-                /pairwise-mobile (opened as tools, often in their own tab), and
-                /thumbnail-selector (a picker). Everything else gets shell(). */}
-            <Route path="/admin" element={shell(<AdminPage />)} />
-            <Route path="/unified-gallery" element={shell(
-              <UnifiedGalleryPage
-                handyIntegration={handyIntegration}
-                handyCode={handyCode}
-                handyConnected={handyConnected}
-              />
-            )} />
-            <Route path="/scene-manager" element={
-              <SceneManagerPage />
-            } />
-            <Route path="/scene-editor" element={
-              <SceneManagerPage />
-            } />
-            <Route path="/hash-management" element={<Navigate to="/performer-management" replace />} />
-            <Route path="/hash-results/:runId" element={shell(<HashResultsPage />)} />
+      <ShellProvider value={shellValue}>
+        {/* Browser uploads (Import page) keep going on every route: the provider sits above the routes. */}
+        <UploadsProvider basePath={basePath}>
+          <div className="App">
+            <Routes>
+              <Route element={<LibraryRoute mainProps={mainProps} />}>
+                <Route index />
+                <Route path="filter" />
+                <Route path="filter/:performerId" />
+                <Route path="pairs" />
+                <Route path="p/:performerId" />
+              </Route>
 
-            {/* /upload-queue is an alias — it renders the combined import page */}
-            <Route path="/upload-queue" element={shell(<LocalImportPage basePath={basePath} />)} />
-            <Route path="/local-import" element={shell(<LocalImportPage basePath={basePath} />)} />
-            <Route path="/tindersorting" element={shell(<TinderSortingPage basePath={basePath} />)} />
-            <Route path="/performer-management" element={shell(
-              <PerformerManagementPage basePath={basePath} hashQueue={hashQueue} setHashQueue={setHashQueue} />
-            )} />
-            <Route path="/pairwise/*" element={shell(<PairwisePage />)} />
-            <Route path="/pairwise-mobile" element={
-              <PairwiseMobilePage />
-            } />
-            <Route path="/ranking-insight" element={shell(<RankingInsightPage />)} />
-            <Route path="/group-rate" element={shell(<GroupRatePage />)} />
-            {/* Phones never get the desktop app bar — it's reached from the
-                phone shell's Score tab, which has no bar to match. */}
-            <Route path="/smart-compare" element={(isPhone || phoneLandscape) ? <SmartComparePage /> : shell(<SmartComparePage />)} />
-            <Route path="/ai-training" element={shell(<AiTrainingPage />)} />
-            <Route path="/taste-dashboard" element={<Navigate to="/ai-training" replace />} />
-            {/* Chrome-free: a full-bleed comparison tool opened in its own tab
-                from the gallery. On the Fold's cover screen in landscape the
-                toolbar ate 64px of a 360px-tall viewport and pushed the
-                Undo/Skip row off the bottom. */}
-            <Route path="/pairwise-rank" element={<PairwiseRankPage />} />
-            <Route path="/funpipe" element={shell(<FunpipePage />)} />
-            <Route path="/jobs" element={shell(<JobsPage hashQueue={hashQueue} setHashQueue={setHashQueue} />)} />
-            <Route path="/settings/space" element={shell(<SpacePage />)} />
-            <Route path="/discover" element={isPhone ? <DiscoverPage /> : shell(<DiscoverPage />)} />
-            {/* Chrome-free: replaces the fullscreen modal the gallery used to
-                open, so like the modal it takes the whole viewport. */}
-            <Route path="/player" element={
-              <PlayerPage
-                handyIntegration={handyIntegration}
-                handyCode={handyCode}
-                handyConnected={handyConnected}
-              />
-            } />
-            <Route path="/vr" element={
-              <VRPage />
-            } />
+              <Route path="/unified-gallery" element={page(<UnifiedGalleryPage {...handyProps} />)} />
+              {/* Bare: it replaced the gallery's fullscreen modal, so it takes the whole viewport. */}
+              <Route path="/player" element={bare(<PlayerPage {...handyProps} />)} />
+              <Route path="/thumbnail-selector/:performerId" element={bare(<ThumbnailSelectorWrapper />)} />
+              <Route path="/local-import" element={page(<LocalImportPage basePath={basePath} />)} />
+              <Route path="/performer-management" element={page(<PerformerManagementPage basePath={basePath} />)} />
+              <Route path="/hash-results/:runId" element={page(<HashResultsPage />)} />
+              <Route path="/discover/*" element={page(<DiscoverPage />)} />
+              {/* A phone held sideways has ~390px of height: Smart Compare drops the chrome there. */}
+              <Route path="/smart-compare" element={<Frame kind="compare"><SmartComparePage /></Frame>} />
+              <Route path="/group-rate" element={page(<GroupRatePage />)} />
+              {/* Bare: on the Fold's cover screen in landscape a bar pushes the Undo/Skip row off the bottom. */}
+              <Route path="/pairwise-rank" element={bare(<PairwiseRankPage />)} />
+              <Route path="/ai-training" element={page(<AiTrainingPage />)} />
+              <Route path="/ranking-insight" element={page(<RankingInsightPage />)} />
+              <Route path="/funpipe" element={page(<FunpipePage />)} />
+              <Route path="/scene-editor" element={bare(<SceneManagerPage />)} />
+              <Route path="/vr" element={bare(<VRPage />)} />
+              <Route path="/jobs" element={page(<JobsPage />)} />
+              <Route path="/settings/*" element={page(<SettingsPage />)} />
 
-            <Route path="/thumbnail-selector/:performerId" element={
-              <ThumbnailSelectorWrapper />
-            } />
-            {/* Phones get their own shell, not the desktop one restyled — no
-                app bar, no MainPage, so none of the desktop chrome mounts. */}
-            <Route path="*" element={isPhone ? (
-              <MobileShell />
-            ) : shell(
-              <MainPage
-                mode={mode}
-                subMode={subMode}
-                basePath={basePath}
-                handyIntegration={handyIntegration}
-                handyCode={handyCode}
-                handyConnected={handyConnected}
-                onFolderAdded={handleFolderAdded}
-                setOnScanPerformers={setOnScanPerformers}
-                setIsScanning={setIsScanning}
-              />,
-              { onUploadFolder: () => setShowUploadImport(true) }
-            )} />
-          </Routes >
-        )
-        }
-        <SceneManagerWrapper />
+              {/* Old addresses: nothing links to them, bookmarks still work. */}
+              <Route path="/admin" element={<Navigate to="/settings/system" replace />} />
+              <Route path="/scene-manager" element={<SceneManagerRedirect />} />
+              <Route path="/hash-management" element={<Navigate to="/performer-management?view=duplicates" replace />} />
+              <Route path="/upload-queue" element={<Navigate to="/local-import" replace />} />
+              <Route path="/taste-dashboard" element={<Navigate to="/ai-training" replace />} />
+              {/* The old pairwise service's pages (Labeler, Threshold, Health) are retired. */}
+              <Route path="/pairwise/*" element={<Navigate to="/ranking-insight" replace />} />
+              <Route path="/pairwise-mobile" element={<Navigate to="/ranking-insight" replace />} />
 
-        <LicenseModal
-          open={showLicenseModal}
-          onSubmit={handleLicenseSubmit}
-          onCancel={handleLicenseCancel}
-          defaultKey={cachedKey}
-          verifying={verifying}
-          error={licenseError}
-        />
-
-        {/* UploadImportModal removed - use /upload-queue page instead */}
-      </div >
-    </Router >
+              <Route path="*" element={page(<NotFoundPage />)} />
+            </Routes>
+            <NavBridge navRef={navRef} />
+            <CloseAsksOnRouteChange />
+            <UpdateNotice />
+          </div>
+        </UploadsProvider>
+      </ShellProvider>
+    </Router>
   );
 }
 
@@ -693,10 +425,7 @@ function App() {
   const [themeId, setThemeId] = useState(getStoredThemeId());
   const currentTheme = getThemeById(themeId);
 
-  const handleThemeChange = (newId) => {
-    setThemeId(newId);
-    setStoredThemeId(newId);
-  };
+  const handleThemeChange = useCallback((newId) => { setThemeId(newId); setStoredThemeId(newId); }, []);
 
   // Publish the design tokens as CSS custom properties on <html>.
   //
@@ -707,10 +436,6 @@ function App() {
   useEffect(() => {
     const root = document.documentElement;
     applyTokens(getTokensById(themeId));
-
-    // Legacy: styles/themes/*.css target [data-theme="id"]. Kept until those
-    // files are retired so existing saved preferences keep working.
-    root.setAttribute('data-theme', themeId);
 
     // Legacy variable names, still referenced by ~9 older components.
     // Mapped onto the active theme so they can't drift from the tokens.
@@ -723,13 +448,18 @@ function App() {
     root.style.setProperty('--bg-paper', p.background.paper);
     root.style.setProperty('--text-primary', p.text.primary);
     root.style.setProperty('--text-secondary', p.text.secondary);
+
+    // The installed app's title bar and the phone's status bar follow the theme.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getTokensById(themeId).bg);
   }, [currentTheme, themeId]);
 
   return (
     <Provider store={store}>
       <ThemeProvider theme={currentTheme}>
         <CssBaseline />
-        <AppContent onThemeChange={handleThemeChange} currentThemeId={themeId} />
+        <FeedbackProvider>
+          <AppContent onThemeChange={handleThemeChange} currentThemeId={themeId} />
+        </FeedbackProvider>
       </ThemeProvider>
     </Provider>
   );

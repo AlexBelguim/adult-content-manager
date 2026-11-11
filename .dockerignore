@@ -6,7 +6,6 @@
 # Node modules (rebuilt inside container)
 node_modules
 frontend/node_modules
-backend-pairwise/node_modules
 
 # Database files (live data — not baked into image)
 *.db
@@ -34,9 +33,6 @@ npm-debug.log*
 backend/debug_*
 backend/temp
 build.log
-
-# Pairwise (separate service)
-backend-pairwise
 
 # Docs (not needed at runtime)
 docs

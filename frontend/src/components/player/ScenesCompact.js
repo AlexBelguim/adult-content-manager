@@ -1,6 +1,7 @@
 import React from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { fmtTime } from './playerUtils';
-import { openSceneManager } from './ScenesPanel';
+import { sceneEditorUrl } from './ScenesPanel';
 import LabelButtons from './LabelButtons';
 import { GROUP_COLOR, sceneAt, sceneName, useVideoTime } from './videoLabels';
 import './videoLabels.css';
@@ -27,7 +28,11 @@ export default function ScenesCompact({ data, videoEl, item }) {
       ))}
       <LabelButtons path={item?.path} labelled />
       <div className="sm-foot">
-        <button type="button" className="pl-btn sm" onClick={() => openSceneManager(item)} disabled={!item?.path}>🎬 Open Scene Manager ↗</button>
+        {item?.path ? (
+          <RouterLink className="pl-btn sm" to={sceneEditorUrl(item)}>🎬 Open in scene editor</RouterLink>
+        ) : (
+          <button type="button" className="pl-btn sm" disabled>🎬 Open in scene editor</button>
+        )}
       </div>
     </section>
   );

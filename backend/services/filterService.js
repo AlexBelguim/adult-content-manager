@@ -218,6 +218,9 @@ class FilterService {
 
   // Clear cache for a specific performer (call after filtering actions)
   clearPerformerCache(performerId) {
+    // the progress numbers change with every decision too
+    this.statsCache.delete(Number(performerId));
+    this.statsCache.delete(String(performerId));
     const keysToDelete = [];
     for (const key of this.fileCache.keys()) {
       if (key.startsWith(`${performerId}_`)) {
@@ -446,7 +449,7 @@ class FilterService {
         return 'image';
       } else if (['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'].includes(ext)) {
         // Check if this is a funscript video by looking at the path
-        if (filePath.includes(path.join('vids', 'funscript'))) {
+        if (/[\\/]vids[\\/]funscript[\\/]/i.test(filePath)) {
           return 'funscript_video';
         }
         return 'video';
@@ -487,6 +490,9 @@ class FilterService {
         db.prepare('UPDATE performers SET funscript_vids_filtered = funscript_vids_filtered + 1 WHERE id = ?').run(performerId);
         console.log(`Updated funscript_vids_filtered for performer ${performerId} (funscript file)`);
       }
+      // Keep the on-disk counts in step with the folder until the debounced rescan runs: progress adds the files a
+      // decision took out to these counts, so a stale count would count a deleted file twice.
+      this.adjustDiskCounts(performerId, fileType, action, 1);
     }
 
     // Clear cache for this performer since files have changed
@@ -534,7 +540,9 @@ class FilterService {
               UPDATE performers 
               SET pics_count = ?, vids_count = ?, funscript_vids_count = ?, 
                   funscript_files_count = ?, total_size_gb = ?,
-                  pics_original_count = ?, vids_original_count = ?, funscript_vids_original_count = ?,
+                  pics_original_count = MAX(COALESCE(pics_original_count, 0), ?),
+                  vids_original_count = MAX(COALESCE(vids_original_count, 0), ?),
+                  funscript_vids_original_count = MAX(COALESCE(funscript_vids_original_count, 0), ?),
                   last_scan_date = ?, cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?
               WHERE id = ?
             `).run(
@@ -591,12 +599,9 @@ class FilterService {
     const movedPath = path.join(funscriptPath, path.basename(filePath));
     await fs.move(filePath, movedPath);
 
-    // Landing in a funscript folder is the signal that this video should get a
-    // script, so hand it straight to funpipe. Best-effort: funpipe lives on the
-    // GPU box and is often off — the move itself must never fail because of it.
-    const funpipe = await this.queueForFunpipe(movedPath, funscriptPath, options);
-
-    return { success: true, message: 'File moved to funscript folder', newPath: funscriptPath, funpipe };
+    // Only the move: the video is not handed to funpipe from here. Scripts are queued on the Funpipe page, when
+    // the owner chooses to. (queueForFunpipe stays for callers that want it.)
+    return { success: true, message: 'File moved to funscript folder', newPath: funscriptPath };
   }
 
   /**
@@ -624,6 +629,13 @@ class FilterService {
 
     const action = this.filterHistory[this.currentIndex];
 
+    // Undo never moved the video back out of the funscript folder: it only forgot the decision, and the video then
+    // dropped out of every list and progress count. Refuse instead of pretending.
+    if (action.action === 'move_to_funscript') {
+      throw new Error('A move to the funscript folder cannot be undone here: the video is in Funscript videos now');
+    }
+
+    let restored = false;
     // Implement undo logic based on action type
     switch (action.action) {
       case 'delete':
@@ -631,6 +643,7 @@ class FilterService {
         const backupPath = path.join(path.dirname(action.filePath), '.trash', path.basename(action.filePath));
         if (await fs.pathExists(backupPath)) {
           await fs.move(backupPath, action.filePath);
+          restored = true;
 
           // Restore deleted_flag to 0 in hash database
           db.prepare(`
@@ -657,7 +670,7 @@ class FilterService {
         return 'image';
       } else if (['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'].includes(ext)) {
         // Check if this is a funscript video by looking at the path
-        if (filePath.includes(path.join('vids', 'funscript'))) {
+        if (/[\\/]vids[\\/]funscript[\\/]/i.test(filePath)) {
           return 'funscript_video';
         }
         return 'video';
@@ -678,7 +691,10 @@ class FilterService {
       db.prepare('UPDATE performers SET funscript_vids_filtered = funscript_vids_filtered - 1 WHERE id = ? AND funscript_vids_filtered > 0').run(action.performerId);
     }
 
+    if (restored) this.adjustDiskCounts(action.performerId, fileType, 'delete', -1);
+
     this.currentIndex--;
+    this.clearPerformerCache(action.performerId);
     return { success: true, message: 'Action undone' };
   }
 
@@ -794,7 +810,75 @@ class FilterService {
     this.statsCache.delete(performerId);
   }
 
-  // Fast version: uses database-cached counts instead of file system scans
+  /**
+   * What has been decided for a performer, per kind of file: the files with a decision (each file once, its latest
+   * decision), and how many of those left the folder (deleted, or moved to the funscript folder).
+   */
+  decisionSummary(performerId) {
+    const rows = db.prepare(`
+      SELECT file_type, COUNT(*) AS done,
+             SUM(CASE WHEN action = 'delete' THEN 1 ELSE 0 END) AS deleted,
+             SUM(CASE WHEN action = 'move_to_funscript' THEN 1 ELSE 0 END) AS moved
+      FROM filter_actions
+      WHERE id IN (SELECT MAX(id) FROM filter_actions WHERE performer_id = ? GROUP BY file_path)
+      GROUP BY file_type
+    `).all(performerId);
+    const out = {};
+    for (const r of rows) out[r.file_type] = { done: r.done || 0, deleted: r.deleted || 0, moved: r.moved || 0 };
+    return out;
+  }
+
+  /**
+   * Progress against the files she had when filtering started. A delete takes a file out of the folder, so the count
+   * on disk shrinks while the decisions grow; dividing one by the other went above 100%. The original number is what
+   * is on disk now plus what the decisions took out of it, so the percentage only moves when a decision is made and
+   * stops at 100.
+   */
+  progressFrom(onDisk, summary) {
+    const kind = (type, { leaves = ['deleted'] } = {}) => {
+      const s = summary[type] || { done: 0, deleted: 0, moved: 0 };
+      const original = (onDisk[type] || 0) + leaves.reduce((n, k) => n + (s[k] || 0), 0);
+      const processed = Math.min(original, s.done);
+      return { original, processed, completion: pct(processed, original) };
+    };
+    // rounded down, so 100% means every file is decided
+    const pct = (done, of) => (of === 0 ? 100 : Math.min(100, Math.floor((done / of) * 100)));
+    const pics = kind('image');
+    const vids = kind('video', { leaves: ['deleted', 'moved'] });
+    const fun = kind('funscript_video');
+    const total = pics.original + vids.original + fun.original;
+    const processed = pics.processed + vids.processed + fun.processed;
+    return {
+      total,
+      processed,
+      remaining: total - processed,
+      completion: pct(processed, total),
+      picsTotal: pics.original, picsProcessed: pics.processed, picsCompletion: pics.completion,
+      vidsTotal: vids.original, vidsProcessed: vids.processed, vidsCompletion: vids.completion,
+      funscriptTotal: fun.original, funscriptProcessed: fun.processed, funscriptCompletion: fun.completion
+    };
+  }
+
+  /**
+   * A decision that takes a file out of its folder changes the cached counts on the performers row (vids_count counts
+   * the funscript videos too). direction 1 applies the decision, -1 undoes it.
+   */
+  adjustDiskCounts(performerId, fileType, action, direction) {
+    const d = -direction;
+    const set = (sql) => db.prepare(`UPDATE performers SET ${sql} WHERE id = ?`).run(performerId);
+    if (action === 'delete') {
+      if (fileType === 'image') set(`pics_count = MAX(0, COALESCE(pics_count, 0) + ${d})`);
+      else if (fileType === 'video') set(`vids_count = MAX(0, COALESCE(vids_count, 0) + ${d})`);
+      else if (fileType === 'funscript_video') {
+        set(`vids_count = MAX(0, COALESCE(vids_count, 0) + ${d}), funscript_vids_count = MAX(0, COALESCE(funscript_vids_count, 0) + ${d})`);
+      }
+    } else if (action === 'move_to_funscript' && fileType === 'video') {
+      // still a video, now one in the funscript folder
+      set(`funscript_vids_count = MAX(0, COALESCE(funscript_vids_count, 0) + ${direction})`);
+    }
+  }
+
+  // Fast version: the file counts cached on the performers row instead of a folder scan
   getFilterStatsFast(performerId) {
     const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(performerId);
     if (!performer) {
@@ -803,33 +887,12 @@ class FilterService {
         picsCompletion: 100, vidsCompletion: 100, funscriptCompletion: 100
       };
     }
-
-    // Use cached counts from performers table
-    const picsTotal = performer.pics_count || 0;
-    const vidsTotal = performer.vids_count || 0;
-    const funscriptTotal = performer.funscript_vids_count || 0;
-    
-    const picsFiltered = performer.pics_filtered || 0;
-    const vidsFiltered = performer.vids_filtered || 0;
-    const funscriptFiltered = performer.funscript_vids_filtered || 0;
-
-    const totalFiles = picsTotal + vidsTotal + funscriptTotal;
-    const totalFiltered = picsFiltered + vidsFiltered + funscriptFiltered;
-
-    const picsCompletion = picsTotal === 0 ? 100 : Math.round((picsFiltered / picsTotal) * 100);
-    const vidsCompletion = vidsTotal === 0 ? 100 : Math.round((vidsFiltered / vidsTotal) * 100);
-    const funscriptCompletion = funscriptTotal === 0 ? 100 : Math.round((funscriptFiltered / funscriptTotal) * 100);
-    const overallCompletion = totalFiles === 0 ? 100 : Math.round((totalFiltered / totalFiles) * 100);
-
-    return {
-      total: totalFiles,
-      processed: totalFiltered,
-      remaining: totalFiles - totalFiltered,
-      completion: overallCompletion,
-      picsTotal, picsProcessed: picsFiltered, picsCompletion,
-      vidsTotal, vidsProcessed: vidsFiltered, vidsCompletion,
-      funscriptTotal, funscriptProcessed: funscriptFiltered, funscriptCompletion
-    };
+    // vids_count includes the videos in vids/funscript (scanPerformerFolderEnhanced), funscript_vids_count is those
+    return this.progressFrom({
+      image: performer.pics_count || 0,
+      video: Math.max(0, (performer.vids_count || 0) - (performer.funscript_vids_count || 0)),
+      funscript_video: performer.funscript_vids_count || 0
+    }, this.decisionSummary(performerId));
   }
 
   getFilterStats(performerId, useCache = true) {
@@ -945,41 +1008,16 @@ class FilterService {
       }
     }
 
-    const totalFiles = picsTotal + vidsTotal + funscriptTotal;
-    const totalFiltered = picsFiltered + vidsFiltered + funscriptFiltered;
-
-    // Calculate percentages - if 0 files of a type, show 100% completion
-    const picsCompletion = picsTotal === 0 ? 100 : Math.round((picsFiltered / picsTotal) * 100);
-    const vidsCompletion = vidsTotal === 0 ? 100 : Math.round((vidsFiltered / vidsTotal) * 100);
-    const funscriptCompletion = funscriptTotal === 0 ? 100 : Math.round((funscriptFiltered / funscriptTotal) * 100);
-    const overallCompletion = totalFiles === 0 ? 100 : Math.round((totalFiltered / totalFiles) * 100);
-
-    // Get action counts for detailed stats
-    const keepActions = db.prepare('SELECT COUNT(*) as count FROM filter_actions WHERE performer_id = ? AND action = ?').get(performerId, 'keep');
-    const deleteActions = db.prepare('SELECT COUNT(*) as count FROM filter_actions WHERE performer_id = ? AND action = ?').get(performerId, 'delete');
-    const moveActions = db.prepare('SELECT COUNT(*) as count FROM filter_actions WHERE performer_id = ? AND action = ?').get(performerId, 'move_to_funscript');
-
+    // picsTotal and the others above are what is on disk now; progress is measured against the original number
+    // (see progressFrom). The *Filtered counts above only matched files still on disk, so they are not used.
+    void picsFiltered; void vidsFiltered; void funscriptFiltered;
+    const summary = this.decisionSummary(performerId);
+    const sum = (key) => Object.values(summary).reduce((n, s) => n + (s[key] || 0), 0);
     const stats = {
-      total: totalFiles,
-      kept: keepActions.count,
-      deleted: deleteActions.count,
-      moved: moveActions.count,
-      processed: totalFiltered,
-      remaining: totalFiles - totalFiltered,
-      completion: overallCompletion,
-
-      // Individual type progress
-      picsTotal: picsTotal,
-      picsProcessed: picsFiltered,
-      picsCompletion: picsCompletion,
-
-      vidsTotal: vidsTotal,
-      vidsProcessed: vidsFiltered,
-      vidsCompletion: vidsCompletion,
-
-      funscriptTotal: funscriptTotal,
-      funscriptProcessed: funscriptFiltered,
-      funscriptCompletion: funscriptCompletion
+      ...this.progressFrom({ image: picsTotal, video: vidsTotal, funscript_video: funscriptTotal }, summary),
+      kept: sum('done') - sum('deleted') - sum('moved'),
+      deleted: sum('deleted'),
+      moved: sum('moved')
     };
     
     // Store in cache
@@ -990,7 +1028,8 @@ class FilterService {
 
   async applySmartBatch(performerId, results, options = {}) {
     console.log(`Applying smart batch for performer ${performerId} (${results.length} items)`);
-    const summary = { kept: 0, deleted: 0, errors: 0 };
+    // failed: the paths that did not go through, so the sorted view can keep them and say which
+    const summary = { kept: 0, deleted: 0, errors: 0, failed: [] };
 
     for (const item of results) {
       try {
@@ -1000,6 +1039,7 @@ class FilterService {
       } catch (err) {
         console.error(`Error applying action to ${item.path}:`, err);
         summary.errors++;
+        summary.failed.push(item.path);
       }
     }
     

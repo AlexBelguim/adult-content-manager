@@ -70,7 +70,6 @@ extra/
 *.bin
 *.safetensors
 backend/ml-datasets/
-backend-pairwise/models/
 
 # ===========================================
 # Standalone ML / vision projects (separate repos)

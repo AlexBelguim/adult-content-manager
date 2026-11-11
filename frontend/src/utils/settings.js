@@ -8,6 +8,9 @@ export const DEFAULT_SHORTCUTS = {
   next: 'ArrowRight'
 };
 
+/** Keys the filter keeps for itself (Space plays and pauses, Esc closes) or the browser needs (Tab). */
+export const RESERVED_KEYS = [' ', 'Space', 'Escape', 'Tab'];
+
 // API functions for settings
 export const settingsAPI = {
   // Get all settings
@@ -32,14 +35,16 @@ export const settingsAPI = {
     }
   },
 
-  // Set setting
+  // Set setting: { success, value } or a throw with the server's error
   set: async (key, value) => {
     const response = await fetch(`/api/settings/${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value })
     });
-    return response.json();
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Could not save (${response.status})`);
+    return data;
   },
 
   // Delete setting
@@ -47,30 +52,32 @@ export const settingsAPI = {
     const response = await fetch(`/api/settings/${key}`, {
       method: 'DELETE'
     });
-    return response.json();
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Could not save (${response.status})`);
+    return data;
   }
 };
 
-// Load shortcuts from settings or use defaults
+// Load shortcuts from settings or use defaults. A reserved key (an old 'Space' recording) becomes no key.
 export const loadShortcuts = async () => {
+  let merged = DEFAULT_SHORTCUTS;
   try {
     const shortcuts = await settingsAPI.get('shortcuts');
     if (shortcuts) {
-      return { ...DEFAULT_SHORTCUTS, ...JSON.parse(shortcuts) };
+      merged = { ...DEFAULT_SHORTCUTS, ...JSON.parse(shortcuts) };
     }
   } catch (error) {
     console.error('Failed to load shortcuts:', error);
   }
-  return DEFAULT_SHORTCUTS;
+  const clean = { ...merged };
+  for (const action of Object.keys(clean)) {
+    if (RESERVED_KEYS.includes(clean[action])) clean[action] = '';
+  }
+  return clean;
 };
 
-// Save shortcuts to settings
+// Save shortcuts to settings. Throws with the server's error.
 export const saveShortcuts = async (shortcuts) => {
-  try {
-    await settingsAPI.set('shortcuts', JSON.stringify(shortcuts));
-    return true;
-  } catch (error) {
-    console.error('Failed to save shortcuts:', error);
-    return false;
-  }
+  await settingsAPI.set('shortcuts', JSON.stringify(shortcuts));
+  return true;
 };

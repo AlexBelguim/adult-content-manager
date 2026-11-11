@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Box, Typography, LinearProgress, Chip, Button, Alert, IconButton, Tooltip, TextField, Tabs, Tab
+  Box, Typography, LinearProgress, Chip, Button, IconButton, Tooltip, Tabs, Tab
 } from '@mui/material';
 import { Refresh, Star, Psychology, Speed, Autorenew, Delete as DeleteIcon } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -14,6 +14,7 @@ import ModelArsenal from '../components/aiTraining/ModelArsenal';
 import ModelNotes from '../components/aiTraining/ModelNotes';
 import PerformerTrainingTable from '../components/aiTraining/PerformerTrainingTable';
 import { PREFERRED_KEYS, MODEL_NOTES, pairSourcesOf, sumPairs } from '../components/aiTraining/modelInfo';
+import { useAsk, useNotify, errorText, plural } from '../components/ui';
 
 const TABS = [['overview', 'Overview'], ['train', 'Train'], ['models', 'Models'], ['performers', 'Performers'], ['system', 'System']];
 
@@ -25,6 +26,20 @@ const smallBtnSx = {
 // null when it can't be had: a section without its data says so, the rest of the page goes on
 const getJson = (url) => fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null);
 const count = (n) => (n == null ? '–' : n.toLocaleString());
+
+// What POST /api/health/cleanup deletes: rows whose performer is no longer in the app. The health check counts five
+// of the tables; the sixth, tags, it does not count, and there a tag definition (performer_id empty) counts as orphaned.
+const CLEANUP_TEXT = 'Deletes the rows that belong to a performer who is no longer in the app. That includes the kept file '
+  + 'hashes of deleted performers, so re-downloads of their files are no longer recognised. It also deletes every tag '
+  + 'definition, since those have no performer; their folders stay. Cannot be undone.';
+const orphanRows = (o = {}) => [
+  ['Ratings', count(o.ratings)],
+  ['File hashes', count(o.hashes)],
+  ['Pairwise scores', count(o.pairwise)],
+  ['Filter actions', count(o.filterActions)],
+  ['Duels', count(o.performerComparisons)],
+  ['Tags', 'All tag definitions'],
+];
 
 function Overview({ health, training, trainingData, aiChecking, aiOnline, useLegacy, onCleanup, navigate }) {
   const p = health?.performers || {};
@@ -39,7 +54,7 @@ function Overview({ health, training, trainingData, aiChecking, aiOnline, useLeg
 
   const suggestions = [];
   if (health && p.ratingCoverage < 50) suggestions.push({ icon: <Star />, text: `Only ${p.ratingCoverage}% of performers are rated. Rate more performers for better AI predictions.`, action: 'Rate performers', onClick: () => navigate('/smart-compare') });
-  if (health && pw.totalPairs === 0) suggestions.push({ icon: <Psychology />, text: 'No pairwise comparisons yet. Start labeling: your pairs train the CLIP models.', action: 'Start labeling', onClick: () => navigate('/pairwise') });
+  if (health && pw.totalPairs === 0) suggestions.push({ icon: <Psychology />, text: 'No picture pairs yet. Rank pictures: your pairs train the CLIP models.', action: 'Rank pictures', onClick: () => navigate('/ranking-insight') });
   if (ready && !aiChecking && !aiOnline) suggestions.push({ icon: <Autorenew />, text: `${training.pictures.keep + training.pictures.delete} training images available but acm-gpu is offline. Start it to train.` });
   if (p.inBefore > p.inAfter * 2 && p.inBefore > 20) suggestions.push({ icon: <Speed />, text: `${p.inBefore} performers still need filtering vs ${p.inAfter} done. Keep filtering!` });
   if (health?.issues?.some(i => i.type === 'orphan')) {
@@ -51,7 +66,7 @@ function Overview({ health, training, trainingData, aiChecking, aiOnline, useLeg
     <Box>
       <Toolbar>
         <Button size="small" variant="outlined" sx={smallBtnSx} onClick={() => navigate('/smart-compare')}>Rate performers</Button>
-        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={() => navigate('/pairwise')}>Pairwise labeling</Button>
+        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={() => navigate('/ranking-insight')}>Rank pictures</Button>
         <Button size="small" variant="outlined" sx={smallBtnSx} component="a" href="/profile.html">Profile page</Button>
         <Button size="small" variant="outlined" sx={smallBtnSx} component="a" href="/profile.html#duels">Profile duels</Button>
       </Toolbar>
@@ -123,7 +138,7 @@ function Overview({ health, training, trainingData, aiChecking, aiOnline, useLeg
   );
 }
 
-function System({ health, cleaning, onCleanup, aiUrl, setAiUrl, onSaveUrl, urlSaved, savingUrl }) {
+function System({ health, cleaning, onCleanup, onOpenWorkers }) {
   if (!health) return <LoadingState />;
   const sizes = health.database?.tableSizes || {};
   const disk = health.disk || {};
@@ -149,18 +164,17 @@ function System({ health, cleaning, onCleanup, aiUrl, setAiUrl, onSaveUrl, urlSa
           ))}
         </Panel>
       </Section>
-      <Section title="AI server address" description="Only used while ACM isn't connected to a coordinator: the coordinator says where acm-gpu is.">
-        <Panel sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <TextField size="small" value={aiUrl} onChange={(e) => setAiUrl(e.target.value)} sx={{ flex: '1 1 260px' }} />
-          <Button size="small" variant="outlined" sx={smallBtnSx} onClick={onSaveUrl} disabled={savingUrl}>{urlSaved ? 'Saved' : 'Save'}</Button>
-        </Panel>
-      </Section>
+      <Section title="AI server address" description="The acm-gpu address is set in Settings → Workers, with the coordinator that can supply it." actions={
+        <Button size="small" variant="outlined" sx={smallBtnSx} onClick={onOpenWorkers}>Open Workers</Button>
+      } />
     </Box>
   );
 }
 
 export default function AiTrainingPage() {
   const navigate = useNavigate();
+  const ask = useAsk();
+  const notify = useNotify();
   const [params, setParams] = useSearchParams();
   const tab = TABS.some(([id]) => id === params.get('tab')) ? params.get('tab') : 'overview';
 
@@ -176,12 +190,13 @@ export default function AiTrainingPage() {
   const [testingModel, setTestingModel] = useState(null);
   const [testResults, setTestResults] = useState({});
   const [useLegacy, setUseLegacy] = useState(true); // pairwise.db import + old labeller file
-  const [notice, setNotice] = useState(null);
   const [cleaning, setCleaning] = useState(false);
-  const [aiUrl, setAiUrl] = useState('');
-  const [savingUrl, setSavingUrl] = useState(false);
-  const [urlSaved, setUrlSaved] = useState(false);
   const pollRef = useRef(null);
+
+  // TrainTab reports the results of Push, Export and Start as { severity, text }: they pass, so they are toasts
+  const toastNotice = useCallback((n) => {
+    if (n?.text) notify({ message: n.text, severity: n.severity || 'info' });
+  }, [notify]);
 
   // each on its own, so nothing here waits for anything else
   const loadHere = useCallback(() => {
@@ -205,7 +220,6 @@ export default function AiTrainingPage() {
 
   useEffect(() => {
     reload();
-    getJson('/api/settings/ai_server_url').then(d => d?.value && setAiUrl(d.value));
     Object.entries(PREFERRED_KEYS).forEach(([type, key]) =>
       getJson(`/api/settings/${key}`).then(d => d?.value && setPreferred(p => ({ ...p, [type]: d.value }))));
   }, [reload]);
@@ -222,35 +236,35 @@ export default function AiTrainingPage() {
     return () => clearInterval(pollRef.current);
   }, [trainingStatus?.active, reload]);
 
-  const saveAiUrl = async () => {
-    setSavingUrl(true);
-    try {
-      await fetch('/api/settings/ai_server_url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: aiUrl }) });
-      // Also sync to localStorage for pages that read it directly
-      localStorage.setItem('pairwiseInferenceUrl', aiUrl);
-      setUrlSaved(true);
-      setTimeout(() => setUrlSaved(false), 2000);
-      loadAi();
-    } catch (err) { setNotice({ severity: 'error', text: `Failed to save: ${err.message}` }); }
-    setSavingUrl(false);
-  };
-
   const cleanup = async () => {
-    if (!window.confirm('Remove all orphaned database records? This is safe and non-destructive.')) return;
-    setCleaning(true);
-    try {
-      const data = await fetch('/api/health/cleanup', { method: 'POST' }).then(r => r.json());
-      setNotice({ severity: 'success', text: `Cleaned ${Object.values(data.cleaned).reduce((a, b) => a + b, 0)} orphaned records` });
-      loadHere();
-    } catch (err) { setNotice({ severity: 'error', text: `Cleanup failed: ${err.message}` }); }
-    setCleaning(false);
+    let cleaned = 0;
+    const done = await ask({
+      title: 'Clean up the database?',
+      text: CLEANUP_TEXT,
+      rows: orphanRows(health?.database?.orphanedRecords),
+      okLabel: 'Delete orphaned rows',
+      danger: true,
+      busyLabel: 'Deleting…',
+      run: async () => {
+        setCleaning(true);
+        try {
+          const res = await fetch('/api/health/cleanup', { method: 'POST' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.cleaned) throw new Error(data.error || `The server answered ${res.status}`);
+          cleaned = Object.values(data.cleaned).reduce((a, b) => a + b, 0);
+        } finally { setCleaning(false); }
+      },
+    });
+    if (!done) return;
+    notify(cleaned ? `Deleted ${plural(cleaned, 'orphaned row')}` : 'Nothing to clean up');
+    loadHere();
   };
 
   const setDefaultModel = async (modelName, type) => {
     try {
       await fetch(`/api/settings/${PREFERRED_KEYS[type]}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: modelName }) });
       setPreferred(p => ({ ...p, [type]: modelName }));
-    } catch (err) { setNotice({ severity: 'error', text: `Failed to save the default model: ${err.message}` }); }
+    } catch (err) { notify({ message: errorText(err, 'Could not save the default model'), severity: 'error' }); }
   };
 
   const p = health?.performers || {};
@@ -278,13 +292,11 @@ export default function AiTrainingPage() {
         {TABS.map(([id, label]) => <Tab key={id} value={id} label={id === 'train' && trainingStatus?.active ? `${label} · running` : label} />)}
       </Tabs>
 
-      {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ mb: 2 }}>{notice.text}</Alert>}
-
       {tab === 'overview' && <Overview health={health} training={training} trainingData={aiTrainingData} aiChecking={aiChecking} aiOnline={!!aiHealth}
         useLegacy={useLegacy} onCleanup={cleanup} navigate={navigate} />}
 
       {tab === 'train' && <TrainTab training={training} aiHealth={aiHealth} aiChecking={aiChecking} aiTrainingData={aiTrainingData} setAiTrainingData={setAiTrainingData}
-        trainingStatus={trainingStatus} setTrainingStatus={setTrainingStatus} useLegacy={useLegacy} setUseLegacy={setUseLegacy} setNotice={setNotice} />}
+        trainingStatus={trainingStatus} setTrainingStatus={setTrainingStatus} useLegacy={useLegacy} setUseLegacy={setUseLegacy} setNotice={toastNotice} />}
 
       {tab === 'models' && (
         <Box>
@@ -304,8 +316,7 @@ export default function AiTrainingPage() {
         </Section>
       )}
 
-      {tab === 'system' && <System health={health} cleaning={cleaning} onCleanup={cleanup} aiUrl={aiUrl} setAiUrl={setAiUrl}
-        onSaveUrl={saveAiUrl} urlSaved={urlSaved} savingUrl={savingUrl} />}
+      {tab === 'system' && <System health={health} cleaning={cleaning} onCleanup={cleanup} onOpenWorkers={() => navigate('/settings/workers')} />}
     </PageShell>
   );
 }

@@ -43,6 +43,11 @@ const deletePerformerRecord = db.transaction((performerId) => {
   // "deleted keep for training"), so unlink them instead of deleting them.
   run('imageEloScores', 'UPDATE image_elo_scores SET performer_id = NULL WHERE performer_id = ?', id);
   run('fileCache', 'DELETE FROM performer_file_cache WHERE performer_id = ?', id);
+  // Her hash builds (hash_jobs has no foreign key, and performer ids are reused): waiting and ended rows go; a running
+  // one is told to stop and loses her id (0 is never a performer), so it can't be shown, retried or matched as
+  // someone who gets her id later.
+  run('hashJobs', "DELETE FROM hash_jobs WHERE performer_id = ? AND status != 'running'", id);
+  run('hashJobsStopped', "UPDATE hash_jobs SET cancel_requested = 1, performer_id = 0 WHERE performer_id = ? AND status = 'running'", id);
   // Everything else referencing performers cascades or sets null.
   run('performer', 'DELETE FROM performers WHERE id = ?', id);
 

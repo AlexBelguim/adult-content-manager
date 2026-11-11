@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import useFunscripts from './useFunscripts';
-import { fileNameOf, fmtRating } from './playerUtils';
+import React, { useEffect, useRef, useState } from 'react';
+import { fmtRating } from './playerUtils';
+import { plural } from '../ui';
+import DeleteDialog from './DeleteDialog';
 import './player.css';
+import './panels.css';
 
 const numOrNull = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
 
@@ -32,22 +34,38 @@ function Stars({ label, value, disabled, onRate }) {
   );
 }
 
+const NO_SCRIPTS = { funscripts: [], loaded: false, error: null, reload: () => {} };
+
+const TrashIcon = () => (
+  <svg className="pl-ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
+    <path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5M10 11v5.5M14 11v5.5" />
+  </svg>
+);
+
 /**
- * Video + funscript score (half stars 0.5–5; clicking the current value clears it)
- * and "Delete video & scripts". Self-contained: loads and saves through /api/ratings.
+ * Video + funscript score (half stars 0.5-5; clicking the current value clears it) and "Delete video & scripts…".
+ * Loads and saves through /api/ratings. scripts is what useFunscripts returns for this item:
+ * { funscripts: [{ name, path, size, axis }], loaded, error, reload }.
+ *
+ *   <RatingPanel item scripts onRatingChange={(path, { videoRating, funscriptRating }) => …}
+ *     onDeleted={({ item, trashed, failed }) => …} />
  */
-export default function RatingPanel({ item, funscripts: funscriptsProp, onRatingChange, onDeleted }) {
+export default function RatingPanel({ item, scripts: scriptsProp, onRatingChange, onDeleted }) {
+  const scripts = scriptsProp || NO_SCRIPTS;
   const path = item?.path;
-  const own = useFunscripts(funscriptsProp ? null : path);
-  const funscripts = funscriptsProp || own.funscripts;
-  const hasScripts = funscripts.length > 0;
+  const latestPath = useRef(path);
+  latestPath.current = path;
+  const funscripts = Array.isArray(scripts.funscripts) ? scripts.funscripts : [];
+  const listReady = !!scripts.loaded && !scripts.error;
+  const hasScripts = listReady && funscripts.length > 0;
 
   const [ratings, setRatings] = useState({ path: null, video: null, funscript: null });
   const [error, setError] = useState('');
-  const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
     setError('');
+    setDeleteOpen(false);
     if (!path) return undefined;
     let cancelled = false;
     (async () => {
@@ -73,6 +91,7 @@ export default function RatingPanel({ item, funscripts: funscriptsProp, onRating
   const save = async (type, value) => {
     if (!path) return;
     if (type === 'funscript' && !hasScripts) return;
+    const savedPath = path;
     const previous = type === 'video' ? videoRating : funscriptRating;
     const next = previous === value ? null : value;
     setError('');
@@ -80,7 +99,7 @@ export default function RatingPanel({ item, funscripts: funscriptsProp, onRating
       const res = await fetch('/api/ratings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: path, [type === 'video' ? 'videoRating' : 'funscriptRating']: next })
+        body: JSON.stringify({ filePath: savedPath, [type === 'video' ? 'videoRating' : 'funscriptRating']: next })
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
@@ -88,68 +107,61 @@ export default function RatingPanel({ item, funscripts: funscriptsProp, onRating
       }
       const data = await res.json();
       const saved = { video: numOrNull(data.videoRating), funscript: numOrNull(data.funscriptRating) };
-      setRatings({ path, ...saved });
+      // A late answer for an item that is no longer shown leaves this panel alone; the page patches its list by path.
+      if (latestPath.current === savedPath) setRatings({ path: savedPath, ...saved });
       window.dispatchEvent(new CustomEvent('ratings-updated', {
-        detail: { filePath: path, videoRating: saved.video, funscriptRating: saved.funscript }
+        detail: { filePath: savedPath, videoRating: saved.video, funscriptRating: saved.funscript }
       }));
-      onRatingChange?.({ videoRating: saved.video, funscriptRating: saved.funscript });
+      onRatingChange?.(savedPath, { videoRating: saved.video, funscriptRating: saved.funscript });
     } catch (e) {
-      setError(`Failed to save rating: ${e.message}`);
+      if (latestPath.current === savedPath) setError(`Failed to save rating: ${e.message}`);
     }
   };
 
-  const deleteAll = async () => {
-    if (!path) return;
-    if (!window.confirm(`Delete "${fileNameOf(path)}" and any associated funscripts?\n\nThis will permanently remove the files from disk.`)) return;
-    if (!window.confirm('Are you sure? This action cannot be undone.')) return;
-    setDeleting(true);
-    setError('');
-    try {
-      const res = await fetch('/api/files/delete-with-funscripts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoPath: path, funscriptPaths: funscripts.map((s) => s.path) })
-      });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error || 'Failed to delete files');
-      }
-      const result = await res.json();
-      if (result.errors && result.errors.length > 0) {
-        throw new Error(result.errors.map((err) => err.error).join(', '));
-      }
-      window.dispatchEvent(new CustomEvent('gallery-content-updated', {
-        detail: { videoPath: path, deleted: result.deleted }
-      }));
-      onDeleted?.(item, result);
-    } catch (e) {
-      setError(`Failed to delete video or funscripts: ${e.message}`);
-    } finally {
-      setDeleting(false);
-    }
-  };
+  const deleteTitle = !scripts.loaded ? 'Waiting for the funscript list'
+    : scripts.error ? 'The funscript list did not load' : undefined;
 
   return (
     <section className="pl-pn" data-panel="rate">
       <h4>Score</h4>
       <div className="pl-rrow">
         <span>Video</span>
-        <Stars label="Video score" value={videoRating} onRate={(v) => save('video', v)} />
+        <Stars label="Video score" value={videoRating} disabled={!path} onRate={(v) => save('video', v)} />
         <b>{fmtRating(videoRating)}</b>
       </div>
       <div className={`pl-rrow${hasScripts ? '' : ' is-off'}`}>
         <span>Funscript</span>
         <Stars label="Funscript score" value={hasScripts ? funscriptRating : null} disabled={!hasScripts} onRate={(v) => save('funscript', v)} />
-        <b>{hasScripts ? fmtRating(funscriptRating) : 'N/A'}</b>
+        <b>{hasScripts ? fmtRating(funscriptRating) : '–'}</b>
       </div>
-      {!hasScripts && <p className="pl-hint">Add a funscript to enable script scoring.</p>}
-      <div style={{ marginTop: 10 }}>
-        <button type="button" className="pl-btn sm danger" onClick={deleteAll} disabled={!path || deleting}>
-          🗑 {deleting ? 'Deleting…' : 'Delete video & scripts'}
+      <div className="pl-rp-del">
+        <button
+          type="button"
+          className="pl-btn sm danger"
+          onClick={() => setDeleteOpen(true)}
+          disabled={!path || !listReady}
+          title={deleteTitle}
+        >
+          <TrashIcon />
+          Delete video &amp; scripts…
         </button>
-        <p className="pl-warn">Permanently removes the video and any linked funscripts. This action cannot be undone.</p>
+        <p className="pl-warn">
+          {hasScripts
+            ? `Moves the video and its ${plural(funscripts.length, 'funscript')} to the folder's trash. You can undo it.`
+            : "Moves the video to the folder's trash. You can undo it."}
+        </p>
       </div>
       {error && <p className="pl-err" role="alert">{error}</p>}
+      <DeleteDialog
+        open={deleteOpen}
+        item={item}
+        scripts={funscripts}
+        onClose={() => setDeleteOpen(false)}
+        onDone={({ trashed, failed }) => {
+          setDeleteOpen(false);
+          onDeleted?.({ item, trashed, failed });
+        }}
+      />
     </section>
   );
 }

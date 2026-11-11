@@ -13,6 +13,29 @@ const ICONS = {
 };
 const FILLED = { play: true, pause: true };
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+// Wheel seeking: one step per this many pixels of accumulated deltaY. A line (deltaMode 1) counts as
+// 33px and a page (deltaMode 2) as 800px; the 1px slack lets one 3-line notch (99px) make a step.
+const WHEEL_STEP_PX = 100;
+const WHEEL_SLACK_PX = 1;
+const WHEEL_IDLE_MS = 400;
+
+/** { volume, muted, speed } kept under `key` in localStorage, or null. */
+function readPrefs(key) {
+  if (!key) return null;
+  try {
+    const p = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!p || typeof p !== 'object') return null;
+    const volume = Number(p.volume);
+    const speed = Number(p.speed);
+    return {
+      volume: p.volume != null && Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : undefined,
+      muted: typeof p.muted === 'boolean' ? p.muted : undefined,
+      speed: SPEEDS.includes(speed) ? speed : undefined
+    };
+  } catch (e) {
+    return null;
+  }
+}
 
 const Icon = ({ name, size = 20 }) => (
   <svg
@@ -29,7 +52,7 @@ const Icon = ({ name, size = 20 }) => (
 );
 
 /** Picture with its thumbnail as an instant placeholder. Keyed by path by the caller. */
-function ImageMedia({ item, onInfo }) {
+function ImageMedia({ item, onInfo, onError }) {
   const [loaded, setLoaded] = useState(false);
   return (
     <>
@@ -46,6 +69,7 @@ function ImageMedia({ item, onInfo }) {
           setLoaded(true);
           onInfo?.({ path: item.path, width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight });
         }}
+        onError={onError}
       />
     </>
   );
@@ -164,18 +188,23 @@ export default function MediaStage({
   overlay,
   actionBar,
   barStart,
+  barEnd,
   counterText,
   stageProps,
   className,
-  timeline
+  timeline,
+  prefsKey,
+  onMediaError,
+  errorNote
 }) {
   const rootRef = useRef(null);
   const stageRef = useRef(null);
+  const [prefs] = useState(() => readPrefs(prefsKey));
   const [videoEl, setVideoEl] = useState(null);
   const [paused, setPaused] = useState(true);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(!!muted);
-  const [speed, setSpeed] = useState(1);
+  const [volume, setVolume] = useState(prefs?.volume ?? 1);
+  const [isMuted, setIsMuted] = useState(prefs?.muted ?? !!muted);
+  const [speed, setSpeed] = useState(prefs?.speed ?? 1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mediaError, setMediaError] = useState(false);
 
@@ -191,6 +220,23 @@ export default function MediaStage({
   const onMediaInfoRef = useRef(onMediaInfo);
   onMediaInfoRef.current = onMediaInfo;
   const reportInfo = useCallback((info) => onMediaInfoRef.current?.(info), []);
+  const onMediaErrorRef = useRef(onMediaError);
+  onMediaErrorRef.current = onMediaError;
+  const errorReportedFor = useRef(null);
+
+  // The banner: a media 'error' event, a picture that does not load, or play() refusing the format.
+  // onMediaError hears about it once per item.
+  const fail = useCallback(() => {
+    setMediaError(true);
+    const p = itemPathRef.current;
+    if (errorReportedFor.current === p) return;
+    errorReportedFor.current = p;
+    onMediaErrorRef.current?.({ path: p });
+  }, []);
+  // AbortError (a newer load) and NotAllowedError (autoplay blocked) are not the file's fault.
+  const playFailed = useCallback((err) => {
+    if (err && err.name === 'NotSupportedError') fail();
+  }, [fail]);
 
   // The <video> is keyed by path, so every item gets a fresh element; hand it
   // to the parent's ref as well as to our own state.
@@ -200,8 +246,26 @@ export default function MediaStage({
     else if (videoRef) videoRef.current = el;
   }, [videoRef]);
 
-  useEffect(() => setIsMuted(!!muted), [muted]);
-  useEffect(() => setMediaError(false), [itemPath]);
+  // A change of the `muted` prop wins; at mount the initial state (stored prefs, else `muted`) stands.
+  const lastMutedProp = useRef(!!muted);
+  useEffect(() => {
+    if (lastMutedProp.current === !!muted) return;
+    lastMutedProp.current = !!muted;
+    setIsMuted(!!muted);
+  }, [muted]);
+  useEffect(() => {
+    setMediaError(false);
+    errorReportedFor.current = null;
+  }, [itemPath]);
+
+  useEffect(() => {
+    if (!prefsKey) return;
+    try {
+      localStorage.setItem(prefsKey, JSON.stringify({ volume, muted: isMuted, speed }));
+    } catch (e) {
+      // private mode or full storage: the settings still hold for this visit
+    }
+  }, [prefsKey, volume, isMuted, speed]);
 
   // Volume / mute / speed survive item changes.
   useEffect(() => {
@@ -217,7 +281,7 @@ export default function MediaStage({
     if (!videoEl) return undefined;
     const sync = () => setPaused(videoEl.paused);
     const ended = (e) => onEndedRef.current?.(e);
-    const failed = () => setMediaError(true);
+    const playing = () => setMediaError(false);
     const meta = () => reportInfo({
       path: itemPathRef.current,
       width: videoEl.videoWidth,
@@ -228,30 +292,45 @@ export default function MediaStage({
     videoEl.addEventListener('play', sync);
     videoEl.addEventListener('pause', sync);
     videoEl.addEventListener('ended', ended);
-    videoEl.addEventListener('error', failed);
-    if (autoPlayRef.current) videoEl.play().catch(() => {});
+    videoEl.addEventListener('error', fail);
+    videoEl.addEventListener('playing', playing);
+    if (autoPlayRef.current) videoEl.play().catch(playFailed);
     return () => {
       videoEl.removeEventListener('loadedmetadata', meta);
       videoEl.removeEventListener('play', sync);
       videoEl.removeEventListener('pause', sync);
       videoEl.removeEventListener('ended', ended);
-      videoEl.removeEventListener('error', failed);
+      videoEl.removeEventListener('error', fail);
+      videoEl.removeEventListener('playing', playing);
     };
-  }, [videoEl, reportInfo]);
+  }, [videoEl, reportInfo, fail, playFailed]);
 
-  // Wheel over the media = seek; scroll up = forward. Step scales with the
-  // video's duration and with how fast the wheel is turning (as in the old modal).
+  // Wheel over the media = seek; scroll up = forward. One step per WHEEL_STEP_PX of accumulated
+  // deltaY, so a trackpad does not fire a step per event. The step scales with the video's duration
+  // and with how fast the steps follow each other (as in the old modal).
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !videoEl) return undefined;
-    let lastWheel = 0;
+    let lastStep = 0;
+    let lastEvent = 0;
+    let acc = 0;
     const onWheel = (e) => {
       const d = videoEl.duration;
       if (!d || !Number.isFinite(d)) return;
       e.preventDefault();
       const now = Date.now();
-      const gap = Math.max(16, Math.min(500, now - lastWheel));
-      lastWheel = now;
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 33;
+      else if (e.deltaMode === 2) dy *= 800;
+      // a pause or a change of direction starts a fresh count
+      if (now - lastEvent > WHEEL_IDLE_MS || (acc && dy && Math.sign(dy) !== Math.sign(acc))) acc = 0;
+      lastEvent = now;
+      acc += dy;
+      if (Math.abs(acc) < WHEEL_STEP_PX - WHEEL_SLACK_PX) return;
+      const dir = acc > 0 ? 1 : -1;
+      acc = Math.abs(acc) >= WHEEL_STEP_PX ? acc - dir * WHEEL_STEP_PX : 0;
+      const gap = Math.max(16, Math.min(500, now - lastStep));
+      lastStep = now;
       const speedFactor = Math.max(0.1, Math.min(1, (500 - gap) / 484));
       let base;
       let max;
@@ -260,7 +339,7 @@ export default function MediaStage({
       else if (d < 3600) { base = 5; max = 60; }
       else { base = 8; max = Math.min(120, d * 0.05); }
       const step = Math.round(base + (max - base) * speedFactor ** 0.7);
-      videoEl.currentTime = Math.max(0, Math.min(d, videoEl.currentTime + (e.deltaY > 0 ? -step : step)));
+      videoEl.currentTime = Math.max(0, Math.min(d, videoEl.currentTime + (dir > 0 ? -step : step)));
     };
     stage.addEventListener('wheel', onWheel, { passive: false });
     return () => stage.removeEventListener('wheel', onWheel);
@@ -274,9 +353,9 @@ export default function MediaStage({
 
   const togglePlay = useCallback(() => {
     if (!videoEl) return;
-    if (videoEl.paused) videoEl.play().catch(() => setMediaError(true));
+    if (videoEl.paused) videoEl.play().catch(playFailed);
     else videoEl.pause();
-  }, [videoEl]);
+  }, [videoEl, playFailed]);
 
   const toggleMute = useCallback(() => {
     setIsMuted((m) => {
@@ -339,8 +418,12 @@ export default function MediaStage({
             onClick={togglePlay}
           />
         )}
-        {item && !isVideo && <ImageMedia key={itemPath} item={item} onInfo={reportInfo} />}
-        {mediaError && <div className="pl-media-error">Could not play this file in the browser</div>}
+        {item && !isVideo && <ImageMedia key={itemPath} item={item} onInfo={reportInfo} onError={fail} />}
+        {mediaError && (
+          <div className="pl-media-error" role="status">
+            Could not play this file in the browser{errorNote ? ` · ${errorNote}` : ''}
+          </div>
+        )}
         {overlay}
       </div>
 
@@ -393,6 +476,7 @@ export default function MediaStage({
               >
                 <Icon name="loop" size={18} />
               </button>
+              {barEnd}
               <button type="button" className="pl-ib" onClick={toggleFullscreen} title="Fullscreen (F)" aria-label="Fullscreen">
                 <Icon name={isFullscreen ? 'unfull' : 'full'} size={18} />
               </button>

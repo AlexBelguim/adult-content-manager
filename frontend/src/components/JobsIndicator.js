@@ -1,101 +1,102 @@
 /**
- * JobsIndicator — the toolbar pill: "N running · M failed", visible from every
- * page. Click opens a popover with the running jobs and a way to the Jobs page.
+ * JobsIndicator — the app-bar chip: 'N running', else 'M queued', else a tick; '· K failed' in red when anything
+ * failed; 'Offline' when the server does not answer. Its popover lists the failed and the running jobs, each a
+ * link to that row on the Jobs page.
  *
- * Replaces the two floating "Background Tasks" boxes, which covered the
- * bottom-right corner and cancelled every hash job when closed.
+ * Reads the shared jobs store (hooks/useJobs), slower than the page: it is on every screen.
  */
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Box, ButtonBase, Button, Popover, Typography, CircularProgress, LinearProgress } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
+import { Box, ButtonBase, Button, Popover, CircularProgress } from '@mui/material';
 import CheckIcon from '@mui/icons-material/Check';
-import MoveToInboxIcon from '@mui/icons-material/MoveToInbox';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import VpnKeyIcon from '@mui/icons-material/VpnKey';
-import MovieFilterIcon from '@mui/icons-material/MovieFilter';
-import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
-import PsychologyIcon from '@mui/icons-material/Psychology';
-import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
-import TravelExploreIcon from '@mui/icons-material/TravelExplore';
-import useJobs, { jobPercent } from '../hooks/useJobs';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
+import useJobs from '../hooks/useJobs';
+import { iconOf, jobPercent, JobBar } from './jobs/kinds';
 
-/** One icon per job type — shared with the Jobs page so the two never drift. */
-export const JOB_TYPE_ICONS = {
-  import: MoveToInboxIcon,
-  funpipe: SmartToyIcon,
-  pipeline: ViewTimelineIcon,
-  hash: VpnKeyIcon,
-  encode: MovieFilterIcon,
-  cleanup: CleaningServicesIcon,
-  train: PsychologyIcon,
-  discover: TravelExploreIcon
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const jobLink = (id) => `/jobs?job=${encodeURIComponent(id)}`;
+
+const headSx = {
+  fontSize: '.75rem', fontWeight: 600, letterSpacing: '.05em',
+  textTransform: 'uppercase', color: 'var(--muted)', mt: 1, mb: 0.25
 };
 
-/** The one progress bar for jobs. Indeterminate when the source reports no progress. */
-export function JobBar({ job, sx = {} }) {
-  const pct = jobPercent(job);
-  const failed = job.status === 'failed';
-  return (
-    <LinearProgress
-      variant={pct == null && !failed ? 'indeterminate' : 'determinate'}
-      value={pct ?? 0}
-      sx={{
-        height: 6, borderRadius: 3, bgcolor: 'var(--line-strong)',
-        '& .MuiLinearProgress-bar': { bgcolor: failed ? 'var(--bad)' : 'var(--accent)', borderRadius: 3 },
-        ...sx
-      }}
-    />
-  );
-}
+const rowSx = {
+  display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '4px', height: 44, px: 1, mx: -1,
+  borderRadius: 'var(--radius, 6px)', color: 'var(--text)', textDecoration: 'none',
+  '&:hover': { bgcolor: 'var(--raised)' },
+  '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: -2 }
+};
 
-export default function JobsIndicator({ hashQueue }) {
-  const navigate = useNavigate();
+const ellipsis = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+
+/** The rows of a status the server left out of the list (its capped tails). */
+const cappedExtra = (capped, status) => (capped || [])
+  .filter(c => c.status === status)
+  .reduce((s, c) => s + Math.max(0, (c.total || 0) - (c.shown || 0)), 0);
+
+export default function JobsIndicator() {
   const [anchor, setAnchor] = useState(null);
-  // Slower than the page: this one is mounted on every screen.
-  const { jobs } = useJobs({ hashQueue, activeMs: 5000, idleMs: 30000 });
+  const { jobs, capped, error, updatedAt } = useJobs({ activeMs: 5000, idleMs: 30000 });
 
   const running = jobs.filter(j => j.status === 'running');
-  const queued = jobs.filter(j => j.status === 'queued').length;
-  const failed = jobs.filter(j => j.status === 'failed').length;
-  const busy = running.length > 0;
+  const failed = jobs.filter(j => j.status === 'failed');
+  const runningN = running.length + cappedExtra(capped, 'running');
+  const queuedN = jobs.filter(j => j.status === 'queued').length + cappedExtra(capped, 'queued');
+  const failedN = failed.length + cappedExtra(capped, 'failed');
+  const offline = !!error;
+  const busy = runningN > 0;
 
-  const openJobs = () => { setAnchor(null); navigate('/jobs'); };
+  const close = () => setAnchor(null);
+
+  let icon = <CheckIcon sx={{ fontSize: 14, color: 'var(--muted)' }} />;
+  let label;
+  let wideOnly = false;
+  if (offline) {
+    icon = <CloudOffIcon sx={{ fontSize: 14, color: 'var(--warn)' }} />;
+    label = 'Offline';
+  } else if (busy) {
+    icon = <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)' }} />;
+    label = `${runningN.toLocaleString()} running`;
+  } else if (queuedN > 0) {
+    label = `${queuedN.toLocaleString()} queued`;
+  } else {
+    label = 'No jobs';
+    wideOnly = true;   // the tick says it; the words only fit on a wide bar
+  }
 
   return (
     <>
       <ButtonBase
         onClick={(e) => setAnchor(e.currentTarget)}
-        aria-label="Background jobs"
+        aria-label={`Background jobs: ${label}${failedN ? `, ${failedN} failed` : ''}`}
+        aria-haspopup="dialog"
         sx={{
-          display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0,
-          border: '1px solid', borderColor: busy ? 'var(--accent)' : 'var(--line-strong)',
-          borderRadius: 99, p: '3px 12px 3px 9px', bgcolor: 'var(--surface)',
-          color: 'var(--text)', fontSize: '.82rem', whiteSpace: 'nowrap',
-          '&:hover': { bgcolor: 'var(--raised)' }
+          display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0, height: 28,
+          border: '1px solid', borderColor: offline ? 'var(--warn)' : busy ? 'var(--accent)' : 'var(--line-strong)',
+          borderRadius: 99, px: '11px', bgcolor: 'var(--surface)',
+          color: 'var(--text)', fontSize: '.8125rem', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+          '&:hover': { bgcolor: 'var(--raised)' },
+          '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: 2 }
         }}
       >
-        {busy
-          ? <CircularProgress size={12} thickness={6} sx={{ color: 'var(--accent)' }} />
-          : <CheckIcon sx={{ fontSize: 14, color: 'var(--muted)' }} />}
-        {/* Idle, the tick says it; the words only fit on a wide bar. */}
-        <Box component="span" sx={busy ? undefined : { display: { xs: 'none', lg: 'inline' } }}>
-          {busy ? `${running.length} running` : 'No jobs running'}
-        </Box>
-        {failed > 0 && (
-          <Box component="span" sx={{ color: 'var(--bad)' }}>· {failed} failed</Box>
+        {icon}
+        <Box component="span" sx={wideOnly ? { display: { xs: 'none', lg: 'inline' } } : undefined}>{label}</Box>
+        {failedN > 0 && (
+          <Box component="span" sx={{ color: 'var(--bad)' }}>· {failedN.toLocaleString()} failed</Box>
         )}
       </ButtonBase>
 
       <Popover
         open={!!anchor}
         anchorEl={anchor}
-        onClose={() => setAnchor(null)}
+        onClose={close}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         slotProps={{
           paper: {
             sx: {
-              mt: 1, p: 1.5, width: 'min(360px, calc(100vw - 28px))',
+              mt: 1, p: 1.5, pt: 0.5, width: 'min(360px, calc(100vw - 28px))',
               bgcolor: 'var(--overlay)', backgroundImage: 'none', color: 'var(--text)',
               border: '1px solid var(--line-strong)', borderRadius: 'var(--radius-lg, 10px)',
               boxShadow: 'var(--shadow-lg)'
@@ -103,46 +104,69 @@ export default function JobsIndicator({ hashQueue }) {
           }
         }}
       >
-        <Typography sx={{
-          fontSize: '.7rem', fontWeight: 700, letterSpacing: '.08em',
-          textTransform: 'uppercase', color: 'var(--muted)', mb: 1
-        }}>
-          Running now
-        </Typography>
-
-        {running.length === 0 && (
-          <Typography sx={{ fontSize: '.8rem', color: 'var(--muted)' }}>Nothing running.</Typography>
+        {offline && (
+          <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1, height: 44, fontSize: '.8125rem', color: 'var(--warn)' }}>
+            <CloudOffIcon sx={{ fontSize: 16, flexShrink: 0 }} />
+            <Box component="span" sx={ellipsis}>
+              Can't reach the server{updatedAt ? `, last update ${clock(updatedAt)}` : ''}
+            </Box>
+          </Box>
         )}
 
-        <Box sx={{ maxHeight: 320, overflowY: 'auto' }}>
-          {running.map((j, i) => {
-            const Icon = JOB_TYPE_ICONS[j.type] || CleaningServicesIcon;
-            const pct = jobPercent(j);
-            return (
-              <Box key={j.id} sx={{ py: 0.75, borderTop: i ? '1px solid var(--line)' : 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '.8rem' }}>
-                  <Icon sx={{ fontSize: 15, color: 'var(--dim)', flexShrink: 0 }} />
-                  <Box component="b" title={j.title} sx={{
-                    flex: 1, minWidth: 0, fontWeight: 600,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                  }}>
-                    {j.title}
+        {failed.length > 0 && (
+          <>
+            <Box sx={headSx}>Failed</Box>
+            {failed.slice(0, 3).map(j => {
+              const Icon = iconOf(j.type);
+              return (
+                <Box key={j.id} component={RouterLink} to={jobLink(j.id)} onClick={close} sx={rowSx}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '.8125rem', minWidth: 0 }}>
+                    <Icon sx={{ fontSize: 15, color: 'var(--dim)', flexShrink: 0 }} />
+                    <Box component="span" title={j.title} sx={{ ...ellipsis, fontWeight: 600 }}>{j.title}</Box>
                   </Box>
-                  {pct != null && (
-                    <Box component="span" sx={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>{pct}%</Box>
-                  )}
+                  <Box sx={{ ...ellipsis, fontSize: '.75rem', color: 'var(--bad)', pl: '23px' }}>{j.error || 'failed'}</Box>
                 </Box>
-                <JobBar job={j} sx={{ mt: 0.5 }} />
+              );
+            })}
+            {failedN > 3 && (
+              <Box component={RouterLink} to="/jobs?state=failed" onClick={close} sx={{
+                ...rowSx, height: 32, fontSize: '.8125rem', color: 'var(--accent)'
+              }}>
+                Show all {failedN.toLocaleString()} failed
               </Box>
-            );
-          })}
-        </Box>
+            )}
+          </>
+        )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1.25 }}>
-          <Typography sx={{ flex: 1, fontSize: '.8rem', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-            {queued} queued
-          </Typography>
-          <Button size="small" variant="contained" onClick={openJobs}>Open Jobs</Button>
+        <Box sx={headSx}>Running</Box>
+        {running.length === 0 && (
+          <Box sx={{ display: 'flex', alignItems: 'center', height: 32, fontSize: '.8125rem', color: 'var(--muted)' }}>Nothing running</Box>
+        )}
+        {running.slice(0, 4).map(j => {
+          const Icon = iconOf(j.type);
+          const pct = jobPercent(j);
+          return (
+            <Box key={j.id} component={RouterLink} to={jobLink(j.id)} onClick={close} sx={rowSx}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '.8125rem', minWidth: 0 }}>
+                <Icon sx={{ fontSize: 15, color: 'var(--dim)', flexShrink: 0 }} />
+                <Box component="span" title={j.title} sx={{ ...ellipsis, flex: 1, fontWeight: 600 }}>{j.title}</Box>
+                {pct != null && (
+                  <Box component="span" sx={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{pct}%</Box>
+                )}
+              </Box>
+              <JobBar job={j} sx={{ ml: '23px' }} />
+            </Box>
+          );
+        })}
+
+        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1.25, pt: 1, borderTop: '1px solid var(--line)' }}>
+          <Box sx={{ flex: 1, fontSize: '.8125rem', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+            {queuedN.toLocaleString()} queued
+          </Box>
+          <Button size="small" variant="contained" component={RouterLink} to="/jobs" onClick={close}
+            sx={{ textTransform: 'none', boxShadow: 'none' }}>
+            Open Jobs
+          </Button>
         </Box>
       </Popover>
     </>

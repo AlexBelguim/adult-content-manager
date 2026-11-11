@@ -21,8 +21,18 @@ const insert = db.prepare(`INSERT OR REPLACE INTO discover_posts (${COLUMNS.join
 const parsePost = (row) => ({ ...row, info: row.info ? JSON.parse(row.info) : null, image_paths: toList(row.image_paths) });
 const parseProfile = (row) => ({ ...row, scrape: row.scrape ? JSON.parse(row.scrape) : null, image_paths: toList(row.image_paths) });
 
+const statusPut = () => db.prepare(`INSERT INTO discover_performer_status (member, status, at) VALUES (?, ?, ?)
+  ON CONFLICT(member) DO UPDATE SET status = excluded.status, at = excluded.at`);
+const decisionPut = () => db.prepare(`INSERT INTO discover_performer_decisions (member, decision, at) VALUES (?, ?, ?)
+  ON CONFLICT(member) DO UPDATE SET decision = excluded.decision, at = excluded.at`);
+
 const store = {
   seen: (site, postId) => !!has.get(site, id(postId)),
+  /** When a post was first recorded, or null when it never was */
+  seenAt: (site, postId) => db.prepare('SELECT scanned_at FROM discover_posts WHERE site = ? AND post_id = ?').get(site, id(postId))?.scanned_at ?? null,
+  /** When the last watch scan of a site that read down to the posts it had began: the posts recorded before it are behind it */
+  watchMark: (site) => store.setting(`watchMark:${site}`, null),
+  setWatchMark: (site, iso) => store.setSetting(`watchMark:${site}`, iso),
   /** Whether the site was scanned before (any post of it recorded) */
   scanned: (site) => !!hasAny.get(site),
   save: (row) => insert.run({
@@ -60,35 +70,87 @@ const store = {
     ON CONFLICT(watcher) DO UPDATE SET checked_at = excluded.checked_at, found = excluded.found, error = excluded.error
   `).run(watcher, now(), found, error),
   /** Two performers combined (kind 'same') or kept apart ('apart'), by a member key of each; the latest wins. */
-  setLink: (a, b, kind) => {
+  setLink: (a, b, kind) => store.putLink(a, b, kind, now()),
+  /** A link as it was (Undo): its own time kept */
+  putLink: (a, b, kind, at) => {
     const [x, y] = [a, b].sort();
     db.prepare(`INSERT INTO discover_performer_links (a, b, kind, at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(a, b) DO UPDATE SET kind = excluded.kind, at = excluded.at`).run(x, y, kind, now());
+      ON CONFLICT(a, b) DO UPDATE SET kind = excluded.kind, at = excluded.at`).run(x, y, kind, at || now());
   },
-  links: () => db.prepare('SELECT a, b, kind FROM discover_performer_links').all(),
+  link: (a, b) => {
+    const [x, y] = [a, b].sort();
+    return db.prepare('SELECT a, b, kind, at FROM discover_performer_links WHERE a = ? AND b = ?').get(x, y) || null;
+  },
+  deleteLink: (a, b) => {
+    const [x, y] = [a, b].sort();
+    db.prepare('DELETE FROM discover_performer_links WHERE a = ? AND b = ?').run(x, y);
+  },
+  links: () => db.prepare('SELECT a, b, kind, at FROM discover_performer_links').all(),
   /** Keep or drop, on each of the performer's members (a member who joins later inherits it through the others). */
   decide: (memberKeys, decision) => {
     const at = now();
-    const put = db.prepare(`INSERT INTO discover_performer_decisions (member, decision, at) VALUES (?, ?, ?)
-      ON CONFLICT(member) DO UPDATE SET decision = excluded.decision, at = excluded.at`);
-    for (const m of memberKeys) put.run(m, decision, at);
+    const put = decisionPut();
+    db.transaction(() => { for (const m of memberKeys) put.run(m, decision, at); })();
+  },
+  /** Decisions as they were (Undo): decision null takes the row away, else it is put back with its own time */
+  restoreDecisions: (rows) => {
+    const put = decisionPut();
+    const del = db.prepare('DELETE FROM discover_performer_decisions WHERE member = ?');
+    db.transaction(() => {
+      for (const r of rows) {
+        if (r.decision == null) del.run(r.member);
+        else put.run(r.member, r.decision, r.at || now());
+      }
+    })();
   },
   decisions: () => Object.fromEntries(db.prepare('SELECT * FROM discover_performer_decisions').all().map((r) => [r.member, { decision: r.decision, at: r.at }])),
   savePool: (signature, score, images, model) => db.prepare(`INSERT INTO discover_pool_scores (signature, score, images, model, scored_at) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(signature) DO UPDATE SET score = excluded.score, images = excluded.images, model = excluded.model, scored_at = excluded.scored_at`)
     .run(signature, score, images, model ?? null, now()),
   clearPools: () => db.exec('DELETE FROM discover_pool_scores'),
+  /** The pool scores of every other model than this one (Re-judge: they are scored again with it) */
+  clearPoolsExcept: (model) => db.prepare('DELETE FROM discover_pool_scores WHERE model IS NOT ?').run(model ?? null),
   /** Keep / Delete / Checked / Remove on each of a performer's members now; a member found later has no row (an update). */
   setStatus: (memberKeys, status) => {
     const at = now();
-    const put = db.prepare(`INSERT INTO discover_performer_status (member, status, at) VALUES (?, ?, ?)
-      ON CONFLICT(member) DO UPDATE SET status = excluded.status, at = excluded.at`);
-    for (const m of memberKeys) put.run(m, status, at);
+    const put = statusPut();
+    db.transaction(() => { for (const m of memberKeys) put.run(m, status, at); })();
+  },
+  /** Put back: no Keep / Delete / Checked / Remove on these members any more */
+  clearStatus: (memberKeys) => {
+    const del = db.prepare('DELETE FROM discover_performer_status WHERE member = ?');
+    db.transaction(() => { for (const m of memberKeys) del.run(m); })();
+  },
+  /** The rows as they were before a click (Undo): status null takes the row away, else it is put back with its own time */
+  restoreStatus: (rows) => {
+    const put = statusPut();
+    const del = db.prepare('DELETE FROM discover_performer_status WHERE member = ?');
+    db.transaction(() => {
+      for (const r of rows) {
+        if (r.status == null) del.run(r.member);
+        else put.run(r.member, r.status, r.at || now());
+      }
+    })();
   },
   statuses: () => Object.fromEntries(db.prepare('SELECT * FROM discover_performer_status').all().map((r) => [r.member, { status: r.status, at: r.at }])),
-  /** Queue an event for the profile page; a dedupe key queued before is left alone. Returns whether it was new. */
-  enqueue: (kind, dedupe, payload) => db.prepare('INSERT OR IGNORE INTO discover_events (dedupe, kind, payload, created_at) VALUES (?, ?, ?, ?)')
-    .run(dedupe, kind, JSON.stringify(payload), now()).changes > 0,
+  /** Queue an event for the profile page; a dedupe key queued before is left alone. Returns the new event's id, or null when it was not new. */
+  enqueue: (kind, dedupe, payload) => {
+    const r = db.prepare('INSERT OR IGNORE INTO discover_events (dedupe, kind, payload, created_at) VALUES (?, ?, ?, ?)').run(dedupe, kind, JSON.stringify(payload), now());
+    return r.changes > 0 ? Number(r.lastInsertRowid) : null;
+  },
+  eventById: (eventId) => db.prepare('SELECT id, kind, dedupe, created_at, sent_at, error FROM discover_events WHERE id = ?').get(eventId) || null,
+  /** The verdict ('keep', 'delete', 'superwrong') of the last keep or delete queued for a performer before an event; null without one */
+  lastVerdict: (key, beforeId) => {
+    const rows = db.prepare("SELECT payload FROM discover_events WHERE kind IN ('keep', 'delete') AND id < ? ORDER BY id DESC LIMIT 500").all(beforeId);
+    for (const r of rows) {
+      let p = null;
+      try { p = JSON.parse(r.payload); } catch { continue; }
+      if (p?.key === key) return p.verdict || p.event || null;
+    }
+    return null;
+  },
+  /** Takes an event out of the outbox, only while it is not sent yet; returns whether it did */
+  deleteEvent: (eventId) => db.prepare('DELETE FROM discover_events WHERE id = ? AND sent_at IS NULL').run(eventId).changes > 0,
   pendingEvents: () => db.prepare('SELECT * FROM discover_events WHERE sent_at IS NULL ORDER BY id').all().map((r) => ({ ...r, payload: JSON.parse(r.payload) })),
   outboxCounts: () => {
     const c = db.prepare('SELECT COUNT(*) AS queued, SUM(error IS NOT NULL) AS failing FROM discover_events WHERE sent_at IS NULL').get();
@@ -105,6 +167,17 @@ const store = {
   allUploads: () => db.prepare('SELECT * FROM discover_uploads ORDER BY created_at DESC').all().map((r) => ({ ...r, files: JSON.parse(r.files) })),
   deleteUpload: (uploadId) => db.prepare('DELETE FROM discover_uploads WHERE id = ?').run(uploadId),
   uploadCount: () => db.prepare('SELECT COUNT(*) AS n FROM discover_uploads').get().n,
+  /**
+   * How each upload was last sent, by its id: { verdict: 'keep' | 'delete' | null (undecided), merged }. merged: the profile
+   * page had her already and took her in as undecided, whatever the verdict (the applied event's answer says so).
+   */
+  uploadVerdicts: () => new Map(db.prepare(`SELECT dedupe, json_extract(payload, '$.verdict') AS verdict,
+      CASE WHEN json_valid(answer) THEN json_extract(answer, '$.result') END AS result
+    FROM discover_events WHERE kind = 'upload' ORDER BY id`).all()
+    .map((r) => [String(r.dedupe).split(':')[1], { verdict: r.verdict ?? null, merged: r.result === 'merged' }])),
+  /** Whether an upload's "upload" event still waits for the profile page: it reads her pictures from the upload's folder */
+  uploadSending: (uploadId) => !!db.prepare("SELECT 1 FROM discover_events WHERE kind = 'upload' AND sent_at IS NULL AND dedupe LIKE ? LIMIT 1")
+    .get(`upload:${uploadId}:%`),
   setting: (key, fallback = null) => { const r = db.prepare('SELECT value FROM discover_settings WHERE key = ?').get(key); return r ? JSON.parse(r.value) : fallback; },
   setSetting: (key, value) => db.prepare('INSERT INTO discover_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(value)),
   pools: () => Object.fromEntries(db.prepare('SELECT signature, score, model FROM discover_pool_scores').all().map((r) => [r.signature, { score: r.score, model: r.model }])),
@@ -118,6 +191,9 @@ const store = {
   /** What is saved but not judged yet: nobody could when it was found */
   waitingPosts: () => db.prepare('SELECT * FROM discover_posts WHERE waiting = 1 ORDER BY scanned_at').all().map(parsePost),
   waitingProfiles: () => db.prepare('SELECT * FROM discover_profiles WHERE waiting = 1').all().map(parseProfile),
+  /** Skipped for a passing reason (a picture or page that did not load): tried again by the next runs, up to 3 times */
+  retryPosts: () => db.prepare("SELECT * FROM discover_posts WHERE score IS NULL AND waiting = 0 AND info LIKE '%\"retry\"%' ORDER BY scanned_at").all()
+    .map(parsePost).filter((p) => p.info?.retry),
 };
 
 module.exports = store;

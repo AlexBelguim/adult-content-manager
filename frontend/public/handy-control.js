@@ -18,6 +18,7 @@
   const SPEED_OFF = 500;   // the speed slider's far right: no limit
   const MSG = {
     nosdk: "The Handy SDK did not load.",
+    nokey: "Enter the key",
     offline: "No Handy online with that key: check it, and that the Handy is on Wi-Fi.",
   };
 
@@ -90,7 +91,8 @@
     async connect(key, quiet) {
       key = (key || "").trim();
       if (this.connected && key === this.key) return true;   // already (a page restoring the connection, and this, both asked)
-      if (!key || this.status === "connecting") return false;
+      if (this.status === "connecting") return false;
+      if (!key) { if (!quiet) { this.status = "error"; this.error = MSG.nokey; this.changed(); } return false; }
       if (!this.sdk) { this.status = "error"; this.error = MSG.nosdk; this.changed(); return false; }
       this.key = key;
       this.save();
@@ -208,10 +210,10 @@
     :host([bare]) .hc { background: transparent; border-color: transparent; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint, #4A4A52); flex: none; }
     .connecting .dot { background: var(--warn, #C9922E); animation: pulse 1s ease-in-out infinite; }
-    .connected .dot { background: var(--ok, #5FA97B); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #5FA97B) 22%, transparent); }
+    .connected .dot { background: var(--ok, #5FA97B); }
     .error .dot { background: var(--bad, #C9564B); }
     @keyframes pulse { 50% { opacity: .35; } }
-    .key { width: 92px; background: transparent; border: none; color: var(--text, #EDEDEF); font-family: ui-monospace, Consolas, monospace; font-size: 13.5px; padding: 4px 0; outline: none; }
+    .key { width: 92px; background: transparent; border: none; color: var(--text, #EDEDEF); font-family: inherit; font-variant-numeric: tabular-nums; font-size: 13.5px; padding: 4px 0; outline: none; }
     .key::placeholder { color: var(--muted, #6E6E76); font-family: inherit; }
     .key:disabled { color: var(--dim, #A1A1A6); }
     button { cursor: pointer; border-radius: var(--radius, 6px); }
@@ -225,11 +227,11 @@
     .mod { position: absolute; right: 5px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #F0703A); }
     :host([compact]) .hc .key, :host([compact]) .hc .go { display: none; }
     :host([compact]) .hc { padding-left: 10px; }
-    .err { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: max-content; max-width: min(300px, 90vw); background: var(--overlay, #242428); color: var(--bad, #C9564B); border: 1px solid var(--line-strong, rgba(255,255,255,.14)); border-radius: var(--radius, 6px); box-shadow: 0 6px 18px rgba(0,0,0,.45); padding: 6px 10px; font-size: 12.5px; line-height: 1.4; cursor: pointer; }
+    .err { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: max-content; max-width: min(300px, 90vw); background: var(--overlay, #242428); color: var(--bad, #C9564B); border: 1px solid var(--line-strong, rgba(255,255,255,.14)); border-radius: var(--radius, 6px); box-shadow: var(--shadow-md, 0 6px 18px rgba(0,0,0,.45)); padding: 6px 10px; font-size: 12.5px; line-height: 1.4; cursor: pointer; }
     .err.up { top: auto; bottom: calc(100% + 6px); }
     :focus-visible { outline: 2px solid var(--accent, #F0703A); outline-offset: 2px; }
 
-    .hs { position: fixed; inset: auto; margin: 0; width: 360px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; background: var(--overlay, #242428); border: 1px solid var(--line-strong, rgba(255,255,255,.14)); border-radius: var(--radius-lg, 10px); box-shadow: 0 12px 32px rgba(0,0,0,.55); color: var(--text, #EDEDEF); padding: 14px 16px 12px; font-size: 14px; }
+    .hs { position: fixed; inset: auto; margin: 0; width: 360px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; background: var(--overlay, #242428); border: 1px solid var(--line-strong, rgba(255,255,255,.14)); border-radius: var(--radius-lg, 10px); box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,.55)); color: var(--text, #EDEDEF); padding: 14px 16px 12px; font-size: 14px; }
     .hs header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .hs header b { flex: 1; font-size: 15px; }
     .state { font-size: 12px; color: var(--dim, #A1A1A6); display: flex; align-items: center; gap: 6px; text-align: right; }
@@ -243,7 +245,7 @@
     .lab b { font-weight: 600; font-size: 13.5px; flex: 1; }
     .val { font-variant-numeric: tabular-nums; font-size: 13px; background: var(--raised, #1C1C1F); border-radius: var(--radius, 6px); padding: 1px 7px; }
     .val.none { color: var(--muted, #6E6E76); }
-    .where { font-size: 11px; color: var(--muted, #6E6E76); border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 99px; padding: 0 7px; }
+    .where { font-size: 12px; color: var(--muted, #6E6E76); border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: var(--radius-sm, 4px); padding: 0 7px; }
     .hint { font-size: 12px; color: var(--dim, #A1A1A6); margin-top: 3px; }
     input[type=range] { width: 100%; accent-color: var(--accent, #F0703A); margin: 8px 0 0; }
     .dual { position: relative; height: 26px; margin-top: 4px; }
@@ -270,7 +272,7 @@
     .msg { font-size: 12.5px; margin-top: 8px; color: var(--bad, #C9564B); }
     .msg:empty { display: none; }
     footer { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
-    footer .note { flex: 1; font-size: 11.5px; color: var(--muted, #6E6E76); }
+    footer .note { flex: 1; font-size: 12px; color: var(--muted, #6E6E76); }
     footer button { padding: 5px 12px; background: var(--raised, #1C1C1F); color: var(--text, #EDEDEF); border: 1px solid var(--line, rgba(255,255,255,.08)); }
     footer button.primary { background: var(--accent, #F0703A); color: var(--on-accent, #1A0E08); border-color: var(--accent, #F0703A); font-weight: 600; }
   `;

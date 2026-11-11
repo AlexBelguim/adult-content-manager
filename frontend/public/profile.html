@@ -7,32 +7,10 @@
 <script>try { if (localStorage.getItem('appTheme') === 'instrument') document.documentElement.dataset.tokens = 'instrument'; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/darkroom-tokens.css">
 <style>
-/* the app's tokens (frontend/src/styles/tokens.js): Darkroom, or Instrument when the app is set to it (the script below reads
+/* the app's tokens come from /darkroom-tokens.css: Darkroom, or Instrument when the app is set to it (the script above reads
    the app's appTheme, as this page shares its origin) */
-:root {
-  --bg: #0B0B0C; --surface: #141416; --raised: #1C1C1F; --overlay: #242428;
-  --text: #EDEDEF; --dim: #A1A1A6; --muted: #6E6E76; --faint: #4A4A52;
-  --line: rgba(255,255,255,0.08); --line-strong: rgba(255,255,255,0.14);
-  --scrim: rgba(16,16,18,0.72); --scrim-strong: rgba(16,16,18,0.88);
-  --accent: #F0703A; --accent-hover: #FF8552; --accent-quiet: rgba(240,112,58,0.14); --on-accent: #1A0E08;
-  --ok: #5FA97B; --ok-quiet: rgba(95,169,123,0.15); --warn: #C9922E; --warn-quiet: rgba(201,146,46,0.15);
-  --info: #6E8CA8; --info-quiet: rgba(110,140,168,0.15); --bad: #C9564B; --bad-quiet: rgba(201,86,75,0.15);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.55);
-  --radius: 6px; --radius-sm: 4px; --radius-lg: 10px;
-  color-scheme: dark;
-}
-:root[data-tokens="instrument"] {
-  --bg: #0E1116; --surface: #151A21; --raised: #1D242E; --overlay: #252E3A;
-  --text: #E6EAF0; --dim: #98A2B3; --muted: #667085; --faint: #475467;
-  --line: rgba(255,255,255,0.07); --line-strong: rgba(255,255,255,0.13);
-  --scrim: rgba(12,15,20,0.74); --scrim-strong: rgba(12,15,20,0.9);
-  --accent: #5CC8FF; --accent-hover: #7FD6FF; --accent-quiet: rgba(92,200,255,0.14); --on-accent: #04121C;
-  --ok: #3DBE8B; --ok-quiet: rgba(61,190,139,0.15); --warn: #D8A13A; --warn-quiet: rgba(216,161,58,0.15);
-  --info: #7C93B8; --info-quiet: rgba(124,147,184,0.15); --bad: #E56A6A; --bad-quiet: rgba(229,106,106,0.15);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.6);
-  --radius: 3px; --radius-sm: 2px; --radius-lg: 6px;
-}
 * { box-sizing: border-box; }
 /* as the app (App.css): thin scrollbars on the surface ramp, the accent around what has focus */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -163,6 +141,7 @@ kbd { font: 600 .7rem ui-monospace, Consolas, monospace; border: 1px solid curre
 .ibtn { width: 36px; height: 36px; display: inline-grid; place-items: center; background: none; border: 0; border-radius: 6px; cursor: pointer; color: var(--text); padding: 0; font-size: 1.1rem; }
 .ibtn:hover { background: var(--raised); }
 .ibtn[hidden] { display: none; }
+.ibtn.bk { width: 40px; height: 40px; flex: none; }   /* the back arrow at the top left of the deck and the duels */
 .chip2 { font-size: .72rem; font-weight: 600; border-radius: 99px; padding: 2px 8px; border: 1px solid var(--line-strong); color: var(--dim); white-space: nowrap; }
 .chip2.accent { color: var(--accent); border-color: var(--accent); background: var(--accent-quiet); }
 .dubody { flex: 1 1 0; min-height: 0; display: flex; position: relative; touch-action: manipulation; }
@@ -279,7 +258,7 @@ a { color: var(--accent); }
 .td-rounds { display: grid; gap: 4px; }
 .td-round { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: var(--radius); background: var(--bg); font-size: .82rem; }
 .td-round label { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; font-weight: 600; min-width: 92px; }
-.td-round .cur { color: var(--accent); background: var(--accent-quiet); border-radius: 99px; padding: 1px 7px; font-size: .7rem; font-weight: 600; white-space: nowrap; }
+.td-round .cur { color: var(--accent); background: var(--accent-quiet); border-radius: 99px; padding: 1px 7px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
 .td-tests .btn { white-space: nowrap; }
 .td-err { color: var(--bad); font-size: .82rem; }
 .td-err[hidden] { display: none; }
@@ -288,10 +267,15 @@ a { color: var(--accent); }
 .ask::backdrop { background: var(--scrim-strong); }
 .ask p { margin: 0 0 16px; line-height: 1.5; }
 .ask form { display: flex; justify-content: flex-end; gap: 8px; margin: 0; }
-.ask .ok { border-color: var(--accent); color: var(--accent); }
+.ask .btn { min-height: 34px; padding: 5px 14px; }
+.ask .no { background: transparent; color: var(--dim); border-color: var(--line-strong); }
+.ask .ok, .ask .ok:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+.ask.danger .ok, .ask.danger .ok:hover { background: var(--bad); color: var(--bg); border-color: var(--bad); }
 @media (max-width: 600px) {   /* the tests as cards: the table's five columns do not fit a phone */
   .sheet { padding: 12px 8px; }
-  .sheet-in { padding: 12px; }
+  .sheet { padding: 0; place-items: stretch; }   /* Training data takes the whole screen, its head stays on top */
+  .sheet-in { padding: 0 12px 16px; border: 0; border-radius: 0; min-height: 100%; align-content: start; }
+  .sheet-head { position: sticky; top: 0; z-index: 1; background: var(--surface); margin: 0 -12px; padding: max(12px, env(safe-area-inset-top)) 12px 10px; border-bottom: 1px solid var(--line); }
   .td-tests thead { display: none; }
   .td-tests, .td-tests tbody, .td-tests tr, .td-tests td { display: block; width: 100%; }
   .td-tests tr { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin-bottom: 8px; }
@@ -299,23 +283,23 @@ a { color: var(--accent); }
 }
 .td-tests { width: 100%; border-collapse: collapse; font-size: .8rem; }
 .td-tests th, .td-tests td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.td-tests th { color: var(--muted); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
+.td-tests th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
 .td-tests tr.is-now td { background: var(--accent-quiet); }
 .td-tests .num { font-variant-numeric: tabular-nums; }
-.pill { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: .7rem; font-weight: 600; background: var(--raised); color: var(--dim); }
+.pill { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: .75rem; font-weight: 600; background: var(--raised); color: var(--dim); }
 .pill.done { background: var(--ok-quiet); color: var(--ok); } .pill.failed { color: var(--bad); } .pill.running, .pill.queued { background: var(--info-quiet); color: var(--info); }
 </style>
 </head>
 <body>
 <div class="fv">
   <aside class="left">
-    <div><a class="sub" href="/taste-dashboard" style="color:var(--dim);text-decoration:none">← Taste Dashboard</a><h2>Profile data</h2><span class="sub">Babepedia + Boobpedia · read only</span></div>
+    <div><a class="sub" href="/ai-training" data-back style="color:var(--dim);text-decoration:none">← AI &amp; Training</a><h2>Profile data</h2><span class="sub">Babepedia + Boobpedia · read only</span></div>
     <input class="search" id="q" placeholder="Search names" autocomplete="off">
     <div id="facets"></div>
   </aside>
   <main class="mid">
     <div class="head">
-      <a class="btn phone" href="/" aria-label="Back to Darkroom">&larr;</a>
+      <a class="btn phone" href="/ai-training" data-back aria-label="Back">&larr;</a>
       <div class="grow"><h2 id="count">Loading…</h2><span class="sub" id="sub"></span></div>
       <button class="btn phone" id="filters">Filters</button>
       <select class="select" id="sort">
@@ -347,7 +331,7 @@ a { color: var(--accent); }
   <div class="lb-side" id="side"></div>
 </div>
 <div class="deck" id="deck" hidden>
-  <div class="dtop"><button class="btn" id="dgrid">Grid</button><button class="btn" id="dduels">Duels</button><span class="sub" id="dcount"></span><button class="dscore" id="dscore" title="How often the model guessed your swipe (tap to reset)"></button></div>
+  <div class="dtop"><button class="ibtn bk" id="dexit" title="Back" aria-label="Back">←</button><button class="btn" id="dgrid">Grid</button><button class="btn" id="dduels">Duels</button><span class="sub" id="dcount"></span><button class="dscore" id="dscore" title="How often the model guessed your swipe (tap to reset)"></button></div>
   <div class="dcard" id="dcard"><img id="dimg" alt=""><div class="dbars" id="dbars"></div>
     <b class="dstamp keep" id="dyes">KEEP</b><b class="dstamp nope" id="dno">NOPE</b><b class="dstamp love" id="dlove">LOVE</b>
     <div class="dinfo"><div class="dname" id="dname"></div><div class="dtags" id="dtags"></div><span class="dmine" id="dmine" hidden></span></div></div>
@@ -356,7 +340,7 @@ a { color: var(--accent); }
 </div>
 <div class="duel" id="duel" hidden>
   <div class="duhead">
-    <button class="ibtn" id="dugrid" title="Back to the grid">←</button><h2>Duels</h2>
+    <button class="ibtn bk" id="dugrid" title="Back" aria-label="Back">←</button><h2>Duels</h2>
     <span class="chip2 accent" id="dusession"></span><span class="chip2" id="dutotal"></span><span style="flex:1"></span>
     <button class="ibtn" id="dufull" title="Full screen">⛶</button>
   </div>
@@ -378,7 +362,7 @@ a { color: var(--accent); }
     </div>
   </div>
 </div>
-<dialog class="ask" id="ask"><p id="askmsg"></p><form method="dialog"><button class="btn" value="no">Cancel</button><button class="btn ok" id="askok" value="yes">OK</button></form></dialog>
+<dialog class="ask" id="ask"><p id="askmsg"></p><form method="dialog"><button class="btn no" id="askno" value="no">Cancel</button><button class="btn ok" id="askok" value="yes">OK</button></form></dialog>
 <script>
 const vname =v => v === 'superwrong' ? 'super wrong' : v;   // a verdict as the page says it
 const FACETS = [['label', 'Your verdict'], ['inapp', 'In your app'], ['site', 'Site'], ['ethnicity', 'Ethnicity'], ['hair', 'Hair'], ['body', 'Body type'], ['cup', 'Cup'],
@@ -657,8 +641,9 @@ $('dnope').onclick = () => dverdict('delete');
 $('dwrong').onclick = () => dverdict('superwrong');
 $('dbad').onclick = () => dverdict('bad');
 $('dback').onclick = () => deck(at - 1);
-$('dgrid').onclick = () => { $('deck').hidden = true; render(); };
-$('swipe').onclick = $('fab').onclick = () => { at = -1; dnext(); };
+$('dgrid').onclick = () => closeView();
+$('dexit').onclick = () => (depth() > 0 ? closeView() : leavePage());   // the deck as the page's first view: Back leaves the page
+$('swipe').onclick = $('fab').onclick = () => openView('#swipe');
 
 // duels as the app's Smart Compare: the server picks two keeps or loves the ranking cannot tell apart; tap anywhere in the one you
 // like more. Draw = alike, Skip = no answer (both kept, so the pair is not asked again; neither teaches P2); Undo steps back
@@ -708,7 +693,7 @@ $('dubody').onclick = e => {
   if (col) duChoose(col.dataset.s);
 };
 $('dubar').onclick = e => { const a = e.target.closest('.act'); if (a) duAct(a.dataset.act); };
-$('dugrid').onclick = () => { $('duel').hidden = true; load(); };
+$('dugrid').onclick = () => (depth() > 0 ? closeView() : leavePage());   // the duels as the page's first view: Back leaves the page
 // full screen, held sideways where the phone allows it (Android Chrome; Safari on an iPhone has no full screen for pages, so
 // the button is not shown there)
 $('dufull').hidden = !document.fullscreenEnabled;
@@ -717,7 +702,7 @@ $('dufull').onclick = async () => {
   await document.documentElement.requestFullscreen();
   screen.orientation?.lock?.('landscape')?.catch(() => {});
 };
-$('duelbtn').onclick = $('fab2').onclick = $('dduels').onclick = duelNext;
+$('duelbtn').onclick = $('fab2').onclick = $('dduels').onclick = () => openView('#duels');
 
 $('grid').onclick = e => { const b = e.target.closest('.card'); if (b) open(+b.dataset.j); };
 $('labelnext').onclick = () => { at = -1; nextNew(); };
@@ -807,13 +792,14 @@ async function tdSend(method, url, body) {
   return ok;
 }
 /** the page's own confirm(): resolves true for OK, false for Cancel or Esc */
-function ask(message, okLabel) {
+function ask(message, okLabel, { danger = false } = {}) {   // danger: a change that cannot be undone, Cancel has the focus
   const d = $('ask');
   $('askmsg').textContent = message;
   $('askok').textContent = okLabel;
+  d.classList.toggle('danger', danger);
   d.returnValue = '';
   d.showModal();
-  $('askok').focus();
+  $(danger ? 'askno' : 'askok').focus();
   return new Promise(done => d.addEventListener('close', () => done(d.returnValue === 'yes'), { once: true }));
 }
 // a modal: focus goes into it, Tab stays inside, and back to the Training data button when it closes
@@ -833,9 +819,9 @@ $('td').addEventListener('keydown', e => {
   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
-$('tdbtn').onclick = tdOpen;
-$('tdclose').onclick = tdClose;
-$('td').onclick = e => { if (e.target === $('td')) tdClose(); };
+$('tdbtn').onclick = () => openView('#training');
+$('tdclose').onclick = () => closeView();
+$('td').onclick = e => { if (e.target === $('td')) closeView(); };
 $('tdsources').onchange = e => {
   if (e.target.id === 'tdapp') return tdSend('PUT', '/api/profile/rounds', { include: { app: e.target.checked } });
   const wrow = e.target.closest('[data-weight]');
@@ -862,7 +848,7 @@ $('tdsources').onclick = async e => {
   const b = e.target.closest('[data-start]');
   if (!b) return;
   const src = b.closest('[data-src]').dataset.src;
-  if (await ask(`Start ${SRC[src][0]} round ${td.current[src] + 1}? Its new verdicts go into it from now on; round ${td.current[src]} stays as it is.`, `Start round ${td.current[src] + 1}`)) tdSend('PUT', '/api/profile/rounds', { start: src });
+  if (await ask(`Start ${SRC[src][0]} round ${td.current[src] + 1}? Its new verdicts go into it from now on; round ${td.current[src]} stays as it is.`, `Start round ${td.current[src] + 1}`, { danger: true })) tdSend('PUT', '/api/profile/rounds', { start: src });
 };
 $('tdrun').onclick = async () => { if (await tdSend('POST', '/api/profile/tests', { note: $('tdnote').value })) $('tdnote').value = ''; };
 $('tdtests').onclick = async e => {
@@ -872,13 +858,13 @@ $('tdtests').onclick = async e => {
 
 document.onkeydown = e => {
   if ($('ask').open) return;   // the question's own keys: Esc cancels it, Enter answers
-  if (!$('td').hidden) { if (e.key === 'Escape') tdClose(); return; }   // Training data open: Esc closes it, no other key acts
+  if (!$('td').hidden) { if (e.key === 'Escape') closeView(); return; }   // Training data open: Esc closes it, no other key acts
   if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
   // the left hand only, the right hand on the mouse for reasons (Alex, Moonlander AZERTY): F keep, D delete, Q bad data on the
   // home row, R love and E super wrong above them, the arrows of the left half to move: → next unlabelled, ← back
   const k = e.key.toLowerCase();
   if (!$('duel').hidden) {   // duels, the app's Smart Compare keys: ← / A left, → / D right, X draw, S skip, Z undo
-    if (k === 'escape') $('dugrid').click();
+    if (k === 'escape') closeView();
     else if (k === 'arrowleft' || k === 'a') duChoose('a');
     else if (k === 'arrowright' || k === 'd') duChoose('b');
     else if (k === 'x') duChoose('draw');
@@ -887,7 +873,7 @@ document.onkeydown = e => {
     return;
   }
   if (!$('deck').hidden) {
-    if (k === 'escape') $('dgrid').click();
+    if (k === 'escape') closeView();
     else if (k === 'r') dverdict('love');
     else if (k === 'f') dverdict('keep');
     else if (k === 'd') dverdict('delete');
@@ -907,8 +893,44 @@ document.onkeydown = e => {
   else if (k === 'arrowright') nextNew();
   else if (k === 'arrowleft') open(at - 1);
 };
-// /profile.html#duels (the Taste Dashboard's Duels button) opens the duels; otherwise a phone starts in the swipe deck
-load().then(() => { if (location.hash === '#duels') duelNext(); else if (matchMedia('(max-width: 760px)').matches) { at = -1; dnext(); } });
+// the views are history entries, so the phone's Back closes them: the grid (no hash), the deck #swipe, the duels #duels, Training
+// data #training. history.state.pv counts this page's entries above the first one.
+const depth = () => history.state?.pv || 0;
+function showView(hash, fresh) {   // show the view the hash names, close the others
+  if (hash !== '#swipe' && !$('deck').hidden) { $('deck').hidden = true; render(); }
+  if (hash !== '#duels' && !$('duel').hidden) { $('duel').hidden = true; load(); }
+  if (hash !== '#training' && !$('td').hidden) tdClose();
+  if (hash === '#swipe' && $('deck').hidden) { at = fresh ? -1 : Math.max(-1, at - 1); dnext(); }
+  else if (hash === '#duels' && $('duel').hidden) duelNext();
+  else if (hash === '#training' && $('td').hidden) tdOpen();
+}
+function openView(hash) {
+  if (location.hash !== hash) history.pushState({ pv: depth() + 1 }, '', hash);
+  showView(hash, true);
+}
+function closeView() {   // a view's own close: back to the entry under it, or to the grid when the view was the first
+  if (depth() > 0) return history.back();
+  history.replaceState({ pv: 0 }, '', location.pathname + location.search);
+  showView('');
+}
+// leaving the page: back past its own entries when the app opened it, else to AI & Training
+function leavePage(e) {
+  if (e && (e.button > 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)) return;   // a new tab: the link's own href
+  if (e) e.preventDefault();
+  let fromApp = false;
+  try { fromApp = !!document.referrer && new URL(document.referrer).origin === location.origin; } catch (err) {}
+  // opened in a tab of its own (a ctrl-click in the app) there is no entry before this page to go back to
+  if (fromApp && history.length > depth() + 1) history.go(-(depth() + 1));
+  else location.replace('/ai-training');
+}
+document.querySelectorAll('[data-back]').forEach(a => a.addEventListener('click', leavePage));
+addEventListener('popstate', () => showView(location.hash));
+history.replaceState({ pv: depth() }, '', location.href);
+// #swipe, #duels (the app's Profile duels) or #training open that view; a phone with no hash starts in the swipe deck
+load().then(() => {
+  if (!location.hash && !depth() && matchMedia('(max-width: 760px)').matches) history.replaceState({ pv: 0 }, '', '#swipe');
+  showView(location.hash, true);
+});
 setInterval(() => { if ($('lb').hidden && $('deck').hidden && $('duel').hidden) load(); }, 60000);
 </script>
 </body>

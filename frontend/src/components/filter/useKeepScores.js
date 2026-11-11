@@ -14,7 +14,7 @@ export const kZone = (score) => (score >= 60 ? 'keep' : score <= 40 ? 'delete' :
  * decisions; scoreAll scores the rest for the sorted view. One request at a time: the server has one
  * model slot and refits once per change of her sorted pictures.
  */
-export default function useKeepScores({ performerId, enabled, files, currentIndex, decisions }) {
+export default function useKeepScores({ performerId, enabled, files, currentIndex, decisions, frozen = false }) {
   const [scores, setScores] = useState({});
   const [learned, setLearned] = useState(0);
   const [error, setError] = useState(null);
@@ -52,23 +52,38 @@ export default function useKeepScores({ performerId, enabled, files, currentInde
     setError(null);
   }, [performerId]);
 
+  // One by one, the pictures ahead are scored again once K has refit (every REFIT_EVERY decisions). The sorted view
+  // freezes that: a batch apply would otherwise wipe every score and empty the view under the user. It rescores
+  // what is left on request (rescore) instead.
   const round = Math.floor(decisions / REFIT_EVERY);
-  useEffect(() => setScores({}), [round]);
+  const frozenRef = useRef(frozen);
+  frozenRef.current = frozen;
+  useEffect(() => {
+    if (!frozenRef.current) setScores({});
+  }, [round]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || frozen) return;
     const todo = files.slice(currentIndex, currentIndex + AHEAD).map((f) => f.path)
       .filter((p) => !(p in scores) && !pending.current.has(p));
     if (todo.length) request(todo).catch((err) => setError(err.message));
-  }, [enabled, files, currentIndex, scores, request]);
+  }, [enabled, frozen, files, currentIndex, scores, request]);
 
-  const scoreAll = useCallback(async (paths, onProgress) => {
-    for (let i = 0; i < paths.length; i += CHUNK) {
-      const part = paths.slice(i, i + CHUNK).filter((p) => !(p in scoresRef.current));
-      if (part.length) await request(part);
-      onProgress(Math.min(paths.length, i + CHUNK));
+  // fresh: score them all again; otherwise only those without a score yet. Decided once at the start: the state
+  // (and so scoresRef) changes after every chunk.
+  const scoreAll = useCallback(async (paths, onProgress, { fresh = false } = {}) => {
+    const todo = fresh ? paths : paths.filter((p) => !(p in scoresRef.current) && !pending.current.has(p));
+    let done = paths.length - todo.length;
+    onProgress(done);
+    for (let i = 0; i < todo.length; i += CHUNK) {
+      const part = todo.slice(i, i + CHUNK);
+      await request(part);
+      done += part.length;
+      onProgress(Math.min(paths.length, done));
     }
   }, [request]);
 
-  return { scores, learned, error, scoreAll };
+  const retry = useCallback(() => { setError(null); setScores((s) => ({ ...s })); }, []);
+
+  return { scores, learned, error, scoreAll, retry };
 }

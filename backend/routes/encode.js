@@ -19,11 +19,13 @@
  *   POST   /workers/:id/relink        a new link (the old one stops working)
  *   PUT    /workers/:id               { enabled }
  *   DELETE /workers/:id
+ *   The coordinator's worker answers 409 to relink, PUT and DELETE: it comes and goes with the coordinator.
  */
 const express = require('express');
 const router = express.Router();
 const q = require('../services/encodeQueue');
 const probe = require('../services/mediaProbe');
+const coordinator = require('../services/coordinator');
 
 const id = (req) => {
   const n = Number(req.params.id);
@@ -38,6 +40,13 @@ const handle = (fn) => async (req, res) => {
   } catch (err) {
     if (!err.status) console.error('[encode]', err);
     res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+};
+
+// the coordinator's worker comes and goes with the coordinator (services/coordinator.js), never by hand
+const guard = (workerId) => {
+  if (workerId != null && Number(coordinator.status().workerId) === Number(workerId)) {
+    throw Object.assign(new Error("This is the coordinator's worker. Connect or disconnect the coordinator in Settings → Workers."), { status: 409 });
   }
 };
 
@@ -76,8 +85,11 @@ router.post('/workers', handle((req) => {
   const w = q.addWorker(req.body?.name);
   return { id: w.id, name: w.name, link: linkFor(req, w.token) };
 }));
-router.post('/workers/:id/relink', handle((req) => ({ link: linkFor(req, q.relinkWorker(id(req)).token) })));
-router.put('/workers/:id', handle((req) => { q.setWorkerEnabled(id(req), !!req.body?.enabled); }));
-router.delete('/workers/:id', handle((req) => { q.removeWorker(id(req)); }));
+router.post('/workers/:id/relink', handle((req) => {
+  guard(id(req));
+  return { link: linkFor(req, q.relinkWorker(id(req)).token) };
+}));
+router.put('/workers/:id', handle((req) => { guard(id(req)); q.setWorkerEnabled(id(req), !!req.body?.enabled); }));
+router.delete('/workers/:id', handle((req) => { guard(id(req)); q.removeWorker(id(req)); }));
 
 module.exports = router;

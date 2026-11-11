@@ -1,0 +1,24 @@
+/* Darkroom and Instrument tokens for the static pages in public/. They mirror frontend/src/styles/tokens.js; keep the two in step. */
+:root {
+  --bg: #0B0B0C; --surface: #141416; --raised: #1C1C1F; --overlay: #242428;
+  --text: #EDEDEF; --dim: #A1A1A6; --muted: #6E6E76; --faint: #4A4A52;
+  --line: rgba(255,255,255,0.08); --line-strong: rgba(255,255,255,0.14);
+  --scrim: rgba(16,16,18,0.72); --scrim-strong: rgba(16,16,18,0.88);
+  --accent: #F0703A; --accent-hover: #FF8552; --accent-quiet: rgba(240,112,58,0.14); --on-accent: #1A0E08;
+  --ok: #5FA97B; --ok-quiet: rgba(95,169,123,0.15); --warn: #C9922E; --warn-quiet: rgba(201,146,46,0.15);
+  --info: #6E8CA8; --info-quiet: rgba(110,140,168,0.15); --bad: #C9564B; --bad-quiet: rgba(201,86,75,0.15);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.55);
+  --radius: 6px; --radius-sm: 4px; --radius-lg: 10px;
+  color-scheme: dark;
+}
+:root[data-tokens="instrument"] {
+  --bg: #0E1116; --surface: #151A21; --raised: #1D242E; --overlay: #252E3A;
+  --text: #E6EAF0; --dim: #98A2B3; --muted: #667085; --faint: #475467;
+  --line: rgba(255,255,255,0.07); --line-strong: rgba(255,255,255,0.13);
+  --scrim: rgba(12,15,20,0.74); --scrim-strong: rgba(12,15,20,0.9);
+  --accent: #5CC8FF; --accent-hover: #7FD6FF; --accent-quiet: rgba(92,200,255,0.14); --on-accent: #04121C;
+  --ok: #3DBE8B; --ok-quiet: rgba(61,190,139,0.15); --warn: #D8A13A; --warn-quiet: rgba(216,161,58,0.15);
+  --info: #7C93B8; --info-quiet: rgba(124,147,184,0.15); --bad: #E56A6A; --bad-quiet: rgba(229,106,106,0.15);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.6);
+  --radius: 3px; --radius-sm: 2px; --radius-lg: 6px;
+}

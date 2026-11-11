@@ -1,0 +1,244 @@
+/* Discover page (/discover): the one tile, its control row and the performer drawer's bar.
+   Darkroom tokens only (styles/tokens.js publishes them as CSS variables). No gradients, nothing under 12px (.75rem).
+   Prefix: dv-. Imported by Tile.js. The feel follows components/hash/hash.css (the accepted dense tile). */
+
+/* ── grid: every column the same width, so every picture (3/4) and every tile the same height ── */
+.dv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 10px; }
+@media (max-width: 600px) {
+  .dv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+
+/* ── tile ── */
+.dv-tile {
+  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; box-sizing: border-box;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); cursor: pointer; transition: border-color .14s ease, background-color .14s ease, opacity .14s ease;
+}
+.dv-tile:hover { border-color: var(--line-strong); background: var(--raised); }
+.dv-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dv-tile.ok, .dv-tile.ok:hover { border-color: var(--ok); }
+.dv-tile.bad, .dv-tile.bad:hover { border-color: var(--bad); }
+.dv-tile.warn, .dv-tile.warn:hover { border-color: var(--warn); }
+.dv-tile.accent, .dv-tile.accent:hover { border-color: var(--accent); }
+.dv-tile.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dv-tile.busy { opacity: .55; pointer-events: none; }
+
+.dv-pic { position: relative; flex: none; width: 100%; aspect-ratio: 3 / 4; overflow: hidden; background: var(--raised); }
+.dv-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: filter .14s ease; }
+.dv-pic.dimmed img { filter: saturate(.55) brightness(.8); }
+.dv-ph {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center;
+  color: var(--muted); font-size: .75rem; line-height: 1.35;
+}
+
+/* the corner chips: a row across the top and one across the bottom, so two chips on a narrow tile shrink instead of
+   overlapping; the right-hand one keeps to the right when it is alone */
+.dv-corners { position: absolute; left: 6px; right: 6px; display: flex; align-items: flex-start; gap: 4px; pointer-events: none; }
+.dv-corners.top { top: 6px; }
+.dv-corners.bottom { bottom: 6px; align-items: flex-end; }
+.dv-c { display: flex; min-width: 0; flex: 0 1 auto; }
+.dv-c.r { margin-left: auto; }
+/* bottom row: "together 88" gives way before the "<n> finds" button */
+.dv-corners.bottom .dv-c.r { flex: none; }
+
+.dv-chip {
+  display: block; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 2px 6px; margin: 0;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--scrim-strong);
+  color: var(--text); font: inherit; font-size: .75rem; font-weight: 600; line-height: 1.3; letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none;
+  pointer-events: none;
+}
+/* a chip with a title takes the pointer so the title shows; its click still reaches the tile */
+.dv-chip[title] { pointer-events: auto; }
+a.dv-chip, button.dv-chip { pointer-events: auto; cursor: pointer; }
+a.dv-chip:hover, button.dv-chip:hover { border-color: currentColor; }
+a.dv-chip:focus-visible, button.dv-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* a finger needs a little more than a chip */
+@media (pointer: coarse) {
+  button.dv-chip { padding: 4px 8px; }
+}
+.dv-chip.ok { color: var(--ok); }
+.dv-chip.bad { color: var(--bad); }
+.dv-chip.warn { color: var(--warn); }
+.dv-chip.info { color: var(--info); }
+.dv-chip.accent { color: var(--accent); }
+.dv-chip.dim { color: var(--dim); }
+
+.dv-name {
+  flex: none; box-sizing: border-box; height: 30px; padding: 6px 8px; min-width: 0;
+  font-size: 13px; font-weight: 600; line-height: 18px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* the name with a dim line under it (a performer's age, country, height, cup, else her profiles and posts): 24 + 20px,
+   the same in every tile of the grid, empty or not */
+.dv-name.with-meta { height: 24px; padding-bottom: 0; }
+.dv-meta {
+  flex: none; box-sizing: border-box; height: 20px; padding: 0 8px 4px; min-width: 0;
+  font-size: .75rem; line-height: 16px; color: var(--dim); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── the one control row ── */
+.dv-row { --dv-row-h: 34px; display: flex; align-items: stretch; gap: 4px; height: var(--dv-row-h); min-width: 0; box-sizing: border-box; }
+.dv-row.lg { --dv-row-h: 40px; }
+@media (max-width: 600px), (pointer: coarse) {
+  .dv-row { --dv-row-h: 40px; }
+}
+.dv-tile > .dv-row { margin: auto 6px 6px; cursor: default; }
+
+/* a span round each control: a disabled button fires no events, the span still shows the title */
+.dv-tip { display: flex; min-width: 0; }
+.dv-tip.grow { flex: 1 1 0; }
+.dv-tip.fixed { flex: none; }
+.dv-tip > button { flex: 1 1 auto; min-width: 0; }
+.dv-tip > button:disabled { pointer-events: none; }
+
+.dv-row button { font-family: inherit; }
+.dv-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Keep | Delete */
+.dv-seg {
+  flex: 1 1 0; min-width: 0; display: flex; gap: 2px; padding: 2px; box-sizing: border-box;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.dv-segbtn {
+  border: 0; padding: 0 4px; border-radius: var(--radius-sm); background: none; color: var(--dim);
+  font-size: .78rem; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.dv-segbtn:hover { color: var(--text); background: var(--raised); }
+.dv-segbtn.on.ok { color: var(--ok); background: none; box-shadow: inset 0 0 0 1px var(--ok); }
+.dv-segbtn.on.bad { color: var(--bad); background: var(--bad-quiet); }
+.dv-segbtn:disabled { opacity: .45; cursor: default; background: none; }
+/* the state stays readable when it is also why the button is off */
+.dv-segbtn.on:disabled { opacity: 1; }
+.dv-segbtn.on.bad:disabled { background: var(--bad-quiet); }
+
+/* square icon button (Checked, Remove) */
+.dv-icon {
+  width: var(--dv-row-h); display: grid; place-items: center; padding: 0; box-sizing: border-box;
+  border: 1px solid var(--line); border-radius: var(--radius); background: none; color: var(--dim);
+  font-size: 18px; cursor: pointer;
+}
+.dv-icon svg { font-size: 18px; }
+.dv-icon:hover { color: var(--text); border-color: var(--line-strong); background: var(--raised); }
+.dv-icon.ok:hover { color: var(--ok); border-color: var(--ok); background: var(--ok-quiet); }
+.dv-icon.bad:hover { color: var(--bad); border-color: var(--bad); background: var(--bad-quiet); }
+.dv-icon.accent { color: var(--accent); }
+.dv-icon:disabled { opacity: .45; cursor: default; background: none; }
+
+/* a wide button with a word (the drawer's Checked / Remove, Upload's Send) */
+.dv-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; box-sizing: border-box;
+  border: 1px solid var(--line); border-radius: var(--radius); background: none; color: var(--dim);
+  font-size: .8rem; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.dv-btn svg { font-size: 18px; flex: none; }
+.dv-btn:hover { color: var(--text); border-color: var(--line-strong); background: var(--raised); }
+.dv-btn.ok { color: var(--ok); border-color: var(--ok); }
+.dv-btn.ok:hover { background: var(--ok-quiet); }
+.dv-btn.bad { color: var(--bad); border-color: var(--bad); }
+.dv-btn.bad:hover { background: var(--bad-quiet); }
+.dv-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 620; }
+.dv-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
+.dv-btn:disabled { opacity: .45; cursor: default; }
+
+/* a two-column phone grid: narrower icons and no padding in the segment, so Keep and Delete keep their words */
+@media (max-width: 600px) {
+  .dv-tile > .dv-row { margin: auto 5px 5px; gap: 3px; }
+  .dv-tile .dv-icon { width: 32px; }
+  .dv-tile .dv-seg { gap: 1px; }
+  .dv-tile .dv-segbtn { padding: 0; font-size: .75rem; }
+}
+
+/* ── skeleton ── */
+.dv-skel { cursor: default; pointer-events: none; }
+.dv-skel .dv-pic { animation: dv-pulse 1.4s ease-in-out infinite; }
+.dv-skel-line { height: 12px; width: 62%; margin: 9px 8px; border-radius: var(--radius-sm); background: var(--raised); }
+.dv-skel.with-meta .dv-skel-line { margin-bottom: 3px; }
+.dv-skel.with-meta .dv-skel-line.meta { height: 10px; width: 45%; margin: 3px 8px 7px; }
+.dv-skel-block { flex: 1 1 auto; border-radius: var(--radius); background: var(--raised); }
+@keyframes dv-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .dv-skel .dv-pic { animation: none; } }
+
+/* ── performer drawer ── */
+.dv-bar { display: grid; gap: 8px; }
+.dv-bar .dv-seg { flex: 2 1 0; }
+.dv-bar-more { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dv-bar-more > * { flex: 1 1 auto; }
+.dv-bar-more .MuiButton-root { width: 100%; min-height: 32px; }
+@media (max-width: 600px), (pointer: coarse) {
+  .dv-bar-more .MuiButton-root { min-height: 40px; }
+}
+/* a phone-wide drawer: the segment as wide as each button, so "Checked" and "Remove" keep their words */
+@media (max-width: 600px) {
+  .dv-bar .dv-seg { flex: 1 1 0; }
+  .dv-bar .dv-btn { padding: 0 6px; gap: 3px; }
+  .dv-bar .dv-btn svg { font-size: 16px; }
+}
+
+/* ── a performer's finds (FindsPopover): a popover under the badge, a bottom sheet on a phone ── */
+.MuiPaper-root.dv-finds {
+  display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;
+  background: var(--surface); background-image: none; color: var(--text);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+}
+.MuiPaper-root.dv-finds.pop { width: min(360px, calc(100vw - 32px)); max-height: min(460px, 70vh); margin-top: 4px; }
+.dv-finds-sheet .MuiDialog-container { align-items: flex-end; }
+.MuiPaper-root.dv-finds.sheet {
+  margin: 0; width: 100%; max-width: 100%; max-height: 80vh;
+  border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding-bottom: env(safe-area-inset-bottom);
+}
+
+.dv-finds-head {
+  flex: none; display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 6px 6px 6px 14px; border-bottom: 1px solid var(--line);
+}
+.dv-finds-name {
+  flex: 0 1 auto; min-width: 0; font-size: .9rem; font-weight: 640; letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dv-finds-count { flex: none; margin-right: auto; color: var(--dim); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.dv-finds-head .dv-finds-close { flex: none; width: 32px; height: 32px; color: var(--dim); border-radius: var(--radius); }
+.dv-finds-head .dv-finds-close:hover { color: var(--text); background: var(--raised); }
+.dv-finds-head .dv-finds-close svg { font-size: 18px; }
+
+.dv-finds-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  list-style: none; margin: 0; padding: 8px; display: grid; gap: 6px; align-content: start;
+}
+.dv-find {
+  display: flex; gap: 10px; min-width: 0; padding: 6px; box-sizing: border-box;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.dv-find-pic {
+  position: relative; flex: none; align-self: flex-start; width: 48px; aspect-ratio: 3 / 4;
+  overflow: hidden; border-radius: var(--radius-sm); background: var(--raised);
+}
+.dv-find-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.dv-find-score { position: absolute; right: 2px; bottom: 2px; display: flex; max-width: calc(100% - 4px); }
+.dv-find-score .dv-chip { padding: 0 3px; }
+.dv-find-body { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; align-content: start; }
+.dv-find-title { font-size: .82rem; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-find-meta { font-size: .75rem; line-height: 1.35; color: var(--dim); overflow-wrap: anywhere; }
+.dv-find-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+/* Open post / Open creator / All details */
+.dv-find-link {
+  display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px; box-sizing: border-box;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: none; color: var(--text);
+  font: inherit; font-size: .78rem; font-weight: 560; line-height: 1; white-space: nowrap; text-decoration: none; cursor: pointer;
+  transition: color .14s ease, border-color .14s ease, background-color .14s ease;
+}
+.dv-find-link svg { flex: none; font-size: 14px; }
+.dv-find-link:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-quiet); }
+.dv-find-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dv-find-link.off, .dv-find-link.off:hover { opacity: .45; cursor: default; color: var(--text); border-color: var(--line-strong); background: none; }
+.dv-finds-foot { flex: none; display: flex; justify-content: flex-end; padding: 8px; border-top: 1px solid var(--line); }
+@media (max-width: 600px), (pointer: coarse) {
+  .dv-find-link { height: 36px; padding: 0 12px; }
+  .dv-finds-head .dv-finds-close { width: 40px; height: 40px; }
+}
+
+/* a picture that opens something of its own (Import: the folder's pictures), and the optional strip under it */
+.dv-pic.opens { cursor: zoom-in; }
+.dv-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px 3px 0; }

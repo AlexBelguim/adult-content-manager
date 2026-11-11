@@ -1,1033 +1,815 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Typography,
-  CircularProgress,
-  Alert,
-  Paper,
-  Grid,
-  Chip,
-  Button,
-  Slider,
-  FormControlLabel,
-  Checkbox,
-  ToggleButtonGroup,
-  ToggleButton,
-  Fab,
-  Collapse,
-  IconButton,
-  CardMedia,
-  Tooltip,
-  Switch,
-} from '@mui/material';
-import DeleteIcon from '@mui/icons-material/Delete';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import WarningIcon from '@mui/icons-material/Warning';
-import BrokenImageIcon from '@mui/icons-material/BrokenImage';
-import ImageIcon from '@mui/icons-material/Image';
-import MovieIcon from '@mui/icons-material/Movie';
+/**
+ * Duplicates page: /hash-results/:runId (mock-up 06-hash-duplicates.html).
+ *
+ * One run of the duplicate check, paged by group on the server. Every
+ * Keep / Remove choice is saved at once; removal moves files to her trash
+ * folder (never saved for training), with Undo while the toast shows; then they are deleted.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { CircularProgress, Switch } from '@mui/material';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import HashResultsGrid from '../components/HashResultsGrid';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import CloseIcon from '@mui/icons-material/Close';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import {
+  PageShell, PageHeader, Section, EmptyState, LoadingState
+} from '../components/layout';
+import {
+  hashGet, hashPost, formatAgo, formatBytes, formatDate, plural,
+  reasonText, skipShortText
+} from '../components/hash/hashApi';
+import useRunData, { useOrphans } from '../components/hash/results/useRunData';
+import FilterRow, { MIN_TO_DISTANCE } from '../components/hash/results/FilterRow';
+import GroupCard from '../components/hash/results/GroupCard';
+import SelectionBar from '../components/hash/results/SelectionBar';
+import OrphanSection from '../components/hash/results/OrphanSection';
+import PreviewDialog from '../components/hash/results/PreviewDialog';
+import RemoveDialog from '../components/hash/results/RemoveDialog';
+import { useNotify, useToastLift } from '../components/ui';
+import '../components/hash/hash.css';
 
-// Global cache for deleted files - persists across re-renders
-const deletedFileCache = new Set();
+const DEFAULTS = { kind: 'all', media: 'all', size: 'all', min: 86, page: 1 };
+const PAGE_SIZE = 20;
+// Toasts sit above the sticky selection bar (taller on phones, where it wraps).
+const TOAST_LIFT = { xs: 'calc(150px + var(--nav-bottom, 0px))', sm: 'calc(96px + var(--nav-bottom, 0px))' };
 
-function HashResultsPage() {
+function readFilters(sp) {
+  const pick = (k, allowed) => (allowed.includes(sp.get(k)) ? sp.get(k) : DEFAULTS[k]);
+  const min = Number(sp.get('min'));
+  const page = parseInt(sp.get('page'), 10);
+  return {
+    kind: pick('kind', ['all', 'exact', 'similar']),
+    media: pick('media', ['all', 'pics', 'vids']),
+    size: pick('size', ['all', 'pairs', 'groups']),
+    min: [86, 90, 95].includes(min) ? min : DEFAULTS.min,
+    page: Number.isFinite(page) && page > 0 ? page : 1
+  };
+}
+
+const EMPTY_SUMMARY = { count: 0, bytes: 0, exact: 0, similar: 0 };
+
+/** Selection summary change for ticking (+1) or unticking (-1) these members. */
+function summaryDelta(members, sign) {
+  const d = { count: 0, bytes: 0, exact: 0, similar: 0 };
+  for (const m of members) {
+    d.count += sign;
+    d.bytes += sign * (Number(m.size) || 0);
+    if (m.relation === 'exact') d.exact += sign; else d.similar += sign;
+  }
+  return d;
+}
+
+function addSummary(s, d) {
+  const b = s || EMPTY_SUMMARY;
+  return {
+    ...b,
+    count: Math.max(0, (b.count || 0) + d.count),
+    bytes: Math.max(0, (b.bytes || 0) + d.bytes),
+    exact: Math.max(0, (b.exact || 0) + d.exact),
+    similar: Math.max(0, (b.similar || 0) + d.similar)
+  };
+}
+
+function negate(d) {
+  return { count: -d.count, bytes: -d.bytes, exact: -d.exact, similar: -d.similar };
+}
+
+export default function HashResultsPage() {
   const { runId } = useParams();
   const navigate = useNavigate();
-  const [run, setRun] = useState(null);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [hammingThreshold, setHammingThreshold] = useState(10);
-  const [selectedItems, setSelectedItems] = useState(new Set());
-  const [selectAll, setSelectAll] = useState(false);
-  const [commitAction, setCommitAction] = useState(null);
-  const [committing, setCommitting] = useState(false);
-  const [commitResult, setCommitResult] = useState(null);
-  const [sortBy, setSortBy] = useState('all');
-  const [groupFilter, setGroupFilter] = useState('all');
-  const [mediaFilter, setMediaFilter] = useState('all');
-  const [displayPage, setDisplayPage] = useState(1);
-  const [deletedSectionOpen, setDeletedSectionOpen] = useState(false);
-  const [detectedDeletedPaths, setDetectedDeletedPaths] = useState(new Set());
-  const [hashVerified, setHashVerified] = useState(false);
-  const [rerunLoading, setRerunLoading] = useState(false);
-  const [performerId, setPerformerId] = useState(null);
-  const [keptSectionOpen, setKeptSectionOpen] = useState(false);
-  const groupsPerPage = 20;
-  const itemsPerPage = 5000;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = readFilters(searchParams);
+  const { kind, media, size, min, page } = filters;
+  const query = useMemo(
+    () => ({ page, kind, media, size, maxDistance: MIN_TO_DISTANCE[min] }),
+    [page, kind, media, size, min]
+  );
+
+  const runData = useRunData(runId, query);
+  const { data, status, error, refreshing, laterError } = runData;
+  const run = data?.run || null;
+  const totals = data?.totals || {};
+
+  const [orphansOpen, setOrphansOpen] = useState(false);
+  const orphans = useOrphans(runId, orphansOpen);
+
+  const [preview, setPreview] = useState(null); // { groupKey, fileId, section }
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [busyKeys, setBusyKeys] = useState(() => new Set());
+  const [skippedMap, setSkippedMap] = useState({}); // itemId -> short reason
+  const [skipBanner, setSkipBanner] = useState(null); // [{ name, message }]
+  const [checking, setChecking] = useState(false);
+  const [oldRemoved, setOldRemoved] = useState(null); // [{ name, storedPath, originalPath }]: her folder is gone
+  const listTopRef = useRef(null);
+  const selSeq = useRef(0);
+
+  // Latest state for the stable callbacks below.
+  const live = useRef({});
+  live.current = { data, orphans, runData, runId };
+
+  const notify = useNotify();
+  useToastLift(TOAST_LIFT);
+
+  // A new run (Check again): forget per-run state.
+  useEffect(() => {
+    setPreview(null); setRemoveOpen(false); setOrphansOpen(false);
+    setSkippedMap({}); setSkipBanner(null); setBusyKeys(new Set());
+  }, [runId]);
+
+  // Files of the old Recently removed that could not go to a trash folder: listed once, until dismissed.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    hashGet('/old-removed', { signal: ctrl.signal })
+      .then(res => setOldRemoved((res.items || []).length ? res.items : null))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
 
   useEffect(() => {
-    if (runId) {
-      loadResults();
+    if (laterError) notify({ severity: 'error', message: `Could not refresh: ${laterError.err.message}` });
+  }, [laterError, notify]);
+
+  /* ─── URL query (filters and page, replace) ─── */
+  const updateParams = useCallback(patch => {
+    setSearchParams(prev => {
+      const n = new URLSearchParams(prev);
+      Object.entries(patch).forEach(([k, v]) => {
+        if (v === undefined || v === null || String(v) === String(DEFAULTS[k])) n.delete(k);
+        else n.set(k, String(v));
+      });
+      return n;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const changeFilters = useCallback(patch => updateParams({ ...patch, page: 1 }), [updateParams]);
+  const resetFilters = useCallback(() => updateParams({ kind: 'all', media: 'all', size: 'all', min: 86, page: 1 }), [updateParams]);
+  const goPage = useCallback(p => {
+    updateParams({ page: p });
+    if (listTopRef.current) listTopRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [updateParams]);
+
+  /* ─── title, back ─── */
+  const source = run?.source;
+  const target = run?.target;
+  const isCompare = run?.kind === 'compare';
+  let titleText = 'Duplicates';
+  if (run && source) {
+    if (isCompare && target) {
+      const same = source.name === target.name;
+      const a = same && source.location ? `${source.name} (${source.location})` : source.name;
+      const b = same && target.location ? `${target.name} (${target.location})` : target.name;
+      titleText = `${a} against ${b}`;
+    } else {
+      titleText = `Duplicates: ${source.name}`;
     }
-  }, [runId, hammingThreshold]);
+  }
+  if (status === 'notfound') titleText = 'Duplicates';
 
-  const loadResults = async () => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    const prev = document.title;
+    return () => { document.title = prev; };
+  }, []);
+  useEffect(() => { document.title = titleText; }, [titleText]);
 
-    try {
-      const response = await fetch(
-        `/api/hashes/run/${runId}?maxHammingDistance=${hammingThreshold}&limit=${itemsPerPage}`
-      );
-      const data = await response.json();
+  const sourceId = source?.id;
+  const goBack = useCallback(() => {
+    if ((window.history.state?.idx ?? 0) > 0) navigate(-1);
+    else navigate(sourceId ? `/performer-management?performer=${sourceId}` : '/performer-management', { replace: true });
+  }, [navigate, sourceId]);
+  const toManagement = useCallback(() => {
+    navigate(sourceId ? `/performer-management?performer=${sourceId}` : '/performer-management');
+  }, [navigate, sourceId]);
 
-      if (data.success) {
-        setRun(data.run);
-        setItems(data.items);
-        const preSelected = new Set(
-          data.items.filter(item => item.selected === 1).map(item => item.id)
-        );
-        setSelectedItems(preSelected);
+  const ctx = useMemo(() => ({
+    kind: isCompare ? 'compare' : 'internal',
+    sourceName: source?.name,
+    sourceLocation: source?.location,
+    targetName: target?.name
+  }), [isCompare, source?.name, source?.location, target?.name]);
 
-        // Extract performer ID from run for internal checks
-        if (data.run && data.run.source_performer_id) {
-          setPerformerId(data.run.source_performer_id);
-          // Fetch verified status
-          try {
-            const statusRes = await fetch(`/api/hashes/performer/${data.run.source_performer_id}/status`);
-            const statusData = await statusRes.json();
-            if (statusData.success) {
-              setHashVerified(!!statusData.hash_verified);
-            }
-          } catch (e) {
-            console.error('Error fetching hash status:', e);
+  /* ─── selection ─── */
+  const findMembers = useCallback(ids => {
+    const out = [];
+    const seen = new Set();
+    const scan = groups => {
+      for (const g of groups || []) {
+        for (const m of g.members) {
+          if (m.itemId !== null && m.itemId !== undefined && ids.has(m.itemId) && !seen.has(m.itemId)) {
+            seen.add(m.itemId); out.push(m);
           }
         }
-      } else {
-        throw new Error(data.error || 'Failed to load results');
       }
-    } catch (err) {
-      console.error('Error loading results:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    scan(live.current.data?.groups);
+    scan(live.current.orphans.groups);
+    return out;
+  }, []);
 
-  // Handle verify toggle
-  const handleVerifyToggle = async (event) => {
-    const newValue = event.target.checked;
-    if (!performerId) return;
+  const setMembersSelected = useCallback((ids, selected) => {
+    const fn = m => (m.itemId !== null && m.itemId !== undefined && ids.has(m.itemId) && !!m.selected !== selected
+      ? { ...m, selected, selectedBy: selected ? 'user' : m.selectedBy }
+      : m);
+    live.current.runData.mapMembers(fn);
+    live.current.orphans.mapMembers(fn);
+  }, []);
 
+  const adjustSummary = useCallback(delta => {
+    live.current.runData.patchData(d => ({ ...d, selection: addSummary(d.selection, delta) }));
+  }, []);
+
+  const changeSelection = useCallback(async (itemIds, selected) => {
+    const members = findMembers(new Set(itemIds)).filter(m => !!m.selected !== selected);
+    if (!members.length) return;
+    const ids = new Set(members.map(m => m.itemId));
+    const delta = summaryDelta(members, selected ? 1 : -1);
+    setMembersSelected(ids, selected);
+    adjustSummary(delta);
+    const seq = ++selSeq.current;
     try {
-      const res = await fetch(`/api/hashes/performer/${performerId}/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verified: newValue })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setHashVerified(newValue);
+      const res = await hashPost(`/run/${encodeURIComponent(live.current.runId)}/selection`, { itemIds: [...ids], selected });
+      const refused = res.refused || [];
+      if (refused.length) {
+        setMembersSelected(new Set(refused.map(r => r.itemId)), !selected);
+        notify({
+          severity: 'warning',
+          message: `${plural(refused.length, 'file')} could not be ticked. ${reasonText(refused[0].reason)}`
+        });
+      }
+      if (seq === selSeq.current) live.current.runData.setSelection(res.selection);
+      else if (refused.length) {
+        adjustSummary(negate(summaryDelta(members.filter(m => refused.some(r => r.itemId === m.itemId)), selected ? 1 : -1)));
       }
     } catch (err) {
-      console.error('Error toggling verified:', err);
-      setError('Failed to update verified status');
+      setMembersSelected(ids, !selected);
+      adjustSummary(negate(delta));
+      notify({ severity: 'error', message: `Not saved: ${err.message}` });
     }
-  };
+  }, [findMembers, setMembersSelected, adjustSummary, notify]);
 
-  // Handle rerun internal dup check
-  const handleRerunCheck = async () => {
-    if (!performerId) return;
+  const reloadAll = useCallback(() => {
+    live.current.runData.reload();
+    live.current.orphans.reload();
+  }, []);
 
-    setRerunLoading(true);
+  // Undo of Clear: puts back exactly what was in effect ('auto' stays 'auto'), then reloads what is shown.
+  const undoClear = useCallback(async restore => {
+    if (!restore.length) return;
+    const seq = ++selSeq.current;
     try {
-      const res = await fetch(`/api/hashes/performer/${performerId}/internal-check`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await res.json();
-      if (data.success && data.runId) {
-        // Navigate to the new run results
-        navigate(`/hash-results/${data.runId}`);
-      } else {
-        setError(data.error || 'Failed to rerun check');
-      }
+      const res = await hashPost(`/run/${encodeURIComponent(live.current.runId)}/selection`, { restore });
+      if (seq === selSeq.current) live.current.runData.setSelection(res.selection);
+      reloadAll();
+      const refused = res.refused || [];
+      notify(refused.length
+        ? { severity: 'warning', message: `Ticked again · ${plural(refused.length, 'file')} could not be ticked` }
+        : { severity: 'success', message: 'Selection restored' });
     } catch (err) {
-      console.error('Error rerunning check:', err);
-      setError('Failed to rerun duplicate check');
-    } finally {
-      setRerunLoading(false);
+      notify({ severity: 'error', message: `Not saved: ${err.message}` });
     }
-  };
+  }, [notify, reloadAll]);
 
-  // Callback for when a file is detected as deleted (image failed to load)
-  const handleFileDeleted = useCallback((filePath) => {
-    deletedFileCache.add(filePath);
-    setDetectedDeletedPaths(prev => {
-      const newSet = new Set(prev);
-      newSet.add(filePath);
-      return newSet;
+  const clearSelection = useCallback(async () => {
+    const loaded = [];
+    const scan = groups => (groups || []).forEach(g => g.members.forEach(m => { if (m.selected && m.itemId) loaded.push(m.itemId); }));
+    scan(live.current.data?.groups);
+    scan(live.current.orphans.groups);
+    const before = live.current.data?.selection;
+    const loadedIds = new Set(loaded);
+    setMembersSelected(loadedIds, false);
+    live.current.runData.setSelection({ ...(before || EMPTY_SUMMARY), ...EMPTY_SUMMARY });
+    const seq = ++selSeq.current;
+    try {
+      const res = await hashPost(`/run/${encodeURIComponent(live.current.runId)}/selection`, { all: true, selected: false });
+      // the server cleared the ticks that wait for a keeper choice too
+      live.current.runData.mapMembers(m => (m.waiting ? { ...m, waiting: false } : m));
+      if (seq === selSeq.current) live.current.runData.setSelection(res.selection);
+      const restore = res.restore || [];
+      notify({
+        severity: 'success',
+        message: 'Selection cleared',
+        action: restore.length ? { label: 'Undo', onClick: () => undoClear(restore) } : null
+      });
+    } catch (err) {
+      setMembersSelected(loadedIds, true);
+      if (before) live.current.runData.setSelection(before);
+      notify({ severity: 'error', message: `Not cleared: ${err.message}` });
+    }
+  }, [setMembersSelected, notify, undoClear]);
+
+  const selectShownIds = useMemo(() => {
+    const ids = [];
+    for (const g of data?.groups || []) for (const m of g.members) if (m.canSelect && !m.selected && m.itemId) ids.push(m.itemId);
+    return ids;
+  }, [data?.groups]);
+
+  const selectShown = useCallback(() => changeSelection(selectShownIds, true), [changeSelection, selectShownIds]);
+
+  /* ─── group actions ─── */
+  const setBusy = useCallback((key, on) => {
+    setBusyKeys(prev => {
+      const n = new Set(prev);
+      if (on) n.add(key); else n.delete(key);
+      return n;
     });
   }, []);
 
-  const handleToggleItem = (itemId) => {
-    const newSelected = new Set(selectedItems);
-    if (newSelected.has(itemId)) {
-      newSelected.delete(itemId);
-    } else {
-      newSelected.add(itemId);
-    }
-    setSelectedItems(newSelected);
-  };
+  const onToggle = useCallback((groupKey, itemId, selected) => changeSelection([itemId], selected), [changeSelection]);
 
-  const handleSelectAll = (checked, itemsToSelect) => {
-    if (checked) {
-      const newSelected = new Set(selectedItems);
-      itemsToSelect.forEach(item => newSelected.add(item.id));
-      setSelectedItems(newSelected);
-    } else {
-      const newSelected = new Set(selectedItems);
-      itemsToSelect.forEach(item => newSelected.delete(item.id));
-      setSelectedItems(newSelected);
-    }
-    setSelectAll(checked);
-  };
+  const onKeepAll = useCallback(groupKey => {
+    const g = (live.current.data?.groups || []).find(x => x.key === groupKey);
+    if (!g) return;
+    changeSelection(g.members.filter(m => m.selected && m.itemId).map(m => m.itemId), false);
+  }, [changeSelection]);
 
-  const handleCommit = async (action) => {
-    if (selectedItems.size === 0) {
-      setError('No items selected');
-      return;
-    }
-
-    setCommitting(true);
-    setError(null);
-
-    // Wait for UI to unmount media components to release file locks
-    await new Promise(r => setTimeout(r, 1000));
-
+  const onMakeKeeper = useCallback(async (groupKey, fileId) => {
+    setBusy(groupKey, true);
     try {
-      const response = await fetch(`/api/hashes/run/${runId}/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          selectedItems: Array.from(selectedItems),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setCommitResult(data.results);
-        setCommitAction(null);
-
-        // Optimistically remove processed items from local state
-        setItems(prevItems => prevItems.filter(item => !selectedItems.has(item.id)));
-        setSelectedItems(new Set()); // Clear selection
-
-        await loadResults();
-      } else {
-        throw new Error(data.error || 'Failed to commit action');
+      const res = await hashPost(`/run/${encodeURIComponent(live.current.runId)}/keeper`, { groupKey, fileId });
+      const inReview = (live.current.data?.groups || []).some(g => g.key === groupKey);
+      if (inReview && res.group) live.current.runData.replaceGroup(groupKey, res.group);
+      else reloadAll(); // an orphan group: the totals and the page's empty state change too
+      if (res.selection) live.current.runData.setSelection(res.selection);
+      if (res.group) {
+        setPreview(p => (p && p.groupKey === groupKey ? { ...p, groupKey: res.group.key } : p));
       }
     } catch (err) {
-      console.error('Error committing action:', err);
-      setError(err.message);
+      notify({ severity: 'error', message: err.message });
     } finally {
-      setCommitting(false);
+      setBusy(groupKey, false);
     }
-  };
+  }, [setBusy, notify, reloadAll]);
 
-  const getSimilarityPercent = (hammingDistance) => {
-    if (hammingDistance === 0) return 100;
-    return Math.round((1 - hammingDistance / 64) * 100);
-  };
-
-  const handleSwitch = async (group) => {
-    const firstItem = group[0];
-    let chosen = group.length === 1 ? group[0] : group.find(i => !selectedItems.has(i.id));
-
-    if (!chosen) {
-      setError('To switch a group, unselect at least one remove-side item first.');
-      return;
-    }
-
+  const onDismiss = useCallback(async groupKey => {
+    setBusy(groupKey, true);
     try {
-      const resp = await fetch(`/api/hashes/run/${runId}/switch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidateId: firstItem.candidate_id, chosenFileId: chosen.file_id_ref }),
-      });
+      const res = await hashPost(`/run/${encodeURIComponent(live.current.runId)}/dismiss`, { groupKey });
+      live.current.orphans.dropGroup(groupKey);
+      live.current.orphans.reload(); // the later pages moved up by one
+      live.current.runData.patchData(d => ({
+        ...d,
+        selection: res.selection || d.selection,
+        totals: { ...d.totals, orphanGroups: Math.max(0, (d.totals?.orphanGroups || 0) - 1) }
+      }));
+      setPreview(p => (p && p.groupKey === groupKey ? null : p));
+    } catch (err) {
+      notify({ severity: 'error', message: err.message });
+    } finally {
+      setBusy(groupKey, false);
+    }
+  }, [setBusy, notify]);
 
-      const data = await resp.json();
-      if (!data.success) throw new Error(data.error || 'Switch failed');
+  const onPreview = useCallback((groupKey, fileId, section = 'review') => setPreview({ groupKey, fileId, section }), []);
+  const onPreviewNavigate = useCallback(t => setPreview(p => (p ? { ...p, ...t } : p)), []);
 
-      setItems(prevItems => {
-        const oldCandidateId = firstItem.candidate_id;
-        const groupStartIndex = prevItems.findIndex(item => item.candidate_id === oldCandidateId);
-        const withoutOldGroup = prevItems.filter(item => item.candidate_id !== oldCandidateId);
-        if (groupStartIndex >= 0) {
-          withoutOldGroup.splice(groupStartIndex, 0, ...data.updatedItems);
-          return withoutOldGroup;
-        } else {
-          return [...withoutOldGroup, ...data.updatedItems];
-        }
-      });
-
-      setSelectedItems(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(chosen.id);
-        if (data.newItemId) newSet.add(data.newItemId);
-        return newSet;
+  /* ─── remove, undo ─── */
+  const undoBatch = useCallback(async (rid, batchId) => {
+    try {
+      const res = await hashPost(`/run/${encodeURIComponent(rid)}/undo`, { batchId });
+      const ok = (res.restored || []).length;
+      const skipped = res.skipped || [];
+      if (res.selection && String(rid) === String(live.current.runId)) live.current.runData.setSelection(res.selection);
+      notify({
+        severity: skipped.length ? 'warning' : 'success',
+        message: `Put back ${plural(ok, 'file')}${skipped.length ? ` · ${skipped.length.toLocaleString()} not put back: ${skipped[0].message}` : ''}`
       });
     } catch (err) {
-      console.error('Error switching items:', err);
-      setError(err.message);
+      notify({ severity: 'error', message: `Not undone: ${err.message}` });
     }
-  };
+    reloadAll();
+  }, [notify, reloadAll]);
 
-  const isVideoPath = (p) => /\.(mp4|webm|mov|avi|mkv|m4v)$/i.test(p);
-
-  // Check if file is deleted (from DB flag or detected via image error)
-  const isFileDeleted = useCallback((path, dbFlag) => {
-    return dbFlag === 1 || deletedFileCache.has(path) || detectedDeletedPaths.has(path);
-  }, [detectedDeletedPaths]);
-
-  // Filter items
-  let filteredItems = items.filter(
-    item => item.exact_match || item.hamming_distance <= hammingThreshold
-  );
-
-  if (sortBy === 'exact') {
-    filteredItems = filteredItems.filter(item => item.exact_match);
-  } else if (sortBy === 'similar') {
-    filteredItems = filteredItems.filter(item => !item.exact_match);
-  }
-
-  // Group by candidate_id
-  const groupedItems = new Map();
-  for (const item of filteredItems) {
-    const targetId = item.candidate_id;
-    if (!groupedItems.has(targetId)) {
-      groupedItems.set(targetId, []);
-    }
-    groupedItems.get(targetId).push(item);
-  }
-
-  const allGroups = Array.from(groupedItems.values());
-
-  // Separate active from deleted groups
-  const activeGroups = [];
-  const deletedMatchItems = [];
-
-  for (const group of allGroups) {
-    const firstItem = group[0];
-    const targetDeleted = isFileDeleted(firstItem.target_path, firstItem.target_deleted);
-    const anySourceDeleted = group.some(item => isFileDeleted(item.source_path, item.source_deleted));
-
-    if (targetDeleted || anySourceDeleted) {
-      // For deleted matches, collect the existing files
-      if (!targetDeleted) {
-        deletedMatchItems.push({
-          ...firstItem,
-          existingPath: firstItem.target_path,
-          isTarget: true
+  const confirmRemove = useCallback(async itemIds => {
+    const rid = live.current.runId;
+    try {
+      const res = await hashPost(`/run/${encodeURIComponent(rid)}/remove`, { itemIds });
+      const removed = res.removed || [];
+      const skipped = res.skipped || [];
+      setRemoveOpen(false);
+      setPreview(null);
+      const map = {};
+      skipped.forEach(s => { if (s.itemId !== null && s.itemId !== undefined) map[s.itemId] = skipShortText(s.reason); });
+      setSkippedMap(map);
+      setSkipBanner(skipped.length ? skipped : null);
+      if (res.selection) live.current.runData.setSelection(res.selection);
+      reloadAll();
+      const skipText = skipped.length ? ` · ${skipped.length.toLocaleString()} skipped` : '';
+      if (removed.length) {
+        notify({
+          severity: skipped.length ? 'warning' : 'success',
+          message: `Moved ${plural(removed.length, 'file')} to the trash${skipText}`,
+          action: res.batchId ? { label: 'Undo', onClick: () => undoBatch(rid, res.batchId) } : null,
+          duration: 12000
         });
-      }
-      for (const item of group) {
-        if (!isFileDeleted(item.source_path, item.source_deleted)) {
-          deletedMatchItems.push({
-            ...item,
-            existingPath: item.source_path,
-            isTarget: false
-          });
-        }
-      }
-    } else {
-      activeGroups.push(group);
-    }
-  }
-
-  // Apply filters to active groups
-  let mediaFilteredGroups = activeGroups;
-  if (mediaFilter === 'pics') {
-    mediaFilteredGroups = activeGroups.filter(group => {
-      const targetIsVideo = isVideoPath(group[0].target_path);
-      const anySourcePic = group.some(i => !isVideoPath(i.source_path));
-      return !targetIsVideo || anySourcePic;
-    });
-  } else if (mediaFilter === 'videos') {
-    mediaFilteredGroups = activeGroups.filter(group => {
-      const targetIsVideo = isVideoPath(group[0].target_path);
-      const anySourceVideo = group.some(i => isVideoPath(i.source_path));
-      return targetIsVideo || anySourceVideo;
-    });
-  }
-
-  let filteredActiveGroups = mediaFilteredGroups;
-  if (groupFilter === 'pairs') {
-    filteredActiveGroups = mediaFilteredGroups.filter(group => group.length === 1);
-  } else if (groupFilter === 'groups') {
-    filteredActiveGroups = mediaFilteredGroups.filter(group => group.length > 1);
-  }
-
-  const totalPages = Math.ceil(filteredActiveGroups.length / groupsPerPage);
-  const startIndex = (displayPage - 1) * groupsPerPage;
-  const endIndex = startIndex + groupsPerPage;
-  const paginatedGroups = filteredActiveGroups.slice(startIndex, endIndex);
-
-  const handlePageChange = (event, value) => {
-    setDisplayPage(value);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const scrollToBottom = () => {
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-  };
-
-  const handleSelectAllDeleted = (checked) => {
-    const newSelected = new Set(selectedItems);
-    deletedMatchItems.forEach(item => {
-      if (checked) {
-        newSelected.add(item.id);
       } else {
-        newSelected.delete(item.id);
+        notify({ severity: 'warning', message: `No files moved${skipText}` });
       }
-    });
-    setSelectedItems(newSelected);
-  };
+    } catch (err) {
+      notify({ severity: 'error', message: err.message });
+    }
+  }, [notify, reloadAll, undoBatch]);
 
-  const deletedSelectedCount = deletedMatchItems.filter(item => selectedItems.has(item.id)).length;
+  /* ─── verified, check again ─── */
+  const verified = !!run?.verified;
+  const toggleVerified = useCallback(async () => {
+    if (!sourceId) return;
+    const next = !verified;
+    live.current.runData.patchRun({ verified: next });
+    try {
+      const res = await hashPost(`/performer/${sourceId}/verify`, { verified: next });
+      if (typeof res.verified === 'boolean' || typeof res.verified === 'number') live.current.runData.patchRun({ verified: !!res.verified });
+    } catch (err) {
+      live.current.runData.patchRun({ verified: !next });
+      notify({ severity: 'error', message: `Not saved: ${err.message}` });
+    }
+  }, [sourceId, verified, notify]);
 
-  // Loading state for deleted file detection in thumbnail grid
-  const [thumbLoadErrors, setThumbLoadErrors] = useState({});
+  const checkAgain = useCallback(async () => {
+    if (!source) return;
+    setChecking(true);
+    try {
+      const res = isCompare && target
+        ? await hashPost('/check', { source_performer_id: source.id, target_performer_id: target.id })
+        : await hashPost(`/performer/${source.id}/internal-check`);
+      notify({ severity: 'success', message: `Checked again: ${plural(res.groupCount || 0, 'group')}` });
+      if (res.runId !== undefined && res.runId !== null) {
+        if (String(res.runId) === String(runId)) runData.reload();
+        else navigate(`/hash-results/${res.runId}`, { replace: true });
+      }
+    } catch (err) {
+      notify({ severity: 'error', message: err.message });
+    } finally {
+      setChecking(false);
+    }
+  }, [source, target, isCompare, notify, navigate, runId, runData]);
 
-  const handleThumbError = (path) => {
-    setThumbLoadErrors(prev => ({ ...prev, [path]: true }));
-    handleFileDeleted(path);
-  };
+  /* ─── what is on screen ─── */
+  const { onScreenIds, onScreenSelected } = useMemo(() => {
+    const ids = new Set();
+    let sel = 0;
+    const add = groups => (groups || []).forEach(g => g.members.forEach(m => {
+      if (m.itemId === null || m.itemId === undefined || ids.has(m.itemId)) return;
+      ids.add(m.itemId);
+      if (m.selected) sel += 1;
+    }));
+    add(data?.groups);
+    add(orphans.groups);
+    return { onScreenIds: ids, onScreenSelected: sel };
+  }, [data?.groups, orphans.groups]);
 
-  if (loading) {
+  // Ticks in a group whose keeper turned out to be missing on disk: the server still counts them, the page does not.
+  const { waitingMembers, waitingIds } = useMemo(() => {
+    const list = [];
+    for (const g of data?.groups || []) for (const m of g.members) if (m.waiting && m.itemId) list.push(m);
+    return { waitingMembers: list, waitingIds: new Set(list.map(m => m.itemId)) };
+  }, [data?.groups]);
+  const selection = useMemo(
+    () => (waitingMembers.length
+      ? addSummary(data?.selection, summaryDelta(waitingMembers, -1))
+      : (data?.selection || EMPTY_SUMMARY)),
+    [data?.selection, waitingMembers]
+  );
+  const offScreen = Math.max(0, (selection.count || 0) - onScreenSelected);
+
+  const allResolved = status === 'ready' && !!run && run.status !== 'pending' && run.status !== 'failed'
+    && !(totals.groups > 0) && !(totals.orphanGroups > 0);
+
+  const skippedFor = useCallback(g => {
+    for (const m of g.members) if (m.itemId && skippedMap[m.itemId]) return skippedMap[m.itemId];
+    return null;
+  }, [skippedMap]);
+
+  /* ─── rendering ─── */
+  const back = { back: true, onBack: goBack };
+
+  if (status === 'loading' || (status === 'ready' && !run)) {
     return (
-      <Box sx={{ p: 3, height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <CircularProgress size={60} sx={{ color: 'primary.light' }} />
-      </Box>
+      <>
+        <PageShell className="hr-page">
+          <PageHeader title="Duplicates" {...back} />
+          <LoadingState label="Loading the check…" />
+        </PageShell>
+      </>
     );
   }
 
-  return (
-    <Box sx={{ p: 3, minHeight: '100vh', display: 'flex', flexDirection: 'column', maxWidth: 2000, mx: 'auto' }}>
-      {/* Header */}
-      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => navigate('/performer-management')}
-          sx={{ color: 'var(--dim)', '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' } }}
-        >
-          Back
-        </Button>
-        <Box sx={{ flex: 1 }}>
-          <Typography variant="h5" component="h1"  sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>
-            Hash Comparison Results
-          </Typography>
-          <Typography variant="body2" sx={{ color: 'var(--muted)' }}>
-            Run ID: {runId}
-          </Typography>
-        </Box>
+  if (status === 'notfound') {
+    return (
+      <>
+        <PageShell className="hr-page">
+          <PageHeader title="Duplicates" subtitle="Check not found" {...back} />
+          <EmptyState
+            title="This check no longer exists"
+            description="It was removed, or replaced by a newer check. Nothing was changed on disk."
+            action={(
+              <button type="button" className="hr-btn" onClick={() => navigate('/performer-management')}>
+                <ArrowBackIcon />Back to Performer Management
+              </button>
+            )}
+          />
+        </PageShell>
+      </>
+    );
+  }
 
-        {/* Verify Toggle and Rerun Button */}
-        {performerId && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Tooltip title="Mark as verified - confirmed no remaining duplicates">
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={hashVerified}
-                    onChange={handleVerifyToggle}
-                    color="success"
-                  />
-                }
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <CheckCircleIcon sx={{ color: hashVerified ? 'var(--ok)' : 'var(--muted)', fontSize: 18 }} />
-                    <span>Verified</span>
-                  </Box>
-                }
-                sx={{ color: hashVerified ? 'var(--ok)' : '#999' }}
-              />
-            </Tooltip>
-            <Tooltip title="Re-run internal duplicate check">
-              <Button
-                variant="outlined"
-                startIcon={rerunLoading ? <CircularProgress size={16} /> : <RefreshIcon />}
-                onClick={handleRerunCheck}
-                disabled={rerunLoading}
-                sx={{
-                  bordercolor: 'primary.light',
-                  color: 'primary.light',
-                  '&:hover': { bordercolor: 'primary.main', bgcolor: 'rgba(255,142,83,0.1)' }
-                }}
-              >
-                Rerun Check
-              </Button>
-            </Tooltip>
-          </Box>
-        )}
-      </Box>
+  if (status === 'error') {
+    return (
+      <>
+        <PageShell className="hr-page">
+          <PageHeader title="Duplicates" {...back} />
+          <EmptyState
+            title="Could not load this check"
+            description={error?.message}
+            action={<button type="button" className="hr-btn" onClick={runData.reload}><RefreshIcon />Retry</button>}
+          />
+        </PageShell>
+      </>
+    );
+  }
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
+  /* status ready, run present */
+  const checkLabel = isCompare ? 'Compare again' : 'Check again';
+  const checkTitle = isCompare
+    ? `Compare ${source?.name} with ${target?.name} again`
+    : `Run the duplicate check on ${source?.name}'s files again`;
+  const checkBtn = (cls = 'hr-btn outlined') => (
+    <button type="button" className={cls} disabled={checking} title={checkTitle} onClick={checkAgain}>
+      {checking ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
+      {checking ? 'Checking…' : checkLabel}
+    </button>
+  );
 
-      {commitResult && (
-        <Alert
-          severity={commitResult.failed.length > 0 ? 'warning' : 'success'}
-          sx={{ mb: 2 }}
-          onClose={() => setCommitResult(null)}
-        >
-          Action completed: {commitResult.success.length} succeeded
-          {commitResult.failed.length > 0 && `, ${commitResult.failed.length} failed`}
-        </Alert>
-      )}
+  const createdAt = run.createdAt;
+  const when = createdAt ? `${formatAgo(createdAt)} (${formatDate(createdAt)})` : '';
+  const subtitle = (
+    <span className="hr-subtitle">
+      {isCompare ? `Compared ${when}` : `Her own files · checked ${when}`}
+      {run.status !== 'pending' && run.status !== 'failed' && ` · ${plural(totals.groups || 0, 'group')} · ${plural(totals.files || 0, 'file')}`}
+    </span>
+  );
+  const title = (
+    <span className="hr-title">
+      {titleText}
+      {verified && <span className="hr-badge ok">Verified</span>}
+    </span>
+  );
 
-      {/* Deleted Matches Section */}
-      {deletedMatchItems.length > 0 && (
-        <Paper
-          elevation={0}
-          sx={{
-            mb: 3,
-            bgcolor: 'var(--bad-quiet)',
-            border: '1px solid var(--bad-quiet)',
-            borderRadius: 2,
-            overflow: 'hidden'
-          }}
-        >
-          <Box
-            onClick={() => setDeletedSectionOpen(!deletedSectionOpen)}
-            sx={{
-              p: 2,
-              minHeight: 48,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              cursor: 'pointer',
-              '&:hover': { bgcolor: 'var(--bad-quiet)' }
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              <BrokenImageIcon sx={{ color: 'var(--bad)', flexShrink: 0 }} />
-              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: 'var(--bad)', whiteSpace: 'nowrap' }}>
-                Matches with Deleted Files ({deletedMatchItems.length})
-              </Typography>
-              <Chip
-                label={`${deletedSelectedCount} selected`}
-                size="small"
-                sx={{ bgcolor: 'var(--bad-quiet)', color: 'var(--bad)' }}
-              />
-            </Box>
-            <IconButton size="small" sx={{ color: 'var(--bad)', flexShrink: 0 }}>
-              {deletedSectionOpen ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-            </IconButton>
-          </Box>
-
-          <Collapse in={deletedSectionOpen}>
-            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid var(--bad-quiet)' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                  Files that matched with now-deleted files. Select to delete, unselect to keep.
-                </Typography>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={deletedSelectedCount === deletedMatchItems.length && deletedMatchItems.length > 0}
-                      indeterminate={deletedSelectedCount > 0 && deletedSelectedCount < deletedMatchItems.length}
-                      onChange={(e) => handleSelectAllDeleted(e.target.checked)}
-                      sx={{ color: 'var(--bad)', '&.Mui-checked': { color: 'var(--bad)' } }}
-                    />
-                  }
-                  label={<Typography variant="body2" sx={{ color: 'var(--dim)' }}>Select All</Typography>}
-                />
-              </Box>
-
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                gap: 1.5
-              }}>
-                {deletedMatchItems.map((item, idx) => {
-                  const isVideo = isVideoPath(item.existingPath);
-                  const isSelected = selectedItems.has(item.id);
-                  const filename = item.existingPath.split(/[\\/]/).pop();
-                  const hasError = thumbLoadErrors[item.existingPath];
-
-                  return (
-                    <Paper
-                      key={`del-${item.id}-${idx}`}
-                      elevation={0}
-                      onClick={() => handleToggleItem(item.id)}
-                      sx={{
-                        p: 1,
-                        bgcolor: isSelected ? 'var(--bad-quiet)' : 'var(--bg)',
-                        border: isSelected ? '2px solid var(--bad)' : '1px solid var(--line)',
-                        borderRadius: 1.5,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s',
-                        '&:hover': { borderColor: isSelected ? '#ff6659' : 'var(--muted)' }
-                      }}
-                    >
-                      <Box sx={{ position: 'relative' }}>
-                        <Box sx={{
-                          width: '100%',
-                          height: 100,
-                          borderRadius: 1,
-                          overflow: 'hidden',
-                          bgcolor: 'var(--bg)',
-                          mb: 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}>
-                          {hasError ? (
-                            <Box sx={{ textAlign: 'center' }}>
-                              <BrokenImageIcon sx={{ color: 'var(--bad)', fontSize: 24 }} />
-                              <Typography variant="caption" sx={{ color: 'var(--bad)', display: 'block', fontSize: '0.5rem' }}>
-                                Also Deleted
-                              </Typography>
-                            </Box>
-                          ) : isVideo ? (
-                            <video
-                              muted
-                              preload="metadata"
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              src={`/api/files/raw?path=${encodeURIComponent(item.existingPath)}&_t=${Date.now()}`}
-                              onError={() => handleThumbError(item.existingPath)}
-                            />
-                          ) : (
-                            <CardMedia
-                              component="img"
-                              image={`/api/files/preview?path=${encodeURIComponent(item.existingPath)}&_t=${Date.now()}`}
-                              alt={filename}
-                              sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={() => handleThumbError(item.existingPath)}
-                            />
-                          )}
-                        </Box>
-
-                        <Checkbox
-                          checked={isSelected}
-                          size="small"
-                          sx={{
-                            position: 'absolute',
-                            top: 4,
-                            left: 4,
-                            bgcolor: 'rgba(0,0,0,0.6)',
-                            borderRadius: 1,
-                            p: 0.25,
-                            color: 'var(--dim)',
-                            '&.Mui-checked': { color: 'var(--bad)' }
-                          }}
-                        />
-
-                        <Chip
-                          label={item.exact_match ? 'EXACT' : `${getSimilarityPercent(item.hamming_distance)}%`}
-                          size="small"
-                          sx={{
-                            position: 'absolute',
-                            bottom: 8,
-                            right: 4,
-                            height: 18,
-                            fontSize: '0.55rem',
-                            fontWeight: 'bold',
-                            bgcolor: item.exact_match ? 'var(--bad)' : 'var(--warn)',
-                            color: 'var(--text)'
-                          }}
-                        />
-                      </Box>
-
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                        {isVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)' }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)' }} />}
-                        <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.55rem' }}>
-                          {isVideo ? 'Video' : 'Image'}
-                        </Typography>
-                      </Box>
-                      <Tooltip title={item.existingPath}>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            color: 'var(--dim)',
-                            fontSize: '0.65rem',
-                            display: 'block',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          {filename}
-                        </Typography>
-                      </Tooltip>
-                    </Paper>
-                  );
-                })}
-              </Box>
-            </Box>
-          </Collapse>
-        </Paper>
-      )}
-
-      {/* Kept Matches Section - shown when verified and there are still active matches */}
-      {hashVerified && filteredActiveGroups.length > 0 && (
-        <Paper
-          elevation={0}
-          sx={{
-            mb: 3,
-            bgcolor: 'var(--ok-quiet)',
-            border: '1px solid var(--ok-quiet)',
-            borderRadius: 2,
-            overflow: 'hidden'
-          }}
-        >
-          <Box
-            onClick={() => setKeptSectionOpen(!keptSectionOpen)}
-            sx={{
-              p: 2,
-              minHeight: 48,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              cursor: 'pointer',
-              '&:hover': { bgcolor: 'var(--ok-quiet)' }
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              <CheckCircleIcon sx={{ color: 'var(--ok)', flexShrink: 0 }} />
-              <Typography variant="subtitle1" fontWeight="bold" sx={{ color: 'var(--ok)', whiteSpace: 'nowrap' }}>
-                Verified Kept Matches ({filteredActiveGroups.length} groups)
-              </Typography>
-              <Chip
-                label="Acknowledged as acceptable"
-                size="small"
-                sx={{ bgcolor: 'var(--ok-quiet)', color: 'var(--ok)' }}
-              />
-            </Box>
-            <IconButton size="small" sx={{ color: 'var(--ok)', flexShrink: 0 }}>
-              {keptSectionOpen ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-            </IconButton>
-          </Box>
-
-          <Collapse in={keptSectionOpen}>
-            <Box sx={{ p: 2, pt: 0, borderTop: '1px solid var(--ok-quiet)' }}>
-              <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 2 }}>
-                These matches were present when you marked this performer as verified. They are considered acceptable duplicates.
-              </Typography>
-
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                gap: 1.5
-              }}>
-                {filteredActiveGroups.slice(0, 50).flatMap((group) =>
-                  group.map((item, idx) => {
-                    const isVideo = isVideoPath(item.source_path);
-                    const filename = item.source_path.split(/[\\/]/).pop();
-
-                    return (
-                      <Paper
-                        key={`kept-${item.id}-${idx}`}
-                        elevation={0}
-                        sx={{
-                          p: 1,
-                          bgcolor: 'var(--bg)',
-                          border: '1px solid var(--ok-quiet)',
-                          borderRadius: 1.5,
-                        }}
-                      >
-                        <Box sx={{ position: 'relative' }}>
-                          <Box sx={{
-                            width: '100%',
-                            height: 100,
-                            borderRadius: 1,
-                            overflow: 'hidden',
-                            bgcolor: 'var(--bg)',
-                            mb: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}>
-                            {isVideo ? (
-                              <video
-                                muted
-                                preload="metadata"
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                src={`/api/files/raw?path=${encodeURIComponent(item.source_path)}&_t=${Date.now()}`}
-                              />
-                            ) : (
-                              <CardMedia
-                                component="img"
-                                image={`/api/files/preview?path=${encodeURIComponent(item.source_path)}&_t=${Date.now()}`}
-                                alt={filename}
-                                sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              />
-                            )}
-                          </Box>
-
-                          <Chip
-                            label={item.exact_match ? 'EXACT' : `${getSimilarityPercent(item.hamming_distance)}%`}
-                            size="small"
-                            sx={{
-                              position: 'absolute',
-                              bottom: 8,
-                              right: 4,
-                              height: 18,
-                              fontSize: '0.55rem',
-                              fontWeight: 'bold',
-                              bgcolor: 'var(--ok-quiet)',
-                              color: 'var(--text)'
-                            }}
-                          />
-                        </Box>
-
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                          {isVideo ? <MovieIcon sx={{ fontSize: 12, color: 'var(--accent)' }} /> : <ImageIcon sx={{ fontSize: 12, color: 'var(--info)' }} />}
-                          <Typography variant="caption" sx={{ color: 'var(--muted)', fontSize: '0.55rem' }}>
-                            {isVideo ? 'Video' : 'Image'}
-                          </Typography>
-                        </Box>
-                        <Tooltip title={item.source_path}>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              color: 'var(--dim)',
-                              fontSize: '0.65rem',
-                              display: 'block',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
-                            }}
-                          >
-                            {filename}
-                          </Typography>
-                        </Tooltip>
-                      </Paper>
-                    );
-                  })
-                )}
-              </Box>
-            </Box>
-          </Collapse>
-        </Paper>
-      )}
-
-      <Grid container spacing={3} sx={{ flex: 1 }}>
-        {/* Left Panel: Filters */}
-        <Grid item xs={12} md={3}>
-          <Paper
-            elevation={0}
-            sx={{
-              p: 3,
-              bgcolor: 'var(--surface)',
-              borderRadius: 2,
-              border: '1px solid var(--line)',
-              position: 'sticky',
-              top: 16,
-              width: '100%',
-              boxSizing: 'border-box',
-              overflow: 'hidden'
-            }}
-          >
-            {/* Stats */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1.5 }}>Statistics</Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
-                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: 'var(--text)', fontWeight: 'bold' }}>{filteredActiveGroups.length}</Typography>
-                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Active</Typography>
-                </Box>
-                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: 'primary.light', fontWeight: 'bold' }}>{selectedItems.size}</Typography>
-                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Selected</Typography>
-                </Box>
-                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: 'var(--bad)', fontWeight: 'bold' }}>{filteredItems.filter(i => i.exact_match).length}</Typography>
-                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Exact</Typography>
-                </Box>
-                <Box sx={{ p: 2, bgcolor: 'var(--surface)', borderRadius: 1, textAlign: 'center' }}>
-                  <Typography variant="h5" sx={{ color: 'var(--warn)', fontWeight: 'bold' }}>{deletedMatchItems.length}</Typography>
-                  <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Deleted</Typography>
-                </Box>
-              </Box>
-            </Box>
-
-            {/* Similarity Slider */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Similarity Threshold</Typography>
-              <Slider
-                value={hammingThreshold}
-                onChange={(e, val) => setHammingThreshold(val)}
-                min={0}
-                max={60}
-                step={1}
-                valueLabelDisplay="auto"
-                valueLabelFormat={(val) => `${getSimilarityPercent(val)}%`}
-                sx={{
-                  color: 'primary.light',
-                  '& .MuiSlider-thumb': { bgcolor: 'var(--text)', border: '2px solid #b085f5' },
-                  '& .MuiSlider-track': { bgcolor: 'primary.light' },
-                  '& .MuiSlider-rail': { bgcolor: 'var(--raised)' },
-                }}
-              />
-            </Box>
-
-            {/* Match Type Filter */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Match Type</Typography>
-              <ToggleButtonGroup
-                value={sortBy}
-                exclusive
-                onChange={(e, v) => v && setSortBy(v)}
-                size="small"
-                fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: 'var(--dim)', borderColor: 'var(--line-strong)', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
-              >
-                <ToggleButton value="all">All</ToggleButton>
-                <ToggleButton value="exact">Exact</ToggleButton>
-                <ToggleButton value="similar">Similar</ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
-
-            {/* Group Filter */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Group Type</Typography>
-              <ToggleButtonGroup
-                value={groupFilter}
-                exclusive
-                onChange={(e, v) => { if (v) { setGroupFilter(v); setDisplayPage(1); } }}
-                size="small"
-                fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: 'var(--dim)', borderColor: 'var(--line-strong)', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
-              >
-                <ToggleButton value="all">All</ToggleButton>
-                <ToggleButton value="pairs">Pairs</ToggleButton>
-                <ToggleButton value="groups">Groups</ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
-
-            {/* Media Filter */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: 'var(--dim)', mb: 1 }}>Media Type</Typography>
-              <ToggleButtonGroup
-                value={mediaFilter}
-                exclusive
-                onChange={(e, v) => { if (v) { setMediaFilter(v); setDisplayPage(1); } }}
-                size="small"
-                fullWidth
-                sx={{ '& .MuiToggleButton-root': { color: 'var(--dim)', borderColor: 'var(--line-strong)', '&.Mui-selected': { bgcolor: 'rgba(255, 142, 83, 0.15)', color: 'primary.light' } } }}
-              >
-                <ToggleButton value="all">All</ToggleButton>
-                <ToggleButton value="pics">Pics</ToggleButton>
-                <ToggleButton value="videos">Videos</ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
-
-            {/* Select All Active */}
-            <Box sx={{ mb: 3, pt: 2, borderTop: '1px solid var(--line)' }}>
-              <FormControlLabel
-                control={<Checkbox checked={selectAll} onChange={(e) => handleSelectAll(e.target.checked, filteredItems)} sx={{ color: 'var(--muted)', '&.Mui-checked': { color: 'primary.light' } }} />}
-                label={<Typography variant="body2" sx={{ color: 'var(--dim)' }}>Select All Active ({filteredActiveGroups.length})</Typography>}
-              />
-            </Box>
-
-            {/* Actions */}
-            <Box sx={{ pt: 2, borderTop: '1px solid var(--line)' }}>
-              {!commitAction && (
-                <Button
-                  fullWidth
-                  variant="contained"
-                  startIcon={<DeleteIcon />}
-                  onClick={() => setCommitAction('delete')}
-                  disabled={selectedItems.size === 0 || committing}
-                  sx={{
-                    background: 'linear-gradient(45deg, var(--bad) 30%, #ff5722 90%)',
-                    fontWeight: 'bold',
-                    py: 1.5,
-                    '&:disabled': { background: 'var(--raised)', color: 'var(--muted)' }
-                  }}
-                >
-                  Delete Selected ({selectedItems.size})
-                </Button>
-              )}
-
-              {commitAction === 'delete' && (
-                <Box>
-                  <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 2, bgcolor: 'rgba(237, 108, 2, 0.1)', color: 'var(--warn)' }}>
-                    Delete {selectedItems.size} file(s)?
-                  </Alert>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button onClick={() => setCommitAction(null)} sx={{ flex: 1, color: 'var(--dim)' }}>
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="error"
-                      onClick={() => handleCommit('delete')}
-                      disabled={committing}
-                      sx={{ flex: 1 }}
-                    >
-                      {committing ? 'Deleting...' : 'Confirm'}
-                    </Button>
-                  </Box>
-                </Box>
-              )}
-            </Box>
-          </Paper>
-        </Grid>
-
-        {/* Right Panel: Results */}
-        <Grid item xs={12} md={9}>
-          {committing ? (
-            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 2, minHeight: '50vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <CircularProgress size={60} sx={{ color: 'primary.light', mb: 3 }} />
-              <Typography variant="h5" sx={{ color: 'var(--text)', mb: 1 }}>Processing Deletion...</Typography>
-              <Typography variant="body2" sx={{ color: 'var(--dim)' }}>Unmounting media to release file locks...</Typography>
-            </Paper>
-          ) : filteredActiveGroups.length === 0 ? (
-            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 2 }}>
-              <Typography variant="h6" sx={{ color: 'var(--muted)' }}>No active matches found at this threshold</Typography>
-            </Paper>
-          ) : (
-            <HashResultsGrid
-              paginatedGroups={paginatedGroups}
-              startIndex={startIndex}
-              isVideoPath={isVideoPath}
-              selectedItems={selectedItems}
-              handleToggleItem={handleToggleItem}
-              onSwitch={handleSwitch}
-              getSimilarityPercent={getSimilarityPercent}
-              totalPages={totalPages}
-              displayPage={displayPage}
-              handlePageChange={handlePageChange}
-              onFileDeleted={handleFileDeleted}
-              committing={committing}
-            />
-          )}
-        </Grid>
-      </Grid>
-
-      {/* Scroll to Bottom FAB */}
-      <Fab
-        size="medium"
-        onClick={scrollToBottom}
-        sx={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          bgcolor: 'var(--surface)',
-          color: 'var(--dim)',
-          border: '1px solid var(--line-strong)',
-          '&:hover': { bgcolor: 'var(--raised)' }
-        }}
+  const actions = (
+    <>
+      <span
+        className={`hr-control${isCompare ? ' disabled' : ''}`}
+        title={isCompare
+          ? "Verified applies to one performer's own files"
+          : 'Mark as verified: you have looked at every group and what is left is kept on purpose'}
       >
-        <KeyboardArrowDownIcon />
-      </Fab>
-    </Box>
+        <Switch
+          size="small"
+          checked={verified}
+          disabled={isCompare}
+          onChange={toggleVerified}
+          slotProps={{ input: { 'aria-label': 'Verified' } }}
+        />
+        Verified
+      </span>
+      {checkBtn()}
+    </>
+  );
+
+  const header = (
+    <PageHeader
+      title={title}
+      titleIsInfo
+      subtitle={subtitle}
+      actions={<div className="hr-actions">{actions}</div>}
+      {...back}
+    />
+  );
+
+  if (run.status === 'pending' || run.status === 'failed') {
+    return (
+      <>
+        <PageShell className="hr-page">
+          {header}
+          {run.status === 'pending' ? (
+            <LoadingState label="This check is still running" />
+          ) : (
+            <EmptyState title="This check failed" description={run.error || undefined} action={checkBtn('hr-btn')} />
+          )}
+        </PageShell>
+      </>
+    );
+  }
+
+  const groups = data.groups || [];
+  const curPage = data.page || 1;
+  const pageCount = data.pageCount || 0;
+  const pageSize = data.pageSize || PAGE_SIZE;
+  const filtered = data.filteredGroups ?? groups.length;
+  const from = groups.length ? (curPage - 1) * pageSize + 1 : 0;
+  const to = groups.length ? from + groups.length - 1 : 0;
+  const libraryReachable = run.libraryReachable !== false;
+
+  const pager = where => (pageCount > 1 ? (
+    <div className={`hr-pager${where === 'bottom' ? ' bottom' : ''}`}>
+      <button type="button" className="hr-ibtn" disabled={curPage <= 1} title="Previous page" aria-label="Previous page" onClick={() => goPage(curPage - 1)}>
+        <ChevronLeftIcon />
+      </button>
+      {`Page ${curPage.toLocaleString()} of ${pageCount.toLocaleString()}`}
+      <button type="button" className="hr-ibtn" disabled={curPage >= pageCount} title="Next page" aria-label="Next page" onClick={() => goPage(curPage + 1)}>
+        <ChevronRightIcon />
+      </button>
+    </div>
+  ) : null);
+
+  return (
+    <>
+      <PageShell className="hr-page">
+        {header}
+
+        {isCompare && (
+          <p className="hr-infoline">
+            <InfoOutlinedIcon />
+            {`Only ${source.name}'s files can be removed here. ${target?.name}'s files are shown for reference and are never touched.`}
+          </p>
+        )}
+
+        {!libraryReachable && (
+          <div className="hr-banner bad" role="alert">
+            <WarningAmberIcon />
+            <div className="hr-grow">The library folder cannot be reached. Nothing can be removed until it is back.</div>
+          </div>
+        )}
+
+        {skipBanner && (
+          <div className="hr-banner" role="status">
+            <WarningAmberIcon />
+            <div className="hr-grow">
+              <b>{`${plural(skipBanner.length, 'file was', 'files were')} not moved and ${skipBanner.length === 1 ? 'stays' : 'stay'} in review.`}</b>
+              <ul>
+                {skipBanner.slice(0, 50).map((s, i) => (
+                  <li key={`${s.itemId}-${i}`}><b>{s.name}</b>{s.message ? `: ${s.message}` : ''}</li>
+                ))}
+                {skipBanner.length > 50 && <li>{`and ${(skipBanner.length - 50).toLocaleString()} more`}</li>}
+              </ul>
+            </div>
+            <button type="button" className="hr-ibtn" title="Dismiss" aria-label="Dismiss" onClick={() => setSkipBanner(null)}>
+              <CloseIcon />
+            </button>
+          </div>
+        )}
+
+        {oldRemoved && (
+          <div className="hr-banner" role="status">
+            <WarningAmberIcon />
+            <div className="hr-grow">
+              <b>{`${plural(oldRemoved.length, 'file')} from the old Recently removed could not go to a trash folder: ${oldRemoved.length === 1 ? 'its' : 'their'} performer folder is gone.`}</b>
+              {' They are still here and are deleted 30 days after they were removed. To keep one, move it back by hand before then.'}
+              <ul>
+                {oldRemoved.slice(0, 50).map(o => <li key={o.id}>{o.storedPath}</li>)}
+                {oldRemoved.length > 50 && <li>{`and ${(oldRemoved.length - 50).toLocaleString()} more`}</li>}
+              </ul>
+            </div>
+            <button type="button" className="hr-ibtn" title="Dismiss" aria-label="Dismiss" onClick={() => setOldRemoved(null)}>
+              <CloseIcon />
+            </button>
+          </div>
+        )}
+
+        {allResolved ? (
+          <EmptyState
+            title={run.removedCount > 0 ? 'No duplicates left' : 'No duplicates in this check'}
+            description={run.removedCount > 0
+              ? `All groups are resolved. ${plural(run.removedCount, 'file was', 'files were')} removed.`
+              : undefined}
+            action={(
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {checkBtn('hr-btn outlined')}
+                <button type="button" className="hr-btn" onClick={toManagement}>
+                  <ArrowBackIcon />Back to Performer Management
+                </button>
+              </div>
+            )}
+          />
+        ) : (
+          <>
+            <div className="hr-stats">
+              <div className="hr-stat">
+                <b>{(totals.groups || 0).toLocaleString()}</b>
+                <span>Groups</span>
+                <em>{`${groups.length.toLocaleString()} on this page`}</em>
+              </div>
+              <div className="hr-stat accent">
+                <b>{(selection.count || 0).toLocaleString()} <small>{`of ${(totals.removable || 0).toLocaleString()}`}</small></b>
+                <span>Files to remove</span>
+                <em>keepers not counted</em>
+              </div>
+              <div className="hr-stat bad">
+                <b>{(totals.exact || 0).toLocaleString()}</b>
+                <span>Exact copies</span>
+                <em>ticked by default</em>
+              </div>
+              <div className="hr-stat warn">
+                <b>{(totals.similar || 0).toLocaleString()}</b>
+                <span>Similar</span>
+                <em>not ticked by default</em>
+              </div>
+              <div className="hr-stat space">
+                <b>{formatBytes(selection.bytes || 0)}</b>
+                <span>Space to free</span>
+                <em>with the current selection</em>
+              </div>
+            </div>
+
+            {totals.groups > 0 && (
+              <>
+                <FilterRow filters={filters} matchCount={filtered} onChange={changeFilters} />
+                <div ref={listTopRef} className="hr-anchor" />
+                <Section
+                  title="To review"
+                  description={<span className="hr-num">{`${from.toLocaleString()} to ${to.toLocaleString()} of ${plural(filtered, 'group')}`}</span>}
+                  actions={pager('top')}
+                >
+                  <div className={`hr-list${refreshing ? ' hr-refreshing' : ''}`} aria-busy={refreshing || undefined}>
+                    {groups.length === 0 ? (
+                      <EmptyState
+                        title="No groups match these filters"
+                        action={<button type="button" className="hr-btn outlined" onClick={resetFilters}>Show all</button>}
+                      />
+                    ) : (
+                      <div className="hr-groups">
+                        {groups.map(g => (
+                          <GroupCard
+                            key={g.key}
+                            group={g}
+                            ctx={ctx}
+                            busy={busyKeys.has(g.key)}
+                            skipped={skippedFor(g)}
+                            onToggle={onToggle}
+                            onMakeKeeper={onMakeKeeper}
+                            onPreview={onPreview}
+                            onKeepAll={onKeepAll}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {pager('bottom')}
+                  </div>
+                </Section>
+              </>
+            )}
+
+            {totals.orphanGroups > 0 && (
+              <OrphanSection
+                count={totals.orphanGroups}
+                open={orphansOpen}
+                onOpenChange={setOrphansOpen}
+                orphans={orphans}
+                ctx={ctx}
+                busyKeys={busyKeys}
+                onToggle={onToggle}
+                onDismiss={onDismiss}
+                onPreview={onPreview}
+              />
+            )}
+          </>
+        )}
+      </PageShell>
+
+      {!allResolved && (
+        <SelectionBar
+          selection={selection}
+          offScreen={offScreen}
+          waiting={waitingMembers.length}
+          showCount={selectShownIds.length}
+          libraryReachable={libraryReachable}
+          onClear={clearSelection}
+          onSelectShown={selectShown}
+          onRemove={() => setRemoveOpen(true)}
+        />
+      )}
+
+      <PreviewDialog
+        open={!!preview}
+        groups={preview?.section === 'orphans' ? orphans.groups : groups}
+        target={preview}
+        ctx={ctx}
+        onClose={() => setPreview(null)}
+        onNavigate={onPreviewNavigate}
+        onToggle={onToggle}
+        onMakeKeeper={onMakeKeeper}
+      />
+
+      <RemoveDialog
+        open={removeOpen}
+        runId={runId}
+        onScreenIds={onScreenIds}
+        waitingIds={waitingIds}
+        onCancel={() => setRemoveOpen(false)}
+        onConfirm={confirmRemove}
+      />
+    </>
   );
 }
-
-export default HashResultsPage;

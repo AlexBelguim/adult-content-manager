@@ -64,6 +64,10 @@ const aPost = (id, title = id) => ({ postId: id, title, postUrl: `${stub.siteBas
 const performerNamed = async (name, view = '') => (await get(`/api/discovery/performers?q=${encodeURIComponent(name)}${view && `&view=${view}`}`)).items.find((g) => g.names.includes(name));
 const labels = () => { const f = path.join(PROFILE, 'alex_labels.json'); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; };
 const eventsOf = (kind) => db.prepare('SELECT * FROM discover_events WHERE kind = ?').all(kind);
+// A decision does not wait for the profile page: this waits for what is queued to be applied
+const settle = () => require('../services/discover/events').sendQueued();
+// Until no run by hand goes (a combine starts a pools run)
+const idle = async () => { for (let i = 0; i < 200 && (await get('/api/discovery/summary')).job.running; i++) await new Promise((r) => setTimeout(r, 25)); };
 
 before(async () => {
   stub.picture = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#884422' } }).jpeg().toBuffer();
@@ -176,7 +180,10 @@ test('Keep puts a new performer on the profile page as a Discover verdict in Dis
   const g = await performerNamed('Fay High');
   const r = await post('/api/discovery/performer-status', { group: g.id, status: 'kept' });
   assert.equal(r.status, 200);
-  assert.equal(r.body.failed, 0);
+  assert.equal(r.body.undo.group, g.id);
+  assert.deepEqual(r.body.undo.rows.map((x) => x.status), [null], 'her rows as they were');
+  assert.equal(typeof r.body.undo.event, 'number');
+  await settle();
 
   assert.equal(await performerNamed('Fay High'), undefined, 'off Performers');
   assert.ok(await performerNamed('Fay High', 'kept'), 'on Kept');
@@ -205,6 +212,7 @@ test('a new round of Discover takes the next verdicts; Super wrong is a heavier 
   await runScan();
   const g = await performerNamed('Gia High');
   await post('/api/discovery/performer-status', { group: g.id, status: 'deleted', superWrong: true });
+  await settle();
   const label = labels()['discover/giahigh'];
   assert.equal(label.verdict, 'superwrong');
   assert.equal(label.round, 2);
@@ -333,7 +341,9 @@ test('Upload: judged, sent as undecided; Remove sends nothing and takes the file
 
   const sent = await post(`/api/discovery/uploads/${upload.id}/send`);
   assert.equal(sent.status, 200);
-  assert.equal(sent.body.failed, 0);
+  assert.ok(sent.body.sent_at);
+  assert.equal((await post(`/api/discovery/uploads/${upload.id}/send`)).status, 409, 'already sent with these pictures');
+  await settle();
   const card = (await get('/api/profile/performers')).find((p) => p.name === 'Nell Up');
   assert.equal(card.origin, 'upload');
   assert.equal(card.label, null);
@@ -448,7 +458,11 @@ test('the timer stays off until it is switched on, and stays on across a restart
   assert.equal(resumed.minutes, 30);
   assert.ok(resumed.nextAt > Date.now(), 'it first runs a little later, not during startup');
   runner.setWatch(false);
-  assert.equal((await post('/api/discovery/scan', { mode: 'watcher', watcher: 'nobody' })).status, 409);
+  assert.equal((await post('/api/discovery/scan', { mode: 'watcher', watcher: 'nobody' })).status, 404);
+  assert.equal((await post('/api/discovery/watch', { on: 'yes' })).status, 400);
+  assert.equal((await post('/api/discovery/watch', { on: true, minutes: 3 })).status, 400);
+  assert.equal((await post('/api/discovery/watch', { on: true, minutes: 20.5 })).status, 400);
+  assert.equal((await get('/api/discovery/summary')).watch.on, false, 'a refused switch changes nothing');
 });
 
 test('settings, the cache and the Jobs page', async () => {
@@ -465,6 +479,252 @@ test('settings, the cache and the Jobs page', async () => {
   assert.equal(jobs[0].link, '/discover');
   assert.equal((await get('/api/discovery/watcher/nobody')) && (await api('GET', '/api/discovery/watcher/nobody')).status, 404);
   assert.ok((await get('/api/discovery/watcher/stand-in-new')).total > 0);
+});
+
+test('a watch scan cut short is gone on from: the posts below its first ones are still read', async () => {
+  stub.posts = [aPost('high-cut1', 'Cut One')];
+  await runScan();   // caught up: the site's mark is when this scan began
+  // what a paused run leaves: the newest post recorded, the one below it not
+  db.prepare("INSERT INTO discover_posts (site, post_id, title, performer_name, score, kept, waiting, model, scanned_at) VALUES ('standin', 'high-cut3', 'Cut Three', 'Cut Three', 80, 1, 0, 'performer_keep.pt', ?)").run(new Date().toISOString());
+  stub.posts = [aPost('high-cut3', 'Cut Three'), aPost('high-cut2', 'Cut Two'), ...stub.posts];
+  const calls = stub.gpuCalls;
+  await runScan();
+  assert.equal(stub.gpuCalls - calls, 1, 'Cut Two judged, nothing else');
+  assert.equal(db.prepare("SELECT kept FROM discover_posts WHERE post_id = 'high-cut2'").get().kept, 1);
+});
+
+test('above the line follows the line at once, and the summary says what the header shows', async () => {
+  stub.posts = [aPost('high-line', 'Line High')];
+  await runScan();
+  assert.equal((await get('/api/discovery/performers?view=liked&q=Line%20High')).total, 1);
+  await post('/api/discovery/settings', { threshold: 90 });
+  assert.equal((await get('/api/discovery/performers?view=liked&q=Line%20High')).total, 0, 'liked no more at 90');
+  await post('/api/discovery/settings', { threshold: 50 });
+  const s = await get('/api/discovery/summary');
+  assert.equal(s.run.current_model, 'performer_keep.pt');
+  assert.ok(s.totals.judged_all >= s.totals.above_line);
+  assert.deepEqual(Object.keys(s.totals.rejudge).sort(), ['model', 'posts', 'profiles']);
+  assert.equal(s.totals.rejudge.posts, 0, 'everything judged by the current model');
+  const w = s.watchers.find((x) => x.id === 'stand-in-new');
+  assert.equal(w.source, 'standin:posts');
+  assert.equal(typeof w.to_decide, 'number');
+  assert.equal(typeof w.judged, 'number');
+  assert.equal(s.backlog.next, 'Stand-in new');
+  assert.equal(s.watch.waitingForHand, false);
+});
+
+test('Undo puts a decision back exactly, and the profile page is told', async () => {
+  stub.posts = [aPost('high-uma-undo', 'Uma Undo')];
+  await runScan();
+  const g = await performerNamed('Uma Undo');
+  const kept = await post('/api/discovery/performer-status', { group: g.id, status: 'kept' });
+  await settle();
+  assert.equal(labels()['discover/umaundo'].verdict, 'keep');
+  const undone = await post('/api/discovery/performer-status/undo', kept.body.undo);
+  assert.equal(undone.status, 200);
+  assert.equal(undone.body.status, null);
+  await settle();
+  const back = await performerNamed('Uma Undo');
+  assert.equal(back.status, null, 'on Performers again, undecided');
+  assert.equal(labels()['discover/umaundo'], undefined, 'Discover\'s verdict taken back');
+  assert.equal((await get('/api/profile/performers')).find((p) => p.slug === 'umaundo')?.label ?? null, null);
+  assert.equal((await post('/api/discovery/performer-status/undo', { group: g.id })).status, 400);
+  assert.equal((await post('/api/discovery/performer-status', { group: g.id, status: 'maybe' })).status, 400);
+});
+
+test('an Undo before the profile page was told takes the event back', async () => {
+  stub.posts = [aPost('high-vic', 'Vic Quick')];
+  await runScan();
+  const g = await performerNamed('Vic Quick');
+  const r = await post('/api/discovery/performer-status', { group: g.id, status: 'deleted' });
+  await settle();
+  // as if the profile page had not been told yet
+  db.prepare('UPDATE discover_events SET sent_at = NULL WHERE id = ?').run(r.body.undo.event);
+  const before_ = db.prepare('SELECT COUNT(*) AS n FROM discover_events').get().n;
+  await post('/api/discovery/performer-status/undo', r.body.undo);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM discover_events').get().n, before_ - 1, 'taken out of the outbox, nothing new');
+  assert.equal(db.prepare('SELECT * FROM discover_events WHERE id = ?').get(r.body.undo.event), undefined);
+  assert.equal((await performerNamed('Vic Quick')).status, null);
+});
+
+test('Put back: a deleted performer is undecided again, here and on the profile page', async () => {
+  stub.posts = [aPost('high-wil', 'Wil Back')];
+  await runScan();
+  const g = await performerNamed('Wil Back');
+  await post('/api/discovery/performer-status', { group: g.id, status: 'deleted' });
+  await settle();
+  assert.equal(labels()['discover/wilback'].verdict, 'delete');
+  assert.equal(await performerNamed('Wil Back'), undefined);
+  assert.ok(await performerNamed('Wil Back', 'decided'), 'on Decided');
+  const r = await post('/api/discovery/performer-status', { group: g.id, status: 'undecided' });
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.body.undo.event, 'number', 'the profile page is told');
+  await settle();
+  assert.equal((await performerNamed('Wil Back')).status, null);
+  assert.equal(labels()['discover/wilback'], undefined);
+  assert.equal(db.prepare("SELECT status FROM discover_entries WHERE slug = 'wilback'").get().status, 'undecided');
+});
+
+test('one performer by key, a watcher\'s performers with their counts, and what it read', async () => {
+  stub.posts = [aPost('high-xen', 'Xen Key')];
+  await runScan();
+  const g = await performerNamed('Xen Key');
+  const one = await api('GET', `/api/discovery/performer?key=${encodeURIComponent(g.members[0].key)}`);
+  assert.equal(one.status, 200);
+  assert.equal(one.body.item.id, g.id);
+  assert.match(one.body.item.members[0].image, /^\/api\/discovery\/cache\//);
+  assert.equal((await api('GET', '/api/discovery/performer?key=nobody')).status, 404);
+
+  const mine = await get('/api/discovery/performers?watcher=stand-in-new&view=everyone');
+  assert.equal(mine.total, mine.counts.all);
+  assert.ok(mine.counts.decide >= 1);
+  assert.equal((await api('GET', '/api/discovery/performers?watcher=nobody')).status, 404);
+
+  const read = await get('/api/discovery/watcher/stand-in-new?list=above');
+  assert.deepEqual(Object.keys(read.counts).sort(), ['above', 'all', 'below', 'skipped', 'waiting']);
+  assert.equal(read.total, read.counts.above);
+  assert.ok(read.items.every((x) => x.above && x.key && x.kind === 'post'));
+  assert.equal((await get('/api/discovery/watcher/stand-in-new?list=kept')).total, read.total, 'the old name still works');
+  assert.equal(read.watcher.source, 'standin:posts');
+});
+
+test('Add performer: the preview, her name made a folder name, and the folder with the row', async () => {
+  stub.posts = [aPost('high-yan', 'Yan: Odd?')];
+  await runScan();
+  const g = await performerNamed('Yan: Odd?');
+  const preview = await get(`/api/discovery/add-performer/preview?group=${encodeURIComponent(g.id)}`);
+  assert.equal(preview.name, 'Yan Odd');
+  assert.equal(preview.raw_name, 'Yan: Odd?');
+  assert.equal(preview.in_library, null);
+  assert.ok(preview.folder_path.endsWith(path.join('before filter performer', 'Yan Odd')));
+  assert.equal((await post('/api/discovery/add-performer', { group: g.id, name: '..' })).status, 400);
+  const r = await post('/api/discovery/add-performer', { group: g.id, name: 'Yan Oddly' });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.name, 'Yan Oddly');
+  assert.ok(fs.existsSync(r.body.folder_path));
+  const card = await performerNamed('Yan: Odd?');
+  assert.equal(card.in_library_id, r.body.performer_id);
+});
+
+test('Upload: a page at a time, pictures by their bytes, a name to send', async () => {
+  const u = (await post('/api/discovery/uploads', { kind: 'performer' })).body;
+  const fake = await fetch(`${base}/api/discovery/uploads/${u.id}/files?name=x.jpg`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: Buffer.from('not a picture at all') });
+  assert.equal(fake.status, 415);
+  await fetch(`${base}/api/discovery/uploads/${u.id}/files?name=a.jpg`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: stub.picture });
+  assert.equal((await post(`/api/discovery/uploads/${u.id}/send`)).status, 400, 'no name');
+  const list = await get('/api/discovery/uploads?limit=1');
+  assert.equal(list.items.length, 1);
+  assert.ok(list.total >= 2);
+  assert.ok(list.not_judged_ids.includes(u.id));
+  const sent = await post(`/api/discovery/uploads/${u.id}/send`, { name: 'Zia Named' });
+  assert.equal(sent.status, 200);
+  assert.equal(sent.body.name, 'Zia Named');
+});
+
+test('Upload: Send with verdict keeps or deletes her on the profile page, by the line when asked', async () => {
+  const make = async (name, judged = true) => {
+    const u = (await post('/api/discovery/uploads', { name, kind: 'performer' })).body;
+    await fetch(`${base}/api/discovery/uploads/${u.id}/files?name=a.jpg`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: stub.picture });
+    if (judged) assert.equal((await post(`/api/discovery/uploads/${u.id}/score`)).status, 200);
+    return u;
+  };
+  const kim = await make('Kim Verdict');
+  assert.equal((await post(`/api/discovery/uploads/${kim.id}/send`, { verdict: 'maybe' })).status, 400);
+  const sent = await post(`/api/discovery/uploads/${kim.id}/send`, { verdict: 'keep' });
+  assert.equal(sent.status, 200);
+  assert.equal(sent.body.sent_verdict, 'keep');
+  assert.equal((await post(`/api/discovery/uploads/${kim.id}/send`, { verdict: 'delete' })).status, 409, 'once per set of pictures, whatever the verdict');
+  await settle();
+  const card = (await get('/api/profile/performers')).find((p) => p.name === 'Kim Verdict');
+  assert.equal(card.origin, 'upload');
+  assert.equal(card.label, 'keep');
+  assert.equal(labels()[`discover/${card.slug}`].source, 'discover', 'a training verdict, as a Keep is');
+  assert.equal(db.prepare('SELECT status FROM discover_entries WHERE key = ?').get(`upload:${kim.id}`).status, 'kept');
+
+  // auto: by the line (50); the stand-in scores these 20, so delete. Without a score there is nothing to go by.
+  const lia = await make('Lia Low', false);
+  const refused = await post(`/api/discovery/uploads/${lia.id}/send`, { verdict: 'auto' });
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.reason, 'unscored');
+  assert.equal((await get('/api/discovery/uploads?q=Lia')).items[0].sent_at, null, 'not sent');
+  await post(`/api/discovery/uploads/${lia.id}/score`);
+  assert.equal((await post(`/api/discovery/uploads/${lia.id}/send`, { verdict: 'auto' })).body.sent_verdict, 'delete');
+  await settle();
+  const lows = (await get('/api/profile/performers')).find((p) => p.name === 'Lia Low');
+  assert.equal(lows.label, 'delete');
+  assert.equal(db.prepare('SELECT status FROM discover_entries WHERE key = ?').get(`upload:${lia.id}`).status, 'deleted');
+});
+
+test('Upload: bulk Delete sends nothing; bulk Send and Send with verdict skip what they can\'t send and say why', async () => {
+  const make = async (name, judged = true) => {
+    const u = (await post('/api/discovery/uploads', { name, kind: 'performer' })).body;
+    await fetch(`${base}/api/discovery/uploads/${u.id}/files?name=a.jpg`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: stub.picture });
+    if (judged) await post(`/api/discovery/uploads/${u.id}/score`);
+    return u;
+  };
+  assert.equal((await post('/api/discovery/uploads/bulk', { ids: ['u1'], action: 'publish' })).status, 400);
+  assert.equal((await post('/api/discovery/uploads/bulk', { ids: [], action: 'send' })).status, 400);
+
+  const mae = await make('Mae Bulk');
+  const una = await make('Una Unscored', false);
+  const anon = await make(null);
+  const r = await post('/api/discovery/uploads/bulk', { ids: [mae.id, una.id, anon.id, 'uNOPE'], action: 'send-verdict' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.sent, 1);
+  assert.equal(r.body.delete, 1, 'scored 20, below the line');
+  assert.deepEqual(r.body.skipped, { unscored: 1, 'no name': 1, gone: 1 });
+  assert.equal(r.body.results.find((x) => x.id === mae.id).verdict, 'delete');
+
+  const again = await post('/api/discovery/uploads/bulk', { ids: [mae.id, una.id], action: 'send' });
+  assert.equal(again.body.sent, 1, 'the unscored one goes undecided');
+  assert.deepEqual(again.body.skipped, { 'already sent': 1 });
+  await settle();
+  const cards = await get('/api/profile/performers');
+  assert.equal(cards.find((p) => p.name === 'Mae Bulk').label, 'delete');
+  assert.equal(cards.find((p) => p.name === 'Una Unscored').label, null);
+  assert.equal((await get('/api/discovery/uploads?q=Una')).items[0].sent_verdict, null);
+
+  const events = db.prepare('SELECT COUNT(*) AS n FROM discover_events').get().n;
+  const gone = await post('/api/discovery/uploads/bulk', { ids: [anon.id, mae.id], action: 'delete' });
+  assert.equal(gone.body.deleted, 2);
+  assert.equal(fs.existsSync(path.join(CACHE, 'uploads', anon.id)), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM discover_events').get().n, events, 'nothing goes to the profile page');
+  assert.ok((await get('/api/profile/performers')).find((p) => p.name === 'Mae Bulk'), 'what was sent stays there');
+});
+
+test('Duplicates: each action answers with its undo, and the undo puts it back', async () => {
+  stub.posts = [aPost('high-ada', 'Ada One'), aPost('high-bo', 'Bo Two')];
+  await runScan();
+  const [a, b] = await Promise.all(['Ada One', 'Bo Two'].map((n) => performerNamed(n)));
+  const combined = await post('/api/discovery/duplicates', { action: 'combine', a: a.id, b: b.id });
+  assert.deepEqual(combined.body.undo, { action: 'unlink', a: a.id, b: b.id, previous: null });
+  assert.ok((await performerNamed('Ada One')).members.some((m) => m.by_hand));
+  await post('/api/discovery/duplicates', combined.body.undo);
+  assert.equal((await performerNamed('Ada One')).members.length, 1, 'apart again');
+
+  await post('/api/discovery/duplicates', { action: 'combine', a: a.id, b: b.id });
+  const apart = await post('/api/discovery/duplicates', { action: 'unlink', member: b.id });
+  assert.equal(apart.body.removed, 1);
+  assert.equal((await performerNamed('Ada One')).members.length, 1);
+  await post('/api/discovery/duplicates', apart.body.undo);
+  assert.equal((await performerNamed('Ada One')).members.length, 2, 'relinked');
+
+  const dropped = await post('/api/discovery/duplicates', { action: 'drop', members: [a.id] });
+  assert.deepEqual(dropped.body.undo.rows, [{ member: a.id, decision: null, at: null }]);
+  await post('/api/discovery/duplicates', dropped.body.undo);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM discover_performer_decisions WHERE member = ?').get(a.id).n, 0);
+  await idle();   // the pools runs a combine starts
+});
+
+test('the export names its file by what it holds; Pause knows its two slots', async () => {
+  const res = await fetch(`${base}/api/discovery/export/profile-data?only=kept`);
+  assert.match(res.headers.get('content-disposition'), /discover-profiles-kept-\d{4}-\d{2}-\d{2}\.json/);
+  assert.equal((await post('/api/discovery/pause', { slot: 'timer' })).status, 409);
+  stub.posts = [aPost('high-vera', 'Vera High')];
+  await idle();
+  assert.equal((await post('/api/discovery/scan', { mode: 'scan', threshold: 0 })).status, 202, 'a line from the page is not taken');
+  assert.equal((await post('/api/discovery/pause', { slot: 'timer' })).status, 409, 'the timer runs nothing');
+  await idle();
 });
 
 test('the import carries the old results over once, nothing overwritten, paths and pool keys rewritten', async () => {
@@ -507,6 +767,7 @@ test('the import carries the old results over once, nothing overwritten, paths a
   assert.equal(row.image_path, 'fapello/Wren/a.jpg');
   assert.deepEqual(JSON.parse(row.image_paths), ['fapello/Wren/a.jpg', 'fapello/Wren/b.jpg']);
   assert.ok(fs.existsSync(path.join(CACHE, 'fapello', 'Wren', 'a.jpg')));
+  stub.posts = [aPost('high-vera', 'Vera High')];
   await runScan();   // the page's results are rebuilt after a run
   assert.equal((await performerNamed('Wren Old')).best_score, 77);
 });

@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Button,
   Grid,
   Card,
-  CardMedia,
   CardActionArea,
   Checkbox,
   FormControl,
@@ -19,14 +18,13 @@ import {
   ToggleButton,
   AppBar,
   Toolbar,
-  IconButton,
-  Dialog,
-  DialogContent,
-  DialogActions
+  IconButton
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useStreamingFiles } from '../hooks/useStreamingFiles';
+import Lightbox from '../components/discover/Lightbox';
+import { useNotify } from '../components/ui';
 
 function ThumbnailSelectorPage({ performer, onBack, onSave }) {
   const [selectedImages, setSelectedImages] = useState([]);
@@ -35,6 +33,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
   const [transitionTime, setTransitionTime] = useState(8.0);
   const [transitionSpeed, setTransitionSpeed] = useState(2.0);
   const [previewImage, setPreviewImage] = useState(null);
+  const notify = useNotify();
 
   // Use the streaming files hook for progressive loading
   const {
@@ -42,9 +41,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
     count: imageCount,
     loading: loadingList,
     loadedFiles: loadedImages,
-    markFileLoaded: handleImageLoad,
-    fromCache,
-    refresh: refreshImages
+    markFileLoaded: handleImageLoad
   } = useStreamingFiles({
     endpoint: performer ? `/api/performers/${performer.id}/gallery/images` : null,
     performerId: performer?.id,
@@ -119,7 +116,7 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
 
   const handleSave = () => {
     if (selectedImages.length === 0) {
-      alert('Please select at least one image');
+      notify({ severity: 'warning', message: 'Pick at least one picture' });
       return;
     }
 
@@ -136,6 +133,12 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
   };
 
   const filteredImages = getFilteredImages();
+
+  // The preview walks the list on screen (arrows and the arrow keys); a picture the filter drops closes it.
+  const previewIndex = previewImage ? filteredImages.findIndex(img => img.path === previewImage) : -1;
+  const previewPictures = previewIndex >= 0
+    ? filteredImages.map(img => ({ image: `/api/files/raw?path=${encodeURIComponent(img.path)}`, name: img.name || img.path.split(/[\\/]/).pop() }))
+    : [];
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
@@ -459,28 +462,14 @@ function ThumbnailSelectorPage({ performer, onBack, onSave }) {
         )}
       </Box>
 
-      {/* Preview Dialog */}
-      <Dialog
-        open={!!previewImage}
+      {/* Preview: the shared lightbox */}
+      <Lightbox
+        open={previewIndex >= 0}
+        pictures={previewPictures}
+        index={Math.max(0, previewIndex)}
+        onIndex={(i) => setPreviewImage(filteredImages[i]?.path || null)}
         onClose={() => setPreviewImage(null)}
-        maxWidth="xl"
-        fullWidth
-      >
-        <DialogContent sx={{ bgcolor: 'var(--bg)', p: 0 }}>
-          {previewImage && (
-            <img
-              src={`/api/files/raw?path=${encodeURIComponent(previewImage)}`}
-              alt="Preview"
-              style={{ width: '100%', height: 'auto', display: 'block' }}
-            />
-          )}
-        </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.paper' }}>
-          <Button onClick={() => setPreviewImage(null)} color="primary">
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+      />
     </Box>
   );
 }

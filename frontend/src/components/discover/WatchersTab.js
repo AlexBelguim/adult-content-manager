@@ -1,18 +1,22 @@
 /**
- * Discover → Watchers: a card per watcher (what it checked and kept, when it last ran, what stopped it), Run now, and each
- * watcher's own Kept / Not kept / Skipped with every score (GET /watcher/:id). A watcher that only runs by hand asks first.
+ * Discover → Watchers: a card per watcher (its site, how it runs, its newest finds above the line, what it read and kept,
+ * when it last ran, what stopped it), Open and Run now. A watcher opens at /discover/watchers/<id>: its performers as the one performer card (decided there, like the
+ * Performers tab), and "What it read": every post or profile with its score, skip reason or wait. A watcher that only runs
+ * by hand asks first. Filters, sub-view and the open drawer live in the URL, so Back and reload keep them.
  */
-import React, { useState } from 'react';
-import { Alert, Box, ButtonBase, CircularProgress, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { CircularProgress, Table, TableBody, TableCell, TableHead, TableRow } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { EmptyState, LoadingState, Panel, Toolbar } from '../layout';
 import {
-  ago, Badge, Card, CARD_GRID, dataLine, DetailDrawer, DrawerTitle, headSx, Link, LoadMore, Nothing, Overlay, plural, post, profileRows, RowOf, Rows,
-  SearchField, SmallButton, SortSelect, TabBar, TotalText, useDetail, useList, when
+  ago, Badge, ExternalLink, FilterChip, get, ListError, LoadMore, post, SearchField, Segment, SmallButton, SortSelect, StalePill, TabBar,
+  TotalText, useList, useOverlay, useQueryState
 } from './shared';
-
-const scoreTone = (x) => (x.kept ? 'var(--ok)' : 'var(--dim)');
-const postCounts = (info) => (info ? [info.size_gb != null && `${info.size_gb} GB`, info.images != null && `${info.images} pics`, info.videos != null && `${info.videos} vids`].filter(Boolean).join(' · ') : '');
+import PerformerGrid from './PerformerGrid';
+import { PerformerDrawerHost } from './PerformerDrawer';
+import usePerformerActions from './usePerformerActions';
+import './watchers.css';
 
 /** Whether a run (by hand, or the timer's) is busy with this watcher */
 function isRunning(w, job, watchJob) {
@@ -22,198 +26,439 @@ function isRunning(w, job, watchJob) {
 
 /** The run by hand has one slot; a watcher on watch also waits for the timer's run */
 const blocked = (w, job, watchJob) => !!job?.running || (w.watch !== false && !!watchJob?.running);
+const blockedTip = (w, job, watchJob) => (job?.running ? 'A run started by hand is going' : (w.watch !== false && watchJob?.running) ? 'The timer run is going' : undefined);
 const runLabel = (w, running) => (w.resume_page && !running ? `Go on from page ${w.resume_page + 1}` : 'Run now');
+// kept of checked, as the old card and the Kept by P tile ("55% of judged", where Judged adds up checked) count it
+const pctOf = (w) => (w.checked ? Math.min(100, Math.round((w.kept || 0) / w.checked * 100)) : 0);
+const Sep = () => <span className="dw-sep" aria-hidden="true">·</span>;
 
-function Stat({ value, label, tone, small, title }) {
+/** The one state chip of a watcher: running, failed, a profiles run paused part way, else how it runs (watching or by hand) */
+function StateChip({ w, running, watch }) {
+  if (running) return <Badge tone="accent"><CircularProgress size={10} thickness={6} sx={{ color: 'var(--accent)' }} />Running</Badge>;
+  if (w.last_error) return <Badge tone="bad" title={w.last_error}>Failed</Badge>;
+  if (w.kind === 'profiles' && w.resume_page) return <Badge tone="warn" title={`A run stopped part way: the next one goes on from page ${w.resume_page + 1}`}>Paused at page {w.resume_page}</Badge>;
+  if (!w.watch) return <Badge title="It only runs when you start it">By hand</Badge>;
+  return watch?.on
+    ? <Badge tone="ok" title={`The timer runs it every ${watch.minutes ?? 20} min`}>Watching</Badge>
+    : <Badge title={`It runs every ${watch?.minutes ?? 20} min while the timer is on`}>Timer off</Badge>;
+}
+
+/** The chip shows how it runs unless it has something more pressing to say; then the line under the name says it */
+const chipIsSchedule = (w, running) => !running && !w.last_error && !(w.kind === 'profiles' && w.resume_page);
+/** "leakshaven.com/models": the site and the list it reads, without the protocol, "www." or a closing slash */
+const siteOf = (url) => {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname}${u.search}`.replace(/\/+$/, '');
+  } catch {
+    return url || '';
+  }
+};
+
+function RunButton({ w, job, watchJob, onRun, sx }) {
+  const off = blocked(w, job, watchJob);
   return (
-    <Box title={title} sx={{ minWidth: 0 }}>
-      <Typography sx={{ fontSize: small ? '.85rem' : '1.2rem', fontWeight: small ? 600 : 660, lineHeight: 1.2, pt: small ? '4px' : 0, color: tone || 'var(--text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</Typography>
-      <Typography sx={{ fontSize: '.7rem', color: 'var(--dim)' }}>{label}</Typography>
-    </Box>
+    <SmallButton disabled={off} tip={off ? blockedTip(w, job, watchJob) : undefined} sx={sx} onClick={(e) => { e.stopPropagation(); onRun(w); }}>
+      {runLabel(w, isRunning(w, job, watchJob))}
+    </SmallButton>
   );
 }
 
-function WatcherCard({ w, watch, job, watchJob, onOpen, onRun }) {
-  const running = isRunning(w, job, watchJob);
-  const rate = w.checked ? Math.round(w.kept / w.checked * 100) : 0;
-  const failed = !!w.last_error;
-  const lastTip = failed ? `Stopped: ${w.last_error}` : w.last_found != null ? `Found ${w.last_found} new` : undefined;
+// ── the grid ─────────────────────────────────────────────────
+const THUMBS = 5;
+
+/** Its newest finds above the line, for the strip of pictures on its card (none asked for when nothing is above the line) */
+function useBestFinds(w, version) {
+  const want = (w.kept || 0) > 0;
+  const key = `${w.id}|${version}|${w.last_update || ''}|${w.kept || 0}`;
+  const [s, setS] = useState({ key: null, items: [], failed: false });
+  useEffect(() => {
+    if (!want) return undefined;
+    let live = true;
+    get(`/watcher/${encodeURIComponent(w.id)}?list=above&sort=newest&limit=${THUMBS}`)
+      .then((r) => { if (live) setS({ key, items: (r.items || []).filter(x => x.image).slice(0, THUMBS), failed: false }); })
+      .catch(() => { if (live) setS(prev => ({ key, items: prev.items, failed: true })); });
+    return () => { live = false; };
+  }, [key, want, w.id]);
+  // The ones from before stay up while the newer ones load, so the strip doesn't blink after a run
+  return want ? { items: s.items, loaded: s.key != null && !s.failed } : { items: [], loaded: true };
+}
+
+const findName = (x) => x.name || x.performer_name || x.title || '';
+
+function Thumb({ x }) {
+  const [broken, setBroken] = useState(false);
   return (
-    <Panel padded={false} interactive tabIndex={0} aria-label={w.label} onClick={() => onOpen(w)}
+    <div className="dw-thumb" title={[findName(x), x.score != null && `score ${x.score}`, x.found_at && `found ${ago(x.found_at)}`].filter(Boolean).join(' · ')}>
+      {!broken && <img src={x.image} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(true)} />}
+      {x.score != null && <span className="dw-thumb-score">{Math.round(x.score)}</span>}
+    </div>
+  );
+}
+
+/** Up to five of its newest finds above the line; the empty slots stay, so every card is the same height */
+function FindStrip({ w, version }) {
+  const { items, loaded } = useBestFinds(w, version);
+  const note = !loaded || items.length ? null : w.checked ? 'Nothing above the line yet' : 'Nothing found yet';
+  return (
+    <div className={`dw-thumbs${note ? ' none' : ''}`} role={items.length ? 'img' : undefined}
+      aria-label={items.length ? `Newest above the line: ${items.map(findName).filter(Boolean).join(', ')}` : undefined}>
+      {Array.from({ length: THUMBS }, (_, i) => (items[i]
+        ? <Thumb key={items[i].key || i} x={items[i]} />
+        : <div key={`e${i}`} className="dw-thumb empty" aria-hidden="true" />))}
+      {note && <span className="dw-thumbs-note">{note}</span>}
+    </div>
+  );
+}
+
+function Num({ value, label, tone, title }) {
+  const n = value || 0;
+  return (
+    <div className="dw-n" title={title}>
+      <span className={`dw-n-v${n ? (tone ? ` ${tone}` : '') : ' zero'}`}>{n}</span>
+      <span className="dw-n-l">{label}</span>
+    </div>
+  );
+}
+
+/** One thin bar: above the line, below it, skipped, waiting, as parts of what it checked; after it, the share kept (of checked) */
+function ReadBar({ w }) {
+  const above = w.kept || 0;
+  const below = Math.max(0, (w.judged || 0) - above);
+  const skipped = w.kind === 'profiles' ? 0 : (w.skipped || 0);
+  const waiting = w.waiting || 0;
+  const all = above + below + skipped + waiting;
+  const part = (n, cls) => (n > 0 ? <span className={`dw-bar-${cls}`} style={{ flexGrow: n }} /> : null);
+  return (
+    <div className="dw-barrow">
+      <div className="dw-bar" aria-hidden="true"
+        title={all ? [`${above} above the line`, `${below} below`, skipped && `${skipped} skipped`, waiting && `${waiting} waiting`].filter(Boolean).join(' · ') : undefined}>
+        {part(above, 'above')}{part(below, 'below')}{part(skipped, 'skipped')}{part(waiting, 'waiting')}
+      </div>
+      <span className={`dw-pct${above ? '' : ' zero'}`}
+        title={w.checked ? `${above} of the ${w.checked} checked kept: at or above the keep line` : 'Nothing checked yet'}>
+        {pctOf(w)}% kept
+      </span>
+    </div>
+  );
+}
+
+function WatcherCard({ w, watch, job, watchJob, version, isPhone, onOpen, onRun }) {
+  const running = isRunning(w, job, watchJob);
+  const failed = !!w.last_error;
+  const profiles = w.kind === 'profiles';
+  const schedule = w.watch ? `every ${watch?.minutes ?? 20} min` : chipIsSchedule(w, running) ? null : 'by hand';
+  const tall = isPhone ? { minHeight: 40 } : undefined;
+  const newest = w.last_update && <><Sep /><span className="dw-nb">newest find {ago(w.last_update)}</span></>;
+  // Failed: when and the newest find on the first line, the error on the second (all of it on hover and on the watcher's page)
+  const last = failed
+    ? (
+      <div className="dw-last failed" title={w.last_error}>
+        <span className="dw-last-1"><span className="dw-nb dw-bad">Failed{w.last_checked ? ` ${ago(w.last_checked)}` : ''}</span>{newest}</span>
+        <span className="dw-err">{w.last_error}</span>
+      </div>
+    )
+    : (
+      <div className="dw-last">
+        <span className="dw-nb">{w.last_checked ? `Checked ${ago(w.last_checked)}${w.last_found != null ? `: ${w.last_found} new` : ''}` : 'Not run yet'}</span>
+        {newest}
+      </div>
+    );
+  return (
+    <Panel padded={false} interactive tabIndex={0} role="link" aria-label={`${w.label}: open`} className="dw-card"
+      onClick={() => onOpen(w)}
       onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(w); }}
-      sx={{ p: 2, display: 'grid', gap: 1.25, alignContent: 'start', minWidth: 0, ...(failed && { borderColor: 'var(--bad)' }) }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px 10px', flexWrap: 'wrap' }}>
-        <Typography component="h3" sx={{ m: 0, fontSize: '1rem', fontWeight: 620, letterSpacing: '-0.01em', color: 'var(--text)' }}>{w.label}</Typography>
-        <Badge tone="info">{w.kind === 'profiles' ? 'Profiles' : 'Posts'}</Badge>
-        {w.watch
-          ? <Badge tone={watch?.on ? 'accent' : 'dim'}>Every {watch?.minutes ?? 20} min{watch?.on ? '' : ' (watch off)'}</Badge>
-          : <Badge>Run by hand</Badge>}
-        {running && <Badge tone="accent"><CircularProgress size={10} thickness={6} sx={{ color: 'var(--accent)' }} />Running</Badge>}
-        {failed && <Badge tone="bad">Failed</Badge>}
-      </Box>
-      <Box component="a" href={w.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} sx={{
-        color: 'var(--muted)', fontSize: '.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none', '&:hover': { color: 'var(--dim)' }
-      }}>{w.url}</Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(72px, 1fr))', gap: 1 }}>
-        <Stat value={w.checked} label="checked" />
-        <Stat value={w.kept} label={`kept · ${rate}%`} tone="var(--ok)" />
-        {w.kind === 'posts'
-          ? <Stat value={w.skipped} label="skipped" tone={w.skipped ? 'var(--warn)' : 'var(--dim)'} />
-          : <Stat value={w.with_data} label="with profile data" />}
-        <Stat value={w.waiting || 0} label="waiting" tone={w.waiting ? 'var(--warn)' : 'var(--dim)'} title="Saved but not judged: nobody could judge yet" />
-        <Stat small value={w.last_checked ? ago(w.last_checked) : 'never'} label={failed ? 'failed' : 'last checked'} tone={failed ? 'var(--bad)' : undefined} title={lastTip} />
-        <Stat small value={w.last_update ? ago(w.last_update) : 'never'} label="last update" />
-      </Box>
-      <Box sx={{ height: 4, borderRadius: 99, bgcolor: 'var(--raised)', overflow: 'hidden' }}>
-        <Box sx={{ height: '100%', width: `${rate}%`, bgcolor: 'var(--ok)' }} />
-      </Box>
-      {failed && <Typography sx={{ fontSize: '.75rem', color: 'var(--bad)', overflowWrap: 'anywhere' }}>Stopped: {w.last_error}</Typography>}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
-        <SmallButton disabled={blocked(w, job, watchJob)} onClick={() => onRun(w)}>{runLabel(w, running)}</SmallButton>
-        {!!w.resume_page && !running && <Typography sx={{ fontSize: '.72rem', color: 'var(--dim)' }}>paused at page {w.resume_page}</Typography>}
-        <Typography sx={{ ml: 'auto', color: 'var(--muted)', fontSize: '.75rem' }}>Kept, not kept, skipped →</Typography>
-      </Box>
+      sx={{ p: isPhone ? '12px' : '14px', ...(failed && { borderColor: 'var(--bad)', '&:hover': { borderColor: 'var(--bad)', background: 'var(--raised)' } }) }}>
+      <div className="dw-card-head">
+        <h3 className="dw-card-title" title={w.label}>{w.label}</h3>
+        <StateChip w={w} running={running} watch={watch} />
+      </div>
+      <div className="dw-kind">
+        {w.url && (
+          <span className="dw-site" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <ExternalLink href={w.url} title={w.url} sx={{ maxWidth: '100%', color: 'var(--dim)', '&:hover': { color: 'var(--text)', textDecoration: 'underline' } }}>
+              <span className="dw-site-text">{siteOf(w.url)}</span>
+            </ExternalLink>
+          </span>
+        )}
+        {w.url && <Sep />}
+        <span>{profiles ? 'Profiles' : 'Posts'}</span>
+        {schedule && <><Sep /><span>{schedule}</span></>}
+      </div>
+      <FindStrip w={w} version={version} />
+      <div className="dw-nums">
+        <Num value={w.to_decide} label="to decide" tone="accent" title="Performers it found that are not decided yet" />
+        <Num value={w.checked} label="checked"
+          title={[`${w.checked || 0} ${profiles ? 'profiles' : 'posts'} checked: ${w.judged || 0} judged`, !profiles && `${w.skipped || 0} skipped`,
+            `${w.waiting || 0} waiting`].filter(Boolean).join(', ')} />
+        <Num value={w.kept} label="kept" tone="ok" title={`${w.kept || 0} of the ${w.checked || 0} checked kept by P: at or above the keep line`} />
+        {profiles
+          ? <Num value={w.with_data} label="with data" title="Profiles saved with their data (age, height and so on)" />
+          : <Num value={w.skipped} label="skipped" tone="warn" title="Read but not judged: no picture, or not a performer" />}
+        <Num value={w.waiting} label="waiting" tone="info" title="Saved but not judged yet: P could not judge them" />
+      </div>
+      <ReadBar w={w} />
+      {last}
+      <div className="dw-card-foot" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        <SmallButton sx={tall} onClick={() => onOpen(w)}>Open</SmallButton>
+        <RunButton w={w} job={job} watchJob={watchJob} onRun={onRun} sx={tall} />
+      </div>
     </Panel>
   );
 }
 
-function PostDrawer({ open, onClose, p }) {
-  return (
-    <DetailDrawer open={open} onClose={onClose} image={p.image} score={p.score} tone={scoreTone(p)}>
-      <DrawerTitle subtitle={[postCounts(p.info), p.posted_at && `posted ${ago(p.posted_at)}`].filter(Boolean).join(' · ')}>{p.kept ? p.performer_name : p.title}</DrawerTitle>
-      <RowOf>
-        {p.saved_link && <SmallButton primary component="a" href={p.saved_link} target="_blank" rel="noreferrer">{p.page_kind === 'creator' ? 'Open creator' : 'Open post'}</SmallButton>}
-        {p.share_url && <SmallButton component="a" href={p.share_url} target="_blank" rel="noreferrer">Share link</SmallButton>}
-        {p.post_url && <SmallButton component="a" href={p.post_url} target="_blank" rel="noreferrer">Page on the site</SmallButton>}
-      </RowOf>
-      <Typography sx={headSx}>Post</Typography>
-      <Rows rows={[
-        ['Score', <><Box component="span" sx={{ color: scoreTone(p), fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{p.score}</Box> <Nothing>{p.kept ? 'kept' : 'not kept'}</Nothing></>],
-        ['Performer', p.performer_name],
-        ['Post title', p.title],
-        ['In library', p.in_library || <Nothing>no</Nothing>],
-        ['Page', p.kept ? (p.page_kind === 'creator' ? 'Creator page' : p.page_kind === 'post' ? 'Single post' : 'unknown') : <Nothing>only looked up for kept posts</Nothing>],
-        ['Saved link', <Link href={p.saved_link} />],
-        ['Picture', <Link href={p.image_url}>original</Link>],
-        ['Posted', when(p.posted_at)],
-        ['Judged', when(p.scanned_at)],
-        ['Model', p.model]
+// ── one watcher: its performers ──────────────────────────────
+const STATUS_VIEW = { decide: 'all', kept: 'kept', decided: 'decided', all: 'everyone' };
+
+function WatcherPerformers({ w, version, ask, notify, refresh, sourceLabel, isPhone, runButton }) {
+  // `view` (the sub-view) is not in the defaults on purpose: a change here must never drop it from the URL
+  const [qs, setQs] = useQueryState({ status: 'decide', q: '', sort: 'score', new: '', pics: '' });
+  const status = STATUS_VIEW[qs.status] ? qs.status : 'decide';
+  const view = STATUS_VIEW[status];
+  const params = new URLSearchParams({ view, watcher: w.id, sort: qs.sort || 'score' });
+  if (qs.q) params.set('q', qs.q);
+  if (qs.new) params.set('new', '1');
+  if (qs.pics) params.set('pics', '1');
+  const filtered = !!(qs.q || qs.new || qs.pics);
+
+  const toolbar = (list) => {
+    const counts = list.extra?.counts || {};
+    const segment = (
+      <Segment label="Show" value={status} onChange={(next) => setQs({ status: next })} options={[
+        { id: 'decide', label: 'To decide', count: counts.decide },
+        { id: 'kept', label: 'Kept', count: counts.kept },
+        { id: 'decided', label: 'Decided', count: counts.decided },
+        { id: 'all', label: 'All', count: counts.all }
       ]} />
-    </DetailDrawer>
+    );
+    return (
+      <Toolbar>
+        {isPhone ? <div className="dw-full">{segment}</div> : segment}
+        <SearchField value={qs.q} onChange={(q) => setQs({ q })} placeholder="Search names and aliases" />
+        <SortSelect value={qs.sort || 'score'} onChange={(sort) => setQs({ sort })} />
+        <FilterChip on={!!qs.new} title="Only the performers not in the library yet" onClick={() => setQs({ new: qs.new ? '' : '1' })}>New only</FilterChip>
+        <FilterChip on={!!qs.pics} title="Only performers with 3 or more pictures" onClick={() => setQs({ pics: qs.pics ? '' : '1' })}>3+ pictures</FilterChip>
+        <TotalText>{list.items.length} of {list.total}</TotalText>
+      </Toolbar>
+    );
+  };
+
+  const empty = status === 'decide' && !filtered
+    ? {
+      title: 'Nothing to decide from this watcher',
+      description: `Everyone ${w.label} found is decided. A run that finds someone new puts her here.`,
+      action: (
+        <div className="dw-empty-actions">
+          <SmallButton onClick={() => setQs({ status: 'all' })}>Show all</SmallButton>
+          {runButton}
+        </div>
+      )
+    }
+    : { title: 'Nothing here', description: filtered ? 'Nothing matches the filters.' : 'Nothing yet.' };
+
+  return (
+    <PerformerGrid path={`/performers?${params}`} view={view} version={version} toolbar={toolbar} empty={empty}
+      focusSource={w.source} focusLabel={w.label} sourceLabel={sourceLabel} ask={ask} notify={notify} refresh={refresh} />
   );
 }
 
-function ProfileDrawer({ open, onClose, p }) {
+// ── one watcher: what it read ────────────────────────────────
+function ScoreText({ r, profiles }) {
+  if (r.score != null) return <span className={`dw-score${r.above ? ' above' : ''}`}>{r.score}</span>;
+  if (r.waiting) return <span className="dw-info" title="Saved but not judged yet">Waiting</span>;
+  return <span className="dw-warn">{profiles ? 'Not judged' : 'Skipped'}</span>;
+}
+
+function RowActions({ r, onOpen, tall }) {
   return (
-    <DetailDrawer open={open} onClose={onClose} image={p.image} score={p.score} tone={scoreTone(p)}>
-      <DrawerTitle subtitle={dataLine(p.scrape)}>{p.name}</DrawerTitle>
-      <RowOf>{p.url && <SmallButton primary component="a" href={p.url} target="_blank" rel="noreferrer">Open creator</SmallButton>}</RowOf>
-      <Typography sx={headSx}>Profile{p.full ? '' : ' (only what the profile list gives)'}</Typography>
-      <Rows rows={[
-        ['Score', p.score != null
-          ? <><Box component="span" sx={{ color: scoreTone(p), fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{p.score}</Box> <Nothing>{p.kept ? 'kept' : 'not kept'}</Nothing></>
-          : <Nothing>not judged</Nothing>],
-        ['In library', p.in_library || <Nothing>no</Nothing>],
-        ...profileRows(p.scrape),
-        ['Model', p.model || '']
-      ]} />
-    </DetailDrawer>
+    <div className="dw-acts">
+      <SmallButton disabled={!r.key} tip={r.key ? undefined : 'Not judged: not a performer yet'} sx={tall ? { minHeight: 40 } : undefined}
+        onClick={() => onOpen(r.key)}>Open her</SmallButton>
+      {r.link && (
+        <span className="dw-iconlink" title="Open on the site">
+          <ExternalLink href={r.link} aria-label="Open on the site"><span className="dw-sr">Open on the site</span></ExternalLink>
+        </span>
+      )}
+    </div>
   );
 }
 
-function WatcherDetail({ id, info, view, patch, job, watchJob, version, onBack, onRun }) {
-  const [which, setWhich] = useState('kept');
-  const params = new URLSearchParams({ list: which, q: view.q, sort: view.sort });
-  const list = useList(`/watcher/${encodeURIComponent(id)}?${params}`, { version });
-  const detail = useDetail();
-  const w = { id, label: id, ...list.extra.watcher, ...info };   // the summary's says where a profiles run goes on
-  const counts = list.extra.counts || {};
+const rowName = (r) => r.title || r.name || r.performer_name || '';
+const rowSub = (r) => (r.performer_name && r.performer_name !== rowName(r) ? r.performer_name : '');
+const rowKey = (r, i) => `${r.kind}:${r.key || r.link || ''}:${i}`;
+
+function WatcherRead({ w, version, ask, notify, refresh, sourceLabel, isPhone, onExtra }) {
+  const [qs, setQs] = useQueryState({ list: 'all', q: '', sort: 'newest' });
   const profiles = w.kind === 'profiles';
-  const running = isRunning(w, job, watchJob);
-  const keyOf = (x) => x.post_id ?? x.profile_id;
+  const which = ['all', 'above', 'below', 'skipped', 'waiting'].includes(qs.list) ? qs.list : 'all';
+  const params = new URLSearchParams({ list: which, sort: qs.sort || 'newest' });
+  if (qs.q) params.set('q', qs.q);
+  const list = useList(`/watcher/${encodeURIComponent(w.id)}?${params}`, { version });
+  const counts = list.extra?.counts || {};
+  const drawer = useOverlay('p');
+  const actions = usePerformerActions({ ask, notify, refresh, onPatched: () => {}, onRegroup: () => {} });
+
+  const extraWatcher = list.extra?.watcher;
+  useEffect(() => { if (extraWatcher) onExtra(extraWatcher); }, [extraWatcher, onExtra]);
+
+  const chips = [
+    { id: 'all', label: 'All' },
+    { id: 'above', label: 'Above the line' },
+    { id: 'below', label: 'Below the line' },
+    { id: 'skipped', label: profiles ? 'Not judged' : 'Skipped' },
+    { id: 'waiting', label: 'Waiting' }
+  ].filter(c => c.id !== 'waiting' || !profiles || counts.waiting > 0 || which === 'waiting');
 
   return (
     <>
-      <ButtonBase onClick={onBack} sx={{ gap: 0.75, color: 'var(--dim)', fontSize: '.82rem', mb: 1.5, '&:hover': { color: 'var(--text)' } }}>
-        <ArrowBackIcon sx={{ fontSize: 15 }} /> Watchers
-      </ButtonBase>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', mb: 1 }}>
-        <Typography component="h2" sx={{ m: 0, fontSize: '1.1rem', fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>{w.label}</Typography>
-        <Badge tone="info">{profiles ? 'Profiles' : 'Posts'}</Badge>
-        {w.url && (
-          <Box component="a" href={w.url} target="_blank" rel="noreferrer" sx={{ color: 'var(--muted)', fontSize: '.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none', '&:hover': { color: 'var(--dim)' } }}>
-            {w.url}
-          </Box>
-        )}
-        <Box sx={{ ml: 'auto' }}>
-          <SmallButton disabled={blocked(w, job, watchJob)} onClick={() => onRun(w)}>{runLabel(w, running)}</SmallButton>
-        </Box>
-      </Box>
-      <TabBar small label="Lists" value={which} onChange={setWhich} tabs={[
-        { id: 'kept', label: 'Kept', count: counts.kept },
-        { id: 'notKept', label: 'Not kept', count: counts.notKept },
-        { id: 'skipped', label: profiles ? 'Not judged' : 'Skipped', count: counts.skipped }
-      ]} />
       <Toolbar>
-        <SearchField value={view.q} onChange={(q) => patch({ q })} placeholder="Search names and aliases" />
-        <SortSelect value={view.sort} onChange={(sort) => patch({ sort })} />
-        <TotalText>{list.total} shown</TotalText>
+        {chips.map(c => (
+          <FilterChip key={c.id} on={which === c.id} onClick={() => setQs({ list: c.id })}>
+            {c.label}{counts[c.id] != null && <span className="dw-count">{counts[c.id]}</span>}
+          </FilterChip>
+        ))}
+        <SearchField value={qs.q} onChange={(q) => setQs({ q })} placeholder="Search names and titles" />
+        <SortSelect value={qs.sort || 'newest'} onChange={(sort) => setQs({ sort })} newest="Newest found first" />
+        <TotalText>{list.items.length} of {list.total}</TotalText>
       </Toolbar>
 
-      {list.error && <Alert severity="error" sx={{ mb: 2 }}>{list.error}</Alert>}
-      {!list.loaded && <LoadingState label="Loading…" />}
-      {list.loaded && !list.items.length && !list.error && (
-        <EmptyState title="Nothing here" description={view.q ? 'Nothing matches the search.' : which === 'kept' ? 'Nothing kept yet.' : 'Nothing yet.'} />
+      <StalePill list={list} />
+      {list.error && <ListError error={list.error} onRetry={list.retry} />}
+      {!list.loaded && !list.error && <LoadingState label="Loading…" />}
+      {list.loaded && !list.error && !list.items.length && (
+        <EmptyState title="Nothing here" description={qs.q || which !== 'all' ? 'Nothing matches the filters.' : 'Nothing yet.'} />
       )}
-      {which === 'skipped' && !profiles && list.items.length > 0 ? (
-        <Panel padded={false} sx={{ overflowX: 'auto' }}>
-          <Table size="small">
+
+      {list.items.length > 0 && !isPhone && (
+        <Panel padded={false} sx={{ overflowX: 'auto', maxWidth: '100%' }}>
+          <Table size="small" sx={{ '& .MuiTableCell-root': { fontSize: '.8rem', borderColor: 'var(--line)', py: '6px' }, '& th': { color: 'var(--muted)', fontWeight: 600 } }}>
             <TableHead>
-              <TableRow>{['Post', 'Reason', 'Posted', ''].map(h => <TableCell key={h}>{h}</TableCell>)}</TableRow>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Score</TableCell>
+                <TableCell>Why</TableCell>
+                <TableCell>Found</TableCell>
+                <TableCell align="right"><span className="dw-sr">Actions</span></TableCell>
+              </TableRow>
             </TableHead>
             <TableBody>
-              {list.items.map(p => (
-                <TableRow key={keyOf(p)}>
-                  <TableCell>{p.title}</TableCell>
-                  <TableCell sx={{ color: 'var(--dim)' }}>{p.skip_reason}</TableCell>
-                  <TableCell sx={{ color: 'var(--dim)', whiteSpace: 'nowrap' }}>{ago(p.posted_at)}</TableCell>
-                  <TableCell>{p.share_url && <SmallButton component="a" href={p.share_url} target="_blank" rel="noreferrer">Share link</SmallButton>}</TableCell>
+              {list.items.map((r, i) => (
+                <TableRow key={rowKey(r, i)} hover>
+                  <TableCell sx={{ minWidth: 180 }}>
+                    <span className="dw-name">{rowName(r)}</span>
+                    {rowSub(r) && <span className="dw-sub">{rowSub(r)}</span>}
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}><ScoreText r={r} profiles={profiles} /></TableCell>
+                  <TableCell sx={{ color: 'var(--dim)' }}>{r.skip_reason || ''}</TableCell>
+                  <TableCell sx={{ color: 'var(--dim)', whiteSpace: 'nowrap' }}>{ago(r.found_at || r.posted_at)}</TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}><RowActions r={r} onOpen={drawer.open} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </Panel>
-      ) : (
-        <Box sx={CARD_GRID}>
-          {list.items.map(x => {
-            const name = profiles ? x.name : x.kept ? x.performer_name : x.title;
-            const subtitle = profiles ? dataLine(x.scrape) : [postCounts(x.info), ago(x.posted_at)].filter(Boolean).join(' · ');
-            return (
-              <Card key={keyOf(x)} image={x.image} title={name || ''} subtitle={subtitle} dimmed={!x.kept} onOpen={() => detail.show(x)}
-                overlays={(
-                  <>
-                    {x.score != null && <Overlay tone={scoreTone(x)}>{x.score}</Overlay>}
-                    {x.in_library ? <Overlay at="tr" tone="var(--dim)">In library</Overlay>
-                      : !profiles && x.page_kind ? <Overlay at="tr" tone="var(--info)">{x.page_kind === 'creator' ? 'Creator' : 'Post'}</Overlay> : null}
-                    {x.image_paths?.length > 1 && <Overlay at="bl" tone="var(--dim)">{plural(x.image_paths.length, 'picture')}</Overlay>}
-                  </>
-                )} />
-            );
-          })}
-        </Box>
+      )}
+
+      {list.items.length > 0 && isPhone && (
+        <Panel padded={false} sx={{ overflow: 'hidden' }}>
+          <ul className="dw-rows">
+            {list.items.map((r, i) => (
+              <li key={rowKey(r, i)} className="dw-row">
+                <div className="dw-row-1">
+                  <span className="dw-name" title={rowName(r)}>{rowName(r)}</span>
+                  <ScoreText r={r} profiles={profiles} />
+                </div>
+                <div className="dw-row-2">
+                  <span className="dw-sub">
+                    {[rowSub(r), r.skip_reason, ago(r.found_at || r.posted_at)].filter(Boolean).join(' · ')}
+                  </span>
+                  <RowActions r={r} onOpen={drawer.open} tall />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
       )}
       <LoadMore list={list} />
 
-      {detail.item && (profiles
-        ? <ProfileDrawer open={detail.open} onClose={detail.close} p={detail.item} />
-        : <PostDrawer open={detail.open} onClose={detail.close} p={detail.item} />)}
+      <PerformerDrawerHost actions={actions} find={() => null} focusSource={w.source} focusLabel={w.label} sourceLabel={sourceLabel} />
     </>
   );
 }
 
-export default function WatchersTab({ summary, view, patch, version, notify, ask, refresh }) {
-  const [open, setOpen] = useState(null);
-  const { watchers, watch, job, watchJob } = summary;
+// ── one watcher ──────────────────────────────────────────────
+function WatcherDetail({ id, info, watch, job, watchJob, version, ask, notify, refresh, sourceLabel, isPhone, onRun }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [qs, setQs] = useQueryState({ view: 'performers', q: '', sort: '', status: '', list: '' });
+  const [extra, setExtra] = useState(null);
+  useEffect(() => { setExtra(null); }, [id]);
+
+  const back = () => (location.state?.fromGrid ? navigate(-1) : navigate('/discover/watchers', { replace: true }));
+  const backLink = (
+    <button type="button" className="dw-back" onClick={back}><ArrowBackIcon />Watchers</button>
+  );
+
+  if (!info) {
+    return (
+      <div className="dw-detail">
+        {backLink}
+        <EmptyState title="No such watcher" description="It may have been removed or renamed."
+          action={<SmallButton onClick={() => navigate('/discover/watchers', { replace: true })}>All watchers</SmallButton>} />
+      </div>
+    );
+  }
+
+  const w = { id, label: id, ...extra, ...info };   // the summary's is the newer one (it says where a profiles run goes on)
+  const profiles = w.kind === 'profiles';
+  const running = isRunning(w, job, watchJob);
+  const sub = qs.view === 'read' ? 'read' : 'performers';
+  const run = (sx) => <RunButton w={w} job={job} watchJob={watchJob} onRun={onRun} sx={sx} />;
+
+  const line = [
+    w.last_error
+      ? <span key="c" className="dw-bad">Failed {ago(w.last_checked)}: {w.last_error}</span>
+      : <span key="c">{w.last_checked ? `Checked ${ago(w.last_checked)}${w.last_found != null ? `: found ${w.last_found} new` : ''}` : 'Not run yet'}</span>,
+    w.last_update && <span key="u">newest find {ago(w.last_update)}</span>,
+    !profiles && w.backlog_done && <span key="b">Older posts: all read</span>,
+    profiles && w.resume_page && !running && <span key="p" className="dw-warn">Paused at page {w.resume_page}</span>
+  ].filter(Boolean);
+
+  const shared = { w, version, ask, notify, refresh, sourceLabel, isPhone };
+  return (
+    <div className="dw-detail">
+      {backLink}
+      <div className="dw-head">
+        <h2>{w.label}</h2>
+        <Badge tone="info">{profiles ? 'Profiles' : 'Posts'}</Badge>
+        {w.watch
+          ? <Badge tone={watch?.on ? 'accent' : 'dim'}>Every {watch?.minutes ?? 20} min{watch?.on ? '' : ', timer off'}</Badge>
+          : <Badge>By hand</Badge>}
+        {w.url && (
+          <span className="dw-url" title={w.url}>
+            <ExternalLink href={w.url} sx={{ display: 'flex', maxWidth: '100%', color: 'var(--muted)', '&:hover': { color: 'var(--dim)', textDecoration: 'underline' } }}>
+              <span className="dw-url-text">{w.url}</span>
+            </ExternalLink>
+          </span>
+        )}
+        <span className="dw-head-run">{run(isPhone ? { minHeight: 40 } : undefined)}</span>
+      </div>
+      <div className="dw-line">
+        {line.map((x, i) => <React.Fragment key={x.key}>{i > 0 && <Sep />}{x}</React.Fragment>)}
+      </div>
+      <TabBar small label="Watcher views" value={sub}
+        onChange={(view) => { if (view !== sub) setQs({ view, q: '', sort: '', status: '', list: '' }); }}
+        tabs={[{ id: 'performers', label: 'Performers' }, { id: 'read', label: 'What it read' }]} />
+      {sub === 'read'
+        ? <WatcherRead key={`read:${id}`} {...shared} onExtra={setExtra} />
+        : <WatcherPerformers key={`performers:${id}`} {...shared} runButton={run()} />}
+    </div>
+  );
+}
+
+export default function WatchersTab({ summary, watcherId, version, ask, notify, refresh, sourceLabel, isPhone }) {
+  const navigate = useNavigate();
+  const { watchers = [], watch, job, watchJob } = summary || {};
 
   // A watcher that only runs by hand (Leakhaven models: all ~5,500 creators) asks first, so a stray click doesn't start it
   const run = async (w) => {
@@ -234,16 +479,20 @@ export default function WatchersTab({ summary, view, patch, version, notify, ask
     refresh();
   };
 
-  if (open) {
+  if (!summary) return <LoadingState label="Loading…" />;
+  if (watcherId) {
     return (
-      <WatcherDetail id={open} info={watchers.find(w => w.id === open)} view={view} patch={patch} job={job} watchJob={watchJob}
-        version={version} onBack={() => setOpen(null)} onRun={run} />
+      <WatcherDetail id={watcherId} info={watchers.find(w => w.id === watcherId)} watch={watch} job={job} watchJob={watchJob}
+        version={version} ask={ask} notify={notify} refresh={refresh} sourceLabel={sourceLabel} isPhone={isPhone} onRun={run} />
     );
   }
-  if (!watchers.length) return <EmptyState title="No watchers" />;
+  if (!watchers.length) return <EmptyState title="No watchers" description="A watcher reads a site for new performers." />;
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: 1.5 }}>
-      {watchers.map(w => <WatcherCard key={w.id} w={w} watch={watch} job={job} watchJob={watchJob} onOpen={(x) => setOpen(x.id)} onRun={run} />)}
-    </Box>
+    <div className="dw-grid">
+      {watchers.map(w => (
+        <WatcherCard key={w.id} w={w} watch={watch} job={job} watchJob={watchJob} version={version} isPhone={isPhone}
+          onOpen={(x) => navigate(`/discover/watchers/${encodeURIComponent(x.id)}`, { state: { fromGrid: true } })} onRun={run} />
+      ))}
+    </div>
   );
 }

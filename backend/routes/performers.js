@@ -474,10 +474,66 @@ router.post('/:id/rating', async (req, res) => {
   }
 });
 
-// Reset all performer rankings to neutral (2.5)
+// ── rating snapshots ──
+// The ratings as they are now (every performer's performer_rating and every ratings row's manual_star: what a
+// reset changes), kept in rating_snapshots so a reset, or a restore, can be put back. The 10 newest are kept.
+// The reset keeps duel counts and duel history, so they are not part of it.
+const SNAPSHOT_KEEP = 10;
+
+function takeRatingSnapshot(label) {
+  // import_date with the id: an id freed by a delete is given to the next new performer, and never changes otherwise
+  const performers = db.prepare('SELECT id, import_date, performer_rating FROM performers ORDER BY id').all();
+  const ratings = db.prepare('SELECT performer_id, manual_star FROM ratings ORDER BY performer_id').all();
+  const rated = performers.filter(p => p.performer_rating !== null).length;
+  const info = db.prepare('INSERT INTO rating_snapshots (created_at, label, performers, data) VALUES (?, ?, ?, ?)')
+    .run(Date.now(), label, rated, JSON.stringify({ performers, ratings }));
+  db.prepare(`
+    DELETE FROM rating_snapshots
+    WHERE id NOT IN (SELECT id FROM rating_snapshots ORDER BY created_at DESC, id DESC LIMIT ?)
+  `).run(SNAPSHOT_KEEP);
+  return Number(info.lastInsertRowid);
+}
+
+/** SQLite's CURRENT_TIMESTAMP ('YYYY-MM-DD HH:MM:SS', UTC) or an ISO date in ms; NaN when unreadable. */
+function sqlDateMs(v) {
+  if (v == null || v === '') return NaN;
+  const s = String(v);
+  return Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s) ? s.replace(' ', 'T') + 'Z' : s);
+}
+
+// Puts a snapshot's ratings back on every performer it has that still exists: the same id and the same import_date,
+// so a performer added since that got a deleted performer's id is not touched. A performer that had no ratings
+// row then keeps its row (and its duel count) with no rating in it. Performers added since are left alone.
+// takenAt: the snapshot's created_at (ms), for a snapshot without import_date: then a performer imported after it
+// is left alone.
+function applyRatingSnapshot(data, takenAt) {
+  const ratingOf = new Map((data.ratings || []).map(r => [r.performer_id, r.manual_star]));
+  const current = db.prepare('SELECT import_date FROM performers WHERE id = ?');
+  const setPerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
+  const setRating = db.prepare('UPDATE ratings SET manual_star = ? WHERE performer_id = ?');
+  let restored = 0;
+  for (const p of data.performers || []) {
+    const now = current.get(p.id);
+    if (!now) continue; // deleted since
+    if (Object.prototype.hasOwnProperty.call(p, 'import_date')) {
+      if ((now.import_date ?? null) !== (p.import_date ?? null)) continue; // another performer with that id now
+    } else {
+      const added = sqlDateMs(now.import_date);
+      if (Number.isFinite(added) && Number.isFinite(takenAt) && added > takenAt) continue; // added since
+    }
+    setPerformer.run(p.performer_rating, p.id);
+    setRating.run(ratingOf.has(p.id) ? ratingOf.get(p.id) : null, p.id);
+    restored += 1;
+  }
+  return restored;
+}
+
+// Reset all performer rankings to neutral (2.5). A snapshot of the ratings is taken first, in the same transaction.
 router.post('/reset-rankings', (req, res) => {
   try {
+    let snapshotId = null;
     const transaction = db.transaction(() => {
+      snapshotId = takeRatingSnapshot('Before reset');
       db.prepare('UPDATE performers SET performer_rating = 2.5 WHERE performer_rating IS NOT NULL').run();
       db.prepare('UPDATE ratings SET manual_star = 2.5').run();
     });
@@ -491,9 +547,54 @@ router.post('/reset-rankings', (req, res) => {
       io.emit('performers_updated', { type: 'batch_rating_updated' });
     }
 
-    res.send({ success: true, count: count.count, message: 'All rankings reset to 2.5' });
+    res.send({ success: true, count: count.count, snapshotId, message: 'All rankings reset to 2.5' });
   } catch (err) {
     console.error('Error resetting rankings:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// The kept snapshots, newest first: { snapshots: [{ id, created_at (ms), label, performers (rated then) }] }
+router.get('/rating-snapshots', (req, res) => {
+  try {
+    const snapshots = db.prepare(`
+      SELECT id, created_at, label, performers FROM rating_snapshots ORDER BY created_at DESC, id DESC
+    `).all();
+    res.send({ success: true, snapshots });
+  } catch (err) {
+    console.error('Error listing rating snapshots:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+// Put a snapshot back. The ratings as they are now are kept as a new snapshot first, so a restore can be undone.
+// -> { success, restored (performers), snapshotId (the new "Before restore" one) }
+router.post('/rating-snapshots/:id/restore', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).send({ error: 'Not a snapshot id' });
+
+  try {
+    let outcome = null;
+    db.transaction(() => {
+      const row = db.prepare('SELECT data, created_at FROM rating_snapshots WHERE id = ?').get(id);
+      if (!row) {
+        outcome = { status: 404, body: { error: 'That snapshot is not kept any more' } };
+        return;
+      }
+      const data = JSON.parse(row.data); // read before the new snapshot, which may prune this one
+      const snapshotId = takeRatingSnapshot('Before restore');
+      const restored = applyRatingSnapshot(data, Number(row.created_at));
+      outcome = { status: 200, body: { success: true, restored, snapshotId } };
+    })();
+
+    if (outcome.status === 200) {
+      const io = req.app.get('io');
+      if (io) io.emit('performers_updated', { type: 'batch_rating_updated' });
+      triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
+    }
+    res.status(outcome.status).send(outcome.body);
+  } catch (err) {
+    console.error('Error restoring rating snapshot:', err);
     res.status(500).send({ error: err.message });
   }
 });
@@ -940,25 +1041,137 @@ function snapshotRatingState(id) {
   return { id, performer_rating: perf ? perf.performer_rating : null, rating_row: row || null };
 }
 
-// Undo one /compare or /compare-batch vote. Body: { undo } — the `undo` object
-// that vote returned. Refuses (409) when a rating changed since, so it can only
-// ever reverse the latest vote on those performers.
+// ── vote ids ──
+// /compare, /compare-batch and /compare/undo take an optional `voteId` (the client's uuid for that one vote).
+// The first send is applied and its answer stored in vote_ids, in the same transaction; a send that comes again
+// with that id gets the stored answer (with `repeated: true`) and changes nothing. So a vote whose answer was
+// lost can be sent again safely. Ids are kept 30 days.
+// /compare/undo can also name the vote by its id instead of its token: { cancelVoteId }. That is for a page being
+// left while a vote has no answer yet: when the vote is stored it is reversed with its stored token; when it is not
+// (yet), the id is stored as 'cancelled', so the vote is never applied when it arrives later. Either order of the two
+// requests ends with neither vote nor undo on the server.
+const VOTE_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const VOTE_ID_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+const VOTE_ID_PRUNE_EVERY_MS = 60 * 60 * 1000;
+let voteIdsPrunedAt = 0;
+
+/** The request's vote id, null when it has none; throws (status 400) when it is not a usable id. */
+function readVoteId(body) {
+  const v = body ? body.voteId : undefined;
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string' || !VOTE_ID_RE.test(v)) {
+    const err = new Error('voteId must be 8 to 64 letters, digits, - or _');
+    err.status = 400;
+    throw err;
+  }
+  return v;
+}
+
+/** Inside the vote's transaction: the stored outcome of a vote id seen before, or null. */
+function seenVote(voteId, kind) {
+  if (!voteId) return null;
+  const row = db.prepare('SELECT kind, result FROM vote_ids WHERE id = ?').get(voteId);
+  if (!row) return null;
+  if (row.kind === 'cancelled' && (kind === 'compare' || kind === 'compare-batch')) {
+    // undone by id before it arrived: never applied
+    return { status: 200, body: { success: true, cancelled: true, repeated: true }, repeated: true };
+  }
+  if (row.kind !== kind) return { status: 409, body: { error: 'That vote id was used for something else' } };
+  let body;
+  try { body = JSON.parse(row.result); } catch (_) { body = { success: true }; }
+  return { status: 200, body: { ...body, repeated: true }, repeated: true };
+}
+
+/** Inside the vote's transaction: remember the answer of a vote id, and now and then forget old ones. */
+function rememberVote(voteId, kind, result) {
+  if (!voteId) return;
+  const now = Date.now();
+  db.prepare('INSERT INTO vote_ids (id, kind, result, created_at) VALUES (?, ?, ?, ?)')
+    .run(voteId, kind, JSON.stringify(result), now);
+  if (now - voteIdsPrunedAt > VOTE_ID_PRUNE_EVERY_MS) {
+    voteIdsPrunedAt = now;
+    db.prepare('DELETE FROM vote_ids WHERE created_at < ?').run(now - VOTE_ID_KEEP_MS);
+  }
+}
+
+/**
+ * Runs one vote: fn() -> { status, body }, in one transaction with the vote id check and, when fn answers 200,
+ * the vote id row. An answer other than 200 changed nothing (fn returns before writing), so it is not remembered.
+ */
+function runVote(req, kind, fn) {
+  const voteId = readVoteId(req.body);
+  let outcome = null;
+  db.transaction(() => {
+    outcome = seenVote(voteId, kind);
+    if (outcome) return;
+    outcome = fn();
+    if (outcome.status === 200) rememberVote(voteId, kind, outcome.body);
+  })();
+  return outcome;
+}
+
+/** After a vote that changed something (not a repeat): tell the clients and refit the model. */
+function afterVote(req, outcome) {
+  if (outcome.status !== 200 || outcome.repeated) return;
+  const io = req.app.get('io');
+  if (io) io.emit('performers_updated', { type: 'batch_rating_updated' });
+  triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
+}
+
+function sendVoteError(res, where, err) {
+  if (err.status === 400) return res.status(400).send({ error: err.message });
+  console.error(`Error in ${where}:`, err);
+  return res.status(500).send({ error: err.message });
+}
+
+const isUndoToken = t => !!t && Array.isArray(t.performers) && t.performers.length >= 2;
+
+// Undo one /compare or /compare-batch vote. Body: { undo, voteId? } — the `undo` object
+// that vote returned — or { cancelVoteId, voteId? } — the vote's own voteId (see vote ids above).
+// Refuses (409) when a rating changed since, so it can only ever reverse the latest vote on those performers.
 router.post('/compare/undo', (req, res) => {
-  const token = req.body && req.body.undo;
-  if (!token || !Array.isArray(token.performers) || token.performers.length < 2) {
+  let token = req.body && req.body.undo;
+  let cancelId = null;
+  try {
+    const v = req.body ? req.body.cancelVoteId : undefined;
+    if (v !== undefined && v !== null && v !== '') {
+      cancelId = readVoteId({ voteId: v });
+      if (cancelId === readVoteId(req.body)) return res.status(400).send({ error: 'cancelVoteId must be another vote' });
+    }
+  } catch (err) {
+    return res.status(400).send({ error: 'cancelVoteId must be 8 to 64 letters, digits, - or _' });
+  }
+  if (!cancelId && !isUndoToken(token)) {
     return res.status(400).send({ error: 'undo token from the vote response is required' });
   }
 
   try {
-    const conflict = token.performers.find(p => {
-      const cur = db.prepare('SELECT manual_star FROM ratings WHERE performer_id = ?').get(p.id);
-      return !cur || cur.manual_star === null || Math.abs(cur.manual_star - p.expect) > 0.0001;
-    });
-    if (conflict) {
-      return res.status(409).send({ error: 'Ratings changed since this vote; cannot undo it' });
-    }
+    const outcome = runVote(req, 'undo', () => {
+      if (cancelId) {
+        const row = db.prepare('SELECT kind, result FROM vote_ids WHERE id = ?').get(cancelId);
+        if (!row) {
+          // the vote is not here (yet): it is never applied when it comes
+          db.prepare('INSERT INTO vote_ids (id, kind, result, created_at) VALUES (?, ?, ?, ?)')
+            .run(cancelId, 'cancelled', JSON.stringify({ success: true, cancelled: true }), Date.now());
+          return { status: 200, body: { success: true, cancelled: true, restored: [] } };
+        }
+        if (row.kind === 'cancelled') return { status: 200, body: { success: true, cancelled: true, restored: [] } };
+        if (row.kind !== 'compare' && row.kind !== 'compare-batch') {
+          return { status: 409, body: { error: 'That vote id is not a vote' } };
+        }
+        let stored = null;
+        try { stored = JSON.parse(row.result); } catch (_) { stored = null; }
+        token = stored && stored.undo;
+        if (!isUndoToken(token)) return { status: 409, body: { error: 'That vote cannot be undone' } };
+      }
+      const conflict = token.performers.find(p => {
+        const cur = db.prepare('SELECT manual_star FROM ratings WHERE performer_id = ?').get(p.id);
+        return !cur || cur.manual_star === null || Math.abs(cur.manual_star - p.expect) > 0.0001;
+      });
+      if (conflict) {
+        return { status: 409, body: { error: 'Ratings changed since this vote; cannot undo it' } };
+      }
 
-    db.transaction(() => {
       for (const p of token.performers) {
         db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?').run(p.performer_rating, p.id);
         if (p.rating_row) {
@@ -975,20 +1188,17 @@ router.post('/compare/undo', (req, res) => {
           db.prepare('DELETE FROM performer_comparisons WHERE id = ?').run(cid);
         }
       }
-    })();
+      return { status: 200, body: { success: true, restored: token.performers.map(p => p.id) } };
+    });
 
-    const io = req.app.get('io');
-    if (io) io.emit('performers_updated', { type: 'batch_rating_updated' });
-    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
-
-    res.send({ success: true, restored: token.performers.map(p => p.id) });
+    afterVote(req, outcome);
+    res.status(outcome.status).send(outcome.body);
   } catch (err) {
-    console.error('Error in compare/undo:', err);
-    res.status(500).send({ error: err.message });
+    sendVoteError(res, 'compare/undo', err);
   }
 });
 
-// Compare performers and auto-adjust ratings (Elo-like)
+// Compare performers and auto-adjust ratings (Elo-like). Body: { winnerId, loserId, draw?, voteId? }
 router.post('/compare', async (req, res) => {
   const { winnerId, loserId, draw = false } = req.body;
 
@@ -997,120 +1207,118 @@ router.post('/compare', async (req, res) => {
   }
 
   try {
-    const undoBefore = [snapshotRatingState(winnerId), snapshotRatingState(loserId)];
-    const comparisonIds = [];
-    // Join with ratings to get the new manual_star
-    const winner = db.prepare(`
-      SELECT p.id, r.manual_star as performer_rating 
-      FROM performers p 
-      LEFT JOIN ratings r ON p.id = r.performer_id 
-      WHERE p.id = ?
-    `).get(winnerId);
-    
-    const loser = db.prepare(`
-      SELECT p.id, r.manual_star as performer_rating 
-      FROM performers p 
-      LEFT JOIN ratings r ON p.id = r.performer_id 
-      WHERE p.id = ?
-    `).get(loserId);
+    const outcome = runVote(req, 'compare', () => {
+      const undoBefore = [snapshotRatingState(winnerId), snapshotRatingState(loserId)];
+      const comparisonIds = [];
+      // Join with ratings to get the new manual_star
+      const winner = db.prepare(`
+        SELECT p.id, r.manual_star as performer_rating
+        FROM performers p
+        LEFT JOIN ratings r ON p.id = r.performer_id
+        WHERE p.id = ?
+      `).get(winnerId);
 
-    if (!winner || !loser) {
-      return res.status(404).send({ error: 'Performer(s) not found' });
-    }
+      const loser = db.prepare(`
+        SELECT p.id, r.manual_star as performer_rating
+        FROM performers p
+        LEFT JOIN ratings r ON p.id = r.performer_id
+        WHERE p.id = ?
+      `).get(loserId);
 
-    let rA = winner.performer_rating !== null ? winner.performer_rating : 2.5;
-    let rB = loser.performer_rating !== null ? loser.performer_rating : 2.5;
-
-    // Use symmetric K-factor so the system is zero-sum (ratings don't inflate).
-    // Higher K for unrated/default performers so they settle into position faster.
-    const isEitherNew = (winner.performer_rating === null || winner.performer_rating === 2.5) ||
-                        (loser.performer_rating === null || loser.performer_rating === 2.5);
-    let K = isEitherNew ? 0.6 : 0.3;
-
-    // Upset bonus: if the underdog wins, increase K so upsets matter more
-    if (!draw && rB > rA + 0.5) {
-      K *= 1.5;
-    }
-
-    // ELO expected score — divisor of 1.5 is correct for a 0-5 star scale.
-    // (Standard ELO uses 400 for a ~2000-point range; 1.5 ≈ 400 * (5/1333))
-    const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 1.5));
-    const expectedB = 1 - expectedA;
-
-    let scoreA = draw ? 0.5 : 1;
-    let scoreB = draw ? 0.5 : 0;
-
-    let newRA = rA + K * (scoreA - expectedA);
-    let newRB = rB + K * (scoreB - expectedB);
-
-    newRA = Math.max(0, Math.min(5, Math.round(newRA * 100) / 100));
-    newRB = Math.max(0, Math.min(5, Math.round(newRB * 100) / 100));
-
-    // Update both performers table and ratings table
-    const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
-    const updateRating = db.prepare(`
-      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, comparison_count)
-      VALUES (?, ?, 0.9, 0, 1)
-      ON CONFLICT(performer_id) DO UPDATE SET
-        manual_star = EXCLUDED.manual_star,
-        confidence = MAX(confidence, 0.9), -- Comparisons slightly less confident than explicit ratings
-        is_flagged = 0,
-        comparison_count = COALESCE(comparison_count, 0) + 1,
-        created_at = CURRENT_TIMESTAMP
-    `);
-
-    updatePerformer.run(newRA, winnerId);
-    updateRating.run(winnerId, newRA);
-    
-    updatePerformer.run(newRB, loserId);
-    updateRating.run(loserId, newRB);
-
-    // Save comparison pair for Siamese model training. A draw has no winner,
-    // and training reads every row here as "winner beat loser" — so a draw
-    // only moves the ratings and is not stored as a pair.
-    try {
-      if (!draw) {
-        const info = db.prepare(`
-          INSERT INTO performer_comparisons
-            (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
-          VALUES (?, ?, 'performer_rank', ?, ?, ?, ?, 'group_rate')
-        `).run(winnerId, loserId, rA, rB, newRA, newRB);
-        comparisonIds.push(Number(info.lastInsertRowid));
+      if (!winner || !loser) {
+        return { status: 404, body: { error: 'Performer(s) not found' } };
       }
-    } catch (compErr) {
-      console.error('Error saving performer comparison:', compErr.message);
-    }
 
-    // Notify clients
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('performers_updated', { type: 'batch_rating_updated' });
-    }
+      let rA = winner.performer_rating !== null ? winner.performer_rating : 2.5;
+      let rB = loser.performer_rating !== null ? loser.performer_rating : 2.5;
 
-    // Trigger recalibration
-    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
+      // Use symmetric K-factor so the system is zero-sum (ratings don't inflate).
+      // Higher K for unrated/default performers so they settle into position faster.
+      const isEitherNew = (winner.performer_rating === null || winner.performer_rating === 2.5) ||
+                          (loser.performer_rating === null || loser.performer_rating === 2.5);
+      let K = isEitherNew ? 0.6 : 0.3;
 
-    res.send({
-      success: true,
-      results: [
-        { id: winnerId, oldRating: rA, newRating: newRA },
-        { id: loserId, oldRating: rB, newRating: newRB }
-      ],
-      undo: {
-        comparisonIds,
-        performers: [
-          { ...undoBefore[0], expect: newRA },
-          { ...undoBefore[1], expect: newRB }
-        ]
+      // Upset bonus: if the underdog wins, increase K so upsets matter more
+      if (!draw && rB > rA + 0.5) {
+        K *= 1.5;
       }
+
+      // ELO expected score — divisor of 1.5 is correct for a 0-5 star scale.
+      // (Standard ELO uses 400 for a ~2000-point range; 1.5 ≈ 400 * (5/1333))
+      const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 1.5));
+      const expectedB = 1 - expectedA;
+
+      let scoreA = draw ? 0.5 : 1;
+      let scoreB = draw ? 0.5 : 0;
+
+      let newRA = rA + K * (scoreA - expectedA);
+      let newRB = rB + K * (scoreB - expectedB);
+
+      newRA = Math.max(0, Math.min(5, Math.round(newRA * 100) / 100));
+      newRB = Math.max(0, Math.min(5, Math.round(newRB * 100) / 100));
+
+      // Update both performers table and ratings table
+      const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
+      const updateRating = db.prepare(`
+        INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, comparison_count)
+        VALUES (?, ?, 0.9, 0, 1)
+        ON CONFLICT(performer_id) DO UPDATE SET
+          manual_star = EXCLUDED.manual_star,
+          confidence = MAX(confidence, 0.9), -- Comparisons slightly less confident than explicit ratings
+          is_flagged = 0,
+          comparison_count = COALESCE(comparison_count, 0) + 1,
+          created_at = CURRENT_TIMESTAMP
+      `);
+
+      updatePerformer.run(newRA, winnerId);
+      updateRating.run(winnerId, newRA);
+
+      updatePerformer.run(newRB, loserId);
+      updateRating.run(loserId, newRB);
+
+      // Save comparison pair for Siamese model training. A draw has no winner,
+      // and training reads every row here as "winner beat loser" — so a draw
+      // only moves the ratings and is not stored as a pair.
+      try {
+        if (!draw) {
+          const info = db.prepare(`
+            INSERT INTO performer_comparisons
+              (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
+            VALUES (?, ?, 'performer_rank', ?, ?, ?, ?, 'group_rate')
+          `).run(winnerId, loserId, rA, rB, newRA, newRB);
+          comparisonIds.push(Number(info.lastInsertRowid));
+        }
+      } catch (compErr) {
+        console.error('Error saving performer comparison:', compErr.message);
+      }
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          results: [
+            { id: winnerId, oldRating: rA, newRating: newRA },
+            { id: loserId, oldRating: rB, newRating: newRB }
+          ],
+          undo: {
+            comparisonIds,
+            performers: [
+              { ...undoBefore[0], expect: newRA },
+              { ...undoBefore[1], expect: newRB }
+            ]
+          }
+        }
+      };
     });
+
+    afterVote(req, outcome);
+    res.status(outcome.status).send(outcome.body);
   } catch (err) {
-    console.error('Error in compare:', err);
-    res.status(500).send({ error: err.message });
+    sendVoteError(res, 'compare', err);
   }
 });
 
-// Batch compare: submit a full ordered ranking in one request
+// Batch compare: submit a full ordered ranking in one request. Body: { orderedIds, voteId? }
 // orderedIds[0] is the best (rank 1), orderedIds[last] is the worst
 router.post('/compare-batch', async (req, res) => {
   const { orderedIds } = req.body;
@@ -1120,84 +1328,84 @@ router.post('/compare-batch', async (req, res) => {
   }
 
   try {
-    // Load all performers in one pass
-    const perfMap = {};
-    for (const id of orderedIds) {
-      const row = db.prepare(`
-        SELECT p.id, r.manual_star as performer_rating 
-        FROM performers p 
-        LEFT JOIN ratings r ON p.id = r.performer_id 
-        WHERE p.id = ?
-      `).get(id);
-      if (!row) {
-        return res.status(404).send({ error: `Performer ${id} not found` });
+    const outcome = runVote(req, 'compare-batch', () => {
+      // Load all performers in one pass
+      const perfMap = {};
+      for (const id of orderedIds) {
+        const row = db.prepare(`
+          SELECT p.id, r.manual_star as performer_rating
+          FROM performers p
+          LEFT JOIN ratings r ON p.id = r.performer_id
+          WHERE p.id = ?
+        `).get(id);
+        if (!row) {
+          return { status: 404, body: { error: `Performer ${id} not found` } };
+        }
+        perfMap[id] = {
+          id: row.id,
+          rating: row.performer_rating !== null ? row.performer_rating : 2.5,
+          isNew: row.performer_rating === null || row.performer_rating === 2.5
+        };
       }
-      perfMap[id] = {
-        id: row.id,
-        rating: row.performer_rating !== null ? row.performer_rating : 2.5,
-        isNew: row.performer_rating === null || row.performer_rating === 2.5
-      };
-    }
 
-    // Process all pairwise comparisons and accumulate deltas
-    const deltas = {};
-    const wins = {};
-    const losses = {};
-    for (const id of orderedIds) {
-      deltas[id] = 0;
-      wins[id] = 0;
-      losses[id] = 0;
-    }
-
-    const anyNew = orderedIds.some(id => perfMap[id].isNew);
-    const baseK = anyNew ? 0.6 : 0.3;
-
-    for (let i = 0; i < orderedIds.length; i++) {
-      for (let j = i + 1; j < orderedIds.length; j++) {
-        const winnerId = orderedIds[i];
-        const loserId = orderedIds[j];
-        const rA = perfMap[winnerId].rating;
-        const rB = perfMap[loserId].rating;
-
-        let K = baseK;
-        // Upset bonus: underdog (lower rated) was ranked higher
-        if (rB > rA + 0.5) K *= 1.5;
-
-        const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 1.5));
-        const expectedB = 1 - expectedA;
-
-        deltas[winnerId] += K * (1 - expectedA);
-        deltas[loserId] += K * (0 - expectedB);
-        wins[winnerId]++;
-        losses[loserId]++;
+      // Process all pairwise comparisons and accumulate deltas
+      const deltas = {};
+      const wins = {};
+      const losses = {};
+      for (const id of orderedIds) {
+        deltas[id] = 0;
+        wins[id] = 0;
+        losses[id] = 0;
       }
-    }
 
-    // Apply all updates in a single transaction
-    const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
-    const updateRating = db.prepare(`
-      INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, comparison_count)
-      VALUES (?, ?, 0.9, 0, 1)
-      ON CONFLICT(performer_id) DO UPDATE SET
-        manual_star = EXCLUDED.manual_star,
-        confidence = MAX(confidence, 0.9),
-        is_flagged = 0,
-        comparison_count = COALESCE(comparison_count, 0) + 1,
-        created_at = CURRENT_TIMESTAMP
-    `);
+      const anyNew = orderedIds.some(id => perfMap[id].isNew);
+      const baseK = anyNew ? 0.6 : 0.3;
 
-    const results = [];
-    const insertComparison = db.prepare(`
-      INSERT INTO performer_comparisons
-        (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
-      VALUES (?, ?, 'performer_rank_batch', ?, ?, ?, ?, 'smart_compare')
-    `);
+      for (let i = 0; i < orderedIds.length; i++) {
+        for (let j = i + 1; j < orderedIds.length; j++) {
+          const winnerId = orderedIds[i];
+          const loserId = orderedIds[j];
+          const rA = perfMap[winnerId].rating;
+          const rB = perfMap[loserId].rating;
 
-    const undoBefore = orderedIds.map(id => snapshotRatingState(id));
-    const comparisonIds = [];
-    const newRatings = {};
+          let K = baseK;
+          // Upset bonus: underdog (lower rated) was ranked higher
+          if (rB > rA + 0.5) K *= 1.5;
 
-    const transaction = db.transaction(() => {
+          const expectedA = 1 / (1 + Math.pow(10, (rB - rA) / 1.5));
+          const expectedB = 1 - expectedA;
+
+          deltas[winnerId] += K * (1 - expectedA);
+          deltas[loserId] += K * (0 - expectedB);
+          wins[winnerId]++;
+          losses[loserId]++;
+        }
+      }
+
+      // Apply all updates (runVote holds them in one transaction)
+      const updatePerformer = db.prepare('UPDATE performers SET performer_rating = ? WHERE id = ?');
+      const updateRating = db.prepare(`
+        INSERT INTO ratings (performer_id, manual_star, confidence, is_flagged, comparison_count)
+        VALUES (?, ?, 0.9, 0, 1)
+        ON CONFLICT(performer_id) DO UPDATE SET
+          manual_star = EXCLUDED.manual_star,
+          confidence = MAX(confidence, 0.9),
+          is_flagged = 0,
+          comparison_count = COALESCE(comparison_count, 0) + 1,
+          created_at = CURRENT_TIMESTAMP
+      `);
+
+      const results = [];
+      const insertComparison = db.prepare(`
+        INSERT INTO performer_comparisons
+          (winner_id, loser_id, type, winner_rating_before, loser_rating_before, winner_rating_after, loser_rating_after, source)
+        VALUES (?, ?, 'performer_rank_batch', ?, ?, ?, ?, 'smart_compare')
+      `);
+
+      const undoBefore = orderedIds.map(id => snapshotRatingState(id));
+      const comparisonIds = [];
+      const newRatings = {};
+
       // Compute new ratings first
       for (const id of orderedIds) {
         const oldRating = perfMap[id].rating;
@@ -1228,29 +1436,24 @@ router.post('/compare-batch', async (req, res) => {
       } catch (compErr) {
         console.error('Error saving batch comparison pairs:', compErr.message);
       }
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          results,
+          undo: {
+            comparisonIds,
+            performers: undoBefore.map(s => ({ ...s, expect: newRatings[s.id] }))
+          }
+        }
+      };
     });
-    transaction();
 
-    // Notify clients once
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('performers_updated', { type: 'batch_rating_updated' });
-    }
-
-    // Trigger recalibration once
-    triggerModelCalibration().catch(err => console.error('Calibration trigger error:', err));
-
-    res.send({
-      success: true,
-      results,
-      undo: {
-        comparisonIds,
-        performers: undoBefore.map(s => ({ ...s, expect: newRatings[s.id] }))
-      }
-    });
+    afterVote(req, outcome);
+    res.status(outcome.status).send(outcome.body);
   } catch (err) {
-    console.error('Error in compare-batch:', err);
-    res.status(500).send({ error: err.message });
+    sendVoteError(res, 'compare-batch', err);
   }
 });
 
@@ -1794,11 +1997,16 @@ async function handleTrashFolder(trashFolderPath, performerName, basePath, fileT
   console.log(`handleTrashFolder: folder=${trashFolderPath}, performer=${performerName}, type=${fileType}, saveForTraining=${saveForTraining}, forceTraining=${forceTraining}`);
 
   try {
+    // Duplicates (name 'dupe__...', from the duplicates page) are deleted first and never saved for training
+    const { dropNoTraining, isNoTraining } = require('../services/fileTrash');
+    await dropNoTraining(trashFolderPath);
+
     if (!await fs.pathExists(trashFolderPath)) {
       return { saved: false, count: 0 };
     }
 
-    const files = await fs.readdir(trashFolderPath);
+    // a duplicate that could not be deleted (in use) is never moved to training: it goes with the folder below
+    const files = (await fs.readdir(trashFolderPath)).filter(f => !isNoTraining(f));
 
     if (saveForTraining && files.length > 0) {
       // Move entire contents to training folder

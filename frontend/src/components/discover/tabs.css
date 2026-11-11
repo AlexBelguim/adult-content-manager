@@ -1,0 +1,109 @@
+/* Discover tabs: Performers / Liked / Kept, Duplicates and Upload.
+   Darkroom tokens only, no gradients, nothing under 12px (.75rem). Prefix: dt-. */
+
+/* ── toolbar: the search field, full width on a phone ── */
+.dt-search { display: flex; flex: 1 1 200px; min-width: 0; max-width: 260px; }
+.dt-search.dt-search > * { flex: 1 1 auto; width: 100%; max-width: none; min-width: 0; }
+@media (max-width: 600px) {
+  .dt-search { flex-basis: 100%; max-width: none; }
+}
+
+/* ── Duplicates: cards side by side, a fallen one 1 tile wide, a pair 2 tiles wide ── */
+.dt-dups { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
+.dt-dup {
+  --cols: 1;
+  display: flex; flex-direction: column; min-width: 0;
+  flex: var(--cols) 1 calc(var(--cols) * 172px + (var(--cols) - 1) * 10px + 24px);
+  max-width: min(100%, calc(var(--cols) * 210px + (var(--cols) - 1) * 10px + 24px));
+}
+.dt-dup.done { border-color: var(--line-strong); }
+.dt-dup-head {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 10px 12px; border-bottom: 1px solid var(--line);
+  font-size: .8rem; line-height: 1.4; font-variant-numeric: tabular-nums;
+}
+.dt-dup-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-dup-text.fallen { color: var(--warn); }
+.dt-dup-text.pair { color: var(--dim); }
+.dt-dup-head > :last-child:not(.dt-dup-text) { flex: none; }
+.dt-dup-body {
+  display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 10px; padding: 12px;
+  align-content: start; flex: 1 1 auto;
+}
+.dt-dup-actions { display: flex; gap: 8px; padding: 0 12px 12px; }
+.dt-dup-actions > * { flex: 1 1 0; min-width: 0; display: flex; }
+.dt-dup-actions button { flex: 1 1 auto; width: 100%; min-height: 34px; }
+@media (max-width: 600px), (pointer: coarse) {
+  .dt-dup-actions button { min-height: 40px; }
+}
+@media (max-width: 600px) {
+  .dt-dups { gap: 8px; }
+  /* a pair is full width with its two side cards side by side; two "below the line" cards share a row, so no half row
+     stays empty */
+  .dt-dup.pair { flex: 1 1 100%; max-width: 100%; }
+  .dt-dup.fallen { flex: 0 1 calc(50% - 4px); max-width: calc(50% - 4px); }
+  .dt-dup-body { gap: 8px; padding: 8px; }
+  .dt-dup-head { padding: 8px; }
+  .dt-dup-actions { padding: 0 8px 8px; gap: 6px; }
+  .dt-dup.fallen .dt-dup-actions button { padding-left: 4px; padding-right: 4px; }
+}
+
+/* ── Upload ── */
+.dt-check {
+  /* the corner row lets clicks through to the picture (pointer-events: none): the box takes them itself */
+  pointer-events: auto;
+  display: grid; place-items: center; width: 28px; height: 28px; cursor: pointer;
+  border-radius: var(--radius); background: var(--scrim-strong); border: 1px solid var(--line-strong);
+}
+.dt-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.dt-check:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.dt-problems {
+  display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: var(--radius);
+  background: var(--warn-quiet); color: var(--warn); font-size: .8rem; line-height: 1.45;
+}
+.dt-problems-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dt-problems-head > :first-child { flex: 1 1 auto; min-width: 0; }
+.dt-problems ul { margin: 0; padding-left: 18px; }
+.dt-problems li { overflow-wrap: anywhere; }
+
+.dt-kind-line { font-size: .8rem; color: var(--dim); flex-basis: 100%; }
+
+/* the selection bar: sticky at the bottom of the grid while entries are selected; every button the same height */
+.dt-selbar {
+  /* above the phone's bottom navigation while it shows (--nav-bottom, set by mobile/BottomNav.js) */
+  position: sticky; bottom: calc(8px + var(--nav-bottom, env(safe-area-inset-bottom, 0px))); z-index: 6;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-lg, 10px); box-shadow: var(--shadow-md);
+}
+.dt-selbar-count {
+  flex: 1 1 220px; min-width: 0; font-size: .875rem; font-weight: 620; line-height: 1.4; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.dt-selbar-count small { display: block; font-size: .75rem; font-weight: 400; color: var(--dim); overflow-wrap: anywhere; }
+.dt-selbar-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.dt-selbar-btns > * { display: flex; }
+.dt-selbar-btns button { min-height: 32px; box-sizing: border-box; }
+@media (max-width: 600px), (pointer: coarse) {
+  .dt-selbar-btns button { min-height: 40px; }
+}
+@media (max-width: 600px) {
+  .dt-selbar { padding: 8px; gap: 8px; }
+  .dt-selbar-btns { width: 100%; }
+  .dt-selbar-btns > * { flex: 1 1 auto; }
+  .dt-selbar-btns button { flex: 1 1 auto; width: 100%; padding-left: 8px; padding-right: 8px; }
+}
+/* the report of the last action, while some stay selected: in the bar, so no toast covers its buttons */
+.dt-selbar-report {
+  flex: 1 1 100%; order: 3; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised);
+  font-size: .8rem; line-height: 1.4; color: var(--text);
+}
+.dt-selbar-report > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.dt-selbar-report.ok { border-color: var(--ok); background: var(--ok-quiet); }
+.dt-selbar-report.warn { border-color: var(--warn); background: var(--warn-quiet); }
+.dt-selbar-report.bad { border-color: var(--bad); background: var(--bad-quiet); }
+.dt-selbar-report button { flex: none; min-height: 28px; }
+@media (max-width: 600px), (pointer: coarse) {
+  .dt-selbar-report button { min-height: 36px; }
+}

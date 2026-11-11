@@ -1,0 +1,162 @@
+/* Discover → Watchers: the grid of watcher cards and one watcher's page (Performers, What it read).
+   Darkroom tokens only, no gradients, nothing under 12px (.75rem). Prefix: dw-.
+   Padding and borders of Panels are set through sx (Panel's own styles would win over a class here). */
+
+.dw-num { font-variant-numeric: tabular-nums; }
+.dw-dim { color: var(--dim); }
+.dw-ok { color: var(--ok); }
+.dw-bad { color: var(--bad); }
+.dw-warn { color: var(--warn); }
+.dw-info { color: var(--info); }
+.dw-sep { color: var(--faint); margin: 0 .35em; }
+.dw-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── the grid of watchers ── */
+/* 1 column on a phone, 2 or more as soon as they fit; every row as tall as the tallest card (grid-auto-rows: 1fr) */
+.dw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  grid-auto-rows: 1fr;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dw-card {
+  display: flex; flex-direction: column; gap: 10px;
+  min-width: 0; color: var(--text);
+}
+.dw-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* name and state chip, then site · kind · schedule */
+.dw-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dw-card-title {
+  margin: 0; flex: 1 1 auto; min-width: 0;
+  font-size: 1rem; font-weight: 620; letter-spacing: -0.01em; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dw-card-head > :last-child:not(.dw-card-title) { flex: none; }
+.dw-kind {
+  display: flex; align-items: center; min-width: 0; margin-top: -6px;
+  font-size: .78rem; line-height: 1.4; color: var(--dim); white-space: nowrap;
+}
+.dw-kind > span { flex: none; }
+.dw-kind > .dw-site { flex: 0 1 auto; min-width: 0; overflow: hidden; display: flex; }
+.dw-site a { font-size: inherit; }
+.dw-site-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the strip of its newest finds above the line: five slots, filled or not */
+.dw-thumbs { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.dw-thumb {
+  position: relative; aspect-ratio: 4 / 5; min-width: 0; overflow: hidden;
+  border-radius: var(--radius-sm); background: var(--raised);
+}
+.dw-thumb.empty { background: none; border: 1px solid var(--line); }
+.dw-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.dw-thumb-score {
+  position: absolute; left: 3px; bottom: 3px; padding: 1px 4px;
+  border-radius: var(--radius-sm); background: var(--scrim-strong);
+  font-size: .75rem; font-weight: 700; line-height: 1.3; color: var(--ok); font-variant-numeric: tabular-nums;
+}
+/* nothing to show: one quiet box with a note, as tall as the strip */
+.dw-thumbs.none .dw-thumb.empty { visibility: hidden; }
+.dw-thumbs-note {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 0 8px; text-align: center;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  font-size: .75rem; color: var(--muted);
+}
+
+/* the numbers: one row of five even columns, value over label; a long label wraps (two lines kept for all, so they line up) */
+.dw-nums { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; min-width: 0; }
+.dw-n { display: flex; flex-direction: column; min-width: 0; }
+.dw-n-v {
+  font-size: 1.05rem; font-weight: 660; line-height: 1.25; color: var(--text);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.dw-n-v.zero { color: var(--muted); font-weight: 600; }
+.dw-n-v.accent { color: var(--accent); }
+.dw-n-v.ok { color: var(--ok); }
+.dw-n-v.warn { color: var(--warn); }
+.dw-n-v.info { color: var(--info); }
+.dw-n-l { font-size: .75rem; line-height: 1.25; min-height: 2.5em; color: var(--dim); }
+
+/* what it read, as parts: above, below, skipped, waiting; then the share above the line */
+.dw-barrow { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: -4px; }
+.dw-bar { flex: 1 1 auto; display: flex; height: 4px; border-radius: 99px; overflow: hidden; background: var(--raised); }
+.dw-pct { flex: none; font-size: .75rem; font-weight: 600; line-height: 1.3; color: var(--ok); font-variant-numeric: tabular-nums; }
+.dw-pct.zero { color: var(--muted); }
+.dw-bar > span { flex-basis: 0; min-width: 2px; }
+.dw-bar-above { background: var(--ok); }
+.dw-bar-below { background: var(--line-strong); }
+.dw-bar-skipped { background: var(--warn); }
+.dw-bar-waiting { background: var(--info); }
+
+/* the last check, two lines at most, so the card keeps its height */
+.dw-last {
+  font-size: .78rem; line-height: 1.45; color: var(--dim); overflow-wrap: anywhere; min-height: calc(2 * 1.45em);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.dw-last.failed { display: block; }
+.dw-last-1, .dw-err { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dw-err { color: var(--bad); }
+.dw-nb { white-space: nowrap; }
+.dw-card-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── one watcher ── */
+.dw-detail { min-width: 0; }
+.dw-back {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px 0 4px; margin: 0 0 8px -4px;
+  border: 0; border-radius: var(--radius-sm); background: none; color: var(--dim);
+  font: inherit; font-size: .82rem; cursor: pointer;
+}
+.dw-back:hover { color: var(--text); background: var(--raised); }
+.dw-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dw-back svg { width: 16px; height: 16px; }
+
+.dw-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 6px; min-width: 0; }
+.dw-head h2 {
+  margin: 0; min-width: 0; max-width: 100%; overflow-wrap: anywhere;
+  font-size: 1.1rem; font-weight: 640; letter-spacing: -0.015em; color: var(--text);
+}
+.dw-url {
+  flex: 1 1 140px; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .75rem; color: var(--muted);
+}
+.dw-url > a { font-size: inherit; }
+/* the text shrinks with an ellipsis, the external-link icon after it stays */
+.dw-url-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dw-head-run { margin-left: auto; flex: none; }
+
+.dw-line { font-size: .78rem; line-height: 1.5; color: var(--dim); margin-bottom: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+.dw-full { flex: 1 1 100%; min-width: 0; }
+.dw-full > * { width: 100%; }
+.dw-count { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dw-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+/* ── What it read ── */
+.dw-name { display: block; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.dw-sub { display: block; font-size: .75rem; color: var(--dim); overflow-wrap: anywhere; }
+.dw-score { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dim); }
+.dw-score.above { color: var(--ok); }
+.dw-acts { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.dw-iconlink { display: inline-flex; }
+.dw-iconlink a {
+  display: inline-grid; place-items: center; min-width: 32px; min-height: 32px;
+  border-radius: var(--radius-sm); color: var(--dim);
+}
+.dw-iconlink a:hover { color: var(--text); background: var(--raised); }
+
+/* phone rows */
+.dw-rows { list-style: none; margin: 0; padding: 0; }
+.dw-row { padding: 10px 12px; border-top: 1px solid var(--line); min-width: 0; }
+.dw-row:first-child { border-top: 0; }
+.dw-row-1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: .85rem; }
+.dw-row-1 .dw-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dw-row-1 > :last-child { flex: none; }
+.dw-row-2 { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 2px; }
+.dw-row-2 .dw-sub { flex: 1 1 auto; min-width: 0; }
+.dw-row .dw-iconlink a { min-width: 40px; min-height: 40px; }

@@ -154,10 +154,11 @@ router.post('/delete', async (req, res) => {
 
 // POST /api/filter/apply-smart-batch
 router.post('/apply-smart-batch', async (req, res) => {
-  const { performerId, results, performerName, basePath } = req.body;
+  const { performerId, results, performerName, basePath, corrections } = req.body;
 
   try {
-    const result = await filterService.applySmartBatch(performerId, results, { performerName, basePath });
+    // corrections: pictures flipped against K's zone, kept as hard examples for K's training
+    const result = await filterService.applySmartBatch(performerId, results, { performerName, basePath, corrections });
     res.send(result);
   } catch (err) {
     console.error('Error in /apply-smart-batch:', err);

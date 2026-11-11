@@ -36,7 +36,7 @@ export default function DecisionBar({
         <b>Undo</b>
         <Key k={shortcuts.undo} />
       </button>
-      <button type="button" className="fv-act move" onClick={() => onDecide('move_to_funscript')} disabled={!canMove} title="Videos only — moves to the funscript folder and queues funpipe" aria-label="Move to funscript">
+      <button type="button" className="fv-act move" onClick={() => onDecide('move_to_funscript')} disabled={!canMove} title="Videos only: moves it to the funscript folder (no script is started)" aria-label="Move to funscript">
         <Icon name="move" />
         <b>To funscript</b>
         <Key k={shortcuts.move_to_funscript} />

@@ -41,6 +41,9 @@ function share(labels, terms) {
   return labels.seconds > 0 ? covered / labels.seconds : 0;
 }
 
+// a rule with a share of 0 asks for any of its terms at all, not for every video
+const meets = (labels, terms, minShare) => { const x = share(labels, terms); return minShare > 0 ? x >= minShare : x > 0; };
+
 const parseLabels = (row) => row && { seconds: row.seconds, scenes: JSON.parse(row.scenes), exposure: JSON.parse(row.exposure) };
 const rules = () => db.prepare('SELECT tag, terms, min_share FROM tag_rules').all().map(r => ({ ...r, terms: JSON.parse(r.terms) }));
 
@@ -56,7 +59,7 @@ function applyToFile(filePath) {
   const labels = parseLabels(db.prepare('SELECT seconds, scenes, exposure FROM video_labels WHERE file_path = ?').get(filePath));
   if (!labels) return [];
   return rules()
-    .filter(r => share(labels, r.terms) >= r.min_share)
+    .filter(r => meets(labels, r.terms, r.min_share))
     .filter(r => insertAuto.run(filePath, r.tag, filePath, r.tag).changes > 0)
     .map(r => r.tag);
 }
@@ -66,7 +69,7 @@ function applyRule(tag) {
   const rule = rules().find(r => r.tag === tag);
   if (!rule) return 0;
   const hits = db.prepare('SELECT file_path, seconds, scenes, exposure FROM video_labels').all()
-    .filter(row => share(parseLabels(row), rule.terms) >= rule.min_share);
+    .filter(row => meets(parseLabels(row), rule.terms, rule.min_share));
   let added = 0;
   db.transaction(() => {
     for (const row of hits) added += insertAuto.run(row.file_path, tag, row.file_path, tag).changes;
@@ -74,13 +77,38 @@ function applyRule(tag) {
   return added;
 }
 
+const autoCount = (tag) => db.prepare("SELECT COUNT(*) AS n FROM file_tags WHERE tag = ? AND source = 'labelmaster'").get(tag).n;
+
+/**
+ * Make a tag's rule-set files match its rule (a new, wider or narrower rule): videos that meet it get the tag (not
+ * those it was taken off by hand), and tags the rule set on videos that no longer meet it come off. Tags set by
+ * hand are never touched. Returns { added, removed, total } (total: files the rule tags now).
+ */
+function syncRule(tag) {
+  const rule = rules().find(r => r.tag === tag);
+  if (!rule) return { added: 0, removed: 0, total: autoCount(tag) };
+  let added = 0;
+  let removed = 0;
+  db.transaction(() => {
+    const current = new Set(db.prepare("SELECT file_path FROM file_tags WHERE tag = ? AND source = 'labelmaster'").all(tag).map(r => r.file_path));
+    const hits = new Set();
+    for (const row of db.prepare('SELECT file_path, seconds, scenes, exposure FROM video_labels').iterate()) {
+      if (meets(parseLabels(row), rule.terms, rule.min_share)) hits.add(row.file_path);
+    }
+    const drop = db.prepare("DELETE FROM file_tags WHERE file_path = ? AND tag = ? AND source = 'labelmaster'");
+    for (const fp of current) if (!hits.has(fp)) removed += drop.run(fp, tag).changes;
+    for (const fp of hits) if (!current.has(fp)) added += insertAuto.run(fp, tag, fp, tag).changes;
+  })();
+  return { added, removed, total: autoCount(tag) };
+}
+
 /** How many labelled videos a rule would tag (the folder maker's live count). */
 function countMatches(terms, minShare) {
   let n = 0;
   for (const row of db.prepare('SELECT seconds, scenes, exposure FROM video_labels').iterate()) {
-    if (share(parseLabels(row), terms) >= minShare) n += 1;
+    if (meets(parseLabels(row), terms, minShare)) n += 1;
   }
   return n;
 }
 
-module.exports = { TERMS, share, rules, applyToFile, applyRule, countMatches };
+module.exports = { TERMS, share, rules, applyToFile, applyRule, syncRule, countMatches };

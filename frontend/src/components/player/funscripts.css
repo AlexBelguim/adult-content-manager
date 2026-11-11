@@ -1,0 +1,75 @@
+/* Funscripts panel (FunscriptPanel.js). Darkroom tokens only. */
+
+/* The header's <handy-control>: its shadow DOM inherits the h4's caps and tracking, so reset them. */
+.pl-fs h4 { min-height: 34px; }
+.pl-fs-hc { margin-left: auto; display: inline-flex; align-items: center; text-transform: none; letter-spacing: normal; font-size: 13px; font-weight: 400; color: var(--text); }
+
+.pl-fs-note { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* One status line for every state. */
+.pl-fs-status { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 4px 6px 4px 10px; margin: 0 0 8px; background: var(--raised); border-radius: var(--radius); font-size: 13px; line-height: 1.35; color: var(--dim); }
+.pl-fs-status > span { min-width: 0; overflow-wrap: anywhere; }
+.pl-fs-status b { color: var(--text); font-weight: 600; }
+.pl-fs-status .is-bad { color: var(--bad); }
+.pl-fs-st-text { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-fs-stop { margin-left: auto; flex: none; font-size: 12px; }
+
+.pl-fs-listerr { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--bad); }
+
+/* Rows: icon | name and facts | fixed slot | delete. All the same height. */
+.pl-fs-item { border-top: 1px solid var(--line); }
+.pl-fs-item:first-child { border-top: 0; }
+.pl-fs-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 112px 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 5px 0; }
+.pl-fs-ic { color: var(--muted); }
+.pl-fs-info { display: flex; flex-direction: column; min-width: 0; }
+.pl-fs-name { font-weight: 600; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-fs-fact { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pl-fs-slot { display: flex; justify-content: flex-end; align-items: center; min-width: 0; }
+.pl-fs-send,
+.pl-fs-on,
+.pl-fs-busy,
+.pl-fs-wait { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; box-sizing: border-box; padding: 0 10px; border-radius: var(--radius); font: inherit; font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pl-fs-send { background: none; border: 1px solid var(--accent); color: var(--accent); font-weight: 600; cursor: pointer; }
+.pl-fs-send:hover { background: var(--accent-quiet); }
+.pl-fs-send:disabled { border-color: var(--line-strong); color: var(--muted); background: none; cursor: default; opacity: .6; }
+.pl-fs-send.is-failed { border-color: var(--bad); color: var(--bad); }
+.pl-fs-send.is-failed:hover { background: var(--bad-quiet); }
+.pl-fs-on { background: var(--ok-quiet); color: var(--ok); font-weight: 600; }
+.pl-fs-wait { color: var(--muted); padding: 0 2px; font-variant-numeric: tabular-nums; }
+.pl-fs-busy { color: var(--warn); padding: 0; height: auto; min-height: 28px; }
+.pl-fs-status .pl-fs-busy { min-height: 0; font-size: 13px; }
+.pl-fs-busy::before { content: ''; flex: none; width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: pl-fs-spin .8s linear infinite; }
+@keyframes pl-fs-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pl-fs-busy::before { animation-duration: 2.4s; } }
+
+.pl-fs-del { width: 28px; height: 28px; display: inline-grid; place-items: center; padding: 0; background: none; border: 1px solid var(--bad); border-radius: var(--radius); color: var(--bad); cursor: pointer; }
+.pl-fs-del:hover { background: var(--bad-quiet); }
+.pl-fs-del:disabled { opacity: .35; cursor: default; background: none; }
+
+.pl-fs-msg { margin: -2px 0 6px 26px; font-size: 12px; color: var(--bad); overflow-wrap: anywhere; }
+
+.pl-fs-auto { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.pl-fs-auto .MuiFormControlLabel-root { margin: 0; gap: 6px; align-items: center; }
+.pl-fs-auto .MuiFormControlLabel-label { font-size: 13px; color: var(--dim); line-height: 1.35; }
+.pl-fs-auto .pl-fs-note { margin-top: 2px; padding-left: 46px; }
+
+/* 900 to 1199px: the tools column is 280px, too narrow for name and slot on one line. The name gets its own
+   line; Send and delete go under it. */
+@media (min-width: 900px) and (max-width: 1199.98px) and (min-height: 500.02px) {
+  .pl-fs-row { grid-template-columns: 18px minmax(0, 1fr) 28px; grid-template-areas: "ic info info" ". slot del"; row-gap: 4px; }
+  .pl-fs-row > .pl-fs-ic { grid-area: ic; }
+  .pl-fs-info { grid-area: info; }
+  .pl-fs-slot { grid-area: slot; justify-content: flex-start; }
+  .pl-fs-del { grid-area: del; }
+}
+
+/* Phone layout (the player's PLAYER_PHONE_QUERY): bigger touch targets. */
+@media (max-width: 899.98px), (max-height: 500px) {
+  .pl-fs-row { grid-template-columns: 18px minmax(0, 1fr) 112px 40px; padding: 9px 0; min-height: 54px; }
+  .pl-fs-del { width: 40px; height: 40px; }
+  .pl-fs-send, .pl-fs-on { height: 36px; }
+  .pl-fs-busy { min-height: 36px; }
+  .pl-fs-stop { min-height: 36px; }
+  .pl-fs-listerr .pl-btn { min-height: 36px; }
+}

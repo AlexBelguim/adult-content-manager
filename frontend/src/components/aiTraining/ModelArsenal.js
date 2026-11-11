@@ -5,6 +5,7 @@ import {
 import { Psychology, CheckCircle, FilterAlt, Science, DeleteOutline, AutoAwesome } from '@mui/icons-material';
 import { Panel, EmptyState } from '../layout';
 import { PREFERRED_KEYS } from './modelInfo';
+import { useAsk } from '../ui';
 
 // ── Model Arsenal sub-component ──
 export default function ModelArsenal({
@@ -12,6 +13,7 @@ export default function ModelArsenal({
   preferred, onSetPreferred
 }) {
   const [loadingModel, setLoadingModel] = useState(null);
+  const ask = useAsk();
   const typeLabels = {
     clip_siamese: { label: 'CLIP Siamese', color: 'var(--accent)' },
     clip_taste: { label: 'CLIP Taste', color: 'var(--chart-5)' },
@@ -50,18 +52,25 @@ export default function ModelArsenal({
     } catch (_) {}
     setLoadingModel(null);
   };
+  // A failed delete shows in the question, which stays open
   const handleDelete = async (model) => {
-    if (!window.confirm(`Delete model ${model.filename}?`)) return;
-    try {
-      const res = await fetch('/api/training/ai-delete-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: model.filename })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) throw new Error(data.message || data.error || `HTTP ${res.status}`);
-      if (onModelLoaded) onModelLoaded();
-    } catch (e) { setTestResults(prev => ({ ...prev, [model.filename]: { error: `Could not delete: ${e.message}` } })); }
+    const done = await ask({
+      title: `Delete the model ${model.filename}?`,
+      text: "Its checkpoint file is deleted from acm-gpu's disk. Cannot be undone.",
+      okLabel: 'Delete model',
+      danger: true,
+      busyLabel: 'Deleting…',
+      run: async () => {
+        const res = await fetch('/api/training/ai-delete-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_id: model.filename })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      }
+    });
+    if (done && onModelLoaded) onModelLoaded();
   };
   const formatDate = (ts) => !ts ? '—' : new Date(ts * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 

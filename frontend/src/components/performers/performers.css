@@ -1,0 +1,196 @@
+/* Performer Management (pages/PerformerManagementPageNew.js): the list, her detail (PerformerDetail.js, pm-detail*:
+   inline under a row, or layout="panel" in the side panel, pm-detail-panel and pm-panel*), the filter tiles (StatFilters.js, pm-tile*) and the toolbar. The rows and pairs
+   style themselves with sx (PerformerRow.js, PairRow.js); pm-row* and pm-pair* are theirs if they need classes.
+   Darkroom tokens only, no gradients, nothing under 12px (.75rem). Below 700px: the phone layout. */
+
+/* ── the list: one Panel; the rows and pairs style themselves (sx in PerformerRow.js, PairRow.js) ── */
+.pm-list { overflow: hidden; }
+.pm-more { display: flex; justify-content: center; padding: 16px 0 4px; }
+
+/* ── the inline detail: a grid of plain cards, 4 / 3 / 2 / 1 columns ── */
+/* the row's wrapper round it gives the hairline, the background and the padding */
+.pm-detail {
+  box-sizing: border-box; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+  cursor: default; color: var(--text);
+}
+.pm-detail-wide { grid-column: 1 / -1; }
+.pm-detail-card {
+  box-sizing: border-box; min-width: 0; display: flex; flex-direction: column; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  scroll-margin: 72px 0 16px;
+}
+.pm-detail-title {
+  display: flex; align-items: baseline; gap: 6px; margin: 0 0 8px;
+  font-size: .8125rem; font-weight: 650; line-height: 1.4; color: var(--text);
+}
+.pm-detail-count { font-size: .75rem; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* label: value pairs */
+.pm-detail-facts {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0;
+  font-size: .8125rem; line-height: 1.45;
+}
+.pm-detail-fact { display: contents; }
+.pm-detail-facts dt { color: var(--muted); white-space: nowrap; }
+.pm-detail-facts dd { margin: 0; min-width: 0; color: var(--text); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+/* the wide card's pairs flow in columns */
+.pm-detail-facts.pm-detail-facts-wide { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 20px; }
+.pm-detail-facts-wide .pm-detail-fact { display: flex; gap: 10px; min-width: 0; }
+.pm-detail-facts-wide dt { flex: none; min-width: 96px; }
+
+.pm-detail-line { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45; color: var(--dim); overflow-wrap: anywhere; }
+.pm-detail-title + .pm-detail-line { margin-top: 0; }
+.pm-detail-link { margin: 0 0 8px; font-size: .8125rem; }
+.pm-detail-path { font-family: var(--font-mono, ui-monospace, Consolas, monospace); font-size: .75rem; user-select: all; overflow-wrap: anywhere; }
+.pm-detail-textlink { color: var(--accent); text-decoration: none; font-size: .8125rem; }
+.pm-detail-textlink:hover { color: var(--accent-hover); text-decoration: underline; }
+.pm-detail-textlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-sm); }
+.pm-detail-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* the buttons sit at the bottom, so they line up across a row of cards */
+.pm-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: auto; padding-top: 10px; }
+
+.pm-detail .ok { color: var(--ok); }
+.pm-detail .warn { color: var(--warn); }
+.pm-detail .bad { color: var(--bad); }
+.pm-detail .info { color: var(--info); }
+.pm-detail .muted { color: var(--muted); }
+.pm-detail .strong { font-weight: 650; }
+
+/* filtering bars: "Pictures   12 of 94   12%" over a 6px bar */
+.pm-detail-bars { display: grid; gap: 10px; }
+.pm-detail-bar {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 40px; grid-template-areas: "label of pct" "track track track";
+  align-items: baseline; gap: 4px 8px; font-size: .8125rem; font-variant-numeric: tabular-nums;
+}
+.pm-detail-bar-label { grid-area: label; color: var(--text); }
+.pm-detail-bar-of { grid-area: of; color: var(--dim); font-size: .75rem; }
+.pm-detail-bar-pct { grid-area: pct; text-align: right; color: var(--dim); font-weight: 600; }
+.pm-detail-bar-track { grid-area: track; display: block; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.pm-detail-bar-track > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.pm-detail-bar.full .pm-detail-bar-track > span { background: var(--ok); }
+.pm-detail-bar.full .pm-detail-bar-pct { color: var(--ok); }
+.pm-detail-bar.none .pm-detail-bar-label, .pm-detail-bar.none .pm-detail-bar-of { color: var(--muted); }
+
+@media (max-width: 1299.98px) {
+  .pm-detail { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 999.98px) {
+  .pm-detail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── the side panel (layout="panel"): a header, then the cards in two columns (one under 900px), Tags and Scraped
+   data across both. The drawer round it gives the background, the padding and the close button (top right). ── */
+.pm-detail.pm-detail-panel { display: flex; flex-direction: column; gap: 16px; }
+
+.pm-panel-head {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr); grid-template-areas: "pic who" "pic acts";
+  gap: 10px 16px; align-items: start; padding-bottom: 16px; border-bottom: 1px solid var(--line);
+}
+.pm-panel-pic {
+  grid-area: pic; box-sizing: border-box; width: 96px; aspect-ratio: 3 / 4; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--raised); border-radius: var(--radius-lg); color: var(--dim); font-size: 1.5rem; font-weight: 600; user-select: none;
+}
+.pm-panel-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* the right padding keeps a long name clear of the drawer's close button */
+.pm-panel-who { grid-area: who; display: grid; gap: 6px; min-width: 0; padding-right: 44px; }
+.pm-panel-name {
+  margin: 0; font-size: 1.25rem; font-weight: 650; line-height: 1.3; letter-spacing: -0.015em; color: var(--text); overflow-wrap: anywhere;
+}
+.pm-panel-where { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.pm-panel-pill {
+  box-sizing: border-box; display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+  border: 1px solid; border-radius: var(--radius-sm); font-size: .75rem; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+.pm-panel-other.MuiButtonBase-root { max-width: 100%; border-radius: var(--radius-sm); }
+@media (hover: hover) {
+  .pm-panel-other.MuiButtonBase-root:hover > span { text-decoration: underline; }
+}
+.pm-panel-other.MuiButtonBase-root.Mui-focusVisible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pm-panel-counts {
+  display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0;
+  font-size: .875rem; line-height: 1.5; color: var(--dim); font-variant-numeric: tabular-nums;
+}
+.pm-panel-counts b { font-weight: 650; color: var(--text); }
+.pm-panel-actions { grid-area: acts; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+
+.pm-panel-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.pm-panel-col, .pm-panel-full { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.pm-detail-panel .pm-detail-card { padding: 14px 16px; scroll-margin: 12px; }
+.pm-detail-panel .pm-detail-title { margin-bottom: 10px; font-size: .875rem; }
+.pm-detail-panel .pm-detail-card-danger .pm-detail-title { color: var(--bad); }
+/* labels in one column wide enough to line the values up */
+.pm-detail-panel .pm-detail-facts:not(.pm-detail-facts-wide) { grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 6px 14px; line-height: 1.5; }
+.pm-detail-panel .pm-detail-facts.pm-detail-facts-wide { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 20px; line-height: 1.5; }
+.pm-detail-panel .pm-detail-line { line-height: 1.5; }
+
+@media (max-width: 899.98px) {
+  .pm-panel-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 599.98px) {
+  .pm-panel-head { grid-template-columns: 64px minmax(0, 1fr); grid-template-areas: "pic who" "acts acts"; gap: 12px; }
+  .pm-panel-pic { width: 64px; font-size: 1.25rem; }
+  .pm-panel-name { font-size: 1.125rem; }
+  .pm-detail-panel .pm-detail-card { padding: 12px; }
+  .pm-detail-panel .pm-detail-facts.pm-detail-facts-wide { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── the filter tiles: a grid of 64px tiles on PC ── */
+.pm-tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0 0 16px;
+}
+.pm-tile.MuiButtonBase-root {
+  box-sizing: border-box; height: 64px; min-width: 0; padding: 8px 12px;
+  display: flex; flex-direction: column-reverse; align-items: flex-start; justify-content: center; gap: 2px;
+  text-align: left; font: inherit; color: var(--text);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  transition: border-color .16s ease, background-color .16s ease;
+}
+@media (hover: hover) {
+  .pm-tile.MuiButtonBase-root:hover { border-color: var(--line-strong); background: var(--raised); }
+}
+.pm-tile.MuiButtonBase-root:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pm-tile-count { font-size: 1.25rem; font-weight: 660; line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--text); }
+.pm-tile-label {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .75rem; line-height: 1.4; color: var(--dim);
+}
+.pm-tile.on.MuiButtonBase-root { border-color: var(--accent); background: var(--accent-quiet); }
+.pm-tile.on .pm-tile-count { color: var(--accent); }
+.pm-tile.on .pm-tile-label { color: var(--text); }
+
+/* ── the toolbar ── */
+.pm-search { display: flex; flex: 0 1 260px; min-width: 0; }
+.pm-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; min-width: 0; }
+
+/* the dot on the Updates tab */
+.pm-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--bad); vertical-align: middle; }
+
+/* ── phone ── */
+@media (max-width: 699.98px) {
+  .pm-detail { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .pm-detail-card { padding: 12px; }
+  .pm-detail-facts.pm-detail-facts-wide { grid-template-columns: minmax(0, 1fr); }
+
+  /* the tiles as one strip of compact chips: "Before 412" */
+  .pm-tiles {
+    display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 0 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pm-tiles::-webkit-scrollbar { display: none; }
+  .pm-tile.MuiButtonBase-root {
+    flex: none; height: 32px; padding: 0 10px; flex-direction: row; align-items: center; gap: 6px;
+    border-radius: var(--radius-sm); background: var(--raised);
+  }
+  .pm-tile-count { font-size: .8125rem; font-weight: 600; color: var(--muted); }
+  .pm-tile-label { font-size: .8125rem; font-weight: 560; color: var(--dim); overflow: visible; }
+  .pm-tile.on .pm-tile-label { color: var(--accent); }
+
+  .pm-search { flex: 1 1 100%; }
+  .pm-bulk { margin-left: 0; }
+}
+@media (max-width: 699.98px) and (pointer: coarse) {
+  .pm-tile.MuiButtonBase-root { height: 40px; }
+}

@@ -390,11 +390,30 @@ function removeJob(id) {
   return true;
 }
 
-/** The finished jobs off the list — not one whose original is still held (Undo, and its deletion, need its record). */
-function clearFinished() {
-  const r = db.prepare("DELETE FROM encode_jobs WHERE status IN ('failed','skipped','undone') OR (status = 'done' AND held_path IS NULL)").run();
+/**
+ * The finished jobs off the list — not one whose original is still held (Undo, and its deletion, need its record).
+ * Failed rows are deleted, unless keepFailed (the Jobs page's Clear finished): then they stay until they are retried
+ * or removed one by one. The skipped, undone and done rows are only hidden (dismissed_at), not deleted: triedByQueue,
+ * calibration and the freed total still read them, so a video that didn't get smaller, or whose re-encode was undone,
+ * is not offered again.
+ */
+function clearFinished({ keepFailed = false } = {}) {
+  const failed = keepFailed ? 0 : db.prepare("DELETE FROM encode_jobs WHERE status = 'failed'").run().changes;
+  const hidden = db.prepare("UPDATE encode_jobs SET dismissed_at = ? WHERE dismissed_at IS NULL AND (status IN ('skipped','undone') OR (status = 'done' AND held_path IS NULL))").run(Date.now()).changes;
   forget();
-  return r.changes;
+  return failed + hidden;
+}
+
+/**
+ * One ended job off the list (the Jobs page's Remove): a failed row is deleted; a skipped or undone row, or a done one
+ * with no original held, is hidden (dismissed_at) and stays as the queue's memory of that video.
+ */
+function dismissJob(id) {
+  const del = db.prepare("DELETE FROM encode_jobs WHERE id = ? AND status = 'failed'").run(id);
+  const r = del.changes ? del : db.prepare("UPDATE encode_jobs SET dismissed_at = ? WHERE id = ? AND dismissed_at IS NULL AND (status IN ('skipped','undone') OR (status = 'done' AND held_path IS NULL))").run(Date.now(), id);
+  if (!r.changes) throw Object.assign(new Error('Only an ended re-encode whose original is not kept can be removed'), { status: 409 });
+  forget();
+  return true;
 }
 
 const PRIORITY_MAX = 999;
@@ -1381,7 +1400,7 @@ function status() {
   const queued = db.prepare("SELECT id, label, source_path, plan, original_size_bytes, estimated_size_bytes, priority FROM encode_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 300").all();
   const recent = db.prepare(`
     SELECT id, label, source_path, out_path, plan, status, error_message, original_size_bytes, estimated_size_bytes, actual_size_bytes, completed_at, held_until, held_path IS NOT NULL AS held
-    FROM encode_jobs WHERE status IN ('done','failed','undone','skipped') ORDER BY completed_at DESC LIMIT 60
+    FROM encode_jobs WHERE status IN ('done','failed','undone','skipped') AND dismissed_at IS NULL ORDER BY completed_at DESC LIMIT 60
   `).all();
   const eng = localEngine();
   return {
@@ -1525,7 +1544,7 @@ function groupReport(key) {
 module.exports = {
   HOLD_DAYS, CHUNK, COORDINATOR_URL_KEY, COORDINATOR_WORKER_KEY, localEngine,
   assess, estimateSize, calibration, fileRow, placeOf, parseKey, ffmpegArgs, verify,
-  pathsFor, enqueue, removeJob, clearFinished, setPriority, bumpJob, retryJob, undoJob,
+  pathsFor, enqueue, removeJob, clearFinished, dismissJob, setPriority, bumpJob, retryJob, undoJob,
   start, pause, pauseJob, resumeJob, mode, setMode, coordinated, isRunning, startQueue, cleanup, kick,
   addWorker, relinkWorker, removeWorker, setWorkerEnabled, workerForToken, listWorkers,
   workerHeartbeat, workerQueue, workerClaim, workerProgress, workerSource, workerReceived, workerUpload, workerComplete, workerFail,

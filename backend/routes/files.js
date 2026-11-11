@@ -11,6 +11,7 @@ const os = require('os');
 const crypto = require('crypto');
 const db = require('../db');
 const imageCache = require('../services/thumbnailCache');
+const videoStream = require('../services/videoStream');
 const { getVideoDuration, getVideoDurations, formatDuration } = require('../utils/videoDuration');
 
 // Get duration for a single video
@@ -323,167 +324,56 @@ router.get('/video-thumbnail', async (req, res) => {
   }
 });
 
-// Stream video with range request support (crucial for large files over SMB/network)
+/**
+ * Stream a video. A file the browser plays as it is goes out with range requests (crucial for large files over
+ * SMB/network); anything else is converted while it plays (services/videoStream.js): ?start=<seconds> starts the
+ * conversion there, ?can= lists what the browser decodes, ?mode= asks for direct/remux/transcode, ?client= names
+ * the player tab (a new stream ends that tab's previous one). ?startTime= is the old name of ?start=.
+ */
 router.get('/stream-video', async (req, res) => {
-  const { path: filePath, startTime } = req.query;
-
-  if (!filePath) {
+  const { path: requestedPath } = req.query;
+  if (!requestedPath) {
     return res.status(400).send({ error: 'File path is required' });
   }
-
   try {
-    // Check if file exists
-    if (!await fs.pathExists(filePath)) {
+    const filePath = await resolveMediaPath(requestedPath);
+    if (!filePath) {
       return res.status(404).send({ error: 'File not found' });
     }
-
-    const stat = await fs.stat(filePath);
-    const fileSize = stat.size;
-    const ext = path.extname(filePath).toLowerCase();
-
-    // For video formats that need remuxing, use ffmpeg with seek support
-    const needsRemux = ['.mkv', '.avi', '.wmv', '.flv'].includes(ext);
-
-    if (needsRemux) {
-      // Remux to MP4 on-the-fly using ffmpeg, starting from startTime if provided
-      const seekSeconds = parseFloat(startTime) || 0;
-      console.log(`[Video Stream] Remuxing ${ext} from ${seekSeconds}s: ${path.basename(filePath)}`);
-
-      res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Transfer-Encoding': 'chunked',
-        'Cache-Control': 'no-cache',
-        'Access-Control-Allow-Origin': '*',
-        'X-Start-Time': seekSeconds.toString()
-      });
-
-      // Build ffmpeg args - seek before input for fast seeking
-      const ffmpegArgs = [];
-      if (seekSeconds > 0) {
-        ffmpegArgs.push('-ss', seekSeconds.toString());
-      }
-      ffmpegArgs.push(
-        '-i', filePath,
-        '-c:v', 'copy',      // Copy video codec (no re-encoding)
-        '-c:a', 'aac',       // Re-encode audio to AAC for compatibility
-        '-movflags', 'frag_keyframe+empty_moov+faststart',
-        '-f', 'mp4',
-        '-'
-      );
-
-      const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
-
-      ffmpeg.stdout.pipe(res);
-
-      ffmpeg.stderr.on('data', (data) => {
-        const msg = data.toString();
-        if (msg.includes('Error') || msg.includes('error')) {
-          console.error('[Video Stream] FFmpeg error:', msg);
-        }
-      });
-
-      ffmpeg.on('error', (err) => {
-        console.error('[Video Stream] FFmpeg spawn error:', err);
-        if (!res.headersSent) {
-          res.status(500).send({ error: 'Remux error' });
-        }
-      });
-
-      ffmpeg.on('close', (code) => {
-        if (code !== 0 && code !== null) {
-          console.error(`[Video Stream] FFmpeg exited with code ${code}`);
-        }
-      });
-
-      req.on('close', () => {
-        ffmpeg.kill('SIGTERM');
-      });
-
-      return;
-    }
-
-    // Determine content type
-    const contentTypes = {
-      '.mp4': 'video/mp4',
-      '.mkv': 'video/x-matroska',
-      '.webm': 'video/webm',
-      '.avi': 'video/x-msvideo',
-      '.mov': 'video/quicktime',
-      '.wmv': 'video/x-ms-wmv',
-      '.flv': 'video/x-flv',
-      '.m4v': 'video/x-m4v',
-      '.ts': 'video/mp2t'
-    };
-    const contentType = contentTypes[ext] || 'video/mp4';
-
-    const range = req.headers.range;
-
-    if (range) {
-      // Parse Range header
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      // For network files, use smaller chunks (2MB) for faster initial load
-      const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
-      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
-
-      const chunkSize = (end - start) + 1;
-
-      console.log(`[Video Stream] Range request: ${start}-${end}/${fileSize} (${Math.round(chunkSize / 1024)}KB)`);
-
-      const stream = fs.createReadStream(filePath, { start, end });
-
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunkSize,
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600',
-        'Access-Control-Allow-Origin': '*'
-      });
-
-      stream.pipe(res);
-
-      // Ensure stream is destroyed if client disconnects (releases file lock)
-      res.on('close', () => {
-        stream.destroy();
-      });
-
-      stream.on('error', (err) => {
-        console.error('[Video Stream] Stream error:', err);
-        if (!res.headersSent) {
-          res.status(500).send({ error: 'Stream error' });
-        }
-      });
-    } else {
-      // No range requested - send headers for range support
-      console.log(`[Video Stream] Full file request: ${fileSize} bytes`);
-
-      res.writeHead(200, {
-        'Content-Length': fileSize,
-        'Content-Type': contentType,
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=3600',
-        'Access-Control-Allow-Origin': '*'
-      });
-
-      const stream = fs.createReadStream(filePath);
-      stream.pipe(res);
-
-      // Ensure stream is destroyed if client disconnects (releases file lock)
-      res.on('close', () => {
-        stream.destroy();
-      });
-
-      stream.on('error', (err) => {
-        console.error('[Video Stream] Stream error:', err);
-        if (!res.headersSent) {
-          res.status(500).send({ error: 'Stream error' });
-        }
-      });
-    }
+    return await videoStream.streamVideo(req, res, filePath);
   } catch (err) {
     console.error('[Video Stream] Error:', err);
-    res.status(500).send({ error: err.message });
+    if (!res.headersSent) res.status(500).send({ error: err.message });
+    return undefined;
+  }
+});
+
+/** GET /video-probe?path=&can= → { duration, mode: direct|remux|transcode, reason, video, audio }: how the player loads it. */
+router.get('/video-probe', async (req, res) => {
+  const { path: requestedPath } = req.query;
+  if (!requestedPath) return res.status(400).send({ error: 'File path is required' });
+  try {
+    const filePath = await resolveMediaPath(requestedPath);
+    if (!filePath) return res.status(404).send({ error: 'File not found' });
+    const info = await videoStream.describe(filePath, videoStream.parseCan(req.query.can));
+    return res.send({ path: requestedPath, ...info });
+  } catch (err) {
+    return res.status(422).send({ error: `Could not read this video: ${err.message}` });
+  }
+});
+
+/** GET /video-keyframe?path=&t= → { t, start }: where a remux asked to start at t really begins. */
+router.get('/video-keyframe', async (req, res) => {
+  const { path: requestedPath } = req.query;
+  const t = parseFloat(req.query.t);
+  if (!requestedPath) return res.status(400).send({ error: 'File path is required' });
+  if (!Number.isFinite(t) || t < 0) return res.status(400).send({ error: 't must be a number of seconds' });
+  try {
+    const filePath = await resolveMediaPath(requestedPath);
+    if (!filePath) return res.status(404).send({ error: 'File not found' });
+    return res.send({ t, start: await videoStream.keyframeAt(filePath, t) });
+  } catch (err) {
+    return res.status(422).send({ error: `Could not read this video: ${err.message}` });
   }
 });
 
@@ -1025,56 +915,31 @@ router.get('/stream', async (req, res) => {
   }
 });
 
-const deleteFileTagsStmt = db.prepare('DELETE FROM file_tags WHERE file_path = ?');
-const deleteFileRatingStmt = db.prepare('DELETE FROM file_ratings WHERE file_path = ?');
+const fileTrash = require('../services/fileTrash');
 
+function sendTrashError(res, err) {
+  if (err instanceof fileTrash.TrashError) {
+    return res.status(err.status).send({ error: err.message, results: err.results || undefined });
+  }
+  console.error('Trash move failed:', err);
+  return res.status(500).send({ error: err.message });
+}
+
+// Moves a video and the chosen funscripts of it to the .trash folder beside them. Tags and scores are kept.
 router.post('/delete-with-funscripts', async (req, res) => {
   try {
-    const { videoPath, funscriptPaths } = req.body || {};
+    res.send(await fileTrash.trashVideo(req.body || {}));
+  } catch (err) {
+    sendTrashError(res, err);
+  }
+});
 
-    if (!videoPath) {
-      return res.status(400).send({ error: 'videoPath is required' });
-    }
-
-    const targets = Array.from(new Set([
-      videoPath,
-      ...(Array.isArray(funscriptPaths) ? funscriptPaths : []),
-    ].filter(Boolean)));
-
-    const deleted = [];
-    const missing = [];
-    const errors = [];
-
-    for (const target of targets) {
-      try {
-        const exists = await fs.pathExists(target);
-        if (!exists) {
-          missing.push(target);
-        } else {
-          await fs.remove(target);
-          deleted.push(target);
-        }
-      } catch (err) {
-        errors.push({ path: target, error: err.message });
-      }
-
-      try {
-        deleteFileTagsStmt.run(target);
-      } catch (err) {
-        console.warn('Failed to delete tags for path:', target, err.message);
-      }
-
-      try {
-        deleteFileRatingStmt.run(target);
-      } catch (err) {
-        console.warn('Failed to delete ratings for path:', target, err.message);
-      }
-    }
-
-    res.send({ success: errors.length === 0, deleted, missing, errors });
-  } catch (error) {
-    console.error('Failed to delete video and funscripts:', error);
-    res.status(500).send({ error: error.message });
+// Puts files moved by the deletes above back where they were: { items: [{ path, trashPath }] }
+router.post('/restore-from-trash', async (req, res) => {
+  try {
+    res.send(await fileTrash.restoreFromTrash(req.body && req.body.items));
+  } catch (err) {
+    sendTrashError(res, err);
   }
 });
 

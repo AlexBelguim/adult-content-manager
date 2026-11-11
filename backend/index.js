@@ -97,8 +97,15 @@ app.use('/api/pairwise', require('./routes/pairwise')); // Pairwise image compar
 app.use('/api/health', require('./routes/health')); // System health & diagnostics
 app.use('/api/training', require('./routes/training')); // AI training hub proxy
 
-// Fallback to React
+// Unknown API routes answer a JSON 404 for every method, never the app shell
+app.use('/api', (req, res) => res.status(404).json({ error: `No such API route: ${req.method} ${req.originalUrl.split('?')[0]}` }));
+
+// Fallback to React. A missing asset is a 404, so a stale bundle or a typo never gets the shell as JS.
 app.get('*', (req, res) => {
+  if (req.path.startsWith('/static/') || /\.(js|mjs|css|map|json|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|txt|html|webmanifest)$/i.test(req.path)) {
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
 
@@ -206,6 +213,8 @@ function buildHttpsOptions() {
 const useHttps = process.env.ENABLE_HTTPS === '1' || process.env.ENABLE_HTTPS === 'true';
 const tlsOpts = useHttps ? buildHttpsOptions() : null;
 const server = (useHttps && tlsOpts) ? https.createServer(tlsOpts, app) : http.createServer(app);
+// A big upload batch may take long: the same 30 minutes as the socket timeout above
+server.requestTimeout = 30 * 60 * 1000;
 if (useHttps && !tlsOpts) {
   console.warn('[TLS] ENABLE_HTTPS set but cert generation failed — falling back to HTTP. VR will NOT work on a remote host.');
 }
@@ -218,6 +227,7 @@ const io = new Server(server, {
 
 // Pass io to routes if needed, or set up handlers here
 app.set('io', io);
+require('./services/hashService').setNotify((payload) => io.emit('performers_updated', payload));
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -294,6 +304,24 @@ server.listen(port, '0.0.0.0', async () => {
     require('./services/mediaProbe').startScanner();
   } catch (error) {
     console.error('Re-encode queue failed to start:', error.message);
+  }
+
+  // Hash builds: the queue is the app's (hash_jobs); one cut off by a restart ends as failed with Retry
+  try { require('./services/hashQueue').start(); } catch (error) { console.error('Hash queue failed to start:', error.message); }
+
+  // Old Recently removed: move held files to her trash, once
+  try {
+    require('./services/hashRemovals').startRetention();
+  } catch (error) {
+    console.error('Old Recently removed: move held files to her trash, once, failed to start:', error.message);
+  }
+
+  // Import: handed-over uploads (a job.json in their temp folder) come back as failed jobs with Retry;
+  // other upload temp folders untouched for 7 days and without a job are removed
+  try {
+    require('./services/uploadQueue').sweepTempUploads().catch(e => console.error('Temp upload sweep failed:', e.message));
+  } catch (error) {
+    console.error('Temp upload sweep failed to start:', error.message);
   }
 
   // Browser auto-open disabled

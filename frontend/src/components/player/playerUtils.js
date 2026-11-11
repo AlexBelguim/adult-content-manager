@@ -45,3 +45,33 @@ export const sceneColor = (index) => `var(--chart-${index % 6})`;
 /** Scenes that have usable start/end times, in the order given. */
 export const validScenes = (scenes) =>
   (Array.isArray(scenes) ? scenes : []).filter((s) => Number.isFinite(sceneStart(s)) && Number.isFinite(sceneEnd(s)));
+
+/** 512 → "512 B", 2048 → "2 KB", 3.4 MB → "3.4 MB", 120 MB → "120 MB", 1.5 GB → "1.5 GB". '' when unknown. */
+export function fmtBytes(bytes) {
+  const n = Number(bytes);
+  if (bytes == null || bytes === '' || !Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return `${Math.round(n)} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  if (mb < 10) return `${mb.toFixed(1)} MB`;
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** The name of the folder a file is in: "D:\\a\\vids\\x.mp4" → "vids". '' when there is none. */
+export function folderOf(path) {
+  const parts = String(path || '').split(/[\\/]/).filter(Boolean);
+  return parts.length >= 2 ? parts[parts.length - 2] : '';
+}
+
+/**
+ * Extracts the genre from a file path like /content/GENRE/...
+ * Returns the genre string or null if not found.
+ */
+export function extractGenreFromPath(filePath) {
+  if (!filePath) return null;
+  // Match /content/GENRE/ or \\content\\GENRE\\
+  const match = filePath.match(/[\\/]content[\\/](.*?)[\\/]/i);
+  return match ? match[1].toLowerCase() : null;
+}

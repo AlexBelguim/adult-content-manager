@@ -1,0 +1,93 @@
+/* Import page (/local-import): the two tabs, the sticky action bar, the drop zone and the upload rows.
+   Darkroom tokens only (styles/tokens.js publishes them as CSS variables). No gradients, no shadows, nothing under
+   12px (.75rem). Prefix: im-. The tiles are components/discover/Tile.js (dv-). The bar follows .hr-selbar
+   (components/hash/hash.css). */
+
+.im-page button, .im-bar button { font-family: inherit; }
+/* on a narrow tile the match chip (top left) is cut, never the pictures button (top right) */
+.im-page .dv-corners.top .dv-c.r { flex: none; }
+.im-num { font-variant-numeric: tabular-nums; }
+
+/* the one dim line under each tab: what happens */
+.im-line { margin: 0 0 12px; font-size: .85rem; line-height: 1.45; color: var(--dim); }
+
+/* ── server tab: toolbar ── */
+.im-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; min-width: 0; }
+.im-total { font-size: .78rem; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── the sticky action bar: after the grid, always on screen while the tab has folders.
+   Its sides undo PageShell's padding (8px under 600px, 16px to 900px, 24px above) so it runs edge to edge and its
+   content lines up with the page's. ── */
+.im-bar {
+  position: sticky; bottom: var(--nav-bottom, 0px); z-index: 15;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; box-sizing: border-box;
+  padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
+  margin: 16px -8px -8px;
+  background: var(--surface); border-top: 1px solid var(--line-strong);
+}
+@media (min-width: 600px) {
+  .im-bar { padding-left: 16px; padding-right: 16px; margin: 16px -16px -16px; }
+}
+@media (min-width: 900px) {
+  .im-bar { padding-left: 24px; padding-right: 24px; margin: 16px -24px -24px; }
+}
+.im-count { min-width: 0; font-size: .9rem; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.im-count small { display: block; font-size: .75rem; font-weight: 400; color: var(--muted); }
+.im-barbtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.im-switch { display: inline-flex; align-items: center; gap: 2px; font-size: .8rem; color: var(--dim); white-space: nowrap; cursor: pointer; }
+
+/* ── computer tab: drop zone ── */
+.im-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; box-sizing: border-box;
+  min-height: 132px; padding: 20px 16px; text-align: center;
+  background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg);
+  transition: border-color .14s ease, background-color .14s ease;
+}
+.im-drop.over { border-color: var(--accent); background: var(--accent-quiet); }
+.im-drop-title { font-size: .95rem; font-weight: 600; color: var(--text); }
+.im-drop-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.im-hidden { display: none; }
+
+.im-warn { margin: 8px 0 0; font-size: .82rem; color: var(--warn); }
+.im-pick { margin-top: 12px; min-width: 0; }
+.im-pick-line { font-size: .85rem; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* the form row: name, match, hashes, Clear, Upload; wraps on a phone */
+.im-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; min-width: 0; }
+.im-name { flex: 1 1 220px; min-width: 0; max-width: 340px; }
+.im-form-btns { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+@media (max-width: 600px) {
+  .im-name { flex-basis: 100%; max-width: none; }
+}
+
+/* ── upload rows ── */
+.im-rows { display: flex; flex-direction: column; gap: 8px; }
+.im-row {
+  position: relative; overflow: hidden; box-sizing: border-box; min-width: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+  padding: 10px 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.im-row.failed { border-color: var(--bad); }
+.im-row-main { min-width: 0; }
+.im-row-name { font-size: .875rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.im-row-state {
+  margin-top: 2px; font-size: .78rem; color: var(--dim); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.im-row.failed .im-row-state { color: var(--bad); white-space: normal; overflow-wrap: anywhere; }
+.im-track { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--line-strong); }
+.im-fill { height: 100%; background: var(--accent); transition: width .3s ease; }
+.im-row.failed .im-fill { background: var(--bad); }
+
+/* ── the four pictures under a folder's cover: each opens the viewer there; the last says how many more ── */
+.im-th {
+  position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden;
+  border: 0; border-radius: var(--radius-sm, 4px); background: var(--raised); cursor: zoom-in;
+}
+.im-th.empty { cursor: default; }
+.im-th img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.im-th:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.im-more {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: var(--scrim); color: var(--text); font-size: .8rem; font-weight: 650; font-variant-numeric: tabular-nums;
+}

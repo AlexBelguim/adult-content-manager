@@ -1,9 +1,12 @@
 /**
  * Player navigation contract (docs/redesign/SPEC.md).
  *
- * The player is a real route: /player?ctx=<id>&i=<index>. The opener saves the
+ * The player is a real route: /player?ctx=<id>&i=<index>&path=<file>. The opener saves the
  * list it is showing (already filtered + sorted) and navigates to playerUrl().
- * /player?path=<file> works without a context: single item, Back = history.back().
+ * With a context that loads, `path` picks the item when it is in the list, else `i` (clamped);
+ * the player then replaces the URL with the canonical one. When the context does not load
+ * (another tab, a cleared session), `path` alone still plays that one file: /player?path=<file>.
+ * Back follows the back rule (nav/useBack): pop when the app pushed the entry, else the list's backUrl.
  *
  * ctx = { title, backUrl, items: [MediaItem, …] }
  */
@@ -86,9 +89,10 @@ export function loadPlayerContext(id) {
   }
 }
 
-/** URL of the player page for item `index` of context `id`. */
-export function playerUrl(id, index = 0) {
-  return `/player?ctx=${encodeURIComponent(id)}&i=${Math.max(0, Number(index) || 0)}`;
+/** URL of the player page for item `index` of context `id`; `path` (optional) names the file too. */
+export function playerUrl(id, index = 0, path) {
+  const base = `/player?ctx=${encodeURIComponent(id)}&i=${Math.max(0, Number(index) || 0)}`;
+  return path ? `${base}&path=${encodeURIComponent(path)}` : base;
 }
 
 /** Build a MediaItem from nothing but a file path (the /player?path= case). */

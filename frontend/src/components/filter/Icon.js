@@ -8,7 +8,9 @@ const PATHS = {
   x: 'M6 6l12 12M18 6L6 18',
   undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3',
   move: 'M3 7h6l2 2h10v10H3zM12 12v5M9.5 14.5L12 12l2.5 2.5',
-  menu: 'M4 7h16M4 12h16M4 17h16'
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  swap: 'M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
+  sort: 'M4 6h16M4 12h10M4 18h5'
 };
 
 /** Stroke icons used by the filter view (same set as the mock). */

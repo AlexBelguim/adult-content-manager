@@ -1,7 +1,10 @@
-/* Player page — direction 3 "Three columns". Colours from styles/tokens.js only. */
+/* Player page — direction 3 "Three columns". Colours from styles/tokens.js only.
+   The phone layout uses PLAYER_PHONE_QUERY of PlayerPage.js: (max-width: 899.98px), (max-height: 500px). */
 
-.pp { height: 100vh; height: 100dvh; min-height: 560px; display: grid; grid-template-columns: 330px minmax(0, 1fr) 310px; background: var(--bg); color: var(--text); font-size: 14px; }
-.pp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); }
+.pp { height: 100vh; height: 100dvh; display: grid; grid-template-columns: 330px minmax(0, 1fr) 310px; background: var(--bg); color: var(--text); font-size: 14px; overflow: hidden; }
+.pp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; text-align: center; color: var(--muted); }
+.pp-empty p { margin: 0; }
+.pp-empty .pp-empty-note { margin-top: -8px; font-size: 13px; color: var(--dim); }
 .pp-grow { flex: 1 1 0; min-width: 0; }
 
 /* left: tools */
@@ -11,7 +14,7 @@
 .pp-head h2 { margin: 0; font-size: 1.05rem; font-weight: 640; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .pp-title { color: var(--dim); font-size: .78rem; overflow-wrap: anywhere; }
 .pp-sub { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
-.pp-sheet-x, .pp-arail, .pp-sheet-scrim { display: none; }
+.pp-sheet-x, .pp-arail, .pp-sheet-scrim, .pp-top { display: none; }
 
 /* centre: media */
 .pp-sw { height: 100%; min-width: 0; }
@@ -19,44 +22,78 @@
 .pp-ud button { width: 48px; height: 48px; padding: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: var(--scrim-strong); color: var(--text); border: 1px solid var(--line-strong); }
 .pp-ud button:hover { background: var(--accent); color: var(--on-accent); }
 .pp-ud button:disabled { opacity: .25; cursor: default; background: var(--scrim-strong); color: var(--text); }
-.pl-toast.pp-toast { position: absolute; bottom: 16px; z-index: 4; }
+/* the Shortcuts button only where there is a keyboard and a mouse */
+.pl-ib.pp-keys { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .pl-ib.pp-keys { display: inline-grid; }
+}
 
 /* right: up next */
 .pp-right { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); padding: 12px 8px 0 12px; }
-.pp-railhead { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; flex-wrap: wrap; font-size: .86rem; }
-.pp-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--dim); cursor: pointer; }
-.pp-toggle input { accent-color: var(--accent); }
-.pp-qlist { overflow-y: auto; min-height: 0; position: relative; }
+.pp-railhead { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; font-size: .86rem; }
+.pp-qlist { flex: 1 1 auto; overflow-y: auto; min-height: 0; position: relative; }
 .pp-qgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 4px 12px 0; }
-.pp-th { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: var(--raised); color: var(--text); cursor: pointer; }
+.pp-th { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; padding: 0; border: 0; border-radius: var(--radius); overflow: hidden; background: var(--raised); color: var(--text); cursor: pointer; }
 .pp-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pp-th.is-cur { outline: 2px solid var(--accent); outline-offset: -2px; }
-.pp-th span, .pp-th em { position: absolute; font-style: normal; font-size: 10px; font-weight: 650; background: var(--scrim-strong); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.pp-th span, .pp-th em { position: absolute; font-style: normal; font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; background: var(--scrim-strong); border-radius: var(--radius-sm); padding: 0 4px; line-height: 17px; }
 .pp-th span { right: 3px; bottom: 3px; }
 .pp-th em { left: 3px; top: 3px; color: var(--warn); }
 
-@media (max-width: 1100px) {
-  .pp { grid-template-columns: 300px minmax(0, 1fr); }
-  .pp-right { display: none; }
+@media (max-width: 1199.98px) {
+  .pp { grid-template-columns: 280px minmax(0, 1fr) 180px; }
+  .pp-qgrid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* phone: swipe feed, tools in a bottom sheet, queue below */
-@media (max-width: 760px) {
-  .pp { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
-  .pp-sw { height: 92vh; height: 92dvh; }
+/* phone: the media fills the screen; tools and queue are bottom sheets; vertical swipe = prev / next */
+@media (max-width: 899.98px), (max-height: 500px) {
+  .pp { grid-template-columns: minmax(0, 1fr); }
+  .pp-sw { height: 100vh; height: 100dvh; }
   /* vertical drags on the media are prev / next, not page scroll */
   .pp-stage { touch-action: pinch-zoom; }
-  .pp-right { display: flex; border: 0; padding: 12px; }
-  .pp-qlist { overflow: visible; }
-  .pp-qgrid { grid-template-columns: repeat(3, 1fr); padding-right: 0; }
 
-  .pp-left { position: fixed; left: 0; right: 0; bottom: 0; max-height: 72vh; z-index: 30; background: var(--bg); border: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0; transform: translateY(105%); visibility: hidden; transition: transform .2s, visibility 0s .2s; }
-  .pp-left.is-open { transform: none; visibility: visible; transition: transform .2s; }
-  .pp-sheet-x { display: inline-flex; align-self: flex-end; }
+  .pp-left, .pp-right { position: fixed; left: 0; right: 0; bottom: 0; max-height: 72vh; max-height: 72dvh; z-index: 30; box-sizing: border-box; background: var(--bg); border: 0; border-top: 1px solid var(--line-strong); border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); transform: translateY(105%); visibility: hidden; transition: transform .2s, visibility 0s .2s; }
+  .pp-left.is-open, .pp-right.is-open { transform: none; visibility: visible; transition: transform .2s; }
+  .pp-sheet-x { display: inline-flex; }
+  .pp-left .pp-sheet-x { align-self: flex-end; }
+  /* the top strip already shows Back, the name and the counter */
+  .pp-left .pp-backrow, .pp-left .pp-head { display: none; }
+  .pp-qgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); padding-right: 0; }
   .pp-sheet-scrim { display: block; position: fixed; inset: 0; z-index: 29; border: 0; padding: 0; background: var(--scrim); }
 
-  .pp-arail { position: absolute; left: 10px; bottom: 12px; z-index: 2; display: flex; flex-direction: column; gap: 8px; }
-  .pp-arail button { width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--scrim-strong); color: var(--text); border: 1px solid var(--line-strong); font-size: 1.05rem; cursor: pointer; }
-  .pl-sw:fullscreen .pp-arail { display: none; }
+  .pp-top { display: flex; align-items: center; gap: 6px; position: absolute; top: 0; left: 0; right: 0; z-index: 4; box-sizing: border-box; padding: env(safe-area-inset-top, 0px) 12px 0 4px; min-height: calc(48px + env(safe-area-inset-top, 0px)); background: var(--scrim-strong); }
+  .pp-top-back { flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius); background: none; color: var(--text); cursor: pointer; }
+  .pp-top-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+  .pp-top-count { flex: none; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .pp .sm-chips { top: 56px; }
+
+  .pp-arail { position: absolute; left: 10px; bottom: 10px; z-index: 5; display: flex; flex-direction: column; gap: 4px; }
+  .pp-arail button { position: relative; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border-radius: 50%; background: var(--scrim-strong); color: var(--text); border: 1px solid var(--line-strong); cursor: pointer; }
+  .pp-arail .live { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px var(--scrim-strong); }
   .pp-ud { right: 8px; }
+  .pl-sw:fullscreen .pp-arail, .pl-sw:fullscreen .pp-top { display: none; }
+
+  /* touch sizes */
+  .pp .pl-st { width: 40px; height: 40px; font-size: 38px; line-height: 40px; }
+  .pp .pl-seek { height: 32px; }
+  .pp .pl-seek::before, .pp .pl-seek-fill { top: 14px; }
+  .pp .pl-seek-scene, .pp .pl-seek-scene:hover { top: 8px; }
+  .pp .pl-ib { width: 40px; height: 44px; }
+  .pp .pl-ctl-row { gap: 0; }
+  .pp .pl-time { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; margin: 0 4px; }
+  .pp .pl-speed { padding: 4px 2px; }
+  .pp .pl-tg { min-height: 32px; padding: 4px 12px; }
+  .pp .pl-btn.sm { min-height: 36px; }
+  /* the error banner clears the rail at the bottom left */
+  .pp .pl-media-error { left: 64px; right: 12px; transform: none; max-width: none; text-align: center; }
+}
+
+/* a short landscape phone: the rail is a row at the top right, over the strip */
+@media (max-height: 500px) {
+  .pp-arail { top: 4px; right: 8px; left: auto; bottom: auto; flex-direction: row; }
+  .pp-top { padding-right: calc(6 * 48px + 8px); }
+  /* the rail is at the top here, so the banner can use the width */
+  .pp .pl-media-error { left: 12px; }
+  /* a wide, short sheet: small thumbnails so two rows or more fit */
+  .pp-qgrid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 }

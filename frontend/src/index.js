@@ -12,7 +12,6 @@ root.render(
   </Provider>
 );
 
-// If you want your app to work offline and load faster, you can change
-// unregister() to register() below. Note this comes with some pitfalls.
-// Learn more about service workers: https://cra.link/PWA
+// The service worker (src/service-worker.js): the app opens without the network and shows offline.html when the
+// server cannot be reached. A new build waits until the "Update ready" notice (pwa/UpdateNotice.js) reloads the app.
 serviceWorkerRegistration.register();

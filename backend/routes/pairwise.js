@@ -1,7 +1,7 @@
 /**
  * Pairwise Routes — Image-level comparison, scoring, and AI proxy
  *
- * Absorbed from the standalone backend-pairwise service.
+ * Absorbed from the old standalone pairwise service (retired).
  * Data lives in app.db (pairwise_pairs, pairwise_image_scores, etc.)
  * The models that train on these pairs are started from the AI & Training page.
  */
@@ -136,6 +136,77 @@ function scanForImages(dirPath) {
   return images;
 }
 
+// A performer's image list, rescanned at most once a minute. Every next-pair used to rescan the folder and run one
+// INSERT per image outside a transaction; now new images are seeded once per scan, in one transaction.
+const FOLDER_TTL_MS = 60000;
+const folderCache = new Map(); // `${performerId}|${picsPath}` -> { at, images }
+const seedScores = db.transaction((pid, images) => {
+  for (const img of images) queries.insertScoreIgnore.run(pid, img, 50, 0);
+});
+
+function listImages(pid, picsPath) {
+  const key = `${pid}|${picsPath}`;
+  const hit = folderCache.get(key);
+  if (hit && Date.now() - hit.at < FOLDER_TTL_MS) return hit.images;
+  const images = scanForImages(picsPath);
+  seedScores(pid, images);
+  folderCache.set(key, { at: Date.now(), images });
+  return images;
+}
+
+function forgetImages(pid) {
+  for (const key of folderCache.keys()) if (key.startsWith(`${pid}|`)) folderCache.delete(key);
+}
+
+const findSameVote = db.prepare(`
+  SELECT id FROM pairwise_pairs
+  WHERE performer_id = ? AND winner = ? AND loser = ? AND type = ? AND source IS NULL LIMIT 1
+`);
+
+/** Store one vote and move the scores, in one transaction. A resent vote (its first answer was lost) finds its
+ *  identical row and changes nothing; the answer names that row, so its Undo can still take it back. */
+const storeVote = db.transaction((pid, winner, loser, type) => {
+  const same = findSameVote.get(pid, winner, loser, type);
+  if (same) return { pairId: Number(same.id), duplicate: true };
+  const info = queries.insertPair.run({ pid, winner, loser, type });
+  updateScores(pid, winner, loser);
+  return { pairId: Number(info.lastInsertRowid), duplicate: false };
+});
+
+/** Both bad: both pictures lose points; one row of type 'both_bad' (winner = left), same duplicate rule. */
+const storeBothBad = db.transaction((pid, left, right) => {
+  const same = findSameVote.get(pid, left, right, 'both_bad');
+  if (same) return { pairId: Number(same.id), duplicate: true };
+  const s1 = getImageScore(pid, left);
+  const s2 = getImageScore(pid, right);
+  const d1 = Math.max(5, 20 / (s1.comparisons + 1));
+  const d2 = Math.max(5, 20 / (s2.comparisons + 1));
+  queries.upsertScore.run(pid, left, Math.max(0, s1.score - d1), s1.comparisons + 1);
+  queries.upsertScore.run(pid, right, Math.max(0, s2.score - d2), s2.comparisons + 1);
+  const info = queries.insertPair.run({ pid, winner: left, loser: right, type: 'both_bad' });
+  return { pairId: Number(info.lastInsertRowid), duplicate: false };
+});
+
+/** Take one stored vote back: restore both scores and delete the row, in one transaction. */
+const undoVote = db.transaction((pid, row) => {
+  const winner = getImageScore(pid, row.winner);
+  const loser = getImageScore(pid, row.loser);
+
+  if (winner.comparisons > 0) {
+    const wDelta = Math.max(5, 20 / winner.comparisons);
+    // A 'both_bad' row lowered BOTH images (the "winner" column is just the
+    // left one), so undoing it has to raise both.
+    const wRestored = row.type === 'both_bad' ? winner.score + wDelta : winner.score - wDelta;
+    queries.upsertScore.run(pid, row.winner, Math.max(0, Math.min(100, wRestored)), winner.comparisons - 1);
+  }
+  if (loser.comparisons > 0) {
+    const lDelta = Math.max(5, 20 / loser.comparisons);
+    queries.upsertScore.run(pid, row.loser, loser.score + lDelta, loser.comparisons - 1);
+  }
+
+  db.prepare('DELETE FROM pairwise_pairs WHERE id = ?').run(row.id);
+});
+
 // ═══════════════════════════════════════════════════════════════
 // LABELING ROUTES
 // ═══════════════════════════════════════════════════════════════
@@ -151,14 +222,9 @@ router.get('/next-pair', (req, res) => {
   const info = getPerformerPicsPath(parseInt(performer_id));
   if (!info) return res.status(404).json({ error: 'Performer not found' });
 
-  const allImages = scanForImages(info.picsPath);
+  const allImages = listImages(parseInt(performer_id), info.picsPath);
   if (allImages.length < 2) {
     return res.json({ error: 'Not enough images', done: true });
-  }
-
-  // Seed scores for new images
-  for (const img of allImages) {
-    queries.insertScoreIgnore.run(parseInt(performer_id), img, 50, 0);
   }
 
   // Generate candidate pairs
@@ -175,6 +241,23 @@ router.get('/next-pair', (req, res) => {
         path2: allImages[idx2],
         uncertainty: getPairUncertainty(parseInt(performer_id), allImages[idx1], allImages[idx2])
       });
+    }
+  }
+
+  // The random draws can all land on seen pairs long before every pair is seen: walk the pairs from a random
+  // start before saying done.
+  if (candidates.length === 0) {
+    const n = allImages.length;
+    const off = Math.floor(Math.random() * n);
+    outer:
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = allImages[(i + off) % n];
+        const b = allImages[(j + off) % n];
+        if (seenPairs.has(pairKey(a, b))) continue;
+        candidates.push({ path1: a, path2: b, uncertainty: getPairUncertainty(parseInt(performer_id), a, b) });
+        if (candidates.length >= 20) break outer;
+      }
     }
   }
 
@@ -214,16 +297,19 @@ router.post('/submit', (req, res) => {
     return res.status(400).json({ error: 'performer_id, winner, and loser are required' });
   }
 
+  if (winner === loser) {
+    return res.status(400).json({ error: 'winner and loser are the same picture' });
+  }
+
   const pid = parseInt(performer_id);
-  queries.insertPair.run({ pid, winner, loser, type: type || 'intra' });
+  const { pairId, duplicate } = storeVote(pid, winner, loser, type || 'intra');
   seenPairs.add(pairKey(winner, loser));
-  updateScores(pid, winner, loser);
 
   const pairCount = queries.getPairCountByPerformer.get(pid)?.count || 0;
 
   // ── Inter-performer ELO propagation ────────────────────────
-  // If this was an inter-performer comparison, update performer_rating
-  if (type === 'inter' && winner_performer_id && loser_performer_id &&
+  // If this was an inter-performer comparison, update performer_rating (not again for a resent vote)
+  if (!duplicate && type === 'inter' && winner_performer_id && loser_performer_id &&
       winner_performer_id !== loser_performer_id) {
     try {
       const K = 0.1; // Small K-factor — image comparisons should nudge, not swing
@@ -255,7 +341,9 @@ router.post('/submit', (req, res) => {
     success: true,
     totalPairs: pairCount,
     winnerScore: getImageScore(pid, winner),
-    loserScore: getImageScore(pid, loser)
+    loserScore: getImageScore(pid, loser),
+    pairId,
+    duplicate
   });
 });
 
@@ -267,50 +355,37 @@ router.post('/both-bad', (req, res) => {
     return res.status(400).json({ error: 'performer_id, left, and right are required' });
   }
 
+  if (left === right) {
+    return res.status(400).json({ error: 'left and right are the same picture' });
+  }
+
   const pid = parseInt(performer_id);
+  const { pairId, duplicate } = storeBothBad(pid, left, right);
   seenPairs.add(pairKey(left, right));
 
-  const s1 = getImageScore(pid, left);
-  const s2 = getImageScore(pid, right);
-  const d1 = Math.max(5, 20 / (s1.comparisons + 1));
-  const d2 = Math.max(5, 20 / (s2.comparisons + 1));
-
-  queries.upsertScore.run(pid, left, Math.max(0, s1.score - d1), s1.comparisons + 1);
-  queries.upsertScore.run(pid, right, Math.max(0, s2.score - d2), s2.comparisons + 1);
-  queries.insertPair.run({ pid, winner: left, loser: right, type: 'both_bad' });
-
-  res.json({ success: true });
+  res.json({ success: true, pairId, duplicate });
 });
 
-// Undo last vote for a performer
+// Undo a vote: with pair_id exactly that row, without it the performer's newest (made here, not imported)
 router.post('/undo', (req, res) => {
-  const { performer_id } = req.body;
+  const { performer_id, pair_id } = req.body;
   if (!performer_id) return res.status(400).json({ error: 'performer_id required' });
 
   const pid = parseInt(performer_id);
   try {
-    const lastPair = db.prepare('SELECT * FROM pairwise_pairs WHERE performer_id = ? AND source IS NULL ORDER BY id DESC LIMIT 1').get(pid);
-    if (!lastPair) return res.status(400).json({ error: 'No vote to undo' });
-
-    const winner = getImageScore(pid, lastPair.winner);
-    const loser = getImageScore(pid, lastPair.loser);
-
-    if (winner.comparisons > 0) {
-      const wDelta = Math.max(5, 20 / winner.comparisons);
-      // A 'both_bad' row lowered BOTH images (the "winner" column is just the
-      // left one), so undoing it has to raise both.
-      const wRestored = lastPair.type === 'both_bad' ? winner.score + wDelta : winner.score - wDelta;
-      queries.upsertScore.run(pid, lastPair.winner, Math.max(0, Math.min(100, wRestored)), winner.comparisons - 1);
-    }
-    if (loser.comparisons > 0) {
-      const lDelta = Math.max(5, 20 / loser.comparisons);
-      queries.upsertScore.run(pid, lastPair.loser, loser.score + lDelta, loser.comparisons - 1);
+    let row;
+    if (pair_id !== undefined && pair_id !== null) {
+      row = db.prepare('SELECT * FROM pairwise_pairs WHERE id = ? AND performer_id = ? AND source IS NULL').get(parseInt(pair_id), pid);
+      if (!row) return res.status(404).json({ error: 'That vote is not stored any more' });
+    } else {
+      row = db.prepare('SELECT * FROM pairwise_pairs WHERE performer_id = ? AND source IS NULL ORDER BY id DESC LIMIT 1').get(pid);
+      if (!row) return res.status(400).json({ error: 'No vote to undo' });
     }
 
-    db.prepare('DELETE FROM pairwise_pairs WHERE id = ?').run(lastPair.id);
-    seenPairs.delete(pairKey(lastPair.winner, lastPair.loser));
+    undoVote(pid, row);
+    seenPairs.delete(pairKey(row.winner, row.loser));
 
-    res.json({ success: true, totalPairs: queries.getPairCountByPerformer.get(pid)?.count || 0 });
+    res.json({ success: true, totalPairs: queries.getPairCountByPerformer.get(pid)?.count || 0, undonePairId: row.id });
   } catch (err) {
     console.error('[Pairwise] Undo error:', err);
     res.status(500).json({ error: 'Failed to undo' });
@@ -370,6 +445,7 @@ router.post('/reset-scores', (req, res) => {
   db.prepare('DELETE FROM pairwise_pairs WHERE performer_id = ?').run(pid);
 
   for (const p of pairs) seenPairs.delete(pairKey(p.winner, p.loser));
+  forgetImages(pid); // the next next-pair seeds the pictures again
 
   res.json({ success: true, message: `Scores and ${pairs.length} pairs reset` });
 });

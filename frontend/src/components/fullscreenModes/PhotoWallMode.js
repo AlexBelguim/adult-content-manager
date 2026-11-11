@@ -19,24 +19,32 @@ import {
  */
 export default function PhotoWallMode({ performers, onPhotoClick, active }) {
   const [layout, setLayout] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Starts as loading when there is work, so 'No pictures' never flashes first
+  const [loading, setLoading] = useState(() => Boolean(active && performers && performers.length));
   const bagsRef = useRef({});
 
   useEffect(() => {
     if (!active || !performers || performers.length === 0) return;
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     (async () => {
       try {
-        const { layout: items } = await generatePhotoWallLayout(performers, bagsRef.current);
-        if (cancelled) return;
+        const { layout: items } = await generatePhotoWallLayout(
+          performers,
+          bagsRef.current,
+          { signal: controller.signal }
+        );
+        if (controller.signal.aborted) return;
         setLayout(items);
+      } catch (e) {
+        if (controller.signal.aborted || e?.name === 'AbortError') return;
+        setLayout([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [performers, active]);
 
@@ -48,7 +56,7 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
         position: 'absolute',
         inset: 0,
         overflow: 'hidden',
-        background: 'radial-gradient(ellipse at center, #1f1a17 0%, #0c0a09 80%)',
+        background: 'var(--bg)',
       }}
     >
       {/* Loading hint while the first batch of images is being collected */}
@@ -60,7 +68,7 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'rgba(255,255,255,0.55)',
+            color: 'var(--dim)',
             fontSize: 14,
             letterSpacing: 2,
             textTransform: 'uppercase',
@@ -69,6 +77,25 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
           }}
         >
           Building the wall…
+        </Box>
+      )}
+      {!loading && layout.length === 0 && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--dim)',
+            fontSize: 14,
+            letterSpacing: 2,
+            textTransform: 'uppercase',
+            pointerEvents: 'none',
+            zIndex: 5,
+          }}
+        >
+          No pictures to show
         </Box>
       )}
       <Box
@@ -110,23 +137,21 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
                 zIndex: item.zIndex,
                 transition: 'transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.35s ease',
                 boxShadow: isHero
-                  ? '0 12px 60px rgba(0, 0, 0, 0.85)'
-                  : isFramed
-                    ? '0 8px 28px rgba(0, 0, 0, 0.65)'
-                    : '0 5px 22px rgba(0, 0, 0, 0.55)',
+                  ? 'var(--shadow-md), 0 0 0 1px var(--line-strong)'
+                  : 'var(--shadow-md)',
                 overflow: 'hidden',
-                backgroundColor: '#222',
+                backgroundColor: 'var(--raised)',
                 border: isFramed
                   ? `${8 + (index % 6)}px solid ${
-                      ['#8B7355', '#654321', '#D4AF37', '#C0C0C0', '#1a1a1a', '#f5f5dc'][index % 6]
+                      ['var(--surface)', 'var(--raised)', 'var(--overlay)', 'var(--line-strong)', 'var(--dim)', 'var(--text)'][index % 6]
                     }`
                   : isHero
-                    ? '8px solid rgba(255, 255, 255, 0.12)'
+                    ? '8px solid var(--line-strong)'
                     : 'none',
                 borderRadius: isFramed && item.frameShape === 'oval' ? '50%' : 0,
                 '&:hover': {
                   transform: `rotate(0deg) scale(${isHero ? 1.04 : 1.08})`,
-                  boxShadow: '0 18px 70px rgba(0, 0, 0, 0.95)',
+                  boxShadow: 'var(--shadow-md), 0 0 0 1px var(--line-strong)',
                   zIndex: 200,
                 },
               }}
@@ -152,9 +177,9 @@ export default function PhotoWallMode({ performers, onPhotoClick, active }) {
                     left: '20%',
                     width: '60px',
                     height: '25px',
-                    backgroundColor: 'rgba(200, 180, 140, 0.6)',
+                    backgroundColor: 'var(--line-strong)',
+                    opacity: 0.8,
                     transform: 'rotate(-2deg)',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
                   }}
                 />
               )}

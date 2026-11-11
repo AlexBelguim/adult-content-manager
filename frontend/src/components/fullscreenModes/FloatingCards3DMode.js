@@ -70,7 +70,7 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
         position: 'absolute',
         inset: 0,
         overflow: 'hidden',
-        background: 'radial-gradient(ellipse at center, #1a1830 0%, #05050d 80%)',
+        background: 'var(--bg)',
         // Far perspective keeps front cards from blowing up
         perspective: '2200px',
         perspectiveOrigin: '50% 50%',
@@ -87,7 +87,7 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
           marginLeft: '-350px',
           marginTop: '-350px',
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(124,77,255,0.22) 0%, transparent 70%)',
+          background: 'var(--accent-quiet)',
           filter: 'blur(50px)',
           animation: 'lightDrift 22s ease-in-out infinite',
           '@keyframes lightDrift': {
@@ -148,15 +148,13 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
                   inset: 0,
                   borderRadius: '6px',
                   overflow: 'hidden',
-                  boxShadow:
-                    '0 30px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)',
-                  background: '#111',
+                  boxShadow: 'var(--shadow-md), 0 0 0 1px var(--line)',
+                  background: 'var(--surface)',
                   backfaceVisibility: 'hidden',
                   transition: 'transform 0.3s ease, box-shadow 0.3s ease',
                   '&:hover': {
                     transform: 'scale(1.06)',
-                    boxShadow:
-                      '0 40px 80px rgba(0,0,0,0.9), 0 0 0 1px rgba(124,77,255,0.5)',
+                    boxShadow: 'var(--shadow-md), 0 0 0 1px var(--accent)',
                   },
                 }}
               >
@@ -174,37 +172,11 @@ export default function FloatingCards3DMode({ performers, onPhotoClick, active }
                   }}
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: '38%',
-                    background:
-                      'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)',
-                    pointerEvents: 'none',
-                  }}
-                />
               </Box>
             </Box>
           </Box>
         ))}
       </Box>
-
-      {/* Floor fog */}
-      <Box
-        sx={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: '22%',
-          background:
-            'linear-gradient(to top, rgba(5,5,13,1) 0%, rgba(5,5,13,0) 100%)',
-          pointerEvents: 'none',
-        }}
-      />
     </Box>
   );
 }

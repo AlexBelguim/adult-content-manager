@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { registerVRComponents } from '../vr/aframeComponents';
 import { buildGallery } from '../vr/buildGallery';
+import ArrowBack from '@mui/icons-material/ArrowBack';
+import { useBack } from '../nav';
 
 const AFRAME_SRC = 'https://aframe.io/releases/1.6.0/aframe.min.js';
 
@@ -36,6 +38,7 @@ export default function VRPage() {
   const [status, setStatus] = useState('loading'); // loading | ready | error
   const [vrSupported, setVrSupported] = useState(null); // null = unknown yet
   const [overlayVisible, setOverlayVisible] = useState(true);
+  const back = useBack('/');
 
   useEffect(() => {
     let cancelled = false;
@@ -96,8 +99,17 @@ export default function VRPage() {
     <div style={{ position: 'fixed', inset: 0, background: '#07090d' }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 
+      {!overlayVisible && (
+        <button type="button" onClick={() => setOverlayVisible(true)} style={{ ...cornerBtnStyle, position: 'fixed', padding: '0 14px' }}>
+          Menu
+        </button>
+      )}
+
       {overlayVisible && (
         <div style={overlayStyle}>
+          <button type="button" onClick={back} aria-label="Back to the library" title="Back to the library" style={{ ...cornerBtnStyle, width: 40, padding: 0 }}>
+            <ArrowBack style={{ fontSize: 20 }} />
+          </button>
           <h1 style={{ margin: 0, fontSize: 'clamp(1.4rem,5vw,2.2rem)', fontWeight: 700 }}>
             ACM — VR
           </h1>
@@ -170,4 +182,25 @@ const btnStyle = {
   font: 'inherit',
   fontWeight: 600,
   padding: '0.75rem 2rem',
+};
+
+/** Back (on the overlay) and Menu (while exploring flat), top-left. */
+const cornerBtnStyle = {
+  position: 'absolute',
+  top: 16,
+  left: 16,
+  zIndex: 11,
+  height: 40,
+  minWidth: 40,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'var(--raised)',
+  color: 'var(--text)',
+  border: '1px solid var(--line-strong)',
+  borderRadius: 'var(--radius)',
+  font: 'inherit',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
 };

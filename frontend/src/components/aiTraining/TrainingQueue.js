@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Typography, Chip, Button, Alert, LinearProgress, IconButton, Tooltip } from '@mui/material';
 import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import { Panel, Section, iconBtnSx } from '../layout';
+import { useAsk } from '../ui';
 
 /**
  * The training queue (GET /api/training/queue): the run going on acm-gpu, the ones waiting (in the order they run),
@@ -10,6 +11,7 @@ import { Panel, Section, iconBtnSx } from '../layout';
 export default function TrainingQueue({ version }) {
   const [q, setQ] = useState(null);
   const [error, setError] = useState(null);
+  const ask = useAsk();
   const load = useCallback(() => fetch('/api/training/queue').then(r => r.json()).then(d => { setQ(d); setError(null); }).catch(e => setError(e.message)), []);
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, [load, version]);
   const act = async (url, method = 'POST', body) => {
@@ -19,6 +21,19 @@ export default function TrainingQueue({ version }) {
       if (!r.ok || d.ok === false) setError(d.error || `HTTP ${r.status}`);
     } catch (e) { setError(e.message); }
     load();
+  };
+  // A waiting run is cancelled at once; a running one loses its progress, so that asks first
+  const cancel = async (j) => {
+    if (j.status === 'running') {
+      const stop = await ask({
+        title: 'Stop this training run?',
+        text: 'It stops at its next report and its progress is lost.',
+        okLabel: 'Stop training',
+        danger: true,
+      });
+      if (!stop) return;
+    }
+    act(`/api/training/jobs/${j.id}/cancel`);
   };
   const jobs = q?.jobs || [];
   if (!jobs.length && !error) return null;
@@ -50,7 +65,7 @@ export default function TrainingQueue({ version }) {
               </>
             )}
             {(j.status === 'queued' || j.status === 'running') && (
-              <Button size="small" color="error" variant="outlined" disabled={j.cancelling} onClick={() => act(`/api/training/jobs/${j.id}/cancel`)}>Cancel</Button>
+              <Button size="small" color="error" variant="outlined" disabled={j.cancelling} onClick={() => cancel(j)}>Cancel</Button>
             )}
             {j.trainable && (j.status === 'failed' || j.status === 'cancelled') && <Button size="small" variant="outlined" onClick={() => act(`/api/training/jobs/${j.id}/retry`)}>Run again</Button>}
             {!['queued', 'running'].includes(j.status) && <Button size="small" onClick={() => act(`/api/training/jobs/${j.id}`, 'DELETE')} sx={{ color: 'var(--dim)' }}>Remove</Button>}

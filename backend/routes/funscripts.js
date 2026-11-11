@@ -1,90 +1,34 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path');
-const fs = require('fs');
+const fileTrash = require('../services/fileTrash');
 
-// Get available funscripts for a video file
-router.get('/', (req, res) => {
+function sendTrashError(res, err) {
+  if (err instanceof fileTrash.TrashError) {
+    return res.status(err.status).send({ error: err.message, results: err.results || undefined });
+  }
+  console.error('Funscript route failed:', err);
+  return res.status(500).send({ error: err.message });
+}
+
+// The funscripts of a video: <base>.funscript and <base>.<axis>.funscript beside it, main script first
+router.get('/', async (req, res) => {
+  const { file } = req.query;
+  if (!file || typeof file !== 'string') {
+    return res.status(400).send({ error: 'File parameter required' });
+  }
   try {
-    const { file } = req.query;
-    if (!file) {
-      return res.status(400).send({ error: 'File parameter required' });
-    }
-
-    const videoDir = path.dirname(file);
-    const videoName = path.basename(file, path.extname(file));
-    
-    // Look for .funscript files with matching names
-    const files = fs.readdirSync(videoDir);
-    const funscripts = files
-      .filter(f => f.endsWith('.funscript') && f.startsWith(videoName))
-      .map(f => ({
-        name: f,
-        path: path.join(videoDir, f)
-      }));
-
-    res.send({ funscripts });
+    res.send({ funscripts: await fileTrash.videoScripts(file) });
   } catch (err) {
-    res.status(500).send({ error: err.message });
+    sendTrashError(res, err);
   }
 });
 
-// Upload funscript to Handy device
-router.post('/upload', async (req, res) => {
+// Moves one funscript to the .trash folder beside it: { scriptPath }
+router.delete('/delete', async (req, res) => {
   try {
-    const { videoFile, funscriptFile, isHandyConnected } = req.body;
-    
-    // Check if frontend connection status is valid
-    if (isHandyConnected === false) {
-      return res.status(400).send({ error: 'Not connected to Handy device' });
-    }
-    
-    // Validate that the files exist
-    const fs = require('fs');
-    if (!fs.existsSync(funscriptFile)) {
-      return res.status(404).send({ error: 'Funscript file not found' });
-    }
-    
-    // Return success - frontend will handle the actual Handy upload
-    res.send({ 
-      success: true, 
-      message: 'Files validated, ready for Handy upload',
-      funscriptFile: funscriptFile,
-      videoFile: videoFile
-    });
+    res.send(await fileTrash.trashFunscript(req.body && req.body.scriptPath));
   } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-});
-
-// Keep funscript (move to approved location)
-router.post('/keep', (req, res) => {
-  try {
-    const { scriptPath } = req.body;
-    
-    // Implementation depends on your folder structure
-    // For now, just mark as successful
-    console.log('Keeping funscript:', scriptPath);
-    
-    res.send({ success: true });
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-});
-
-// Delete funscript
-router.delete('/delete', (req, res) => {
-  try {
-    const { scriptPath } = req.body;
-    
-    if (fs.existsSync(scriptPath)) {
-      fs.unlinkSync(scriptPath);
-      console.log('Deleted funscript:', scriptPath);
-    }
-    
-    res.send({ success: true });
-  } catch (err) {
-    res.status(500).send({ error: err.message });
+    sendTrashError(res, err);
   }
 });
 

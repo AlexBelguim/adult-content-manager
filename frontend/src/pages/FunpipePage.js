@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink } from 'react-router-dom';
 import {
   Box, Typography, Button, IconButton, Chip, Alert,
   LinearProgress, Stack, Tooltip,
-  TextField, Checkbox, Snackbar
+  TextField, Checkbox
 } from '@mui/material';
 import { PageShell, Panel, StatRow, SPACE, iconBtnSx } from '../components/layout';
+import { useNotify } from '../components/ui';
+import { useShell } from '../nav';
 import useJobs, { isActive } from '../hooks/useJobs';
 import MovieIcon from '@mui/icons-material/Movie';
 import QueueIcon from '@mui/icons-material/Queue';
@@ -101,7 +103,7 @@ function fmtBytes(b) {
  * under the Funscripts filter; this page only adds videos to it.
  */
 export default function FunpipePage() {
-  const navigate = useNavigate();
+  const { openSettings } = useShell();
   const [config, setConfig] = useState({ url: '', aiServerUrl: '' });
 
   const [library, setLibrary] = useState({ videos: [], counts: {}, total: 0 });
@@ -109,7 +111,7 @@ export default function FunpipePage() {
   const [selected, setSelected] = useState(new Set());
   const [statusFilter, setStatusFilter] = useState(null);
   const [query, setQuery] = useState('');
-  const [toast, setToast] = useState(null);
+  const notify = useNotify();
   const [editor, setEditor] = useState({ running: false, url: null });
   const [editorBusy, setEditorBusy] = useState(false);
 
@@ -131,11 +133,11 @@ export default function FunpipePage() {
       if (data.error) throw new Error(data.error);
       setLibrary(data);
     } catch (err) {
-      setToast({ severity: 'error', msg: `Library scan failed: ${err.message}` });
+      notify({ severity: 'error', message: `Library scan failed: ${err.message}` });
     } finally {
       setLibraryLoading(false);
     }
-  }, []);
+  }, [notify]);
 
   const loadEditor = useCallback(async () => {
     try {
@@ -150,9 +152,9 @@ export default function FunpipePage() {
     setEditorBusy(true);
     try {
       const res = await post(editor.running ? '/api/funpipe/ui/stop' : '/api/funpipe/ui/start');
-      if (res.error) setToast({ severity: 'error', msg: res.error });
+      if (res.error) notify({ severity: 'error', message: res.error });
       else if (!editor.running) {
-        setToast({ severity: 'success', msg: 'Review editor started' });
+        notify('Review editor started');
       }
       await loadEditor();
     } finally {
@@ -183,10 +185,10 @@ export default function FunpipePage() {
     if (videos.length === 0) return;
     const result = await post('/api/funpipe/queue/add', { videos });
     if (result.queued) {
-      setToast({ severity: 'success', msg: `Queued ${result.added} video(s) with funpipe` });
+      notify(`Queued ${result.added} video(s) with funpipe`);
       setSelected(new Set());
     } else {
-      setToast({ severity: 'warning', msg: result.error || 'funpipe accepted nothing — already processed?' });
+      notify({ severity: 'warning', message: result.error || 'funpipe accepted nothing — already processed?' });
     }
     refreshJobs();
     loadLibrary(true);
@@ -244,8 +246,8 @@ export default function FunpipePage() {
         <Button
           size="small"
           variant="outlined"
-          endIcon={<OpenInNewIcon sx={{ fontSize: '14px !important' }} />}
-          onClick={() => navigate('/jobs')}
+          component={RouterLink}
+          to="/jobs"
           sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
         >
           {funpipeCount > 0 ? `${funpipeCount} in queue — view in Jobs` : 'View queue in Jobs'}
@@ -273,7 +275,7 @@ export default function FunpipePage() {
           </Tooltip>
         )}
         <Tooltip title="Runs on acm-gpu, ACM's GPU worker — its address is in Settings → Workers">
-          <IconButton onClick={() => navigate('/ai-training')} sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
+          <IconButton onClick={() => openSettings('workers')} aria-label="Settings → Workers" sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
         </Tooltip>
         <Tooltip title="Rescan funscript folders">
           <span>
@@ -464,9 +466,9 @@ export default function FunpipePage() {
                           <span>
                             <IconButton size="small" disabled={!online} sx={iconBtnSx()} onClick={async () => {
                               const r = await post('/api/funpipe/queue/add', { videos: [v.path] });
-                              setToast(r.queued
-                                ? { severity: 'success', msg: `Queued ${v.name}` }
-                                : { severity: 'warning', msg: r.error || 'funpipe accepted nothing' });
+                              notify(r.queued
+                                ? { severity: 'success', message: `Queued ${v.name}` }
+                                : { severity: 'warning', message: r.error || 'funpipe accepted nothing' });
                               refreshJobs();
                             }}>
                               <QueueIcon />
@@ -482,13 +484,6 @@ export default function FunpipePage() {
           )}
         </Box>
       </Panel>
-
-      <Snackbar
-        open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        {toast ? <Alert severity={toast.severity} onClose={() => setToast(null)}>{toast.msg}</Alert> : undefined}
-      </Snackbar>
     </PageShell>
   );
 }

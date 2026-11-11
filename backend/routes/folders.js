@@ -3,39 +3,37 @@ const router = express.Router();
 const multer = require('multer');
 const { validateAndCreateStructure, scanBeforeFolder, scanAfterFolder, scanContentFolder, scanOrphanedPerformers, scanBeforeUploadFolder, scanBeforeUploadPerformerDetails } = require('../services/fileScanner');
 const { importPerformer, getPerformerFiles } = require('../services/importer');
-const { uploadImportPerformer, uploadProgressMap } = require('../services/uploadImporter');
-const { addLocalImportToQueue } = require('../services/uploadQueue');
-
-const merger = require('../services/merger');
+const { addLocalImportToQueue, activeJobFor, jobForUpload, anyJobForUpload } = require('../services/uploadQueue');
+const {
+  SUPPORTED, UPLOAD_ID, resolveLibrary, requireLibrary, checkFolder, resolveImportName,
+  safeRel, safeBase, uploadTempDir, readManifests, countOther
+} = require('../services/importGuard');
 
 const db = require('../db');
+const folderRemoval = require('../services/folderRemoval');
 
 const path = require('path');
 const fs = require('fs-extra');
 
-// Configure multer for disk storage (files saved to temp folder in basePath)
+// The name a browser sent (encodeURIComponent of the path inside the chosen folder), decoded when it can be
+const decodedName = (raw) => {
+  try { return decodeURIComponent(raw); } catch (e) { return String(raw); }
+};
+
+// An error answer: { error, code? } with the status the error carries
+const sendError = (res, err, fallback = 500) => res.status(err.status || fallback).json({ error: err.message, code: err.code });
+
+// Multer saves each batch of an upload into that upload's own temp folder (set by prepareBatch)
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
-      // Get basePath from query parameter (sent before body is parsed)
-      const basePath = req.query.basePath;
-      console.log(`[Multer] Receiving file: ${file.originalname}, basePath from query: ${basePath}`);
-      if (!basePath) {
-        console.error('[Multer] ERROR: basePath query parameter is missing!');
-        return cb(new Error('basePath query parameter is required for upload'));
-      }
-      // Create temp folder in the basePath (same storage as final destination)
-      const tempDir = path.join(basePath, '.temp-uploads');
-      try {
-        fs.ensureDirSync(tempDir);
-        console.log(`[Multer] Saving to temp dir: ${tempDir}`);
-        cb(null, tempDir);
-      } catch (err) {
-        console.error(`[Multer] ERROR creating temp dir: ${err.message}`);
-        cb(err);
-      }
+      if (!req.uploadDir) return cb(new Error('No temp folder for this upload'));
+      cb(null, req.uploadDir);
     },
-    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${file.originalname}`)
+    filename: (req, file, cb) => {
+      const last = safeRel(decodedName(file.originalname)).split('/').pop() || 'file';
+      cb(null, `b${req.batchIndex}-${req.seq++}-${safeBase(last)}`);
+    }
   }),
   limits: {
     fileSize: 10 * 1024 * 1024 * 1024, // 10GB max per file
@@ -73,6 +71,39 @@ router.get('/', (req, res) => {
   }
 });
 
+// The library folders with their counts, in the order of GET / (the first one is the folder in use)
+router.get('/summary', async (req, res) => {
+  try {
+    const folders = db.prepare('SELECT * FROM folders').all();
+    const count = (sql, id) => db.prepare(sql).get(id).n;
+    const out = [];
+    for (const f of folders) {
+      out.push({
+        id: f.id,
+        path: f.path,
+        name: folderRemoval.folderName(f.path),
+        performers: count('SELECT COUNT(*) AS n FROM performers WHERE folder_id = ?', f.id),
+        before: count('SELECT COUNT(*) AS n FROM performers WHERE folder_id = ? AND (moved_to_after = 0 OR moved_to_after IS NULL)', f.id),
+        after: count('SELECT COUNT(*) AS n FROM performers WHERE folder_id = ? AND moved_to_after = 1', f.id),
+        genres: count('SELECT COUNT(*) AS n FROM content_genres WHERE folder_id = ?', f.id),
+        exists: await fs.pathExists(f.path)
+      });
+    }
+    res.json({ folders: out, currentId: folders[0]?.id ?? null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// What removing a folder from the app would remove and keep, and what stops it now (read-only)
+router.get('/:id/removal', async (req, res) => {
+  try {
+    res.json(await folderRemoval.plan(req.params.id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 // Scan for new performers
 router.get('/scan', async (req, res) => {
   try {
@@ -88,27 +119,6 @@ router.get('/scan', async (req, res) => {
     });
   } catch (err) {
     console.error('Error scanning for new performers:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-// Manual scan - force scan filesystem for new performers
-router.post('/scan-manual', async (req, res) => {
-  try {
-    const folders = db.prepare('SELECT * FROM folders').all();
-    if (!folders.length) return res.send({ newPerformers: [], orphanedPerformers: [] });
-
-    const newPerformers = await scanBeforeFolder(folders[0].path);
-    const orphanedPerformers = await scanOrphanedPerformers(folders[0].path);
-
-    res.send({
-      success: true,
-      newPerformers,
-      orphanedPerformers,
-      message: `Scan complete: Found ${newPerformers.length} new performer(s)`
-    });
-  } catch (err) {
-    console.error('Error during manual scan:', err);
     res.status(500).send({ error: err.message });
   }
 });
@@ -141,35 +151,6 @@ router.get('/scan-content', async (req, res) => {
     res.send(genres);
   } catch (err) {
     console.error('Error scanning content folder:', err);
-    res.status(500).send({ error: err.message });
-  }
-});
-
-// Delete orphaned performers
-router.post('/delete-orphaned', async (req, res) => {
-  const { performerIds } = req.body;
-
-  try {
-    if (!Array.isArray(performerIds) || performerIds.length === 0) {
-      return res.status(400).send({ error: 'No performer IDs provided' });
-    }
-
-    // Delete filter actions first (foreign key constraint)
-    for (const id of performerIds) {
-      db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
-    }
-
-    // Delete performers
-    const placeholders = performerIds.map(() => '?').join(',');
-    const deletedCount = db.prepare(`DELETE FROM performers WHERE id IN (${placeholders})`).run(...performerIds).changes;
-
-    res.send({
-      success: true,
-      message: `Deleted ${deletedCount} orphaned performer(s) from database`,
-      deletedCount
-    });
-  } catch (err) {
-    console.error('Error deleting orphaned performers:', err);
     res.status(500).send({ error: err.message });
   }
 });
@@ -232,320 +213,264 @@ router.get('/performer-files/:performerName', async (req, res) => {
   }
 });
 
-// Scan "before upload" folder for performer folders ready for local import
+// Scan "before upload" for folders ready for import (read-only), with the name match and job of each
 router.get('/scan-before-upload', async (req, res) => {
   try {
-    const folders = db.prepare('SELECT * FROM folders').all();
-    if (!folders.length) return res.json({ performers: [] });
+    const count = db.prepare('SELECT COUNT(*) AS n FROM folders').get().n;
+    if (!count) {
+      return res.json({ success: true, noLibrary: true, basePath: null, beforeUploadPath: null, types: SUPPORTED, performers: [], count: 0 });
+    }
+    const lib = resolveLibrary(req.query.basePath);
+    if (!lib) return res.status(400).json({ error: 'This library folder is not registered', code: 'unknown-library' });
 
-    const basePath = req.query.basePath || folders[0].path;
-    const performers = await scanBeforeUploadFolder(basePath);
+    const beforeUploadPath = path.join(lib.path, 'before upload');
+    const folders = await scanBeforeUploadFolder(lib.path);
+    const performers = folders.map(f => ({
+      name: f.name,
+      path: f.path,
+      match: resolveImportName(f.name),
+      job: activeJobFor({ libPath: lib.path, folderName: f.name })
+    }));
 
     res.json({
       success: true,
+      basePath: lib.path,
+      beforeUploadPath,
+      types: SUPPORTED,
       performers,
       count: performers.length
     });
   } catch (err) {
     console.error('Error scanning before upload folder:', err);
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
-// Scan specific performer in "before upload" for details (stats, previews)
+// One folder in "before upload": stats, up to 30 pictures, and the files that cannot be imported (read-only)
 router.get('/scan-before-upload-details', async (req, res) => {
   try {
     const { performerName } = req.query;
-    if (!performerName) {
-      return res.status(400).json({ error: 'performerName is required' });
+    if (typeof performerName !== 'string' || !performerName) {
+      return res.status(400).json({ error: 'performerName is required', code: 'invalid' });
     }
+    const lib = requireLibrary(req.query.basePath);
+    const problem = await checkFolder(lib.path, performerName);
+    if (problem) return res.status(problem.code === 'missing' ? 404 : 400).json({ error: problem.error, code: problem.code });
 
-    let basePath = req.query.basePath;
-    if (!basePath) {
-      const folders = db.prepare('SELECT * FROM folders').all();
-      if (!folders.length) return res.status(400).json({ error: 'No folders configured' });
-      basePath = folders[0].path;
-    }
-
-    const details = await scanBeforeUploadPerformerDetails(basePath, performerName);
+    const details = await scanBeforeUploadPerformerDetails(lib.path, performerName);
+    const other = await countOther(path.join(lib.path, 'before upload', performerName));
     res.json({
       success: true,
       stats: details.stats,
-      previewImages: details.previewImages
+      previewImages: details.previewImages,
+      other
     });
   } catch (err) {
     console.error('Error getting performer details:', err);
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
-// Local import - import performer(s) from "before upload" folder (no HTTP upload needed)
-router.post('/local-import', async (req, res) => {
-  const { performers, basePath, createHashes } = req.body;
-
-  if (!performers || !Array.isArray(performers) || performers.length === 0) {
-    return res.status(400).json({ error: 'performers array is required' });
-  }
-
-  if (!basePath) {
-    return res.status(400).json({ error: 'basePath is required' });
-  }
-
+// What an import under this name does: { match } (read-only)
+router.get('/name-check', (req, res) => {
   try {
-    const jobIds = [];
+    const { name } = req.query;
+    if (typeof name !== 'string') return res.status(400).json({ error: 'name is required', code: 'invalid' });
+    requireLibrary(req.query.basePath);
+    res.json({ match: resolveImportName(name) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
 
-    for (const performer of performers) {
-      const jobId = addLocalImportToQueue({
+// Local import: queue folders of "before upload". Each folder is checked; the refused ones are listed with a code.
+router.post('/local-import', async (req, res) => {
+  const { performers, basePath, createHashes } = req.body || {};
+
+  if (!Array.isArray(performers) || performers.length === 0
+    || performers.some(p => !p || typeof p !== 'object' || typeof p.folderName !== 'string')) {
+    return res.status(400).json({ error: 'performers must be a list of { folderName, name }', code: 'bad-request' });
+  }
+
+  let lib;
+  try {
+    lib = requireLibrary(basePath);
+  } catch (err) {
+    return sendError(res, err, 400);
+  }
+
+  const jobs = [];
+  const refused = [];
+  for (const performer of performers) {
+    const name = typeof performer.name === 'string' && performer.name.trim() ? performer.name.trim() : performer.folderName;
+    try {
+      const queued = await addLocalImportToQueue({
         folderName: performer.folderName,
-        performerName: performer.name,
-        basePath,
+        performerName: name,
+        basePath: lib.path,
         totalFiles: performer.totalFiles || 0,
         createHashes: !!createHashes
       });
-      jobIds.push({ performerName: performer.name, jobId });
+      jobs.push({ folderName: performer.folderName, performerName: queued.performerName, jobId: queued.jobId });
+    } catch (err) {
+      // A refusal without one of these codes is a server error (a busy database, say), not a bad name
+      const code = ['invalid', 'blacklisted', 'queued', 'missing'].includes(err.code) ? err.code : 'error';
+      if (!err.code) console.error(`Error queuing local import of "${performer.folderName}":`, err);
+      refused.push({ folderName: performer.folderName, code, error: err.message });
     }
-
-    res.json({
-      success: true,
-      message: `${performers.length} performer(s) queued for local import`,
-      jobs: jobIds
-    });
-  } catch (err) {
-    console.error('Error queuing local import:', err);
-    res.status(500).json({ error: err.message });
   }
+
+  if (jobs.length) return res.json({ success: true, jobs, refused });
+  res.status(409).json({ error: refused[0].error, jobs: [], refused });
 });
 
-// Upload-based import - upload files directly instead of scanning
-router.post('/upload-import', upload.array('files'), async (req, res) => {
-  // Get basePath from query (for multer) and body
-  const basePathFromQuery = req.query.basePath;
-  const basePathFromBody = req.body.basePath;
-  const basePath = basePathFromQuery || basePathFromBody;
+const toInt = (v) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
 
-  const { performerName, batchIndex, totalBatches, totalFiles, isLastBatch } = req.body;
-  // Get uploadId from query (most reliable), body, headers, or generate one
-  const uploadId = req.query.uploadId || req.body.uploadId || req.headers['x-upload-id'] || `upload-${Date.now()}`;
-  const files = req.files;
+/**
+ * Before multer: check the upload id, batch numbers and library, refuse a handed-over upload, and remove what an
+ * earlier try of this batch left, so a batch sent again never doubles.
+ */
+async function prepareBatch(req, res, next) {
+  try {
+    const { uploadId } = req.query;
+    if (typeof uploadId !== 'string' || !UPLOAD_ID.test(uploadId)) {
+      return res.status(400).json({ error: 'This upload id is not valid', code: 'bad-id' });
+    }
+    const i = toInt(req.query.batchIndex);
+    const n = toInt(req.query.totalBatches);
+    if (i === null || n === null || n < 1 || n > 100000 || i >= n) {
+      return res.status(400).json({ error: 'batchIndex and totalBatches must be whole numbers, 0 <= batchIndex < totalBatches <= 100000', code: 'bad-batch' });
+    }
+    const lib = requireLibrary(req.query.basePath);
+    if (jobForUpload(uploadId)) {
+      return res.status(409).json({ error: 'This upload is already handed over for import', code: 'handed-over' });
+    }
 
-  const batchNum = parseInt(batchIndex) || 0;
-  const numTotalBatches = parseInt(totalBatches) || 1;
-  const numTotalFiles = parseInt(totalFiles) || files?.length || 0;
-  const isFinalBatch = isLastBatch === 'true' || isLastBatch === true;
-
-  console.log(`\n=== Upload batch ${batchNum + 1}/${numTotalBatches} ===`);
-  console.log(`  performerName: ${performerName}`);
-  console.log(`  basePath: ${basePath}`);
-  console.log(`  files in this batch: ${files?.length}`);
-  console.log(`  total files: ${numTotalFiles}`);
-  console.log(`  uploadId: ${uploadId}`);
-  console.log(`  isFinalBatch: ${isFinalBatch}`);
-
-  if (!performerName || !basePath) {
-    return res.status(400).send({ error: 'Performer name and base path are required' });
+    const dir = uploadTempDir(lib.path, uploadId);
+    await fs.ensureDir(dir);
+    for (const name of await fs.readdir(dir)) {
+      if (name.startsWith(`b${i}-`) || name === `batch-${i}.json` || name.startsWith(`batch-${i}.json.`)) {
+        await fs.remove(path.join(dir, name));
+      }
+    }
+    req.uploadDir = dir;
+    req.uploadId = uploadId;
+    req.batchIndex = i;
+    req.seq = 0;
+    next();
+  } catch (err) {
+    sendError(res, err);
   }
+}
 
-  if (!files || files.length === 0) {
-    return res.status(400).send({ error: 'No files in this batch' });
-  }
-
-  // For non-final batches, just acknowledge receipt (files already saved to temp by multer)
-  if (!isFinalBatch) {
-    console.log(`  Batch ${batchNum + 1} received, waiting for more batches...`);
-    return res.send({
-      success: true,
-      batch: batchNum,
-      filesReceived: files.length,
-      message: `Batch ${batchNum + 1}/${numTotalBatches} received`
-    });
-  }
-
-  // This is the final batch - just acknowledge receipt
-  // The frontend will call /api/upload-queue to add the job for background processing
-  console.log(`  Final batch received! Files ready for queue processing.`);
-
-  res.send({
-    success: true,
-    batch: batchNum,
-    filesReceived: files.length,
-    message: `Final batch ${batchNum + 1}/${numTotalBatches} received. Ready for queue processing.`,
-    uploadId
+// Multer with JSON errors
+function receiveFiles(req, res, next) {
+  upload.array('files')(req, res, (err) => {
+    if (!err) return next();
+    console.error(`[Upload] Batch ${req.batchIndex} of ${req.uploadId} failed:`, err.message);
+    res.status(err instanceof multer.MulterError ? 400 : 500).json({ error: err.message, code: err.code || 'upload-failed' });
   });
+}
+
+// One batch of a browser upload, into <lib>/.temp-uploads/<uploadId>/, with its manifest batch-<i>.json
+router.post('/upload-import', prepareBatch, receiveFiles, async (req, res) => {
+  const files = req.files || [];
+  const dir = req.uploadDir;
+  const i = req.batchIndex;
+  try {
+    if (!files.length) return res.status(400).json({ error: 'No files in this batch', code: 'no-files' });
+
+    // Handed over while this batch was on its way: it is not part of that import
+    if (jobForUpload(req.uploadId)) {
+      for (const f of files) await fs.remove(path.join(dir, f.filename)).catch(() => {});
+      return res.status(409).json({ error: 'This upload is already handed over for import', code: 'handed-over' });
+    }
+
+    const manifest = {
+      index: i,
+      files: files.map(f => ({ temp: f.filename, rel: safeRel(decodedName(f.originalname)) || f.filename, size: f.size })),
+      at: new Date().toISOString()
+    };
+    const target = path.join(dir, `batch-${i}.json`);
+    const tmp = `${target}.${process.pid}-${Date.now()}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(manifest));
+    await fs.rename(tmp, target);
+
+    const batches = [...(await readManifests(dir)).keys()].sort((a, b) => a - b);
+    res.json({ success: true, uploadId: req.uploadId, batchIndex: i, files: files.length, batches });
+  } catch (err) {
+    console.error(`[Upload] Could not store batch ${i} of ${req.uploadId}:`, err);
+    sendError(res, err);
+  }
 });
 
-// Get upload status
-router.get('/upload-status/:id', (req, res) => {
-  const { id } = req.params;
-
-  if (uploadProgressMap.has(id)) {
-    res.send(uploadProgressMap.get(id));
-  } else {
-    // Return a "waiting" status instead of 404
-    // This handles the race condition where polling starts before processing begins
-    res.send({
-      status: 'waiting',
-      processed: 0,
-      total: 0,
-      currentFile: 'Waiting for server to start processing...'
+// What the server has of an upload (read-only)
+router.get('/upload-import/:uploadId', async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+    if (!UPLOAD_ID.test(uploadId)) return res.status(400).json({ error: 'This upload id is not valid', code: 'bad-id' });
+    const lib = requireLibrary(req.query.basePath);
+    const dir = uploadTempDir(lib.path, uploadId);
+    const exists = await fs.pathExists(dir);
+    const manifests = exists ? await readManifests(dir) : new Map();
+    let files = 0;
+    let bytes = 0;
+    for (const m of manifests.values()) {
+      files += m.files.length;
+      for (const f of m.files) bytes += Number(f && f.size) || 0;
+    }
+    res.json({
+      uploadId,
+      exists,
+      batches: [...manifests.keys()].sort((a, b) => a - b),
+      files,
+      bytes,
+      job: anyJobForUpload(uploadId)
     });
-  }
-});
-
-// Check if performer exists in after folder
-router.post('/check-performer', async (req, res) => {
-  const { performerName, basePath } = req.body;
-
-  try {
-    const exists = await merger.checkPerformerExists(performerName, basePath, 'after');
-    res.send({ exists });
   } catch (err) {
-    res.status(500).send({ error: err.message });
+    sendError(res, err);
   }
 });
 
-// Find potential performer matches by name and aliases
-router.post('/find-matches', async (req, res) => {
-  const { performerName, basePath } = req.body;
+// Size of everything under a folder
+async function treeBytes(dir) {
+  let total = 0;
+  for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) total += await treeBytes(full);
+    else if (e.isFile()) total += (await fs.stat(full).catch(() => ({ size: 0 }))).size;
+  }
+  return total;
+}
 
+// Drop an upload that was not handed over: its temp folder goes
+router.delete('/upload-import/:uploadId', async (req, res) => {
   try {
-    // Get all performers in 'after filter performer'
-    const folder = db.prepare('SELECT * FROM folders WHERE path = ?').get(basePath);
-    if (!folder) {
-      return res.status(404).send({ error: 'Folder not found' });
+    const { uploadId } = req.params;
+    if (!UPLOAD_ID.test(uploadId)) return res.status(400).json({ error: 'This upload id is not valid', code: 'bad-id' });
+    const lib = requireLibrary(req.query.basePath);
+    if (jobForUpload(uploadId)) {
+      return res.status(409).json({ error: 'This upload is handed over for import: remove it on the Jobs page', code: 'handed-over' });
     }
-
-    const allPerformers = db.prepare(
-      'SELECT * FROM performers WHERE folder_id = ? AND moved_to_after = 1'
-    ).all(folder.id);
-
-    const matches = [];
-
-    for (const performer of allPerformers) {
-      let matchType = null;
-      let matchScore = 0;
-
-      // Exact name match
-      if (performer.name.toLowerCase() === performerName.toLowerCase()) {
-        matchType = 'exact_name';
-        matchScore = 100;
-      } else {
-        // Check aliases
-        if (performer.aliases) {
-          try {
-            const aliases = JSON.parse(performer.aliases);
-            if (Array.isArray(aliases)) {
-              for (const alias of aliases) {
-                if (alias.toLowerCase() === performerName.toLowerCase()) {
-                  matchType = 'alias_match';
-                  matchScore = 90;
-                  break;
-                }
-                // Partial match
-                if (alias.toLowerCase().includes(performerName.toLowerCase()) ||
-                  performerName.toLowerCase().includes(alias.toLowerCase())) {
-                  if (!matchType) {
-                    matchType = 'partial_match';
-                    matchScore = 50;
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            // Invalid JSON, skip
-          }
-        }
-
-        // Partial name match
-        if (!matchType && (
-          performer.name.toLowerCase().includes(performerName.toLowerCase()) ||
-          performerName.toLowerCase().includes(performer.name.toLowerCase())
-        )) {
-          matchType = 'partial_name';
-          matchScore = 40;
-        }
-      }
-
-      if (matchType) {
-        matches.push({
-          id: performer.id,
-          name: performer.name,
-          aliases: performer.aliases ? JSON.parse(performer.aliases) : [],
-          matchType,
-          matchScore,
-          thumbnail: performer.thumbnail,
-          pics_count: performer.pics_count,
-          vids_count: performer.vids_count,
-          total_size_gb: performer.total_size_gb
-        });
-      }
-    }
-
-    // Sort by match score (highest first)
-    matches.sort((a, b) => b.matchScore - a.matchScore);
-
-    res.send({ matches });
+    const dir = uploadTempDir(lib.path, uploadId);
+    if (!await fs.pathExists(dir)) return res.status(404).json({ error: 'The server has no files for this upload', code: 'missing' });
+    const removedBytes = await treeBytes(dir).catch(() => 0);
+    await fs.remove(dir);
+    console.log(`[Upload] Removed the temp folder of ${uploadId} (${removedBytes} bytes)`);
+    res.json({ success: true, removedBytes });
   } catch (err) {
-    console.error('Error finding matches:', err);
-    res.status(500).send({ error: err.message });
+    sendError(res, err);
   }
 });
 
-// Merge imported performer with existing one
-router.post('/merge-import', async (req, res) => {
-  const { performerName, basePath, options } = req.body;
-
-  try {
-    const result = await merger.mergeImportedPerformer(performerName, basePath, options);
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-});
-
-// Delete a folder from the app (not from file system) - FULL DATABASE RESET
+// Forget one library folder (no file on disk is touched): body { confirm: <folder name> }. A copy of the database is
+// saved first; settings, tag definitions and file hashes stay (services/folderRemoval.js).
 router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-
   try {
-    const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(id);
-    if (!folder) {
-      return res.status(404).send({ error: 'Folder not found' });
-    }
-
-    console.log(`Full database reset requested for folder: ${folder.path}`);
-
-    // FULL DATABASE RESET - Delete ALL data from ALL tables
-    console.log('Resetting all database tables...');
-
-    // Delete all data from all tables in correct order (respecting foreign keys)
-    db.exec('DELETE FROM filter_actions');
-    db.exec('DELETE FROM tags');
-    db.exec('DELETE FROM file_tags');
-    db.exec('DELETE FROM exported_files');
-    db.exec('DELETE FROM video_scenes');
-    db.exec('DELETE FROM performers');
-    db.exec('DELETE FROM content_genres');
-    db.exec('DELETE FROM folders');
-    db.exec('DELETE FROM app_settings');
-
-    // Reset auto-increment counters (sqlite_sequence table only exists if there are AUTOINCREMENT columns)
-    try {
-      db.exec('DELETE FROM sqlite_sequence');
-    } catch (e) {
-      // sqlite_sequence table doesn't exist, which is fine
-      console.log('sqlite_sequence table does not exist, skipping reset');
-    }
-
-    console.log('Database fully reset - all tables cleared');
-
-    res.send({
-      success: true,
-      message: `Database fully reset. All folders and data have been cleared from the app.`,
-      reset: true
-    });
+    res.json({ success: true, ...(await folderRemoval.remove(req.params.id, { confirm: req.body?.confirm })) });
   } catch (err) {
-    console.error('Error during database reset:', err);
-    res.status(500).send({ error: err.message });
+    if (!err.status) console.error('Error removing a folder:', err);
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

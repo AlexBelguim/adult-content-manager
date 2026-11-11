@@ -6,6 +6,7 @@ import GalleryToolbar from './gallery/GalleryToolbar';
 import ActiveFilters from './gallery/ActiveFilters';
 import FilterDrawer from './gallery/FilterDrawer';
 import MasonryGrid from './gallery/MasonryGrid';
+import { usePageBar, useChrome } from '../nav';
 import './gallery/gallery.css';
 
 // Tiles rendered at first, and added each time the user nears the bottom.
@@ -86,6 +87,10 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
   const pendingRestoreRef = useRef(null); // { scrollY, count } saved when a tile was opened
   const rootRef = useRef(null);
   const [pairwiseScores, setPairwiseScores] = useState(null); // Map of path -> score
+
+  // The phone's page bar names the gallery (nothing on desktop)
+  usePageBar({ title: galleryName || 'Gallery' });
+  const chrome = useChrome();
   const preferencesKey = useMemo(() => {
     if (!galleryType || !galleryName || !basePath) return null;
     return `unifiedGalleryPrefs:${galleryType}:${encodeURIComponent(basePath)}:${encodeURIComponent(galleryName)}`;
@@ -960,7 +965,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
       performerName: performerData.name || galleryName,
       basePath: basePath || ''
     });
-    window.open(`/pairwise-rank?${params.toString()}`, '_blank');
+    navigate(`/pairwise-rank?${params.toString()}`); // a push: the ranker's Back comes back here
   };
 
   // Items of the current tab, already filtered + sorted.
@@ -1050,11 +1055,12 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     navigate(target);
   }, [navigate]);
 
-  // The app bar above is sticky and wraps on narrow screens; keep the gallery
-  // toolbar glued to its bottom edge whatever height it has.
+  // The app bar above (the desktop one or the phone's page bar, both data-app-bar) is sticky; keep the
+  // gallery toolbar glued to its bottom edge whatever height it has. A chrome flip swaps the bar.
   useEffect(() => {
     const root = rootRef.current;
-    const appBar = document.querySelector('.MuiAppBar-root');
+    const appBar = document.querySelector('[data-app-bar]');
+    if (root) root.style.setProperty('--ug-top', '0px');
     if (!root || !appBar) return undefined;
     const update = () => {
       const position = window.getComputedStyle(appBar).position;
@@ -1065,7 +1071,7 @@ const UnifiedGallery = ({ handyIntegration, handyCode, handyConnected }) => {
     const observer = new ResizeObserver(update);
     observer.observe(appBar);
     return () => observer.disconnect();
-  }, []);
+  }, [chrome]);
 
   const isPerformer = galleryType === 'performer';
   const counts = {

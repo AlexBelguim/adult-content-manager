@@ -14,7 +14,7 @@
  *
  * Usage:
  *   <PageShell>
- *     <PageHeader title="Ranking" subtitle="3,915 pairs" actions={<Button/>} back />
+ *     <PageHeader title="Ranking" subtitle="3,915 pairs" actions={<Button/>} back parent="/" />
  *     <StatRow items={[{label:'Scored', value:'12,480'}]} />
  *     <Section title="Results">
  *       <Panel>…</Panel>
@@ -24,7 +24,10 @@
 import React from 'react';
 import { Box, Typography, IconButton, Tooltip, CircularProgress } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { useNavigate } from 'react-router-dom';
+// The nav submodules, not '../../nav': nav/actions imports components/ui, which imports this file.
+import useBack from '../../nav/useBack';
+import { usePageBar } from '../../nav/pageBar';
+import { useChrome } from '../../nav/shell';
 
 /* ─── the one spacing scale ─────────────────────────────────────
    Pages were using 11 padding values and 8 gaps. Use these names
@@ -120,52 +123,113 @@ export function PageShell({ children, full = false, flush = false, sx = {}, ...r
 /**
  * Page title block. ONE heading level for every page — the audit found the
  * same semantic thing rendered as h4, h5 and h6 depending on the page.
+ *
+ *   title       the page title (a string also becomes the phone page bar's title)
+ *   subtitle    one line under the title
+ *   actions     buttons on the right of the header
+ *   back        show a Back arrow (desktop and bare chrome)
+ *   parent      where Back goes when the app did not push this entry (default: the route table's parent)
+ *   onBack      replaces the back rule (nav/useBack) for the arrow and the phone bar
+ *   barActions  phone only: nodes in the page bar, right of the title
+ *   barMenu     phone only: the page bar's More menu, [{ label, onClick, disabled?, hint?, danger? }]
+ *
+ * In the phone chrome the page bar shows the title and Back, so the header draws neither: only the
+ * subtitle and actions, in a compact row, or nothing when there are neither.
  */
-export function PageHeader({ title, subtitle, actions, back = false, onBack, sx = {} }) {
-  const navigate = useNavigate();
-  const goBack = onBack || (() => navigate(-1));
+export function PageHeader({ title, titleIsInfo = false, subtitle, actions, back = false, parent, onBack, barActions, barMenu, sx = {} }) {
+  const chrome = useChrome();
+  const goBack = useBack(parent);
+  usePageBar({
+    title: typeof title === 'string' ? title : undefined,
+    parent,
+    onBack,
+    actions: barActions,
+    menu: barMenu
+  });
 
+  if (chrome === 'phone') {
+    if (!subtitle && !actions) return null;
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: SPACE.sm,
+          flexWrap: 'wrap',
+          mb: SPACE.md,
+          pb: SPACE.sm,
+          borderBottom: '1px solid var(--line)',
+          ...sx
+        }}
+      >
+        {subtitle && (
+          <Typography variant="body2" sx={{ color: 'var(--dim)', flex: '1 1 auto', minWidth: 0 }}>
+            {subtitle}
+          </Typography>
+        )}
+        {actions && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap', ml: 'auto' }}>
+            {actions}
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  // PC: no big page title, the app bar already says where you are. One compact row instead: Back, a title only
+  // when it carries information (titleIsInfo, e.g. "Duplicates: katielefit"), the subtitle line and the actions.
+  // A page with none of these draws nothing. The title still names the page for screen readers.
+  const shownTitle = titleIsInfo ? title : null;
+  if (!subtitle && !actions && !shownTitle && !back) {
+    return typeof title === 'string' ? <Typography component="h1" sx={visuallyHidden}>{title}</Typography> : null;
+  }
   return (
     <Box
       sx={{
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'space-between',
         gap: SPACE.md,
         flexWrap: 'wrap',
-        mb: SPACE.lg,
-        pb: SPACE.md,
+        mb: SPACE.md,
+        pb: SPACE.sm,
         borderBottom: '1px solid var(--line)',
         ...sx
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, minWidth: 0, flex: '1 1 auto' }}>
         {back && (
           <Tooltip title="Back">
-            <IconButton onClick={goBack} size="small" sx={{ color: 'var(--dim)', mt: '2px' }}>
+            <IconButton aria-label="Back" onClick={onBack || goBack} size="small" sx={{ color: 'var(--dim)' }}>
               <ArrowBackIcon fontSize="small" />
             </IconButton>
           </Tooltip>
         )}
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="h5" sx={{ fontWeight: 640, letterSpacing: '-0.015em', color: 'var(--text)' }}>
-            {title}
+        {!shownTitle && typeof title === 'string' && <Typography component="h1" sx={visuallyHidden}>{title}</Typography>}
+        {shownTitle && (
+          <Typography component="h1" sx={{ fontSize: '1rem', fontWeight: 640, color: 'var(--text)', whiteSpace: 'nowrap' }}>
+            {shownTitle}
           </Typography>
-          {subtitle && (
-            <Typography variant="body2" sx={{ color: 'var(--dim)', mt: 0.25 }}>
-              {subtitle}
-            </Typography>
-          )}
-        </Box>
+        )}
+        {subtitle && (
+          <Typography variant="body2" sx={{ color: 'var(--dim)', minWidth: 0 }}>
+            {subtitle}
+          </Typography>
+        )}
       </Box>
       {actions && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap', ml: 'auto' }}>
           {actions}
         </Box>
       )}
     </Box>
   );
 }
+
+const visuallyHidden = {
+  position: 'absolute', width: '1px', height: '1px', p: 0, m: '-1px', overflow: 'hidden',
+  clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0
+};
 
 /** A titled block within a page. Gives every page the same vertical rhythm. */
 export function Section({ title, description, actions, children, sx = {} }) {
@@ -247,8 +311,8 @@ export function StatTile({ label, value, tone = 'default', hint }) {
       >
         {value}
       </Typography>
-      <Typography sx={{ fontSize: '.72rem', color: 'var(--dim)', mt: 0.25 }}>{label}</Typography>
-      {hint && <Typography sx={{ fontSize: '.65rem', color: 'var(--muted)', mt: 0.25 }}>{hint}</Typography>}
+      <Typography sx={{ fontSize: '.75rem', color: 'var(--dim)', mt: 0.25 }}>{label}</Typography>
+      {hint && <Typography sx={{ fontSize: '.75rem', color: 'var(--muted)', mt: 0.25 }}>{hint}</Typography>}
     </Panel>
   );
 }
@@ -296,7 +360,8 @@ export function LoadingState({ label = 'Loading…', sx = {} }) {
   );
 }
 
-export default {
+const layout = {
   PageShell, PageHeader, Section, Panel, Toolbar,
   StatTile, StatRow, EmptyState, LoadingState, SPACE, CONTENT_MAX
 };
+export default layout;

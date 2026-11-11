@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import PerformerCard from './PerformerCard';
 import PerformerFilterView from './PerformerFilterView';
 import PerformerSettingsModal from './PerformerSettingsModal';
-import { smartOpen } from '../utils/pwaNavigation';
+import { EmptyState, LoadingState, PageShell } from './layout';
+import { useOpen } from '../nav';
+import useFilterViewHistory from './filter/filterHistory';
 import {
   Box,
+  Button,
   FormControl,
   InputLabel,
   Select,
@@ -97,22 +100,49 @@ export const handleCompletePerformer = async (performerId) => {
   }
 };
 
-function FilterView({ basePath, handyIntegration, handyConnected, cachedPerformers, onPerformersUpdate }) {
+function FilterView({ performerId = null, basePath, handyIntegration, handyConnected, cachedPerformers, onPerformersUpdate }) {
   const navigate = useNavigate();
+  const open = useOpen();
+  const { leave, goTo } = useFilterViewHistory('/filter');
   // Initialize from cache if available
   const [allPerformers, setAllPerformers] = useState(cachedPerformers || []);
   const [loading, setLoading] = useState(!cachedPerformers || cachedPerformers.length === 0);
   const [renderedCount, setRenderedCount] = useState(cachedPerformers?.length || 0);
   const [sort, setSort] = useState(() => localStorage.getItem('filterSortBy') || 'size-desc');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [settingsModal, setSettingsModal] = useState({ open: false, performer: null });
   const [containerWidth, setContainerWidth] = useState(0);
   const cardRowRef = useRef(null);
   const prevSortRef = useRef(sort);
 
-  // Track initial tab when opening performer
-  const [initialTab, setInitialTab] = useState(null);
+  // The performer of /filter/:performerId: from the list when she is in it, else asked of the server
+  // (a deep link, or one the list does not hold). { id, performer, status: 'ok' | 'missing' | 'error', error }
+  const listPerformer = performerId ? allPerformers.find((p) => String(p.id) === String(performerId)) || null : null;
+  const [fetched, setFetched] = useState({ id: null, performer: null, status: null, error: null });
+  const fetchedNow = fetched.id === performerId ? fetched : null;
+  const performer = listPerformer || fetchedNow?.performer || null;
+  const needFetch = !!performerId && !listPerformer && !fetchedNow;
+  const inPerformer = !!performerId;
+
+  useEffect(() => {
+    if (!needFetch) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/performers/${encodeURIComponent(performerId)}`);
+        if (res.status === 404) {
+          if (!cancelled) setFetched({ id: performerId, performer: null, status: 'missing', error: null });
+          return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setFetched({ id: performerId, performer: data, status: 'ok', error: null });
+      } catch (err) {
+        if (!cancelled) setFetched({ id: performerId, performer: null, status: 'error', error: err.message });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [needFetch, performerId]);
 
   // Fetch ALL performers on mount (or when sort changes)
   const fetchAllPerformers = async () => {
@@ -166,21 +196,8 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
         console.log(`FilterView: Loaded ${performers.length} performers`);
         setAllPerformers(performers);
 
-        // Progressive rendering for smooth appearance
-        if (performers.length > 0) {
-          setRenderedCount(0);
-          setTimeout(() => {
-            let count = 0;
-            const revealNext = () => {
-              if (count < performers.length && !cancelled) {
-                count++;
-                setRenderedCount(count);
-                setTimeout(revealNext, 5); // Fast reveal
-              }
-            };
-            revealNext();
-          }, 50);
-        }
+        // All at once: a card-by-card timer chain is slowed down by the browser in a background tab
+        setRenderedCount(performers.length);
 
         if (onPerformersUpdate) {
           onPerformersUpdate(performers);
@@ -199,7 +216,22 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     return () => {
       cancelled = true;
     };
-  }, [sort]); // Re-fetch when sort changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the sort changes
+  }, [sort]);
+
+  // Back on the list from her filter view, by any way out (Back here, browser Back, a link): counts moved
+  // and the view's cleanup runs on the server, so refresh the cards now and once more when it has most
+  // likely finished.
+  const shownPerformer = useRef(performerId);
+  useEffect(() => {
+    const was = shownPerformer.current;
+    shownPerformer.current = performerId;
+    if (!was || performerId) return undefined;
+    fetchAllPerformers();
+    const timer = setTimeout(fetchAllPerformers, 5000);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only when she is left
+  }, [performerId]);
 
   // Save states to localStorage whenever they change
   useEffect(() => {
@@ -224,7 +256,8 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  // the row is only there while the list shows, so measure again each time it comes back
+  }, [inPerformer]);
 
   // Client-side filtering by search term
   const sorted = allPerformers.filter(performer => {
@@ -232,23 +265,23 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     return performer.name.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
-  const handlePerformerClick = (performer) => {
-    // If performer is in "after filter performer" folder (moved_to_after = 1), open gallery
+  // A card opens her filter view, or her gallery once she is in "after". Ctrl-click: a new tab.
+  const handlePerformerClick = (performer, e) => {
     if (performer.moved_to_after) {
-      const performerUrl = `/unified-gallery?performer=${encodeURIComponent(performer.name)}&basePath=${encodeURIComponent(basePath)}`;
-      smartOpen(performerUrl);
+      open(`/unified-gallery?performer=${encodeURIComponent(performer.name)}&basePath=${encodeURIComponent(basePath)}`, e);
     } else {
-      // Open filtering interface for this performer
-      setInitialTab(null); // Reset initial tab
-      setSelectedPerformer(performer);
+      open(`/filter/${performer.id}`, e);
     }
   };
 
+  // A progress row opens her filter view on that tab
   const handleProgressClick = (performer, tab) => {
-    // Open filtering interface directly to the specified tab
-    setInitialTab(tab);
-    setSelectedPerformer(performer);
+    navigate(`/filter/${performer.id}?tab=${encodeURIComponent(tab)}`);
   };
+
+  // Out of the filter view in one step, whatever it stacked (filter/filterHistory.js); the next performer
+  // takes the place of this one in the history.
+  const goToPerformer = (next) => goTo(next.id);
 
   const handlePerformerThumbnailChange = async (performerId) => {
     try {
@@ -293,12 +326,14 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
       // Refresh the performers list
       fetchAllPerformers();
 
-      // If there's a next performer, auto-select it
+      // On to the next performer to filter: in her place from the filter view, a new entry from the list
       if (result.nextPerformer) {
-        setSelectedPerformer(result.nextPerformer);
-      } else {
+        if (inPerformer) goToPerformer(result.nextPerformer);
+        else navigate(`/filter/${result.nextPerformer.id}`);
+      } else if (inPerformer) {
         // No more performers to filter
-        await exitPerformerView(selectedPerformer, null, { cleanup: true });
+        exitPerformerView(performer, { cleanup: true });
+        leave();
       }
     }
   };
@@ -307,26 +342,9 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     setSettingsModal({ open: true, performer });
   };
 
+  // Her duplicates, on Performer Management in this tab
   const handleOpenHash = (performerId) => {
-    const url = `/performer-management?performer=${performerId}`;
-
-    // Try to find existing window
-    const hashWindow = window.open('', 'hashManagementWindow');
-
-    if (hashWindow && hashWindow.location.pathname === '/performer-management') {
-      // Window exists and is on hash management page - just update the URL param without reload
-      const newUrl = new URL(url, window.location.origin);
-      hashWindow.history.pushState({}, '', newUrl);
-
-      // Dispatch a popstate event to trigger the search update
-      hashWindow.dispatchEvent(new PopStateEvent('popstate'));
-
-      // Focus the window
-      hashWindow.focus();
-    } else {
-      // Window doesn't exist or is on wrong page - open new/navigate
-      window.open(url, 'hashManagementWindow');
-    }
+    navigate(`/performer-management?performer=${performerId}`);
   };
 
   const handleSettingsModalClose = () => {
@@ -334,11 +352,12 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
     fetchAllPerformers(); // Refresh the list
   };
 
-  // Exit the performer filter view. PerformerFilterView already starts the
-  // trash cleanup on its own Back / Next (it has to: the phone shell mounts it
-  // without this parent), so only the "complete performer" path asks for one
-  // here — otherwise every Back showed two "Cleaning up trash" jobs.
-  const exitPerformerView = (currentPerformer, nextPerformer = null, { cleanup = false } = {}) => {
+  // The cleanup when the performer filter view is left. PerformerFilterView
+  // already starts the trash cleanup on its own Back / Next and when it unmounts
+  // (it has to: the phone shell mounts it without this parent), so only the
+  // "complete performer" path asks for one here — otherwise every Back showed
+  // two "Cleaning up trash" jobs. Where to go is the caller's: the URL holds it.
+  const exitPerformerView = (currentPerformer, { cleanup = false } = {}) => {
     if (cleanup && currentPerformer?.id) {
       fetch(`/api/performers/${currentPerformer.id}/cleanup-trash-on-exit`, {
         method: 'POST',
@@ -353,9 +372,6 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
           console.error('Error cleaning up trash on exit:', error);
         });
     }
-
-    // Navigate immediately without waiting
-    setSelectedPerformer(nextPerformer);
   };
 
   // Handle next performer without completion
@@ -375,48 +391,48 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
         fetchAllPerformers();
 
         // Switch to the next performer
-        setSelectedPerformer(nextPerformer);
+        goToPerformer(nextPerformer);
       } else {
         console.log('No more performers in sorted order, going back to list');
         // No more performers, go back to list
-        exitPerformerView(selectedPerformer);
+        leave();
       }
     } catch (error) {
       console.error('Error getting next performer:', error);
-      exitPerformerView(selectedPerformer);
+      leave();
     }
   };
 
-  // If a performer is selected, show the filtering interface
-  if (selectedPerformer) {
-    return (
-      <PerformerFilterView
-        performer={selectedPerformer}
-        initialTab={initialTab}
-        onBack={async (nextPerformer) => {
-          if (nextPerformer) {
-            console.log('onBack called with next performer:', nextPerformer.name);
-            // Reset initial tab when moving to next performer
-            setInitialTab(null);
-            // Switch to the next performer
-            setSelectedPerformer(nextPerformer);
-          } else {
-            console.log('onBack called, going back to list');
-            // Reset initial tab when going back to list
-            setInitialTab(null);
-            exitPerformerView(selectedPerformer);
-            // Counts moved: the view's cleanup runs on the server, so refresh
-            // the cards now and once more when it has most likely finished.
-            fetchAllPerformers();
-            setTimeout(fetchAllPerformers, 5000);
-          }
-        }}
-        onNext={handleNextPerformer}
-        onComplete={handlePerformerComplete}
-        handyIntegration={handyIntegration}
-        handyConnected={handyConnected}
-      />
-    );
+  // /filter/:performerId: the filtering interface for her
+  if (inPerformer) {
+    if (performer) {
+      return (
+        <PerformerFilterView
+          key={performer.id}
+          performer={performer}
+          onBack={(nextPerformer) => {
+            // Back to the list refreshes the cards (the effect on performerId)
+            if (nextPerformer) goToPerformer(nextPerformer);
+            else leave();
+          }}
+          onNext={handleNextPerformer}
+          handyIntegration={handyIntegration}
+          handyConnected={handyConnected}
+        />
+      );
+    }
+    if (fetchedNow?.status === 'missing' || fetchedNow?.status === 'error') {
+      return (
+        <PageShell>
+          <EmptyState
+            title={fetchedNow.status === 'missing' ? 'Performer not found' : 'Could not load this performer'}
+            description={fetchedNow.status === 'missing' ? `No performer has the id ${performerId}.` : fetchedNow.error}
+            action={<Button component={RouterLink} to="/filter" variant="outlined">Back to the list</Button>}
+          />
+        </PageShell>
+      );
+    }
+    return <PageShell><LoadingState label="Loading the performer…" /></PageShell>;
   }
 
   return (
@@ -570,7 +586,7 @@ function FilterView({ basePath, handyIntegration, handyConnected, cachedPerforme
               ) : (
                 <PerformerCard
                   performer={performer}
-                  onClick={() => handlePerformerClick(performer)}
+                  onClick={(e) => handlePerformerClick(performer, e)}
                   onChangeThumbnail={handlePerformerThumbnailChange}
                   onComplete={handlePerformerComplete}
                   onSettings={handlePerformerSettings}

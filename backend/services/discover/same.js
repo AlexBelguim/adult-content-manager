@@ -17,8 +17,8 @@
  * judgment P was fitted for (scored by scan.js after each run, kept in discover_pool_scores by the pictures it saw).
  */
 const { createHash } = require('crypto');
-const { normalize } = require('./library');
-const { siteLink } = require('./links');
+const { normalize, fullName } = require('./library');
+const { siteLink, safeDecode } = require('./links');
 
 const MIN_KEY = 4;   // shorter names ("Mia", "Eva") join too many people
 const exact = (s) => String(s || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -28,7 +28,7 @@ const NETWORK_NAMES = { onlyfans: 'OnlyFans', fansly: 'Fansly', instagram: 'Inst
 /** The account a social link is: 'onlyfans:name', or null for a link to no account. */
 function account(network, url) {
   const name = String(url || '').match(/^https?:\/\/(?:www\.)?[^/]+\/(?:@)?([^/?#]+)/i)?.[1];
-  return name && !/^(home|login|signup|explore)$/i.test(name) ? `${network}:${decodeURIComponent(name).toLowerCase()}` : null;
+  return name && !/^(home|login|signup|explore)$/i.test(name) ? `${network}:${safeDecode(name).toLowerCase()}` : null;
 }
 
 /** The pictures a performer's pool score is from, and its key in pool_scores (the same pictures, the same score). */
@@ -47,17 +47,22 @@ function samePerformerGroups({ kept = [], notKept = [], profiles = [] }, library
   { singles = false, links = [], decisions = {}, pools = {}, statuses = {}, threshold = 50, model = null } = {}) {
   const members = [
     ...profiles.map(p => ({
-      type: 'profile', source: `${p.site}:profiles`, site: p.site, id: p.profile_id, name: p.name, link: siteLink(p.url), image_url: p.image_url, image_path: p.image_path, image_paths: p.image_paths,
-      score: p.score, kept: p.kept, names: [p.name, ...(p.scrape?.aliases || [])], scrape: p.scrape, full: p.full, socials: p.scrape?.socials || {},
+      type: 'profile', source: `${p.site}:profiles`, site: p.site, id: p.profile_id, name: p.name, link: siteLink(p.url), url: p.url, image_url: p.image_url, image_path: p.image_path, image_paths: p.image_paths,
+      score: p.score, kept: p.kept, model: p.model ?? null, judged_at: p.judged_at ?? null, complete: !!p.full,
+      names: [p.name, ...(p.scrape?.aliases || [])], scrape: p.scrape, full: p.full, socials: p.scrape?.socials || {},
       found_at: p.judged_at || p.data_at
     })),
     ...[...kept, ...notKept].map(p => ({
       type: 'post', source: `${p.site}:posts`, site: p.site, id: p.post_id, name: p.performer_name || p.title, title: p.title,
-      link: siteLink(p.saved_link || p.share_url || p.post_url), share_url: p.share_url, image_url: p.image_url, image_path: p.image_path, image_paths: p.image_paths,
+      link: siteLink(p.saved_link || p.share_url || p.post_url), share_url: p.share_url, post_url: p.post_url, saved_link: siteLink(p.saved_link) ?? null,
+      page_kind: p.page_kind ?? null, info: p.info ?? null, model: p.model ?? null, scanned_at: p.scanned_at ?? null,
+      image_url: p.image_url, image_path: p.image_path, image_paths: p.image_paths,
       score: p.score, kept: p.kept, posted_at: p.posted_at, names: [p.title, p.performer_name], socials: {}, found_at: p.scanned_at
     }))
   ];
-  members.forEach(m => { m.key = `${m.type}:${m.site}:${m.id}`; m.names = m.names.filter(Boolean); });
+  // by_hand: combined with another by hand (Duplicates: Combine), so Take apart can undo it
+  const handLinked = new Set(links.filter(l => l.kind === 'same').flatMap(l => [l.a, l.b]));
+  members.forEach(m => { m.key = `${m.type}:${m.site}:${m.id}`; m.names = m.names.filter(Boolean); m.by_hand = handLinked.has(m.key); });
   const byKey = new Map(members.map((m, i) => [m.key, i]));
 
   const parent = members.map((_, i) => i);
@@ -112,7 +117,6 @@ function samePerformerGroups({ kept = [], notKept = [], profiles = [] }, library
   };
   // A shared alias only counts as a full name ("Ariana Lu"); a first name ("Emma", "Mila") is shared by too many,
   // and some sites' data leaks into the aliases ("| birth month = November")
-  const fullName = (s) => /^[\p{L}\p{N}][\p{L}\p{N} .'_-]*$/u.test(s) && s.trim().split(/\s+/).filter(w => /\p{L}/u.test(w)).length >= 2;
   const byName = index(normalize);
   for (const [k, { main, alias }] of byName) {
     const all = [...main, ...alias];
@@ -180,10 +184,12 @@ function samePerformerGroups({ kept = [], notKept = [], profiles = [] }, library
     const keptAlone = list.some(m => m.kept);
     const poolScore = pooled ? Math.round(pooled.score * 10) / 10 : null;
     for (const m of list) { delete m.scrape; delete m.full; delete m.names; delete m.socials; }
+    const lib = library.performer(...list.flatMap(m => [m.name, m.title, ...m.matched_on]), ...(data?.aliases || []));
     summaries.set(root, {
       names,
       data,
-      in_library: library.find(...list.flatMap(m => [m.name, m.title, ...m.matched_on]), ...(data?.aliases || [])),
+      in_library: lib?.name || null,
+      in_library_id: lib?.id ?? null,
       profiles: list.filter(m => m.type === 'profile').length,
       posts: list.filter(m => m.type === 'post').length,
       sites: [...new Set(list.map(m => m.site))],

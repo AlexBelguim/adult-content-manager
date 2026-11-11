@@ -2,8 +2,6 @@
   "scripts": {
     "start": "npm run start:backend",
     "start:backend": "cd backend && node index.js",
-    "start:pairwise": "cd backend-pairwise && node server.js",
-    "full": "npx concurrently \"npm run start:backend\" \"npm run start:pairwise\"",
     "build": "cd frontend && npm run build",
     "test": "node --test --test-force-exit backend/test/*.test.js",
     "kill": "taskkill /f /im node.exe && taskkill /f /im python.exe"

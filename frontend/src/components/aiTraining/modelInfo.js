@@ -33,7 +33,7 @@ export const MODEL_NOTES = [
     how: 'CLIP ViT-L/14-336 (frozen) turns a picture into 768 numbers; a small head (768 → 512 → 256 → 1) turns those into a score. Trained on pairs: the winner must score higher (RankNet). Only the order of the scores means something, so a cut has to be picked per batch.',
     better: [
       'Retrain here: adds kept > deleted pairs of every performer plus your same-performer hand pairs, and holds performers out for an honest score',
-      'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from backend-pairwise/pairwise.db (785 of its 788, 764 of them same performer: 483 in the app DB, 302 of performers deleted from the app in a PC file); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
+      'Hand pairs come from three sources, counted apart in the training log: Rank images; legacy pairs imported from pairwise.db of the old pairwise service (785 of its 788, 764 of them same performer: 483 in the app DB, 302 of performers deleted from the app in a PC file); legacy old labeller file on the AI PC (2,763 same-performer pairs of the Jan 2026 export)',
       'A keep cut-off per performer, stricter for performers with fewer stars',
       '2nd order (across performers) only from hand-made cross pairs (698 in the labeller file, 21 from pairwise.db); pairs made from stars teach the model who, not what',
     ],

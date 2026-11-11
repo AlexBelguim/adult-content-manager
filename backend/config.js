@@ -16,8 +16,6 @@ module.exports = {
     workerConcurrency: parseInt(process.env.HASH_WORKER_CONCURRENCY) || 4,
     videoFramePosition: parseFloat(process.env.VIDEO_FRAME_POSITION) || 0.5, // 0-1 (0.5 = middle)
     runTTLDays: parseInt(process.env.HASH_RUN_TTL_DAYS) || 7,
-    quarantinePath: process.env.QUARANTINE_PATH || path.join(__dirname, 'quarantine'),
-    quarantineRetentionDays: parseInt(process.env.QUARANTINE_RETENTION_DAYS) || 30,
     defaultHammingThreshold: parseInt(process.env.DEFAULT_HAMMING_THRESHOLD) || 10,
   }
 };

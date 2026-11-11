@@ -101,6 +101,7 @@ function view(r) {
     started: r.started_at ? r.started_at / 1000 : null,
     elapsed: r.finished_at && r.started_at ? (r.finished_at - r.started_at) / 1000 : null,
     error: r.error, log_tail: log.slice(-6),
+    heartbeat: r.heartbeat_at || null, finished: r.finished_at || null,
   };
 }
 
@@ -126,8 +127,15 @@ function remove(id) {
   return { ok: true };
 }
 
-function clearDone() {
-  const n = db.prepare("DELETE FROM funpipe_jobs WHERE status IN ('done', 'failed', 'cancelled')").run().changes;
+/**
+ * The ended jobs off the list. keepFailed (the Jobs page's Clear finished): failed rows stay, and so does a cancelled
+ * job whose worker may still be stopping (a phase, and a report within STALE_MS).
+ */
+function clearDone({ keepFailed = false } = {}) {
+  const n = keepFailed
+    ? db.prepare("DELETE FROM funpipe_jobs WHERE status = 'done' OR (status = 'cancelled' AND (phase IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?))")
+      .run(Date.now() - STALE_MS).changes
+    : db.prepare("DELETE FROM funpipe_jobs WHERE status IN ('done', 'failed', 'cancelled')").run().changes;
   return { ok: true, removed: n };
 }
 
@@ -231,7 +239,7 @@ async function writeSidecar(video, ext, stream) {
 }
 
 module.exports = {
-  VIDEO_EXTS, SIDECARS, events, workerToken, libraryVideo, sidecarPath,
+  STALE_MS, VIDEO_EXTS, SIDECARS, events, workerToken, libraryVideo, sidecarPath,
   enqueue, list, start, stop, remove, clearDone,
   heartbeat, claim, queued, paused, progress, complete, fail, sidecarFile, writeSidecar,
 };

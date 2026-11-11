@@ -11,13 +11,14 @@
  * the estimate, and the new file is thrown away when it isn't really 5% smaller. Every original is kept 14 days in
  * the base folder's .originals, with Undo.
  *
- * Route: /settings/space
+ * Route: /settings/space, the Space section of pages/SettingsPage.js
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Box, Button, ButtonBase, Checkbox, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
-  LinearProgress, MenuItem, Select, Snackbar, Alert, TextField, Tooltip, Typography
+  Box, Button, ButtonBase, Checkbox, Chip, Collapse, IconButton,
+  LinearProgress, MenuItem, Select, Alert, Tooltip, Typography
 } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import CloseIcon from '@mui/icons-material/Close';
@@ -26,7 +27,9 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import UndoIcon from '@mui/icons-material/Undo';
 import ReplayIcon from '@mui/icons-material/Replay';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { PageShell, PageHeader, Section, Panel, StatRow, LoadingState, SPACE, iconBtnSx } from '../components/layout';
+import { Section, Panel, StatRow, LoadingState, SPACE, iconBtnSx } from '../components/layout';
+import { useAsk, useNotify } from '../components/ui';
+import { SmallButton } from '../components/discover/shared';
 
 const LIMIT = 30;
 const TOP_LABEL = { before: 'Before filter', after: 'After filter', content: 'Content' };
@@ -69,7 +72,8 @@ const smallBtnSx = {
   minWidth: 0, px: '9px', py: '2px', fontSize: '.78rem', lineHeight: 1.5, textTransform: 'none', whiteSpace: 'nowrap',
   color: 'var(--text)', borderColor: 'var(--line-strong)', '&:hover': { borderColor: 'var(--line-strong)', bgcolor: 'var(--raised)' }
 };
-const meta = { fontSize: '.74rem', color: 'var(--dim)' };
+const meta = { fontSize: '.75rem', color: 'var(--dim)' };
+const linkSx = { color: 'inherit', textDecoration: 'underline' };
 
 function QueueButton({ n, busy, onClick, label }) {
   if (!n) return null;
@@ -149,7 +153,7 @@ function GroupDetail({ group, busy, onQueue, version }) {
                   <Typography sx={{ fontSize: '.8rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={x.path}>
                     {x.name}
                   </Typography>
-                  <Typography sx={{ ...meta, fontSize: '.7rem' }}>
+                  <Typography sx={meta}>
                     {[fmtSize(x.size), x.codec ? x.codec.toUpperCase() : null, x.height ? `${x.height}p` : null,
                       x.bitrate ? `${(x.bitrate / 1e6).toFixed(1)} Mb/s` : null, x.duration ? fmtSecs(Math.round(x.duration)) : null].filter(Boolean).join(' · ')}
                     {' — '}
@@ -175,7 +179,7 @@ function GroupRow({ g, tab, busy, onQueue, version }) {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography component="div" sx={{ fontSize: '.88rem', fontWeight: 620, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {g.name}
-            <Chip size="small" label={TOP_LABEL[g.top]} sx={{ ml: 1, height: 18, fontSize: '.66rem', color: 'var(--dim)', bgcolor: 'var(--raised)' }} />
+            <Chip size="small" label={TOP_LABEL[g.top]} sx={{ ml: 1, height: 20, fontSize: '.75rem', color: 'var(--dim)', bgcolor: 'var(--raised)' }} />
           </Typography>
           <Typography sx={meta}>{line(g, tab)}</Typography>
         </Box>
@@ -189,7 +193,13 @@ function GroupRow({ g, tab, busy, onQueue, version }) {
 
 // ── the queue ────────────────────────────────────────────────
 function ActiveJob({ j, act }) {
+  const ask = useAsk();
   const paused = j.hold || j.held;
+  // a running encode loses its progress when stopped, so it asks first
+  const stop = async () => {
+    const ok = await ask({ title: 'Stop this re-encode?', text: 'Its progress is lost.', okLabel: 'Stop and remove', danger: true });
+    if (ok) act(`/api/encode/jobs/${j.id}`, 'DELETE');
+  };
   const label = paused ? (j.held ? 'paused' : 'pausing…') : (PHASE[j.phase] || j.phase);
   return (
     <Box sx={{ py: 1, borderBottom: '1px solid var(--line)' }}>
@@ -207,7 +217,7 @@ function ActiveJob({ j, act }) {
           </IconButton>
         </Tooltip>
         <Tooltip title="Stop and remove">
-          <IconButton sx={iconBtnSx()} onClick={() => act(`/api/encode/jobs/${j.id}`, 'DELETE')}><CloseIcon /></IconButton>
+          <IconButton sx={iconBtnSx()} aria-label="Stop and remove" onClick={stop}><CloseIcon /></IconButton>
         </Tooltip>
       </Box>
       <LinearProgress variant="determinate" value={Math.round((j.progress || 0) * 100)} sx={{ mt: 0.75, height: 4, borderRadius: 2 }} />
@@ -240,13 +250,13 @@ function QueuePanel({ q, act, onMode }) {
           </Tooltip>
         )}
       </Box>
-      {!q.local.ok && !q.coordinated && <Alert severity="warning" sx={{ mb: 1 }}>This server can't encode: {q.local.error}. Link a worker below.</Alert>}
+      {!q.local.ok && !q.coordinated && <Alert severity="warning" sx={{ mb: 1 }}>This server can't encode: {q.local.error}. Link a worker in <Box component={RouterLink} to="/settings/workers" sx={linkSx}>Settings → Workers</Box>.</Alert>}
       {q.active.map(j => <ActiveJob key={j.id} j={j} act={act} />)}
       {queued.map((j, i) => (
         <Box key={j.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: '1px solid var(--line)' }}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography sx={{ fontSize: '.8rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={j.path}>{j.label}</Typography>
-            <Typography sx={{ ...meta, fontSize: '.7rem' }}>
+            <Typography sx={meta}>
               {[fmtSize(j.size), j.why.join(', '), j.priority ? `priority ${j.priority}` : null].filter(Boolean).join(' · ')}
             </Typography>
           </Box>
@@ -266,7 +276,12 @@ function QueuePanel({ q, act, onMode }) {
 }
 
 function RecentPanel({ q, act }) {
+  const ask = useAsk();
   if (!q.recent.length) return null;
+  const undo = async (j) => {
+    const ok = await ask({ title: 'Undo this re-encode?', text: 'The new file is deleted and the original put back.', okLabel: 'Undo re-encode' });
+    if (ok) act(`/api/encode/jobs/${j.id}/undo`);
+  };
   return (
     <Panel>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
@@ -285,11 +300,11 @@ function RecentPanel({ q, act }) {
           <Box key={j.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: '1px solid var(--line)' }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ fontSize: '.8rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={j.path}>{j.label}</Typography>
-              <Typography sx={{ ...meta, fontSize: '.7rem', color: tone }}>{text}</Typography>
+              <Typography sx={{ ...meta, color: tone }}>{text}</Typography>
             </Box>
             {j.status === 'done' && j.heldUntil && (
               <Tooltip title="Put the original back (the new file is deleted)">
-                <Button size="small" variant="outlined" sx={smallBtnSx} startIcon={<UndoIcon />} onClick={() => act(`/api/encode/jobs/${j.id}/undo`)}>Undo</Button>
+                <Button size="small" variant="outlined" sx={smallBtnSx} startIcon={<UndoIcon />} onClick={() => undo(j)}>Undo</Button>
               </Tooltip>
             )}
             {j.status === 'failed' && (
@@ -302,84 +317,17 @@ function RecentPanel({ q, act }) {
   );
 }
 
-function WorkersPanel({ q, act, reload }) {
-  const [name, setName] = useState('');
-  const [link, setLink] = useState(null);
-  const add = async (url, body) => {
-    const r = await post(url, body);
-    setLink(r.link);
-    setName('');
-    reload();
-  };
-  const workerCmd = (l) => `node hikari-worker.mjs "${l}" --ffmpeg <path to ffmpeg>`;
-  return (
-    <Panel>
-      <Typography sx={{ fontWeight: 620, color: 'var(--text)', mb: 0.5 }}>Workers</Typography>
-      <Typography sx={{ ...meta, mb: 1 }}>
-        A worker is another machine that encodes for this app over HTTP: it downloads the original, encodes it (on the
-        card when it has NVENC) and uploads the new file, which is checked here before it's swapped in. It's Hikari's worker
-        program, run with a link from here.
-      </Typography>
-      {q.workers.map(w => (
-        <Box key={w.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: '1px solid var(--line)' }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', bgcolor: w.local ? (w.enabled ? 'var(--ok)' : 'var(--muted)') : w.online ? 'var(--ok)' : 'var(--muted)' }} />
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography sx={{ fontSize: '.82rem', color: 'var(--text)' }}>{w.name}</Typography>
-            <Typography sx={{ ...meta, fontSize: '.7rem' }}>
-              {w.local ? [w.note, w.info?.encoder].filter(Boolean).join(' · ')
-                : [w.online ? 'online' : w.lastSeen ? `last seen ${new Date(w.lastSeen).toLocaleString()}` : 'never called in yet',
-                  w.info ? (w.info.nvenc ? `GPU: ${w.info.gpu || 'NVENC'}` : `CPU: ${w.info.threads} threads`) : null,
-                  !w.enabled ? 'switched off' : null].filter(Boolean).join(' · ')}
-              {w.job ? ` · ${PHASE[w.job.phase] || w.job.phase} ${w.job.label}` : ''}
-            </Typography>
-          </Box>
-          {!w.local && (
-            <>
-              <Button size="small" sx={{ ...smallBtnSx, border: 0 }} onClick={() => act(`/api/encode/workers/${w.id}`, 'PUT', { enabled: !w.enabled })}>
-                {w.enabled ? 'Switch off' : 'Switch on'}
-              </Button>
-              <Tooltip title="A new link; the old one stops working">
-                <Button size="small" sx={{ ...smallBtnSx, border: 0 }} onClick={() => add(`/api/encode/workers/${w.id}/relink`).catch(() => {})}>New link</Button>
-              </Tooltip>
-              <Tooltip title="Remove: its link stops working, its job goes back in the queue">
-                <IconButton sx={iconBtnSx()} onClick={() => act(`/api/encode/workers/${w.id}`, 'DELETE')}><CloseIcon /></IconButton>
-              </Tooltip>
-            </>
-          )}
-        </Box>
-      ))}
-      <Box sx={{ display: 'flex', gap: 1, mt: 1.25, alignItems: 'center' }}>
-        <TextField size="small" placeholder="Name, e.g. GPU PC" value={name} onChange={(e) => setName(e.target.value)} sx={{ flex: 1, '& input': { fontSize: '.82rem' } }} />
-        <Button size="small" variant="outlined" sx={smallBtnSx} disabled={!name.trim()} onClick={() => add('/api/encode/workers', { name })}>Add worker</Button>
-      </Box>
-      <Dialog open={!!link} onClose={() => setLink(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>The worker's link</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ color: 'var(--dim)', mb: 1 }}>
-            Shown once. Start the worker with it on the machine that encodes (it only ever calls out to this app):
-          </Typography>
-          <TextField fullWidth multiline value={workerCmd(link || '')} InputProps={{ readOnly: true, sx: { fontFamily: 'monospace', fontSize: '.78rem' } }}
-            onFocus={(e) => e.target.select()} />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => navigator.clipboard?.writeText(workerCmd(link || '')).catch(() => {})}>Copy</Button>
-          <Button onClick={() => setLink(null)}>Done</Button>
-        </DialogActions>
-      </Dialog>
-    </Panel>
-  );
-}
-
 // ── the page ─────────────────────────────────────────────────
 export default function SpacePage() {
   const [space, setSpace] = useState(null);
   const [q, setQ] = useState(null);
   const [error, setError] = useState(null);
-  const [toast, setToast] = useState(null);
+  const ask = useAsk();
+  const notify = useNotify();
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState('gain');
   const [showAll, setShowAll] = useState(false);
-  const [confirmAll, setConfirmAll] = useState(false);
+  const [howOpen, setHowOpen] = useState(false);   // the long rules, folded
   const [version, setVersion] = useState(0);   // bumped after an action: open performers load their files again
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -408,7 +356,7 @@ export default function SpacePage() {
   }, [finished, loadSpace]);
 
   const act = async (url, method = 'POST', body) => {
-    try { await send(method, url, method === 'DELETE' ? undefined : (body || {})); } catch (e) { setToast({ severity: 'error', msg: e.message }); }
+    try { await send(method, url, method === 'DELETE' ? undefined : (body || {})); } catch (e) { notify({ severity: 'error', message: e.message }); }
     refreshAll();
   };
 
@@ -416,9 +364,9 @@ export default function SpacePage() {
     setBusy(true);
     try {
       const r = await post('/api/encode/queue', body);
-      setToast({ severity: r.added ? 'success' : 'info', msg: `${what}: ${queuedText(r)}` });
+      notify({ severity: r.added ? 'success' : 'info', message: `${what}: ${queuedText(r)}` });
     } catch (e) {
-      setToast({ severity: 'error', msg: e.message });
+      notify({ severity: 'error', message: e.message });
     } finally {
       if (alive.current) setBusy(false);
       refreshAll();
@@ -436,32 +384,53 @@ export default function SpacePage() {
   const cal = space?.calibration;
   const scan = space?.scan;
 
+  // the whole library: asks first, with what it queues and what a re-encode does to a file
+  const queueAll = async () => {
+    const ok = await ask({
+      title: 'Re-encode the whole library?',
+      text: `Queues ${files(t.gainFiles)}, to save about ${fmtSize(t.gain)}. Videos above 1080p are scaled down to 1080p. Each original is kept 14 days in .originals and takes its room until then; a file that does not come out at least 5% smaller keeps its original.`,
+      okLabel: 'Queue them',
+    });
+    if (ok) queue({ all: true }, 'The library');
+  };
+
   const scanLine = !scan ? '' : scan.running
     ? `Looking at the library… ${scan.probed} of ${scan.toProbe || '?'} new videos probed`
     : `${scan.known} videos known${scan.unprobed ? `, ${scan.unprobed} not looked at yet` : ''}${scan.errors ? `, ${scan.errors} unreadable` : ''}${scan.finishedAt ? ` · last looked ${new Date(scan.finishedAt).toLocaleString()}` : ''}`;
 
   return (
-    <PageShell>
-      <PageHeader back title="Space"
-        subtitle="What the library's videos take up, where a re-encode saves the most, and the queue that does it."
-        actions={(
-          <Tooltip title="Walk the library again and probe what's new or changed">
-            <span>
-              <Button size="small" variant="outlined" sx={smallBtnSx} startIcon={<RefreshIcon />} disabled={!!scan?.running}
-                onClick={() => post('/api/encode/space/rescan').then(loadSpace).catch(e => setToast({ severity: 'error', msg: e.message }))}>
-                Rescan
-              </Button>
-            </span>
-          </Tooltip>
-        )} />
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+        <Typography sx={{ ...meta, flex: 1 }}>
+          What the library's videos take up, where a re-encode saves the most, and the queue that does it.
+        </Typography>
+        <Tooltip title="Walk the library again and probe what's new or changed">
+          <span>
+            <Button size="small" variant="outlined" sx={smallBtnSx} startIcon={<RefreshIcon />} disabled={!!scan?.running}
+              onClick={() => post('/api/encode/space/rescan').then(loadSpace).catch(e => notify({ severity: 'error', message: e.message }))}>
+              Rescan
+            </Button>
+          </span>
+        </Tooltip>
+      </Box>
 
-      <Typography sx={{ ...meta, mb: SPACE.md, maxWidth: 900, lineHeight: 1.6 }}>
-        A re-encode makes a video HEVC 10-bit (at most 10 Mb/s, and 1080p when it's bigger) and keeps every audio and
-        subtitle track; only audio a browser can't play becomes AAC. A file is queued only when it comes out at least a fifth
-        smaller by the estimate, and the new file is thrown away when it isn't really 5% smaller. It has to be exactly as long as the
-        original (funscripts stay in sync). Every original is kept 14 days in the base folder's <code>.originals</code>, with Undo.
-        HEVC files, VR videos, and files the queue already made or couldn't shrink are left alone. Pictures aren't touched.
-      </Typography>
+      <Box sx={{ mb: SPACE.md, maxWidth: 900 }}>
+        <Typography sx={meta}>Each new file is checked (length, start, tracks, HEVC) before it replaces the original.</Typography>
+        <Typography sx={meta}>The original is kept 14 days in .originals, with Undo.</Typography>
+        <Typography sx={meta}>HEVC files, VR videos and files that would not come out a fifth smaller are left alone. Videos above 1080p are scaled to 1080p.</Typography>
+        <SmallButton variant="text" aria-expanded={howOpen} onClick={() => setHowOpen(o => !o)} sx={{ border: 0, mt: 0.5, ml: '-9px' }}>
+          How it works
+        </SmallButton>
+        <Collapse in={howOpen}>
+          <Typography sx={{ ...meta, mt: 0.5, lineHeight: 1.6 }}>
+            A re-encode makes a video HEVC 10-bit (at most 10 Mb/s, and 1080p when it's bigger) and keeps every audio and
+            subtitle track; only audio a browser can't play becomes AAC. A file is queued only when it comes out at least a fifth
+            smaller by the estimate, and the new file is thrown away when it isn't really 5% smaller. It has to be exactly as long as the
+            original (funscripts stay in sync). Every original is kept 14 days in the base folder's <code>.originals</code>, with Undo.
+            HEVC files, VR videos, and files the queue already made or couldn't shrink are left alone. Pictures aren't touched.
+          </Typography>
+        </Collapse>
+      </Box>
 
       {error && <Alert severity="error" sx={{ mb: SPACE.md }}>{error}</Alert>}
       {!space && !error && <LoadingState label="Working it out…" />}
@@ -495,7 +464,7 @@ export default function SpacePage() {
               </ButtonBase>
             ))}
             {t?.gainFiles > 0 && (
-              <Button size="small" variant="contained" sx={{ ml: 'auto', textTransform: 'none' }} disabled={busy} onClick={() => setConfirmAll(true)}>
+              <Button size="small" variant="contained" sx={{ ml: 'auto', textTransform: 'none' }} disabled={busy} onClick={queueAll}>
                 Re-encode all {t.gainFiles}
               </Button>
             )}
@@ -519,27 +488,13 @@ export default function SpacePage() {
         <Box sx={{ display: 'grid', gap: SPACE.md }}>
           {q && <QueuePanel q={q} act={act} onMode={(mode) => act('/api/encode/mode', 'PUT', { mode })} />}
           {q && <RecentPanel q={q} act={act} />}
-          <Collapse in={!!q}>{q && <WorkersPanel q={q} act={act} reload={refreshAll} />}</Collapse>
+          <Panel>
+            <Typography sx={meta}>
+              The machines that encode are in <Box component={RouterLink} to="/settings/workers" sx={linkSx}>Settings → Workers</Box>.
+            </Typography>
+          </Panel>
         </Box>
       </Box>
-
-      <Dialog open={confirmAll} onClose={() => setConfirmAll(false)}>
-        <DialogTitle>Re-encode the whole library?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Queue {t ? files(t.gainFiles) : ''} for about {t ? fmtSize(t.gain) : ''}. Each original is kept 14 days in .originals (that
-            room is needed until then), and a file that doesn't come out smaller keeps its original.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmAll(false)}>Cancel</Button>
-          <Button variant="contained" onClick={() => { setConfirmAll(false); queue({ all: true }, 'The library'); }}>Queue them</Button>
-        </DialogActions>
-      </Dialog>
-
-      <Snackbar open={!!toast} autoHideDuration={7000} onClose={() => setToast(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        {toast ? <Alert severity={toast.severity} onClose={() => setToast(null)} sx={{ width: '100%' }}>{toast.msg}</Alert> : <span />}
-      </Snackbar>
-    </PageShell>
+    </Box>
   );
 }

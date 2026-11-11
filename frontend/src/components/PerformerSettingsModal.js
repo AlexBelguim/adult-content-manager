@@ -1,121 +1,37 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Modal,
-  Box,
-  Typography,
-  Button,
-  FormControlLabel,
-  Checkbox,
-  IconButton,
-  Divider,
-  Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  CircularProgress,
-  Tooltip
-} from '@mui/material';
-import {
-  Close as CloseIcon,
-  Delete as DeleteIcon,
-  MoveUp as MoveIcon,
-  Edit as EditIcon,
-  Save as SaveIcon,
-  Fingerprint as HashIcon,
-  Search as SearchIcon,
-  Refresh as RefreshIcon,
-  Storage as StorageIcon,
-  OpenInNew as OpenInNewIcon
-} from '@mui/icons-material';
+import { Box, Button, TextField, Typography } from '@mui/material';
+import { ArrowForward as ArrowForwardIcon } from '@mui/icons-material';
+import { hashGet, hashPost } from './hash/hashApi';
+import { AppDialog, DialogText, useAsk, useNotify, errorText, plural } from './ui';
+import { Section, SPACE } from './layout';
+import RemovePerformerDialog from './performers/RemovePerformerDialog';
 
-// Dark theme modal styles (matching UploadQueuePage)
-const darkModalStyles = {
-  container: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: { xs: '95%', sm: '85%', md: '70%' },
-    maxWidth: 700,
-    maxHeight: '90vh',
-    overflow: 'auto',
-    bgcolor: 'var(--surface)',
-    borderRadius: 3,
-    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    border: '1px solid #333',
-    p: 0
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    p: 3,
-    pb: 2,
-    borderBottom: '1px solid #333'
-  },
-  content: {
-    p: 3
-  },
-  section: {
-    mb: 4
-  },
-  sectionTitle: {
-    fontWeight: 'bold',
-    mb: 2,
-    color: 'var(--text)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 1
-  },
-  card: {
-    bgcolor: 'var(--surface)',
-    borderRadius: 2,
-    p: 2.5,
-    border: '1px solid #444'
-  },
-  textSecondary: {
-    color: 'var(--dim)'
-  },
-  gradientButton: {
-    background: 'linear-gradient(135deg, var(--primary-main, var(--accent)) 0%, var(--primary-dark, #5e35b1) 100%)',
-    color: 'var(--text)',
-    fontWeight: 'bold',
-    px: 3,
-    py: 1.5,
-    textTransform: 'none',
-    '&:hover': {
-      background: 'linear-gradient(135deg, #8e67d2 0%, #6e45c1 100%)',
-      boxShadow: '0 3px 10px var(--accent-quiet)'
-    },
-    '&:disabled': {
-      background: 'var(--raised)',
-      color: '#777'
-    }
-  },
-  outlinedButton: {
-    borderColor: 'var(--line-strong)',
-    color: '#ddd',
-    fontWeight: 'bold',
-    px: 3,
-    py: 1.5,
-    textTransform: 'none',
-    '&:hover': {
-      bordercolor: 'primary.light',
-      bgcolor: 'rgba(255, 142, 83, 0.1)'
-    }
-  },
-  textField: {
-    '& .MuiInputLabel-root': { color: 'var(--dim)' },
-    '& .MuiOutlinedInput-root': {
-      color: 'var(--text)',
-      '& fieldset': { borderColor: 'var(--line-strong)' },
-      '&:hover fieldset': { bordercolor: 'primary.light' },
-      '&.Mui-focused fieldset': { bordercolor: 'primary.light' }
-    }
-  }
+const LOCATION_WORD = { before: 'Before filter', after: 'After filter', 'missing-or-empty': 'Missing or empty', blacklisted: 'Blacklisted' };
+
+/** A row of buttons under a section's text. */
+const rowSx = { display: 'flex', gap: SPACE.sm, flexWrap: 'wrap', alignItems: 'center' };
+/** Outlined in --bad: the buttons that delete something. */
+const dangerSx = {
+  color: 'var(--bad)',
+  borderColor: 'var(--bad)',
+  '&:hover': { borderColor: 'var(--bad)', bgcolor: 'var(--bad-quiet)' }
+};
+const errorLineSx = { fontSize: '.8125rem', color: 'var(--bad)', mt: 0.75 };
+
+/** 'Could not refresh her stats: <reason>': the server's reason, or that it did not answer. */
+const failText = (what, err) => {
+  const text = errorText(err, what);
+  return text.startsWith(what) ? text : `${what}: ${text}`;
+};
+
+/** The same rule as Performer Management's rename: a name is one folder name. */
+const nameProblem = (value, current) => {
+  const v = (value || '').trim();
+  if (!v) return 'Enter a name';
+  if (v === current) return 'That is her name now';
+  if (/[/\\]/.test(v) || v.startsWith('.')) return 'A name cannot contain / or \\ or start with a dot';
+  return null;
 };
 
 function PerformerSettingsModal({
@@ -124,32 +40,37 @@ function PerformerSettingsModal({
   onClose,
   onUpdate,
   basePath,
-  onAddBackgroundTask,
-  // Hash queue management props (optional)
-  hashQueue = [],
-  setHashQueue = null
+  onAddBackgroundTask
 }) {
+  const ask = useAsk();
+  const notify = useNotify();
+  const navigate = useNavigate();
   const [settings, setSettings] = useState(null);
-  const [confirmDialog, setConfirmDialog] = useState({ open: false, type: '', title: '', message: '' });
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteOption, setDeleteOption] = useState('blacklist');
-  const [blacklistReason, setBlacklistReason] = useState('');
-  const [deleteOptions, setDeleteOptions] = useState([]);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   // Rename state
-  const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
-  const [renameFolderToo, setRenameFolderToo] = useState(true);
   const [isRenaming, setIsRenaming] = useState(false);
-
-  const navigate = useNavigate();
+  const [renameError, setRenameError] = useState(null);
 
   // Hash actions state
   const [isCreatingHash, setIsCreatingHash] = useState(false);
   const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [hashStatus, setHashStatus] = useState(null);   // GET /api/hashes/performer/:id/status
+  const [hashNote, setHashNote] = useState(null);       // { text, error } under the hash buttons
+
+  // Her hash status, read again whenever the modal opens for her.
+  useEffect(() => {
+    if (!open || !performer?.id) return undefined;
+    setHashNote(null);
+    setHashStatus(null);
+    const ctrl = new AbortController();
+    hashGet(`/performer/${performer.id}/status`, { signal: ctrl.signal })
+      .then((data) => { if (!ctrl.signal.aborted) setHashStatus(data); })
+      .catch(() => { if (!ctrl.signal.aborted) setHashStatus(null); });
+    return () => ctrl.abort();
+  }, [open, performer?.id]);
 
   const fetchSettings = useCallback(async () => {
     if (!performer?.id) return;
@@ -169,13 +90,46 @@ function PerformerSettingsModal({
   useEffect(() => {
     if (open && performer?.id) {
       fetchSettings();
-      setIsEditingName(false);
+      setRenameError(null);
+      setRemoveOpen(false);
     }
   }, [open, performer?.id, fetchSettings]);
+
+  // Her record as the server has it now (the prop can be older: the name after a rename, the counts)
+  // Only her loaded settings: closed and without a performer both ids are undefined, and settings is null
+  const current = settings?.performer && performer && settings.performer.id === performer.id
+    ? { ...performer, ...settings.performer }
+    : performer;
+  const name = current?.name || '';
+
+  /**
+   * Polls a background task until it ends and calls back with the task. With `limit`, a failed poll stops it and
+   * so does the limit (move to After); without, it polls until the task ends (refresh, as it always did).
+   */
+  const pollTask = (jobId, every, onEnd, limit = false) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResp = await fetch(`/api/performers/background-task/${jobId}`);
+        if (statusResp.ok) {
+          const statusData = await statusResp.json();
+          const task = statusData.task;
+          if (task.status === 'completed' || task.status === 'error') {
+            clearInterval(pollInterval);
+            onEnd(task);
+          }
+        }
+      } catch (err) {
+        console.error('Error polling task status:', err);
+        if (limit) clearInterval(pollInterval);
+      }
+    }, every);
+    if (limit) setTimeout(() => clearInterval(pollInterval), 300000);
+  };
 
   const handleRefreshStats = async () => {
     if (!performer?.id || isRefreshing) return;
 
+    const what = `Could not refresh ${name}'s stats`;
     setIsRefreshing(true);
     try {
       const response = await fetch(`/api/performers/${performer.id}/refresh-stats-async`, {
@@ -200,126 +154,88 @@ function PerformerSettingsModal({
 
         onClose();
 
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusResp = await fetch(`/api/performers/background-task/${jobId}`);
-            if (statusResp.ok) {
-              const statusData = await statusResp.json();
-              const task = statusData.task;
-
-              if (task.status === 'completed') {
-                clearInterval(pollInterval);
-                if (onUpdate) onUpdate();
-              } else if (task.status === 'error') {
-                clearInterval(pollInterval);
-              }
-            }
-          } catch (err) {
-            console.error('Error polling task status:', err);
+        pollTask(jobId, 500, (task) => {
+          if (task.status === 'completed') {
+            if (onUpdate) onUpdate();
+          } else {
+            notify({ severity: 'error', message: failText(what, new Error(task.error || '')) });
           }
-        }, 500);
+        });
       } else {
-        const error = await response.json();
-        alert('Failed to refresh stats: ' + (error.error || 'Unknown error'));
+        const error = await response.json().catch(() => ({}));
+        notify({ severity: 'error', message: failText(what, new Error(error.error || `the server answered ${response.status}`)) });
       }
     } catch (error) {
       console.error('Error refreshing stats:', error);
-      alert('Error refreshing stats: ' + error.message);
+      notify({ severity: 'error', message: failText(what, error) });
     } finally {
       setIsRefreshing(false);
     }
   };
 
-
-
-  // Rename performer handler
+  // Her folders are always renamed with her: renaming only the record detaches it from its folder.
   const handleRenamePerformer = async () => {
-    if (!performer?.id || !newName.trim() || isRenaming) return;
-
-    if (newName.trim() === performer.name) {
-      setIsEditingName(false);
+    if (!performer?.id || isRenaming) return;
+    const problem = nameProblem(newName, name);
+    if (problem) {
+      setRenameError(problem);
       return;
     }
 
     setIsRenaming(true);
+    setRenameError(null);
     try {
       const response = await fetch(`/api/performer-management/${performer.id}/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           newName: newName.trim(),
-          renameFolder: renameFolderToo
+          renameFolder: true
         })
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (data.success) {
-        setIsEditingName(false);
         if (onUpdate) onUpdate();
         // Refresh settings to get updated name
         await fetchSettings();
       } else {
-        alert(`Failed to rename: ${data.error}`);
+        setRenameError(failText('Could not rename her', new Error(data.error || `the server answered ${response.status}`)));
       }
     } catch (error) {
       console.error('Error renaming performer:', error);
-      alert('Failed to rename performer');
+      setRenameError(failText('Could not rename her', error));
     } finally {
       setIsRenaming(false);
     }
   };
 
   // Hash management actions
+  const hashError = (err, fallback) => (err?.name === 'TypeError' || !err?.message ? `${fallback}: the server did not answer` : err.message);
+
   const handleCreateHashDB = async () => {
     if (!performer?.id || isCreatingHash) return;
 
     setIsCreatingHash(true);
+    setHashNote(null);
     try {
-      // If we have setHashQueue, use the queue system
-      if (setHashQueue) {
-        const existingJob = hashQueue.find(j =>
-          j.performerId === performer.id && (j.status === 'queued' || j.status === 'processing')
-        );
-
-        if (existingJob) {
-          alert(`${performer.name} is already in the hash creation queue`);
-          return;
-        }
-
-        const newJob = {
-          id: `job-${Date.now()}-${Math.random()}`,
-          performerId: performer.id,
-          performerName: performer.name,
-          location: settings?.performer?.location || 'before',
-          mode: 'append',
-          status: 'queued',
-          processed: 0,
-          total: 0,
-          progress: 0,
-        };
-
-        setHashQueue(prev => [...prev, newJob]);
-        onClose();
+      // The server's hash queue runs it; 'append' updates without re-reading unchanged files.
+      const data = await hashPost('/queue', { items: [{ performerId: performer.id, mode: 'append' }] });
+      const skipped = data?.skipped?.[0];
+      const already = data?.queued?.[0]?.already;
+      if (skipped) {
+        setHashNote({ text: skipped.reason, error: true });
+      } else if (already === 'running') {
+        setHashNote({ text: 'Already hashing. Follow it on the Jobs page.' });
+      } else if (already === 'queued') {
+        setHashNote({ text: 'Already queued. Follow it on the Jobs page.' });
       } else {
-        // Direct API call if queue system not available
-        const response = await fetch(`/api/hashes/performer/${performer.id}/create`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'append' })
-        });
-
-        if (response.ok) {
-          alert('Hash database creation started');
-          onClose();
-        } else {
-          const error = await response.json();
-          alert('Failed to create hash DB: ' + (error.error || 'Unknown error'));
-        }
+        setHashNote({ text: 'Queued. Follow it on the Jobs page.' });
       }
     } catch (error) {
       console.error('Error creating hash DB:', error);
-      alert('Error creating hash DB: ' + error.message);
+      setHashNote({ text: hashError(error, 'Could not start hashing'), error: true });
     } finally {
       setIsCreatingHash(false);
     }
@@ -329,195 +245,40 @@ function PerformerSettingsModal({
     if (!performer?.id || isCheckingDuplicates) return;
 
     setIsCheckingDuplicates(true);
-
-    // Open new tab immediately with loading state
-    const newTab = window.open('about:blank', '_blank');
-    if (newTab) {
-      newTab.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Loading Internal Duplicates...</title>
-            <style>
-              body {
-                margin: 0;
-                padding: 0;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
-                background: var(--surface);
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              }
-              .loading-container {
-                text-align: center;
-                padding: 40px;
-              }
-              .spinner {
-                border: 4px solid #333;
-                border-top: 4px solid #b085f5;
-                border-radius: 50%;
-                width: 60px;
-                height: 60px;
-                animation: spin 1s linear infinite;
-                margin: 0 auto 20px;
-              }
-              @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-              }
-              h2 { color: var(--text); margin-bottom: 10px; }
-              p { color: var(--dim); }
-            </style>
-          </head>
-          <body>
-            <div class="loading-container">
-              <div class="spinner"></div>
-              <h2>Checking for Internal Duplicates...</h2>
-              <p>Please wait while we analyze the content</p>
-            </div>
-          </body>
-        </html>
-      `);
-    }
-
+    setHashNote(null);
     try {
-      const response = await fetch('/api/hashes/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_performer_id: performer.id,
-          target_performer_id: performer.id,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.runId) {
-        if (newTab) {
-          newTab.location.href = `/hash-results/${data.runId}`;
-        }
-        onClose();
-      } else {
-        throw new Error(data.error || 'Failed to check for internal duplicates');
+      const data = await hashPost(`/performer/${performer.id}/internal-check`, {});
+      if (!data?.runId || !data.groupCount) {
+        setHashNote({ text: 'No duplicates in her files' });
+        return;
       }
+      onClose();
+      navigate(`/hash-results/${data.runId}`);
     } catch (error) {
       console.error('Error checking internal duplicates:', error);
-      alert('Failed to check duplicates: ' + error.message);
-      if (newTab) {
-        newTab.close();
-      }
+      setHashNote({ text: hashError(error, 'The check failed'), error: true });
     } finally {
       setIsCheckingDuplicates(false);
     }
   };
 
-  const handleDeleteData = async () => {
-    if (!performer?.id) return;
-
-    try {
-      const response = await fetch(`/api/performers/${performer.id}/data`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        if (onUpdate) onUpdate();
-        onClose();
-      }
-    } catch (error) {
-      console.error('Error deleting data:', error);
-    }
-  };
-
-  const handleDeleteFolder = async () => {
-    if (!performer?.id) return;
-
-    const location = performer.location || (performer.moved_to_after ? 'after' : 'before');
-
-    let options = [];
-
-    if (performer.blacklisted === 1) {
-      options = ['unblacklist', 'delete-complete'];
-      setDeleteOption('unblacklist');
-    } else if (location === 'after') {
-      options = ['cleanup-before', 'delete-complete'];
-      setDeleteOption('cleanup-before');
-    } else if (location === 'before') {
-      options = ['blacklist', 'delete-folder-only', 'delete-complete'];
-      setDeleteOption('blacklist');
-    } else {
-      options = ['delete-complete'];
-      setDeleteOption('delete-complete');
-    }
-
-    setDeleteOptions(options);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!performer?.id || !deleteOption) return;
-
-    try {
-      setIsDeleting(true);
-      let response;
-
-      switch (deleteOption) {
-        case 'unblacklist':
-          response = await fetch(`/api/performer-management/${performer.id}/unblacklist`, {
-            method: 'POST'
-          });
-          break;
-
-        case 'blacklist':
-          response = await fetch(`/api/performer-management/${performer.id}/blacklist`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: blacklistReason })
-          });
-          break;
-
-        case 'delete-folder-only':
-          response = await fetch(`/api/performer-management/${performer.id}/folder-only`, {
-            method: 'DELETE'
-          });
-          break;
-
-        case 'cleanup-before':
-          response = await fetch(`/api/performer-management/${performer.id}/before-cleanup`, {
-            method: 'DELETE'
-          });
-          break;
-
-        case 'delete-complete':
-          response = await fetch(`/api/performer-management/${performer.id}/complete`, {
-            method: 'DELETE'
-          });
-          break;
-
-        default:
-          throw new Error('Invalid delete option');
-      }
-
-      const data = await response.json();
-
-      if (data.success) {
-        setDeleteDialogOpen(false);
-        if (onUpdate) onUpdate();
-        onClose();
-      } else {
-        alert(`Error: ${data.error}`);
-      }
-    } catch (error) {
-      console.error('Error processing action:', error);
-      alert(`Failed to process action: ${error.message}`);
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-  
+  // move-to-after-async runs merger.movePerformerToAfter: a plain move, or a merge when her After folder exists
   const handleMoveToAfter = async (merge = false) => {
     if (!performer?.id) return;
 
+    const mergesInto = settings?.existsInAfter && current?.moved_to_after !== 1;
+    const moveIt = await ask({
+      title: `Move ${name} to After filter?`,
+      text: current?.moved_to_after === 1
+        ? 'Her record is in After filter already. If her Before folder is still there, its pictures and videos are merged into the After folder.'
+        : mergesInto
+        ? `An After folder named ${name} exists, so she is merged into it: her pictures and videos move in, renamed where a file name is taken, her hashes go to the After record, and this record is deleted with its filter decisions and tags.`
+        : `Her folder moves to after filter performer/${name} and her filter decisions are cleared.`,
+      okLabel: 'Move to After'
+    });
+    if (!moveIt) return;
+
+    const what = `Could not move ${name} to After`;
     try {
       const response = await fetch(`/api/performers/${performer.id}/move-to-after-async`, {
         method: 'POST',
@@ -542,458 +303,141 @@ function PerformerSettingsModal({
 
         onClose();
 
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusResp = await fetch(`/api/performers/background-task/${jobId}`);
-            if (statusResp.ok) {
-              const statusData = await statusResp.json();
-              const task = statusData.task;
-
-              if (task.status === 'completed') {
-                clearInterval(pollInterval);
-                if (onUpdate) onUpdate();
-              } else if (task.status === 'error') {
-                clearInterval(pollInterval);
-                console.error('Move to after failed:', task.error);
-              }
-            }
-          } catch (error) {
-            console.error('Error polling task status:', error);
-            clearInterval(pollInterval);
+        pollTask(jobId, 1000, (task) => {
+          if (task.status === 'completed') {
+            if (onUpdate) onUpdate();
+            notify(/^Merged/.test(task.result || '') ? `Merged ${name} into her After record` : `Moved ${name} to After`);
+          } else {
+            console.error('Move to after failed:', task.error);
+            notify({ severity: 'error', message: failText(what, new Error(task.error || '')) });
           }
-        }, 1000);
-
-        setTimeout(() => clearInterval(pollInterval), 300000);
+        }, true);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        notify({ severity: 'error', message: failText(what, new Error(data.error || `the server answered ${response.status}`)) });
       }
     } catch (error) {
       console.error('Error moving to after:', error);
+      notify({ severity: 'error', message: failText(what, error) });
     }
-  };
-
-  const showConfirmDialog = (type, title, message, action) => {
-    setConfirmDialog({
-      open: true,
-      type,
-      title,
-      message,
-      action
-    });
-  };
-
-  const handleConfirmAction = () => {
-    if (confirmDialog.type === 'merge') {
-      handleMoveToAfter(true);
-    } else if (confirmDialog.action) {
-      confirmDialog.action();
-    }
-    setConfirmDialog({ open: false, type: '', title: '', message: '' });
-  };
-
-  const handleCancelAction = () => {
-    setConfirmDialog({ open: false, type: '', title: '', message: '' });
   };
 
   if (!performer || !settings) return null;
 
-  const hasHashDB = settings?.performer?.hash_count > 0;
+  const hashCount = hashStatus?.file_count || 0;
+  const hasHashDB = hashCount > 0;
+
+  const location = current.blacklisted === 1
+    ? 'blacklisted'
+    : (performer.location || (current.moved_to_after ? 'after' : 'before'));
+  const subtitle = [LOCATION_WORD[location], plural(current.pics_count || 0, 'picture'), plural(current.vids_count || 0, 'video')]
+    .filter(Boolean).join(' · ');
+  const nameUnchanged = !newName.trim() || newName.trim() === name;
 
   return (
     <>
-      <Modal open={open} onClose={onClose}>
-        <Box sx={darkModalStyles.container}>
-          {/* Header with editable name */}
-          <Box sx={darkModalStyles.header}>
-            <Box sx={{ flex: 1 }}>
-              <Typography
-                variant="h5"
-                sx={{
-                  fontWeight: 'bold',
-                  mb: 1,
-                  color: 'var(--text)',
-                }}
-              >
-                Performer Settings
-              </Typography>
-
-              {/* Editable Name */}
-              {isEditingName ? (
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexDirection: 'column' }}>
-                  <TextField
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    size="small"
-                    fullWidth
-                    sx={{ ...darkModalStyles.textField, maxWidth: 400 }}
-                    autoFocus
-                  />
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={renameFolderToo}
-                          onChange={(e) => setRenameFolderToo(e.target.checked)}
-                          size="small"
-                          sx={{ color: 'var(--dim)', '&.Mui-checked': { color: 'primary.light' } }}
-                        />
-                      }
-                      label={<Typography variant="body2" sx={{ color: 'var(--dim)' }}>Also rename folder</Typography>}
-                    />
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={handleRenamePerformer}
-                      disabled={isRenaming || !newName.trim()}
-                      startIcon={isRenaming ? <CircularProgress size={16} /> : <SaveIcon />}
-                      sx={{ ...darkModalStyles.gradientButton, py: 0.5, px: 2 }}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => {
-                        setIsEditingName(false);
-                        setNewName(performer.name);
-                      }}
-                      sx={{ ...darkModalStyles.outlinedButton, py: 0.5, px: 2 }}
-                    >
-                      Cancel
-                    </Button>
-                  </Box>
-                </Box>
-              ) : (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="h6" sx={{ color: '#ddd' }}>
-                    {settings?.performer?.name || performer.name}
-                  </Typography>
-                  <IconButton
-                    size="small"
-                    onClick={() => setIsEditingName(true)}
-                    sx={{ color: 'var(--dim)', '&:hover': { color: 'primary.light' } }}
-                  >
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              )}
-            </Box>
-            <IconButton onClick={onClose} sx={{ color: 'var(--dim)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
-
-          <Box sx={darkModalStyles.content}>
-            {/* Aliases, scraping and Leakhaven updates live on the performer management page */}
-            <Box sx={{ ...darkModalStyles.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', mb: 4 }}>
-              <Typography variant="body2" sx={darkModalStyles.textSecondary}>
-                Aliases, scraping and Leakhaven updates
-              </Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                endIcon={<OpenInNewIcon />}
-                onClick={() => {
-                  onClose();
-                  navigate(`/performer-management?performer=${performer.id}`);
-                }}
-                sx={{ ...darkModalStyles.outlinedButton, py: 0.5, px: 2 }}
-              >
-                Open in Performer Management
-              </Button>
-            </Box>
-
-            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
-
-            {/* Hash Management Section */}
-            <Box sx={darkModalStyles.section}>
-              <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                <HashIcon sx={{ color: 'var(--accent)' }} />
-                Hash Management
-                {hasHashDB && (
-                  <Chip
-                    label={`${settings.performer.hash_count} hashes`}
-                    size="small"
-                    sx={{ ml: 1, bgcolor: 'rgba(206, 147, 216, 0.2)', color: 'var(--accent)' }}
-                  />
-                )}
-              </Typography>
-              <Box sx={darkModalStyles.card}>
-                <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
-                  Create perceptual hashes to detect duplicate content across performers.
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <Tooltip title={hasHashDB ? "Update existing hash database" : "Create new hash database"}>
-                    <Button
-                      variant="contained"
-                      onClick={handleCreateHashDB}
-                      disabled={isCreatingHash}
-                      startIcon={isCreatingHash ? <CircularProgress size={20} /> : <StorageIcon />}
-                      sx={darkModalStyles.gradientButton}
-                    >
-                      {hasHashDB ? 'Update Hash DB' : 'Create Hash DB'}
-                    </Button>
-                  </Tooltip>
-                  <Tooltip title="Find duplicate files within this performer's content">
-                    <span>
-                      <Button
-                        variant="outlined"
-                        onClick={handleCheckInternalDuplicates}
-                        disabled={isCheckingDuplicates || !hasHashDB}
-                        startIcon={isCheckingDuplicates ? <CircularProgress size={20} /> : <SearchIcon />}
-                        sx={darkModalStyles.outlinedButton}
-                      >
-                        Check Internal Duplicates
-                      </Button>
-                    </span>
-                  </Tooltip>
-                </Box>
-              </Box>
-            </Box>
-
-            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
-
-            {/* AI Insights Section */}
-            {/* Stats & Cache Sync Section */}
-            <Box sx={darkModalStyles.section}>
-              <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                <RefreshIcon sx={{ color: 'var(--info)' }} />
-                Sync & Refresh
-              </Typography>
-              <Box sx={darkModalStyles.card}>
-                <Typography variant="body2" sx={{ mb: 2, color: 'var(--dim)' }}>
-                  Scan the performer folder to update file counts, sizes, thumbnails, and rebuild the file cache. This also purges stale references to deleted files.
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <Button
-                    variant="contained"
-                    onClick={handleRefreshStats}
-                    disabled={isRefreshing}
-                    startIcon={isRefreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
-                    sx={darkModalStyles.gradientButton}
-                  >
-                    {isRefreshing ? 'Syncing...' : 'Sync & Refresh'}
-                  </Button>
-                </Box>
-              </Box>
-            </Box>
-
-            <Divider sx={{ my: 3, borderColor: 'var(--line)' }} />
-
-            {/* Action Buttons */}
-            <Box sx={darkModalStyles.section}>
-              <Typography variant="h6" sx={darkModalStyles.sectionTitle}>
-                Actions
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                <Button
-                  variant="contained"
-                  color="success"
-                  startIcon={<MoveIcon />}
-                  onClick={() => handleMoveToAfter(false)}
-                  sx={{ fontWeight: 'bold', textTransform: 'none' }}
-                >
-                  Move to After
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<DeleteIcon />}
-                  onClick={() => showConfirmDialog(
-                    'delete-data',
-                    'Delete Data',
-                    'Are you sure you want to delete all data for this performer? This action cannot be undone.',
-                    handleDeleteData
-                  )}
-                  sx={{ fontWeight: 'bold', textTransform: 'none' }}
-                >
-                  Delete Data
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<DeleteIcon />}
-                  onClick={handleDeleteFolder}
-                  sx={{ fontWeight: 'bold', textTransform: 'none' }}
-                >
-                  Delete/Manage
-                </Button>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
-      </Modal>
-
-      {/* Confirmation Dialog */}
-      <Dialog open={confirmDialog.open} onClose={handleCancelAction} PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}>
-        <DialogTitle>{confirmDialog.title}</DialogTitle>
-        <DialogContent>
-          <Typography sx={{ color: '#ddd' }}>{confirmDialog.message}</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCancelAction} sx={{ color: 'var(--dim)' }}>
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmAction} color="error" variant="contained">
-            Confirm
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Delete Options Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => !isDeleting && setDeleteDialogOpen(false)} maxWidth="md" fullWidth PaperProps={{ sx: { bgcolor: 'var(--surface)', color: 'var(--text)' } }}>
-        <DialogTitle>Performer Actions: {performer?.name}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            {deleteOptions.includes('unblacklist') && (
-              <Box sx={{ border: '2px solid #2196f3', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--info-quiet)' }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={deleteOption === 'unblacklist'}
-                      onChange={() => setDeleteOption('unblacklist')}
-                      disabled={isDeleting}
-                      sx={{ color: 'var(--info)', '&.Mui-checked': { color: 'var(--info)' } }}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="h6" sx={{ color: 'var(--info)' }}>
-                        🔓 Remove from Blacklist
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                        Remove this performer from the blacklist and allow it to be imported again.
-                      </Typography>
-                    </Box>
-                  }
-                />
-              </Box>
-            )}
-
-            {deleteOptions.includes('blacklist') && (
-              <Box sx={{ border: '2px solid #ff9800', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--warn-quiet)' }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={deleteOption === 'blacklist'}
-                      onChange={() => setDeleteOption('blacklist')}
-                      disabled={isDeleting}
-                      sx={{ color: 'var(--warn)', '&.Mui-checked': { color: 'var(--warn)' } }}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="h6" sx={{ color: 'var(--warn)' }}>
-                        ⛔ Add to Blacklist
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                        Delete the folder and prevent this performer from being imported in the future.
-                      </Typography>
-                    </Box>
-                  }
-                />
-                {deleteOption === 'blacklist' && (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Reason (optional)"
-                    value={blacklistReason}
-                    onChange={(e) => setBlacklistReason(e.target.value)}
-                    sx={{ mt: 2, ...darkModalStyles.textField }}
-                    disabled={isDeleting}
-                  />
-                )}
-              </Box>
-            )}
-
-            {deleteOptions.includes('delete-folder-only') && (
-              <Box sx={{ border: '2px solid #9c27b0', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--accent-quiet)' }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={deleteOption === 'delete-folder-only'}
-                      onChange={() => setDeleteOption('delete-folder-only')}
-                      disabled={isDeleting}
-                      sx={{ color: 'var(--accent)', '&.Mui-checked': { color: 'var(--accent)' } }}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="h6" sx={{ color: 'var(--accent)' }}>
-                        📁 Delete Folder Only
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                        Delete the performer folder from disk but keep all database records (filter history, tags, etc).
-                      </Typography>
-                    </Box>
-                  }
-                />
-              </Box>
-            )}
-
-            {deleteOptions.includes('cleanup-before') && (
-              <Box sx={{ border: '2px solid #4caf50', borderRadius: 2, p: 2, mb: 2, backgroundColor: 'var(--ok-quiet)' }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={deleteOption === 'cleanup-before'}
-                      onChange={() => setDeleteOption('cleanup-before')}
-                      disabled={isDeleting}
-                      sx={{ color: 'var(--ok)', '&.Mui-checked': { color: 'var(--ok)' } }}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="h6" sx={{ color: 'var(--ok)' }}>
-                        🧹 Clean Up "Before" Folder
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                        For performers in "after" - delete the old "before filter performer" folder and merge hash databases.
-                      </Typography>
-                    </Box>
-                  }
-                />
-              </Box>
-            )}
-
-            {deleteOptions.includes('delete-complete') && (
-              <Box sx={{ border: '2px solid #f44336', borderRadius: 2, p: 2, backgroundColor: 'var(--bad-quiet)' }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={deleteOption === 'delete-complete'}
-                      onChange={() => setDeleteOption('delete-complete')}
-                      disabled={isDeleting}
-                      sx={{ color: 'var(--bad)', '&.Mui-checked': { color: 'var(--bad)' } }}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="h6" sx={{ color: 'var(--bad)' }}>
-                        🗑️ Completely Delete Performer
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-                        PERMANENT deletion of ALL data and files! Deletes folders, database records, hash DB, everything. Cannot be undone!
-                      </Typography>
-                    </Box>
-                  }
-                />
-              </Box>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ borderTop: '1px solid #333', p: 2 }}>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={isDeleting} sx={{ color: 'var(--dim)' }}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteConfirm}
-            color="error"
-            variant="contained"
-            disabled={!deleteOption || isDeleting}
+      <AppDialog
+        open={open}
+        onClose={onClose}
+        size="md"
+        title={name}
+        subtitle={subtitle}
+        cancelLabel="Close"
+      >
+        <Section title="Name">
+          <Box
+            component="form"
+            onSubmit={(e) => { e.preventDefault(); handleRenamePerformer(); }}
+            sx={{ display: 'flex', gap: SPACE.sm, alignItems: 'flex-start' }}
           >
-            {isDeleting ? 'Processing...' : 'Confirm Action'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <TextField
+              value={newName}
+              onChange={(e) => { setNewName(e.target.value); setRenameError(null); }}
+              size="small"
+              fullWidth
+              disabled={isRenaming}
+              inputProps={{ 'aria-label': 'Name' }}
+              error={!!renameError}
+            />
+            <Button type="submit" variant="contained" disabled={isRenaming || nameUnchanged} sx={{ flexShrink: 0 }}>
+              {isRenaming ? 'Renaming…' : 'Rename'}
+            </Button>
+          </Box>
+          {renameError && <Typography role="alert" sx={errorLineSx}>{renameError}</Typography>}
+          <Box sx={{ mt: 0.75 }}><DialogText>Her folders are renamed with her.</DialogText></Box>
+        </Section>
+
+        <Section title="Profile">
+          <Box sx={{ ...rowSx, justifyContent: 'space-between' }}>
+            <DialogText>Aliases, scraping and Leakhaven updates are on the Performer Management page.</DialogText>
+            <Button
+              variant="outlined"
+              size="small"
+              endIcon={<ArrowForwardIcon />}
+              onClick={() => {
+                onClose();
+                navigate(`/performer-management?performer=${performer.id}`);
+              }}
+            >
+              Open in Performer Management
+            </Button>
+          </Box>
+        </Section>
+
+        <Section title="Hash database" description={hasHashDB ? `${hashCount.toLocaleString()} ${hashCount === 1 ? 'hash' : 'hashes'}` : 'None yet'}>
+          <DialogText>Perceptual hashes find duplicate content across performers.</DialogText>
+          <Box sx={{ ...rowSx, mt: SPACE.sm }}>
+            <Button variant="outlined" size="small" onClick={handleCreateHashDB} disabled={isCreatingHash}>
+              {isCreatingHash ? 'Starting…' : hasHashDB ? 'Update hash DB' : 'Create hash DB'}
+            </Button>
+            <Button variant="outlined" size="small" onClick={handleCheckInternalDuplicates} disabled={isCheckingDuplicates || !hasHashDB}>
+              {isCheckingDuplicates ? 'Checking…' : 'Find duplicates in her files'}
+            </Button>
+          </Box>
+          {hashNote && (
+            <Typography variant="body2" sx={{ mt: 1.5, color: hashNote.error ? 'var(--bad)' : 'var(--dim)' }}>
+              {hashNote.text}
+            </Typography>
+          )}
+        </Section>
+
+        <Section title="Sync and refresh">
+          <DialogText>
+            Scans her folder to update file counts, sizes and thumbnails, and rebuilds the file cache. Stale references to deleted files are purged.
+          </DialogText>
+          <Box sx={{ ...rowSx, mt: SPACE.sm }}>
+            <Button variant="outlined" size="small" onClick={handleRefreshStats} disabled={isRefreshing}>
+              {isRefreshing ? 'Syncing…' : 'Sync and refresh'}
+            </Button>
+          </Box>
+        </Section>
+
+        <Section title="Move and remove" sx={{ mb: 0 }}>
+          <Box sx={rowSx}>
+            <Button variant="outlined" size="small" onClick={() => handleMoveToAfter(false)}>
+              Move to After
+            </Button>
+            <Button variant="outlined" size="small" onClick={() => setRemoveOpen(true)} sx={dangerSx}>
+              Remove or blacklist…
+            </Button>
+          </Box>
+        </Section>
+      </AppDialog>
+
+      <RemovePerformerDialog
+        open={open && removeOpen}
+        performer={{ ...current, location }}
+        // The routes delete her After folder by name too; the settings only say whether that folder exists.
+        sameName={settings.existsInAfter && location !== 'after'
+          ? [{ location: 'after', folder_id: current.folder_id, folderOnly: true }]
+          : []}
+        onClose={() => setRemoveOpen(false)}
+        onDone={(choice, data) => {
+          if (onUpdate) onUpdate();
+          // a partial failure reports here too (some folders went): stay open so its error stays in sight
+          if (data?.success) onClose();
+        }}
+      />
     </>
   );
 }

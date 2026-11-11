@@ -4,14 +4,14 @@
  *
  *   POST /api/discovery/performers      Content-Type: application/json
  *   {
- *     "source": "keep-scanner", "event": "keep" | "delete" | "update" | "upload",
+ *     "source": "keep-scanner", "event": "keep" | "delete" | "update" | "upload" | "undecide",
  *     "update": null | "red" | "green",            // update: found again after delete (red) or keep/checked (green)
  *     "key": "<member key>",                       // stable id of the performer on Discover (her first find)
  *     "members": ["<type>:<site>:<id>", …],        // every find of her
  *     "new_finds": [ … ],
  *     "name": "…", "aliases": [ … ], "links": [ … ], "sources": [ … ],
  *     "profile": { …the app's scrape shape: profile fields, aliases, tags, socials… } | null,
- *     "pictures": [ "<url>", … ] | [ { "name", "type", "data": "<base64>" }, … ],
+ *     "pictures": [ { "name", "type", "data": "<base64>" }, … ]   // over HTTP only the bytes; URLs only in this server's own events
  *     "best_score": 0-100, "pool_score": 0-100 | null, "decided_at": "<iso>",
  *     "verdict": "keep" | "delete" | "superwrong" | null   // keep / delete: the training verdict; superwrong: a delete P got
  *   }                                                       // badly wrong; null on an update
@@ -23,26 +23,34 @@
  *   - a performer the app already had (the profile page's collection, or the library): merged, never overwritten: the
  *     aliases, links and pictures she lacks are added; and she is set to undecided whatever the event. Her verdict there is
  *     kept in the entry (was_verdict). She is decided on the profile page, under its "From Discover" sort.
- *   - event "upload": always undecided, new or merged, under its own "Uploaded" sort.
+ *   - event "upload": under its own "Uploaded" sort. Undecided without a verdict; with "verdict" keep / delete (Send with
+ *     verdict on the Upload tab) a new one, or the entry an earlier send made, is kept or deleted as a Keep / Delete is, a
+ *     training verdict too. Merged into a performer the app had, it is undecided whatever the verdict, as above.
+ *   - event "undecide" (Put back, or an Undo, on Discover): only an entry Discover made itself goes back to undecided and loses
+ *     the verdict Discover gave it; a merged or library one is left as it is (it is decided on the profile page). Nobody known:
+ *     nothing happens ("none").
+ *   A merge moves her verdict on the profile page into the entry (was_verdict) the first time only: a verdict given there
+ *   later is the profile page's own and stays.
  *
  *   Keep and Delete are training data for P: the verdict goes where the profile page's do, with source "discover", in
  *   Discover's current round (profile page → Training data), and her pictures with the profile collection's, where P's
  *   trainer reads them (GET /api/profile/full).
  *
- *   → 200 { "result": "created" | "updated" | "merged", "performer_id": <id>, "status": "kept" | "deleted" | "undecided" }
+ *   → 200 { "result": "created" | "updated" | "merged" | "unchanged" | "none", "performer_id": <id> | null, "status": "kept" | "deleted" | "undecided" }
  *
- * local: pictures come from this server's cache ("files", paths as stored), for events.js. Only there: over HTTP a caller
- * can't name a file on this server, only a URL or the bytes.
+ * local: pictures come from this server's cache ("files", paths as stored), or from the URLs of its own events, for
+ * events.js. Only there: over HTTP a caller can't name a file on this server nor make it fetch a URL, only send the bytes.
  */
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { abs } = require('./paths');
 const { loadLibrary, normalize } = require('./library');
+const { safeDecode } = require('./links');
 const { warn } = require('./runLog');
 const entries = require('./entries');
 
-const EVENTS = ['keep', 'delete', 'update', 'upload'];
+const EVENTS = ['keep', 'delete', 'update', 'upload', 'undecide'];
 const VERDICTS = ['keep', 'delete', 'superwrong'];
 const MAX_PICTURES = 40;
 const MAX_PICTURE_BYTES = 25 * 1024 * 1024;
@@ -62,7 +70,7 @@ function newSlug(name, key) {
 /** The Leakhaven model in a link, as a name to look for */
 function leakhavenName(link) {
   const m = /leakshaven\.com\/(?:model\/|\?q=)([^/?#&]+)/i.exec(String(link || ''));
-  return m ? decodeURIComponent(m[1]) : null;
+  return m ? safeDecode(m[1]) : null;
 }
 
 const accounts = (profile) => Object.entries(profile?.socials || {}).filter(([n]) => n === 'onlyfans' || n === 'fansly').map(([, url]) => String(url).toLowerCase().replace(/\/+$/, ''));
@@ -97,7 +105,7 @@ async function fetchPicture(url) {
   }
 }
 
-/** The pictures of an event as { bytes, ext } */
+/** The pictures of an event as { bytes, ext }. A URL is only fetched for this server's own events (local). */
 async function picturesOf(p, local) {
   const out = [];
   if (local) {
@@ -109,6 +117,7 @@ async function picturesOf(p, local) {
   }
   for (const pic of (p.pictures || []).slice(0, MAX_PICTURES)) {
     if (typeof pic === 'string') {
+      if (!local) continue;
       const got = await fetchPicture(pic);
       if (got) out.push(got);
     } else if (EXT[pic?.type] && pic.data) {
@@ -147,8 +156,9 @@ async function applyEvent(p, { local = false } = {}) {
   if (p.verdict != null && !VERDICTS.includes(p.verdict)) throw bad(`verdict: ${VERDICTS.join(', ')} or null`);
 
   const { records, labels, saveLabels, current, DATA } = page();
-  const recs = records();
   const known = entries.byKey(p.key) || entries.byMembers(p.members);
+  if (p.event === 'undecide') return undecide(known, { labels, saveLabels });
+  const recs = records();
   const found = known ? { entry: known } : lookUp(p, recs);
   const pictures = await picturesOf(p, local);
   const origin = p.event === 'upload' ? 'upload' : 'scanner';
@@ -172,21 +182,29 @@ async function applyEvent(p, { local = false } = {}) {
   const lab = labels();
   const labelKey = `${site}/${slug}`;
   let status = e.status;
-  if (merging || p.event === 'upload') {
+  if (p.event === 'upload') e.origin = 'upload';
+  if (merging || (p.event === 'upload' && !p.verdict)) {
     // decided on the profile page, not here: what she had there goes, and is kept in the entry
     status = 'undecided';
     const twin = recs.get(labelKey)?.babepedia_slug && `babepedia/${recs.get(labelKey).babepedia_slug}`;
-    for (const k of [labelKey, twin]) {
-      if (k && lab[k]) { e.was_verdict ||= lab[k]; delete lab[k]; }
+    // only the first time: a verdict given on the profile page after that is its own
+    if (!found.entry) {
+      for (const k of [labelKey, twin]) {
+        if (k && lab[k]) { e.was_verdict ||= lab[k]; delete lab[k]; }
+      }
+    } else if (!merging && found.entry.origin === 'upload' && lab[labelKey]?.source === 'discover') {
+      // an upload's own entry, sent undecided after a send with a verdict: that verdict goes, as a Put back takes it
+      delete lab[labelKey];
     }
     e.update_mark = null;
-    if (p.event === 'upload') e.origin = 'upload';
   } else if (p.event === 'update') {
     e.update_mark = p.update === 'red' || p.update === 'green' ? p.update : null;
   } else {
-    status = p.event === 'keep' ? 'kept' : 'deleted';
+    // keep / delete, or an upload sent with its verdict
+    const verdict = p.event === 'upload' ? p.verdict : p.verdict || p.event;
+    status = verdict === 'keep' ? 'kept' : 'deleted';
     e.update_mark = null;
-    setVerdict(lab, labelKey, p.verdict || p.event, current());
+    setVerdict(lab, labelKey, verdict, current());
   }
   e.status = status;
   const saved = entries.save(e);
@@ -196,6 +214,18 @@ async function applyEvent(p, { local = false } = {}) {
     performer_id: saved.library_id ?? saved.id,
     status,
   };
+}
+
+/** Put back on Discover: her own entry undecided again, without the verdict Discover gave it. No pictures are read. */
+function undecide(known, { labels, saveLabels }) {
+  if (!known) return { result: 'none', performer_id: null, status: 'undecided' };
+  if (known.merged_into || known.library_id) return { result: 'unchanged', performer_id: known.library_id ?? known.id, status: known.status };
+  const lab = labels();
+  const labelKey = `discover/${known.slug}`;
+  if (lab[labelKey]?.source === 'discover') delete lab[labelKey];
+  const saved = entries.save({ ...known, status: 'undecided', update_mark: null, decided_at: new Date().toISOString() });
+  saveLabels(lab);
+  return { result: 'updated', performer_id: saved.id, status: 'undecided' };
 }
 
 module.exports = { applyEvent };

@@ -4,273 +4,185 @@ const db = require('../db');
 const { deletePerformerRecord } = require('../services/performerRecords');
 const fs = require('fs-extra');
 const path = require('path');
-const { findAllPerformersByNameOrAlias, normalizeName } = require('../utils/performerMatcher');
+const { normalizeName } = require('../utils/performerMatcher');
 const { scrapeLeakshaven, checkLeakshavenUpdates, modelNameFromUrl } = require('../services/scraperService');
+const folders = require('../services/performerFolders');
+const { validName, resolveOwnFolder, twinsOf, planRemoval, removeFolder, deleteFolderWithRetry, locationFolder } = folders;
+
+const PERFORMER_SQL = `
+  SELECT p.*, f.path as folder_path
+  FROM performers p
+  LEFT JOIN folders f ON p.folder_id = f.id
+  WHERE p.id = ?
+`;
+const getPerformer = (id) => db.prepare(PERFORMER_SQL).get(id);
+
+/** Length in characters as SQLite's substr counts them (code points, not UTF-16 units). */
+const sqlLength = (s) => [...s].length;
+
+// Same library and name as twinsOf's `name = ? COLLATE NOCASE`, which folds ASCII letters only
+const twinKey = (p) => `${p.folder_id ?? ''}\u0000${String(p.name).replace(/[A-Z]/g, c => c.toLowerCase())}`;
 
 /**
- * Handle trash folder - either move contents to training or permanently delete
+ * One row of the performer list: her folder (her own one, never a twin's), hash, scrape, filter and Leakhaven facts.
+ * `groups` maps normalizeName(name) to the ids of every record of that name (the duplicate hint).
  */
-async function handleTrashFolder(trashFolderPath, performerName, basePath, fileType) {
-  const setting = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('save_deleted_for_training');
-  const saveForTraining = setting && setting.value === 'true';
-  
-  console.log(`handleTrashFolder: folder=${trashFolderPath}, performer=${performerName}, type=${fileType}, saveForTraining=${saveForTraining}`);
-  
-  try {
-    if (!await fs.pathExists(trashFolderPath)) {
-      return { saved: false, count: 0 };
+async function enhance(performer, twins, groups) {
+  const isEmpty = (performer.pics_count || 0) + (performer.vids_count || 0) + (performer.funscript_vids_count || 0) === 0;
+  const resolved = await resolveOwnFolder(performer, twins);
+  const own = resolved.own;
+
+  let location;
+  if (performer.blacklisted === 1) location = 'blacklisted';
+  else if (own) location = isEmpty ? 'missing-or-empty' : own.location;
+  else location = 'missing-or-empty';
+  const folderExists = !!own;
+  const actualPath = own ? own.path : null;
+
+  const hashInfo = db.prepare(`
+    SELECT
+      SUM(CASE WHEN deleted_flag = 0 THEN 1 ELSE 0 END) as file_count, -- live rows only: history (1, 2) is not a hash database
+      MAX(seen_at) as last_updated,
+      SUM(CASE WHEN exact_hash IS NOT NULL THEN 1 ELSE 0 END) as exact_hash_count,
+      SUM(CASE WHEN perceptual_hash IS NOT NULL THEN 1 ELSE 0 END) as perceptual_hash_count,
+      SUM(CASE WHEN deleted_flag = 1 THEN 1 ELSE 0 END) as deleted_count
+    FROM performer_file_hashes
+    WHERE performer_id = ?
+  `).get(performer.id);
+  const hasHashDB = !!hashInfo && hashInfo.file_count > 0;
+
+  const hasScrapedData = !!(
+    performer.scraped_at ||
+    performer.age ||
+    performer.born ||
+    performer.height ||
+    performer.ethnicity
+  );
+
+  const filterStats = db.prepare(`
+    SELECT
+      COUNT(*) as total_actions,
+      SUM(CASE WHEN action = 'keep' THEN 1 ELSE 0 END) as kept,
+      SUM(CASE WHEN action = 'delete' THEN 1 ELSE 0 END) as deleted
+    FROM filter_actions
+    WHERE performer_id = ?
+  `).get(performer.id);
+
+  let aliases = [];
+  if (performer.aliases) {
+    try {
+      aliases = JSON.parse(performer.aliases);
+    } catch (e) {
+      aliases = [];
     }
-    
-    const files = await fs.readdir(trashFolderPath);
-    
-    if (saveForTraining && files.length > 0) {
-      // Move entire contents to training folder
-      const trainingBasePath = path.join(basePath, 'deleted keep for training', performerName);
-      const destFolder = path.join(trainingBasePath, fileType === 'video' ? 'vids' : 'pics');
-      
-      await fs.ensureDir(destFolder);
-      
-      // Move each file
-      for (const file of files) {
-        const sourcePath = path.join(trashFolderPath, file);
-        const destPath = path.join(destFolder, file);
-        await fs.move(sourcePath, destPath, { overwrite: true });
-      }
-      
-      console.log(`Saved ${files.length} files for training: ${destFolder}`);
-      
-      // Remove empty trash folder
-      await fs.remove(trashFolderPath);
-      
-      return { saved: true, count: files.length };
-    } else {
-      // Permanently delete the entire trash folder
-      await fs.remove(trashFolderPath);
-      console.log(`Permanently deleted trash folder: ${trashFolderPath} (${files.length} files)`);
-      
-      return { saved: false, count: files.length };
-    }
-  } catch (err) {
-    console.error('Error handling trash folder:', err);
-    throw err;
   }
+
+  const picsProgress = performer.pics_count > 0
+    ? Math.round((performer.pics_filtered / performer.pics_count) * 100)
+    : 0;
+  const vidsProgress = performer.vids_count > 0
+    ? Math.round((performer.vids_filtered / performer.vids_count) * 100)
+    : 0;
+  const funscriptProgress = performer.funscript_vids_count > 0
+    ? Math.round((performer.funscript_vids_filtered / performer.funscript_vids_count) * 100)
+    : 0;
+
+  const group = groups.get(normalizeName(performer.name)) || [];
+  const duplicateIds = group.filter(id => id !== performer.id);
+
+  return {
+    ...performer,
+    location,
+    folderExists,
+    actualPath,
+    expectedPath: resolved.expected ? resolved.expected.path : null,
+    isEmpty,
+    hasHashDB,
+    hashStats: {
+      fileCount: hashInfo?.file_count || 0,
+      exactHashCount: hashInfo?.exact_hash_count || 0,
+      perceptualHashCount: hashInfo?.perceptual_hash_count || 0,
+      deletedCount: hashInfo?.deleted_count || 0,
+      lastUpdated: hashInfo?.last_updated
+        ? new Date(hashInfo.last_updated * 1000).toISOString()
+        : null
+    },
+    hasScrapedData,
+    scrapedAt: performer.scraped_at,
+    filterStats: {
+      totalActions: filterStats?.total_actions || 0,
+      kept: filterStats?.kept || 0,
+      deleted: filterStats?.deleted || 0
+    },
+    aliases,
+    filteringProgress: {
+      pics: picsProgress,
+      vids: vidsProgress,
+      funscript: funscriptProgress,
+      overall: Math.round((picsProgress + vidsProgress + funscriptProgress) / 3)
+    },
+    leakshavenUpdate: {
+      url: performer.leakshaven_url,
+      lastCheckDate: performer.last_leakshaven_check_date,
+      newestUpload: performer.last_leakshaven_update_time,
+      acknowledged: performer.leakshaven_update_acknowledged === 1,
+      error: performer.leakshaven_check_error
+    },
+    hasDuplicates: duplicateIds.length > 0,
+    duplicateIds,
+    twinIds: twins.map(t => t.id),
+    folderSharedWith: resolved.sharedWith
+  };
 }
 
-/**
- * Helper function to delete folder with retry logic for locked files
- */
-async function deleteFolderWithRetry(folderPath, maxRetries = 3, delayMs = 1000) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await fs.remove(folderPath);
-      return { success: true };
-    } catch (err) {
-      if (err.code === 'EBUSY' && attempt < maxRetries) {
-        console.log(`Attempt ${attempt} failed for ${folderPath}, retrying in ${delayMs}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        continue;
-      }
-      // If it's the last attempt or not EBUSY error, throw it
-      throw err;
-    }
+function nameGroups(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = normalizeName(row.name);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row.id);
   }
+  return groups;
 }
 
 /**
  * GET /api/performer-management/all
- * Get comprehensive data on all performers with location, hash status, scrape status, duplicates
+ * Every performer with her location, hash status, scrape status, duplicates and twins
  */
 router.get('/all', async (req, res) => {
   try {
-    // Get all performers with folder paths (exclude hidden folders like .cache)
+    // exclude hidden folders like .cache
     const performers = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
+      SELECT p.*, f.path as folder_path
+      FROM performers p
       LEFT JOIN folders f ON p.folder_id = f.id
       WHERE p.name NOT LIKE '.%'
     `).all();
-    
-    // Enhance each performer with additional metadata
-    const enhancedPerformers = await Promise.all(performers.map(async (performer) => {
-      // Determine location
-      let location = 'unknown';
-      let folderExists = false;
-      let actualPath = null;
-      const isEmpty = (performer.pics_count || 0) + (performer.vids_count || 0) + (performer.funscript_vids_count || 0) === 0;
-      
-      // Check if blacklisted first
-      if (performer.blacklisted === 1) {
-        location = 'blacklisted';
-      } else if (performer.folder_path && performer.name) {
-        const beforePath = path.join(performer.folder_path, 'before filter performer', performer.name);
-        const afterPath = path.join(performer.folder_path, 'after filter performer', performer.name);
-        
-        const beforeExists = await fs.pathExists(beforePath);
-        const afterExists = await fs.pathExists(afterPath);
-        
-        // If moved_to_after is 1, prefer "after" location even if both folders exist
-        if (performer.moved_to_after === 1 && afterExists) {
-          location = 'after';
-          folderExists = true;
-          actualPath = afterPath;
-        } else if (beforeExists) {
-          location = 'before';
-          folderExists = true;
-          actualPath = beforePath;
-        } else if (afterExists) {
-          location = 'after';
-          folderExists = true;
-          actualPath = afterPath;
-        } else {
-          location = 'missing-or-empty';
-        }
-        
-        // Override to missing-or-empty if empty
-        if (isEmpty && folderExists) {
-          location = 'missing-or-empty';
-        }
-      } else {
-        location = 'missing-or-empty';
-      }
-      
-      // Get hash database info
-      const hashInfo = db.prepare(`
-        SELECT 
-          COUNT(*) as file_count,
-          MAX(seen_at) as last_updated,
-          SUM(CASE WHEN exact_hash IS NOT NULL THEN 1 ELSE 0 END) as exact_hash_count,
-          SUM(CASE WHEN perceptual_hash IS NOT NULL THEN 1 ELSE 0 END) as perceptual_hash_count,
-          SUM(CASE WHEN deleted_flag = 1 THEN 1 ELSE 0 END) as deleted_count
-        FROM performer_file_hashes
-        WHERE performer_id = ?
-      `).get(performer.id);
-      
-      const hasHashDB = hashInfo && hashInfo.file_count > 0;
-      
-      // Check if scraped
-      const hasScrapedData = !!(
-        performer.scraped_at ||
-        performer.age ||
-        performer.born ||
-        performer.height ||
-        performer.ethnicity
-      );
-      
-      // Get filter action stats
-      const filterStats = db.prepare(`
-        SELECT 
-          COUNT(*) as total_actions,
-          SUM(CASE WHEN action = 'keep' THEN 1 ELSE 0 END) as kept,
-          SUM(CASE WHEN action = 'delete' THEN 1 ELSE 0 END) as deleted
-        FROM filter_actions
-        WHERE performer_id = ?
-      `).get(performer.id);
-      
-      // Get tags count
-      const tagCount = db.prepare(`
-        SELECT COUNT(*) as count FROM tags WHERE performer_id = ?
-      `).get(performer.id).count;
-      
-      // Parse aliases if they exist
-      let aliases = [];
-      if (performer.aliases) {
-        try {
-          aliases = JSON.parse(performer.aliases);
-        } catch (e) {
-          aliases = [];
-        }
-      }
-      
-      // Calculate filtering progress
-      const picsProgress = performer.pics_count > 0 
-        ? Math.round((performer.pics_filtered / performer.pics_count) * 100) 
-        : 0;
-      const vidsProgress = performer.vids_count > 0 
-        ? Math.round((performer.vids_filtered / performer.vids_count) * 100) 
-        : 0;
-      const funscriptProgress = performer.funscript_vids_count > 0 
-        ? Math.round((performer.funscript_vids_filtered / performer.funscript_vids_count) * 100) 
-        : 0;
-      
-      return {
-        ...performer,
-        location,
-        folderExists,
-        actualPath,
-        isEmpty,
-        hasHashDB,
-        hashStats: {
-          fileCount: hashInfo?.file_count || 0,
-          exactHashCount: hashInfo?.exact_hash_count || 0,
-          perceptualHashCount: hashInfo?.perceptual_hash_count || 0,
-          deletedCount: hashInfo?.deleted_count || 0,
-          lastUpdated: hashInfo?.last_updated 
-            ? new Date(hashInfo.last_updated * 1000).toISOString() 
-            : null
-        },
-        hasScrapedData,
-        scrapedAt: performer.scraped_at,
-        filterStats: {
-          totalActions: filterStats?.total_actions || 0,
-          kept: filterStats?.kept || 0,
-          deleted: filterStats?.deleted || 0
-        },
-        tagCount,
-        aliases,
-        filteringProgress: {
-          pics: picsProgress,
-          vids: vidsProgress,
-          funscript: funscriptProgress,
-          overall: Math.round((picsProgress + vidsProgress + funscriptProgress) / 3)
-        },
-        leakshavenUpdate: {
-          url: performer.leakshaven_url,
-          lastCheckDate: performer.last_leakshaven_check_date,
-          newestUpload: performer.last_leakshaven_update_time,
-          acknowledged: performer.leakshaven_update_acknowledged === 1,
-          error: performer.leakshaven_check_error
-        }
-      };
-    }));
-    
-    // Find duplicates (same name/alias, different IDs)
-    const duplicateGroups = {};
-    enhancedPerformers.forEach(performer => {
-      const normalizedKey = normalizeName(performer.name);
-      if (!duplicateGroups[normalizedKey]) {
-        duplicateGroups[normalizedKey] = [];
-      }
-      duplicateGroups[normalizedKey].push(performer);
-    });
-    
-    // Mark duplicates
-    enhancedPerformers.forEach(performer => {
-      const normalizedKey = normalizeName(performer.name);
-      const group = duplicateGroups[normalizedKey];
-      performer.hasDuplicates = group.length > 1;
-      performer.duplicateIds = group.filter(p => p.id !== performer.id).map(p => p.id);
-    });
-    
-    // Group performers by location
-    const grouped = {
-      before: enhancedPerformers.filter(p => p.location === 'before'),
-      after: enhancedPerformers.filter(p => p.location === 'after'),
-      'missing-or-empty': enhancedPerformers.filter(p => p.location === 'missing-or-empty'),
-      blacklisted: enhancedPerformers.filter(p => p.location === 'blacklisted')
-    };
-    
+
+    // Twins: same library, same name (case-insensitive), from this one query
+    const byKey = new Map();
+    for (const p of performers) {
+      const key = twinKey(p);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(p);
+    }
+    const groups = nameGroups(performers);
+
+    const list = await Promise.all(performers.map(p =>
+      enhance(p, byKey.get(twinKey(p)).filter(t => t.id !== p.id), groups)));
+
+    const count = (location) => list.filter(p => p.location === location).length;
     res.send({
       success: true,
-      performers: enhancedPerformers,
-      grouped,
+      performers: list,
       summary: {
-        total: enhancedPerformers.length,
-        before: grouped.before.length,
-        after: grouped.after.length,
-        missingOrEmpty: grouped['missing-or-empty'].length,
-        blacklisted: grouped.blacklisted.length,
-        withHashDB: enhancedPerformers.filter(p => p.hasHashDB).length,
-        scraped: enhancedPerformers.filter(p => p.hasScrapedData).length
+        total: list.length,
+        before: count('before'),
+        after: count('after'),
+        missingOrEmpty: count('missing-or-empty'),
+        blacklisted: count('blacklisted'),
+        withHashDB: list.filter(p => p.hasHashDB).length,
+        scraped: list.filter(p => p.hasScrapedData).length
       }
     });
   } catch (err) {
@@ -280,90 +192,114 @@ router.get('/all', async (req, res) => {
 });
 
 /**
+ * GET /api/performer-management/:id
+ * One row in the shape of /all
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const performer = getPerformer(req.params.id);
+    if (!performer) {
+      return res.status(404).send({ error: 'Performer not found' });
+    }
+    const groups = nameGroups(db.prepare("SELECT id, name FROM performers WHERE name NOT LIKE '.%'").all());
+    res.send({ success: true, performer: await enhance(performer, twinsOf(performer), groups) });
+  } catch (err) {
+    console.error('Error getting performer:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/performer-management/:id/removal-plan
+ * Her folders (with file counts and sizes) and, per removal option, which of them go and whether it is refused
+ */
+router.get('/:id/removal-plan', async (req, res) => {
+  try {
+    const performer = getPerformer(req.params.id);
+    if (!performer) {
+      return res.status(404).send({ error: 'Performer not found' });
+    }
+    res.send({ success: true, ...await planRemoval(performer, { stats: true }) });
+  } catch (err) {
+    console.error('Error planning removal:', err);
+    res.status(500).send({ error: err.message });
+  }
+});
+
+/**
+ * Delete exactly the folders the plan gives the option, in the order own (or leftover), legacy trash, training.
+ * Answers the 409 (blocked) or 500 (a folder could not be deleted) itself and returns null then; else what was done.
+ * Nothing in the database changes here.
+ */
+async function removeFolders(res, performer, option, { saveTrash = true } = {}) {
+  const plan = await planRemoval(performer);
+  const { goes, blocked } = plan.options[option];
+  if (blocked) {
+    res.status(409).send({ error: blocked, code: 'blocked' });
+    return null;
+  }
+
+  const done = { plan, deletedFolders: [], deletedPaths: [], trash: { saved: 0, deleted: 0, errors: [] } };
+  for (const key of ['own', 'leftover', 'trash', 'training'].filter(k => goes.includes(k))) {
+    const folder = plan.folders.find(f => f.key === key);
+    if (!folder) continue;
+    try {
+      if (key === 'training') {
+        await deleteFolderWithRetry(folder.path);
+      } else {
+        const t = await removeFolder(folder.path, performer, { saveTrash });
+        done.trash.saved += t.saved;
+        done.trash.deleted += t.deleted;
+        done.trash.errors.push(...t.errors);
+      }
+      done.deletedFolders.push(folder.rel);
+      done.deletedPaths.push(folder.path);
+    } catch (err) {
+      console.error(`Error deleting ${folder.path}:`, err);
+      res.status(500).send({
+        error: `Could not delete ${folder.rel}: ${err.message}. Some files may already be gone; rescan her to see what is left.`,
+        code: 'delete_failed',
+        path: folder.path,
+        deletedFolders: done.deletedFolders
+      });
+      return null;
+    }
+  }
+
+  done.keptFolders = plan.folders
+    .filter(f => !goes.includes(f.key) && (f.key === 'other' || ((f.key === 'trash' || f.key === 'training') && f.shared)))
+    .map(f => ({ rel: f.rel, reason: f.key === 'other' ? `belongs to her other record #${f.otherId}` : 'shared with her other record' }));
+  return done;
+}
+
+const removalFields = (done) => ({
+  deletedFolders: done.deletedFolders,
+  keptFolders: done.keptFolders,
+  trash: done.trash
+});
+
+/**
  * DELETE /api/performer-management/:id/folder-only
- * Delete folder but keep all database records
+ * Delete her own folder but keep all database records
  */
 router.delete('/:id/folder-only', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
-      LEFT JOIN folders f ON p.folder_id = f.id
-      WHERE p.id = ?
-    `).get(id);
-    
+    const performer = getPerformer(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
-    const deletedFolders = [];
-    
-    // Delete folders from filesystem
-    if (performer.folder_path && performer.name) {
-      const beforePath = path.join(performer.folder_path, 'before filter performer', performer.name);
-      const afterPath = path.join(performer.folder_path, 'after filter performer', performer.name);
-      const trashPath = path.join(performer.folder_path, 'trash', performer.name);
-      
-      if (await fs.pathExists(beforePath)) {
-        try {
-          await deleteFolderWithRetry(beforePath);
-          deletedFolders.push(beforePath);
-        } catch (err) {
-          console.error('Error deleting before folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}`,
-            path: beforePath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(afterPath)) {
-        try {
-          await deleteFolderWithRetry(afterPath);
-          deletedFolders.push(afterPath);
-        } catch (err) {
-          console.error('Error deleting after folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}`,
-            path: afterPath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(trashPath)) {
-        try {
-          // Handle trash folders
-          const trashFolders = [
-            { path: path.join(trashPath, 'pics', '.trash'), type: 'image' },
-            { path: path.join(trashPath, 'vids', '.trash'), type: 'video' },
-            { path: path.join(trashPath, 'vids', 'funscript', '.trash'), type: 'funscript' }
-          ];
-          
-          for (const trashFolder of trashFolders) {
-            await handleTrashFolder(trashFolder.path, performer.name, performer.folder_path, trashFolder.type);
-          }
-          
-          // Remove parent trash folder if it still exists and is empty
-          if (await fs.pathExists(trashPath)) {
-            await deleteFolderWithRetry(trashPath);
-          }
-          deletedFolders.push(trashPath);
-        } catch (err) {
-          console.error('Error handling trash folder:', err);
-          console.warn('Could not delete trash folder, continuing...');
-        }
-      }
-    }
-    
+
+    const done = await removeFolders(res, performer, 'delete-folder-only');
+    if (!done) return;
+
     // Clear thumbnail (no longer valid)
     db.prepare('UPDATE performers SET thumbnail = NULL WHERE id = ?').run(id);
-    
+
     res.send({
       success: true,
       message: `Deleted folders for "${performer.name}", kept all database records`,
-      deletedFolders
+      ...removalFields(done)
     });
   } catch (err) {
     console.error('Error deleting folder only:', err);
@@ -373,101 +309,37 @@ router.delete('/:id/folder-only', async (req, res) => {
 
 /**
  * DELETE /api/performer-management/:id/before-cleanup
- * Clean up before folder for performers in after (merge hash DBs)
+ * Delete the Before folder left over from her move to After, and the filter decisions of the files in it.
+ * Her After folder, her tags and her hash rows stay (the next hash build marks the missing files).
  */
 router.delete('/:id/before-cleanup', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
-      LEFT JOIN folders f ON p.folder_id = f.id
-      WHERE p.id = ?
-    `).get(id);
-    
+    const performer = getPerformer(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
-    // Only allow for performers in "after" or with moved_to_after = 1
-    if (performer.moved_to_after !== 1) {
-      return res.status(400).send({ 
-        error: 'This action is only for performers in "after filter performer" folder' 
-      });
+
+    const done = await removeFolders(res, performer, 'cleanup-before');
+    if (!done) return;
+
+    let filterActionsDeleted = 0;
+    const leftover = done.plan.folders.find(f => f.key === 'leftover');
+    if (leftover && done.deletedPaths.includes(leftover.path)) {
+      const prefix = leftover.path + path.sep;
+      filterActionsDeleted = db.prepare(`
+        DELETE FROM filter_actions
+        WHERE performer_id = ? AND (file_path = ? OR substr(file_path, 1, ?) = ?)
+      `).run(id, leftover.path, sqlLength(prefix), prefix).changes;
     }
-    
-    const deletedItems = [];
-    
-    // Delete before folder and trash with retry logic
-    if (performer.folder_path && performer.name) {
-      const beforePath = path.join(performer.folder_path, 'before filter performer', performer.name);
-      const trashPath = path.join(performer.folder_path, 'trash', performer.name);
-      
-      if (await fs.pathExists(beforePath)) {
-        try {
-          await deleteFolderWithRetry(beforePath);
-          deletedItems.push(beforePath);
-        } catch (err) {
-          console.error('Error deleting before folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}. Please close any programs accessing these files and try again.`,
-            path: beforePath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(trashPath)) {
-        try {
-          // Handle trash folders
-          const trashFolders = [
-            { path: path.join(trashPath, 'pics', '.trash'), type: 'image' },
-            { path: path.join(trashPath, 'vids', '.trash'), type: 'video' },
-            { path: path.join(trashPath, 'vids', 'funscript', '.trash'), type: 'funscript' }
-          ];
-          
-          for (const trashFolder of trashFolders) {
-            await handleTrashFolder(trashFolder.path, performer.name, performer.folder_path, trashFolder.type);
-          }
-          
-          // Remove parent trash folder if it still exists
-          if (await fs.pathExists(trashPath)) {
-            await deleteFolderWithRetry(trashPath);
-          }
-          deletedItems.push(trashPath);
-        } catch (err) {
-          console.error('Error handling trash folder:', err);
-          console.warn('Could not delete trash folder, continuing...');
-        }
-      }
-    }
-    
-    // Update hash DB file paths (before → after) if any exist
-    const hashCount = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM performer_file_hashes 
-      WHERE performer_id = ? AND file_path LIKE '%before filter performer%'
-    `).get(id);
-    
-    if (hashCount.count > 0) {
-      db.prepare(`
-        UPDATE performer_file_hashes 
-        SET file_path = REPLACE(file_path, 'before filter performer', 'after filter performer')
-        WHERE performer_id = ? AND file_path LIKE '%before filter performer%'
-      `).run(id);
-    }
-    
-    // Delete old filter actions and tags (from before state)
-    const filterActionsDeleted = db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
-    const tagsDeleted = db.prepare('DELETE FROM tags WHERE performer_id = ?').run(id);
-    
+
     res.send({
       success: true,
       message: `Cleaned up before folder for "${performer.name}"`,
-      deletedFolders: deletedItems,
-      hashPathsUpdated: hashCount.count,
-      filterActionsDeleted: filterActionsDeleted.changes,
-      tagsDeleted: tagsDeleted.changes
+      ...removalFields(done),
+      hashPathsUpdated: 0,
+      filterActionsDeleted,
+      tagsDeleted: 0
     });
   } catch (err) {
     console.error('Error cleaning up before folder:', err);
@@ -482,86 +354,23 @@ router.delete('/:id/before-cleanup', async (req, res) => {
 router.post('/:id/blacklist', async (req, res) => {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
-    
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
-      LEFT JOIN folders f ON p.folder_id = f.id
-      WHERE p.id = ?
-    `).get(id);
-    
+    const { reason } = req.body || {};
+    const performer = getPerformer(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
-    const deletedFolders = [];
-    
-    // Delete folders with retry logic
-    if (performer.folder_path && performer.name) {
-      const beforePath = path.join(performer.folder_path, 'before filter performer', performer.name);
-      const afterPath = path.join(performer.folder_path, 'after filter performer', performer.name);
-      const trashPath = path.join(performer.folder_path, 'trash', performer.name);
-      
-      if (await fs.pathExists(beforePath)) {
-        try {
-          await deleteFolderWithRetry(beforePath);
-          deletedFolders.push(beforePath);
-        } catch (err) {
-          console.error('Error deleting before folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}. Please close any programs accessing these files and try again.`,
-            path: beforePath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(afterPath)) {
-        try {
-          await deleteFolderWithRetry(afterPath);
-          deletedFolders.push(afterPath);
-        } catch (err) {
-          console.error('Error deleting after folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}. Please close any programs accessing these files and try again.`,
-            path: afterPath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(trashPath)) {
-        try {
-          // Handle trash folders
-          const trashFolders = [
-            { path: path.join(trashPath, 'pics', '.trash'), type: 'image' },
-            { path: path.join(trashPath, 'vids', '.trash'), type: 'video' },
-            { path: path.join(trashPath, 'vids', 'funscript', '.trash'), type: 'funscript' }
-          ];
-          
-          for (const trashFolder of trashFolders) {
-            await handleTrashFolder(trashFolder.path, performer.name, performer.folder_path, trashFolder.type);
-          }
-          
-          // Remove parent trash folder if it still exists
-          if (await fs.pathExists(trashPath)) {
-            await deleteFolderWithRetry(trashPath);
-          }
-          deletedFolders.push(trashPath);
-        } catch (err) {
-          console.error('Error handling trash folder:', err);
-          console.warn('Could not delete trash folder, continuing...');
-        }
-      }
-    }
-    
+
+    const done = await removeFolders(res, performer, 'blacklist');
+    if (!done) return;
+
     // Delete filter actions, tags, thumbnail
     db.prepare('DELETE FROM filter_actions WHERE performer_id = ?').run(id);
     db.prepare('DELETE FROM tags WHERE performer_id = ?').run(id);
-    
+
     // Mark as blacklisted (keep performer record, hash DB, scraped data, name, aliases)
     const now = new Date().toISOString();
     db.prepare(`
-      UPDATE performers 
+      UPDATE performers
       SET blacklisted = 1,
           blacklist_reason = ?,
           blacklist_date = ?,
@@ -574,12 +383,12 @@ router.post('/:id/blacklist', async (req, res) => {
           total_size_gb = 0
       WHERE id = ?
     `).run(reason || null, now, id);
-    
+
     res.send({
       success: true,
       message: `Blacklisted "${performer.name}"`,
       reason: reason || null,
-      deletedFolders,
+      ...removalFields(done),
       keptData: ['name', 'aliases', 'hash_db', 'scraped_data']
     });
   } catch (err) {
@@ -595,26 +404,26 @@ router.post('/:id/blacklist', async (req, res) => {
 router.post('/:id/unblacklist', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const performer = db.prepare('SELECT * FROM performers WHERE id = ?').get(id);
-    
+
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
+
     if (performer.blacklisted !== 1) {
       return res.status(400).send({ error: 'Performer is not blacklisted' });
     }
-    
+
     // Remove blacklist
     db.prepare(`
-      UPDATE performers 
+      UPDATE performers
       SET blacklisted = 0,
           blacklist_reason = NULL,
           blacklist_date = NULL
       WHERE id = ?
     `).run(id);
-    
+
     res.send({
       success: true,
       message: `Removed blacklist for "${performer.name}"`
@@ -627,25 +436,21 @@ router.post('/:id/unblacklist', async (req, res) => {
 
 /**
  * DELETE /api/performer-management/:id/complete
- * Completely delete a performer - all files and all database records
+ * Delete her own folder and her record
  */
 router.delete('/:id/complete', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
-      LEFT JOIN folders f ON p.folder_id = f.id
-      WHERE p.id = ?
-    `).get(id);
-    
+    const performer = getPerformer(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
+
+    const done = await removeFolders(res, performer, 'delete-complete');
+    if (!done) return;
+
     const deletedItems = {
-      folders: [],
+      folders: done.deletedPaths,
       databaseRecords: {
         filterActions: 0,
         tags: 0,
@@ -654,72 +459,15 @@ router.delete('/:id/complete', async (req, res) => {
         performer: 0
       }
     };
-    
-    // Delete folders from filesystem
-    if (performer.folder_path && performer.name) {
-      const beforePath = path.join(performer.folder_path, 'before filter performer', performer.name);
-      const afterPath = path.join(performer.folder_path, 'after filter performer', performer.name);
-      const trashPath = path.join(performer.folder_path, 'trash', performer.name);
-      
-      if (await fs.pathExists(beforePath)) {
-        try {
-          await deleteFolderWithRetry(beforePath);
-          deletedItems.folders.push(beforePath);
-        } catch (err) {
-          console.error('Error deleting performer folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}. Please close any programs accessing these files and try again.`,
-            path: beforePath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(afterPath)) {
-        try {
-          await deleteFolderWithRetry(afterPath);
-          deletedItems.folders.push(afterPath);
-        } catch (err) {
-          console.error('Error deleting performer folder:', err);
-          return res.status(500).send({ 
-            error: `Failed to delete folder (file may be open in another program): ${err.message}. Please close any programs accessing these files and try again.`,
-            path: afterPath 
-          });
-        }
-      }
-      
-      if (await fs.pathExists(trashPath)) {
-        try {
-          // Handle trash folders
-          const trashFolders = [
-            { path: path.join(trashPath, 'pics', '.trash'), type: 'image' },
-            { path: path.join(trashPath, 'vids', '.trash'), type: 'video' },
-            { path: path.join(trashPath, 'vids', 'funscript', '.trash'), type: 'funscript' }
-          ];
-          
-          for (const trashFolder of trashFolders) {
-            await handleTrashFolder(trashFolder.path, performer.name, performer.folder_path, trashFolder.type);
-          }
-          
-          // Remove parent trash folder if it still exists
-          if (await fs.pathExists(trashPath)) {
-            await deleteFolderWithRetry(trashPath);
-          }
-          deletedItems.folders.push(trashPath);
-        } catch (err) {
-          console.error('Error handling trash folder:', err);
-          console.warn('Could not delete trash folder, continuing...');
-        }
-      }
-    }
-    
     // Delete all database records (one transaction, clears every FK dependent)
     Object.assign(deletedItems.databaseRecords, deletePerformerRecord(id));
-    
+
     res.send({
       success: true,
       message: `Performer "${performer.name}" completely deleted`,
       performerName: performer.name,
-      deletedItems
+      deletedItems,
+      ...removalFields(done)
     });
   } catch (err) {
     console.error('Error deleting performer completely:', err);
@@ -729,46 +477,48 @@ router.delete('/:id/complete', async (req, res) => {
 
 /**
  * DELETE /api/performer-management/:id/forget
- * Delete a performer and her training data: her folders and trash (nothing saved for training), what was already
- * saved under "deleted keep for training", and every record, the keep/delete decisions, picture pairs and picture
- * scores she was in included. File hashes stay, so a re-download is still recognised.
+ * Delete a performer and her training data: her own folder and its trash (nothing saved for training), what was
+ * already saved under "deleted keep for training" (only when no other record has her name), and every record, the
+ * keep/delete decisions, picture pairs and picture scores she was in included. File hashes stay, so a re-download is
+ * still recognised.
  */
 router.delete('/:id/forget', async (req, res) => {
   try {
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path FROM performers p LEFT JOIN folders f ON p.folder_id = f.id WHERE p.id = ?
-    `).get(req.params.id);
+    const performer = getPerformer(req.params.id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
 
-    const deletedFolders = [];
-    if (performer.folder_path && performer.name) {
-      const folders = ['before filter performer', 'after filter performer', 'trash', 'deleted keep for training']
-        .map(f => path.join(performer.folder_path, f, performer.name));
-      for (const folder of folders) {
-        if (!await fs.pathExists(folder)) continue;
-        try {
-          await deleteFolderWithRetry(folder);
-          deletedFolders.push(folder);
-        } catch (err) {
-          return res.status(500).send({
-            error: `Failed to delete folder (file may be open in another program): ${err.message}`,
-            path: folder
-          });
-        }
-      }
+    const done = await removeFolders(res, performer, 'delete-forget', { saveTrash: false });
+    if (!done) return;
+
+    const plan = done.plan;
+    const hasTwins = twinsOf(performer).length > 0;
+    // Her pictures as pair members (any performer's pair), only in folders that went: her own one and her training
+    // folder. instr is case-sensitive and needs no escaping, so a twin whose name differs in case is not hit.
+    const marks = [];
+    const own = plan.folders.find(f => f.key === 'own');
+    const goneFolders = [];
+    if (own && done.deletedPaths.includes(own.path)) goneFolders.push(own.rel.split('/')[0]);
+    const training = plan.folders.find(f => f.key === 'training');
+    if (training && done.deletedPaths.includes(training.path)) goneFolders.push(folders.TRAINING_FOLDER);
+    for (const f of goneFolders) {
+      marks.push(`/${f}/${performer.name}/`, `\\${f}\\${performer.name}\\`);
     }
 
-    // her pictures as pair members (any performer's pair) and their scores, then the records themselves
-    const literal = performer.name.replace(/[\\%_]/g, c => `\\${c}`);   // a "_" in her name must not match any letter
-    const inHerFolders = ['before filter performer', 'after filter performer', 'deleted keep for training']
-      .map(f => `%/${f}/${literal}/%`);
+    const clauses = ['performer_id = ?'];
+    const params = [performer.id];
+    if (!hasTwins) {
+      clauses.push('(performer_id IS NULL AND performer_name = ?)');
+      params.push(performer.name);
+    }
+    for (const mark of marks) {
+      clauses.push('(instr(winner, ?) > 0 OR instr(loser, ?) > 0)');
+      params.push(mark, mark);
+    }
+
     const forget = db.transaction(() => {
-      const pairs = db.prepare(`
-        DELETE FROM pairwise_pairs WHERE performer_id = ? OR (performer_id IS NULL AND performer_name = ?)
-          OR ${inHerFolders.map(() => "(winner LIKE ? ESCAPE '\\' OR loser LIKE ? ESCAPE '\\')").join(' OR ')}
-      `).run(performer.id, performer.name, ...inHerFolders.flatMap(p => [p, p])).changes;
+      const pairs = db.prepare(`DELETE FROM pairwise_pairs WHERE ${clauses.join(' OR ')}`).run(...params).changes;
       const scores = db.prepare('DELETE FROM image_elo_scores WHERE performer_id = ?').run(performer.id).changes;
       return { pairs, scores, ...deletePerformerRecord(performer.id) };
     });
@@ -776,7 +526,7 @@ router.delete('/:id/forget', async (req, res) => {
     res.send({
       success: true,
       message: `"${performer.name}" deleted with her training data`,
-      deletedFolders,
+      ...removalFields(done),
       databaseRecords: forget()
     });
   } catch (err) {
@@ -787,63 +537,43 @@ router.delete('/:id/forget', async (req, res) => {
 
 /**
  * POST /api/performer-management/:id/rescan
- * Rescan a performer folder and update stats
+ * Rescan her own folder and update stats. The original counts are written only when not set yet.
  */
 router.post('/:id/rescan', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
-      LEFT JOIN folders f ON p.folder_id = f.id
-      WHERE p.id = ?
-    `).get(id);
-    
+    const performer = getPerformer(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
-    // Determine performer path
-    let performerPath = null;
-    if (performer.folder_path && performer.name) {
-      const beforePath = path.join(performer.folder_path, 'before filter performer', performer.name);
-      const afterPath = path.join(performer.folder_path, 'after filter performer', performer.name);
-      
-      if (await fs.pathExists(beforePath)) {
-        performerPath = beforePath;
-      } else if (await fs.pathExists(afterPath)) {
-        performerPath = afterPath;
-      }
+
+    const { own } = await resolveOwnFolder(performer, twinsOf(performer));
+    if (!own) {
+      return res.status(404).send({ error: 'Her folder was not found' });
     }
-    
-    if (!performerPath) {
-      return res.status(404).send({ error: 'Performer folder not found' });
-    }
-    
-    // Scan the folder
+    const performerPath = own.path;
+
     const { scanPerformerFolderEnhanced } = require('../services/importer');
     const stats = await scanPerformerFolderEnhanced(performerPath);
-    
-    // Update database
+
     const now = new Date().toISOString();
     const picsPath = path.join(performerPath, 'pics');
     const vidsPath = path.join(performerPath, 'vids');
     const funscriptPath = path.join(vidsPath, 'funscript');
-    
+
     db.prepare(`
-      UPDATE performers 
-      SET pics_count = ?, 
-          vids_count = ?, 
-          funscript_vids_count = ?, 
-          funscript_files_count = ?, 
+      UPDATE performers
+      SET pics_count = ?,
+          vids_count = ?,
+          funscript_vids_count = ?,
+          funscript_files_count = ?,
           total_size_gb = ?,
-          pics_original_count = ?, 
-          vids_original_count = ?, 
-          funscript_vids_original_count = ?,
-          last_scan_date = ?, 
-          cached_pics_path = ?, 
-          cached_vids_path = ?, 
+          pics_original_count = CASE WHEN COALESCE(pics_original_count, 0) = 0 THEN ? ELSE pics_original_count END,
+          vids_original_count = CASE WHEN COALESCE(vids_original_count, 0) = 0 THEN ? ELSE vids_original_count END,
+          funscript_vids_original_count = CASE WHEN COALESCE(funscript_vids_original_count, 0) = 0 THEN ? ELSE funscript_vids_original_count END,
+          last_scan_date = ?,
+          cached_pics_path = ?,
+          cached_vids_path = ?,
           cached_funscript_path = ?
       WHERE id = ?
     `).run(
@@ -861,7 +591,7 @@ router.post('/:id/rescan', async (req, res) => {
       funscriptPath,
       id
     );
-    
+
     res.send({
       success: true,
       message: 'Performer rescanned',
@@ -882,42 +612,47 @@ router.post('/:id/rescan', async (req, res) => {
  * so the performer's last folder scan is the line instead.
  */
 router.post('/:id/check-update', async (req, res) => {
-  const performer = db.prepare(`
-    SELECT leakshaven_url, last_leakshaven_update_time, leakshaven_update_acknowledged, last_scan_date, import_date
-    FROM performers WHERE id = ?
-  `).get(req.params.id);
-  if (!performer) {
-    return res.status(404).send({ error: 'Performer not found' });
-  }
-  const modelName = modelNameFromUrl(performer.leakshaven_url);
-  if (!modelName) {
-    return res.status(400).send({ error: 'No Leakhaven link' });
-  }
-
-  const checkDate = new Date().toISOString();
   try {
-    const newest = await checkLeakshavenUpdates(modelName);
-    const previous = performer.last_leakshaven_update_time;
-    const scanned = performer.last_scan_date || performer.import_date;
-    // import_date is SQLite's UTC "YYYY-MM-DD HH:MM:SS"
-    const line = previous || (scanned ? new Date(scanned.includes('T') ? scanned : `${scanned.replace(' ', 'T')}Z`).toISOString() : '');
+    const performer = db.prepare(`
+      SELECT leakshaven_url, last_leakshaven_update_time, leakshaven_update_acknowledged, last_scan_date, import_date
+      FROM performers WHERE id = ?
+    `).get(req.params.id);
+    if (!performer) {
+      return res.status(404).send({ error: 'Performer not found' });
+    }
+    const modelName = modelNameFromUrl(performer.leakshaven_url);
+    if (!modelName) {
+      return res.status(400).send({ error: 'No Leakhaven link' });
+    }
 
-    let acknowledged = previous ? performer.leakshaven_update_acknowledged : 1;
-    if (newest && newest > line) acknowledged = 0;
+    const checkDate = new Date().toISOString();
+    try {
+      const newest = await checkLeakshavenUpdates(modelName);
+      const previous = performer.last_leakshaven_update_time;
+      const scanned = performer.last_scan_date || performer.import_date;
+      // import_date is SQLite's UTC "YYYY-MM-DD HH:MM:SS"
+      const line = previous || (scanned ? new Date(scanned.includes('T') ? scanned : `${scanned.replace(' ', 'T')}Z`).toISOString() : '');
 
-    db.prepare(`
-      UPDATE performers
-      SET last_leakshaven_check_date = ?, last_leakshaven_update_time = ?,
-          leakshaven_update_acknowledged = ?, leakshaven_check_error = NULL
-      WHERE id = ?
-    `).run(checkDate, newest || previous, acknowledged, req.params.id);
+      let acknowledged = previous ? performer.leakshaven_update_acknowledged : 1;
+      if (newest && newest > line) acknowledged = 0;
 
-    res.send({ success: true, newestUpload: newest, isNew: !!newest && acknowledged === 0 });
+      db.prepare(`
+        UPDATE performers
+        SET last_leakshaven_check_date = ?, last_leakshaven_update_time = ?,
+            leakshaven_update_acknowledged = ?, leakshaven_check_error = NULL
+        WHERE id = ?
+      `).run(checkDate, newest || previous, acknowledged, req.params.id);
+
+      res.send({ success: true, newestUpload: newest, isNew: !!newest && acknowledged === 0 });
+    } catch (err) {
+      console.error(`Leakhaven check failed for ${modelName}:`, err.message);
+      db.prepare('UPDATE performers SET last_leakshaven_check_date = ?, leakshaven_check_error = ? WHERE id = ?')
+        .run(checkDate, err.message, req.params.id);
+      res.send({ success: false, error: err.message });
+    }
   } catch (err) {
-    console.error(`Leakhaven check failed for ${modelName}:`, err.message);
-    db.prepare('UPDATE performers SET last_leakshaven_check_date = ?, leakshaven_check_error = ? WHERE id = ?')
-      .run(checkDate, err.message, req.params.id);
-    res.send({ success: false, error: err.message });
+    console.error('Error checking Leakhaven update:', err);
+    res.status(500).send({ error: err.message });
   }
 });
 
@@ -927,11 +662,15 @@ router.post('/:id/check-update', async (req, res) => {
  * knows. It is looked up first, so only a real model page is saved. An empty link removes it.
  */
 router.put('/:id/leakhaven-link', async (req, res) => {
-  const link = (req.body.link || '').trim();
-  if (!db.prepare('SELECT id FROM performers WHERE id = ?').get(req.params.id)) {
-    return res.status(404).send({ error: 'Performer not found' });
-  }
   try {
+    const raw = (req.body || {}).link;
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+      return res.status(400).send({ error: 'Link must be text' });
+    }
+    const link = (raw || '').trim();
+    if (!db.prepare('SELECT id FROM performers WHERE id = ?').get(req.params.id)) {
+      return res.status(404).send({ error: 'Performer not found' });
+    }
     let url = null;
     if (link) {
       const found = await scrapeLeakshaven([link]);
@@ -960,19 +699,19 @@ router.put('/:id/leakhaven-link', async (req, res) => {
 router.post('/:id/acknowledge-update', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const performer = db.prepare('SELECT name FROM performers WHERE id = ?').get(id);
-    
+
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
+
     db.prepare(`
-      UPDATE performers 
+      UPDATE performers
       SET leakshaven_update_acknowledged = 1
       WHERE id = ?
     `).run(id);
-    
+
     res.send({
       success: true,
       message: `Acknowledged update for "${performer.name}"`
@@ -983,126 +722,150 @@ router.post('/:id/acknowledge-update', async (req, res) => {
   }
 });
 
+/** Same folder on disk (a case-only rename on a case-insensitive disk sees its own folder as the target). */
+async function sameFolder(a, b) {
+  try {
+    const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)]);
+    return sa.ino === sb.ino && sa.dev === sb.dev;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * POST /api/performer-management/:id/rename
- * Rename a performer and optionally rename their folder
+ * Rename a performer and, with renameFolder, her own folder (never a twin's). Every stored path under her folder is
+ * rewritten by prefix in one transaction; if that fails, the folders are moved back.
  */
 router.post('/:id/rename', async (req, res) => {
   try {
     const { id } = req.params;
-    const { newName, renameFolder } = req.body;
-    
-    if (!newName || !newName.trim()) {
-      return res.status(400).send({ error: 'New name is required' });
+    const { newName, renameFolder } = req.body || {};
+    const trimmedNewName = typeof newName === 'string' ? newName.trim() : '';
+    const invalid = validName(trimmedNewName);
+    if (invalid) {
+      return res.status(400).send({ error: invalid, code: 'invalid_name' });
     }
-    
-    const performer = db.prepare(`
-      SELECT p.*, f.path as folder_path 
-      FROM performers p 
-      LEFT JOIN folders f ON p.folder_id = f.id
-      WHERE p.id = ?
-    `).get(id);
-    
+
+    const performer = getPerformer(id);
     if (!performer) {
       return res.status(404).send({ error: 'Performer not found' });
     }
-    
     const oldName = performer.name;
-    const trimmedNewName = newName.trim();
-    
+
     // Check if name already exists
     const existing = db.prepare('SELECT id FROM performers WHERE name = ? AND id != ?').get(trimmedNewName, id);
     if (existing) {
       return res.status(400).send({ error: `Performer with name "${trimmedNewName}" already exists` });
     }
-    
+
     const renamedFolders = [];
-    
-    // Rename folders if requested
-    if (renameFolder && performer.folder_path && oldName) {
-      const fs = require('fs-extra');
-      const path = require('path');
-      
-      const beforeOldPath = path.join(performer.folder_path, 'before filter performer', oldName);
-      const beforeNewPath = path.join(performer.folder_path, 'before filter performer', trimmedNewName);
-      const afterOldPath = path.join(performer.folder_path, 'after filter performer', oldName);
-      const afterNewPath = path.join(performer.folder_path, 'after filter performer', trimmedNewName);
-      const trashOldPath = path.join(performer.folder_path, 'trash', oldName);
-      const trashNewPath = path.join(performer.folder_path, 'trash', trimmedNewName);
-      
-      // Rename before folder
-      if (await fs.pathExists(beforeOldPath)) {
-        await fs.move(beforeOldPath, beforeNewPath);
-        renamedFolders.push({ from: beforeOldPath, to: beforeNewPath });
+    let oldOwn = null;
+    let newOwn = null;
+
+    // A record whose name is not a folder name is renamed in the database only
+    if (renameFolder && performer.folder_path && !validName(oldName)) {
+      const twins = twinsOf(performer);
+      const resolved = await resolveOwnFolder(performer, twins);
+      if (resolved.sharedWith.length) {
+        return res.status(409).send({
+          error: `Another record of hers (#${resolved.sharedWith[0]}) uses the same folder. Merge the two records first.`,
+          code: 'blocked'
+        });
       }
-      
-      // Rename after folder
-      if (await fs.pathExists(afterOldPath)) {
-        await fs.move(afterOldPath, afterNewPath);
-        renamedFolders.push({ from: afterOldPath, to: afterNewPath });
-      }
-      
-      // Rename trash folder
-      if (await fs.pathExists(trashOldPath)) {
-        await fs.move(trashOldPath, trashNewPath);
-        renamedFolders.push({ from: trashOldPath, to: trashNewPath });
-      }
-      
-      // Update cached paths in database
-      if (performer.cached_pics_path) {
-        const newPicsPath = performer.cached_pics_path.replace(oldName, trimmedNewName);
-        db.prepare('UPDATE performers SET cached_pics_path = ? WHERE id = ?').run(newPicsPath, id);
-      }
-      if (performer.cached_vids_path) {
-        const newVidsPath = performer.cached_vids_path.replace(oldName, trimmedNewName);
-        db.prepare('UPDATE performers SET cached_vids_path = ? WHERE id = ?').run(newVidsPath, id);
-      }
-      if (performer.cached_funscript_path) {
-        const newFunscriptPath = performer.cached_funscript_path.replace(oldName, trimmedNewName);
-        db.prepare('UPDATE performers SET cached_funscript_path = ? WHERE id = ?').run(newFunscriptPath, id);
-      }
-      
-      // Update thumbnail path if it contains the old name
-      if (performer.thumbnail && performer.thumbnail.includes(oldName)) {
-        const newThumbnail = performer.thumbnail.replace(new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), trimmedNewName);
-        db.prepare('UPDATE performers SET thumbnail = ? WHERE id = ?').run(newThumbnail, id);
-      }
-      
-      // Update thumbnail_paths if it contains the old name
-      if (performer.thumbnail_paths) {
-        try {
-          const thumbnailPaths = JSON.parse(performer.thumbnail_paths);
-          const updatedPaths = thumbnailPaths.map(path => 
-            path.includes(oldName) ? path.replace(new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), trimmedNewName) : path
-          );
-          db.prepare('UPDATE performers SET thumbnail_paths = ? WHERE id = ?').run(JSON.stringify(updatedPaths), id);
-        } catch (e) {
-          console.error('Error updating thumbnail_paths:', e);
+      if (resolved.own && trimmedNewName !== oldName) {
+        oldOwn = resolved.own.path;
+        const parent = path.join(performer.folder_path, locationFolder(resolved.own.location));
+        newOwn = path.join(parent, trimmedNewName);
+        if (path.dirname(newOwn) !== parent) {
+          return res.status(400).send({ error: folders.NAME_RULE, code: 'invalid_name' });
         }
-      }
-      
-      // Update file_path in filter_actions table
-      const filterActions = db.prepare('SELECT id, file_path FROM filter_actions WHERE performer_id = ?').all(id);
-      for (const action of filterActions) {
-        if (action.file_path && action.file_path.includes(oldName)) {
-          const newFilePath = action.file_path.replace(new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), trimmedNewName);
-          db.prepare('UPDATE filter_actions SET file_path = ? WHERE id = ?').run(newFilePath, action.id);
+        if (await fs.pathExists(newOwn) && !await sameFolder(oldOwn, newOwn)) {
+          return res.status(409).send({
+            error: `A folder named ${trimmedNewName} already exists in ${folders.locationLabel(resolved.own.location)}`,
+            code: 'target_exists'
+          });
         }
-      }
-      
-      // Update file_path in performer_file_hashes table
-      const fileHashes = db.prepare('SELECT id, file_path FROM performer_file_hashes WHERE performer_id = ?').all(id);
-      for (const hash of fileHashes) {
-        if (hash.file_path && hash.file_path.includes(oldName)) {
-          const newFilePath = hash.file_path.replace(new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), trimmedNewName);
-          db.prepare('UPDATE performer_file_hashes SET file_path = ? WHERE id = ?').run(newFilePath, hash.id);
+
+        await fs.move(oldOwn, newOwn);
+        renamedFolders.push({ from: oldOwn, to: newOwn });
+
+        // The legacy trash is per name: only when no other record has her name, and only into a free name
+        const trashOld = path.join(performer.folder_path, folders.TRASH_FOLDER, oldName);
+        const trashNew = path.join(performer.folder_path, folders.TRASH_FOLDER, trimmedNewName);
+        if (twins.length === 0 && await fs.pathExists(trashOld) && !await fs.pathExists(trashNew)) {
+          try {
+            await fs.move(trashOld, trashNew);
+            renamedFolders.push({ from: trashOld, to: trashNew });
+          } catch (err) {
+            console.error('Could not rename the old trash folder:', err);
+          }
         }
       }
     }
-    
-    // Update performer name in database
-    db.prepare('UPDATE performers SET name = ? WHERE id = ?').run(trimmedNewName, id);
-    db.prepare('UPDATE pairwise_pairs SET performer_name = ? WHERE performer_id = ?').run(trimmedNewName, id);
+
+    const fromPrefix = oldOwn ? oldOwn + path.sep : null;
+    const toPrefix = newOwn ? newOwn + path.sep : null;
+    const rewrite = (value) => {
+      if (!oldOwn || typeof value !== 'string') return value;
+      if (value === oldOwn) return newOwn;
+      return value.startsWith(fromPrefix) ? toPrefix + value.slice(fromPrefix.length) : value;
+    };
+
+    const apply = db.transaction(() => {
+      if (oldOwn) {
+        let thumbnailPaths = performer.thumbnail_paths;
+        if (thumbnailPaths) {
+          try {
+            const parsed = JSON.parse(thumbnailPaths);
+            if (Array.isArray(parsed)) thumbnailPaths = JSON.stringify(parsed.map(rewrite));
+          } catch (e) {
+            // not JSON: left as it is
+          }
+        }
+        db.prepare(`
+          UPDATE performers
+          SET cached_pics_path = ?, cached_vids_path = ?, cached_funscript_path = ?, thumbnail = ?, thumbnail_paths = ?
+          WHERE id = ?
+        `).run(
+          rewrite(performer.cached_pics_path),
+          rewrite(performer.cached_vids_path),
+          rewrite(performer.cached_funscript_path),
+          rewrite(performer.thumbnail),
+          thumbnailPaths,
+          id
+        );
+        for (const table of ['filter_actions', 'performer_file_hashes']) {
+          db.prepare(`
+            UPDATE ${table}
+            SET file_path = ? || substr(file_path, ?)
+            WHERE performer_id = ? AND (file_path = ? OR substr(file_path, 1, ?) = ?)
+          `).run(newOwn, sqlLength(oldOwn) + 1, id, oldOwn, sqlLength(fromPrefix), fromPrefix);
+        }
+        db.prepare('DELETE FROM performer_file_cache WHERE performer_id = ?').run(id);
+      }
+      db.prepare('UPDATE performers SET name = ? WHERE id = ?').run(trimmedNewName, id);
+      db.prepare('UPDATE pairwise_pairs SET performer_name = ? WHERE performer_id = ?').run(trimmedNewName, id);
+    });
+
+    try {
+      apply();
+    } catch (err) {
+      console.error('Rename failed in the database, moving the folders back:', err);
+      const stuck = [];
+      for (const moved of [...renamedFolders].reverse()) {
+        try {
+          await fs.move(moved.to, moved.from);
+        } catch (moveErr) {
+          stuck.push(`${moved.to} (${moveErr.message})`);
+        }
+      }
+      return res.status(500).send({
+        error: stuck.length
+          ? `Could not rename her: ${err.message}. These folders could not be moved back: ${stuck.join(', ')}`
+          : `Could not rename her: ${err.message}. Her folders were moved back.`
+      });
+    }
 
     res.send({
       success: true,

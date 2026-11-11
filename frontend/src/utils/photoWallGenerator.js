@@ -310,15 +310,14 @@ const tryPlacePhoto = (performer, width, height, gridCol, gridRow, cols, rows, s
  * 
  * @param {Array} performers - List of performer objects
  * @param {Object} bagsRef - Reference object for 7-bag randomness state
+ * @param {Object} [options]
+ * @param {AbortSignal} [options.signal] - Cancels the picture-list fetches
  * @returns {Object} { layout: Array, shrinePositions: Array }
  */
-export const generatePhotoWallLayout = async (performers, bagsRef) => {
+export const generatePhotoWallLayout = async (performers, bagsRef, { signal } = {}) => {
   if (!performers || performers.length === 0) return { layout: [], shrinePositions: [] };
 
-  console.log('=== Generating Photo Wall ===');
-  console.log('Total performers:', performers.length);
-
-  const validPerformers = performers.filter(p => p.name);
+  const validPerformers = performers.filter(p => p && p.name);
 
   if (validPerformers.length === 0) return { layout: [], shrinePositions: [] };
 
@@ -329,50 +328,57 @@ export const generatePhotoWallLayout = async (performers, bagsRef) => {
   const screenWidth = window.innerWidth * config.screenMultiplier;
   const screenHeight = window.innerHeight * config.screenMultiplier;
 
-  console.log('🖼️  Canvas calculation:', {
-    windowWidth: window.innerWidth,
-    windowHeight: window.innerHeight,
-    multiplier: config.screenMultiplier,
-    calculatedCanvasWidth: screenWidth,
-    calculatedCanvasHeight: screenHeight
-  });
-
   const itemsNeeded = Math.ceil(
     (screenWidth * screenHeight) / (config.avgItemWidth * config.avgItemHeight)
   ) * config.coverageMultiplier;
 
-  // Expand performers to fill the wall (with image fetching)
-  let expandedPerformers = [];
+  // Fetch each performer's picture list once, 4 at a time
+  const lists = new Map();
+  const fetchList = async (performer) => {
+    try {
+      const response = await fetch(`/api/performers/${performer.id}/images?filter=pics`, { signal });
+      if (!response.ok) return;
+      const data = await response.json();
+      const paths = Array.isArray(data?.pics)
+        ? data.pics.map(pic => pic && pic.path).filter(Boolean)
+        : [];
+      if (paths.length) lists.set(performer.id, paths);
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      // One performer's failure does not stop the wall
+    }
+  };
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < validPerformers.length) {
+      if (signal?.aborted) return;
+      const performer = validPerformers[nextIndex++];
+      await fetchList(performer);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(4, validPerformers.length) }, worker)
+  );
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
+  const withPics = validPerformers.filter(p => lists.has(p.id));
+  if (withPics.length === 0) return { layout: [], shrinePositions: [] };
+
+  // Expand performers to fill the wall. Stops when a full pass adds nothing.
+  const expandedPerformers = [];
   while (expandedPerformers.length < itemsNeeded) {
-    for (let performer of validPerformers) {
+    let added = 0;
+    for (const performer of withPics) {
       if (expandedPerformers.length >= itemsNeeded) break;
-
-      // Fetch all pic files from performer's "after" folder
-      let allPics = [];
-      try {
-        const response = await fetch(`/api/performers/${performer.id}/images?filter=pics`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.pics && Array.isArray(data.pics)) {
-            allPics = data.pics.map(pic => pic.path);
-          }
-        }
-      } catch (e) {
-        console.error(`Error fetching images for ${performer.name}:`, e);
-      }
-
-      if (!allPics || allPics.length === 0) continue;
-
-      // Get random image from 7-bag
-      const selectedImage = getRandomImageFromBag(performer.id, allPics, bagsRef);
+      const selectedImage = getRandomImageFromBag(performer.id, lists.get(performer.id), bagsRef);
       if (!selectedImage) continue;
-
       expandedPerformers.push({
         ...performer,
         selectedThumbnail: selectedImage
       });
+      added++;
     }
+    if (!added) break;
   }
 
   // Generate layout with scatter and overlap control
@@ -381,13 +387,6 @@ export const generatePhotoWallLayout = async (performers, bagsRef) => {
 
   const cols = Math.ceil(screenWidth / config.gridCellWidth);
   const rows = Math.ceil(screenHeight / config.gridCellHeight);
-
-  console.log('📊 Grid setup:', {
-    cols, rows,
-    totalGridCells: cols * rows,
-    itemsNeeded,
-    expandedPerformersCount: expandedPerformers.length
-  });
 
   // SHUFFLE the performers to randomize which grid cells get filled first
   const shuffled = [...expandedPerformers.slice(0, itemsNeeded)];
@@ -436,49 +435,6 @@ export const generatePhotoWallLayout = async (performers, bagsRef) => {
       layout.push(item);
     }
   });
-
-  console.log(`Generated teen wall layout with ${layout.length} items (scattered style)`);
-  console.log('Canvas size:', { screenWidth, screenHeight });
-  console.log('Grid dimensions:', { cols, rows });
-  console.log('Items needed:', itemsNeeded);
-
-  // Debug: Check photo distribution
-  const xSegments = 10;
-  const ySegments = 10;
-  const segmentWidth = screenWidth / xSegments;
-  const segmentHeight = screenHeight / ySegments;
-  const xDistribution = new Array(xSegments).fill(0);
-  const yDistribution = new Array(ySegments).fill(0);
-
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-
-  layout.forEach(item => {
-    // Track bounds
-    minX = Math.min(minX, item.x);
-    maxX = Math.max(maxX, item.x);
-    minY = Math.min(minY, item.y);
-    maxY = Math.max(maxY, item.y);
-
-    // Horizontal distribution
-    const xSegment = Math.floor(item.x / segmentWidth);
-    if (xSegment >= 0 && xSegment < xSegments) {
-      xDistribution[xSegment]++;
-    }
-
-    // Vertical distribution
-    const ySegment = Math.floor(item.y / segmentHeight);
-    if (ySegment >= 0 && ySegment < ySegments) {
-      yDistribution[ySegment]++;
-    }
-  });
-
-  console.log('Photo bounds:', {
-    minX, maxX, minY, maxY,
-    xCoverage: `${((maxX / screenWidth) * 100).toFixed(1)}%`,
-    yCoverage: `${((maxY / screenHeight) * 100).toFixed(1)}%`
-  });
-  console.log('Horizontal distribution (left to right):', xDistribution);
-  console.log('Vertical distribution (top to bottom):', yDistribution);
 
   return { layout, shrinePositions: [] };
 };

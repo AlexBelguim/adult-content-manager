@@ -1,17 +1,12 @@
 import React from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { fmtTime, sceneColor, sceneEnd, sceneFunscript, sceneStart, validScenes } from './playerUtils';
 import LabelButtons from './LabelButtons';
 import './player.css';
 
-/** Same destination as SceneManagerWrapper's `sceneManagerToggle` handler. */
-export function openSceneManager(item) {
-  const url = new URL(window.location.href);
-  url.pathname = '/scene-manager';
-  url.search = '';
-  url.hash = '';
-  if (item.url) url.searchParams.set('videoSrc', item.url);
-  if (item.path) url.searchParams.set('filePath', item.path);
-  window.open(url.toString(), '_blank', 'noopener');
+/** The scene editor's one URL; App redirects the old /scene-manager?filePath=&videoSrc= here. */
+export function sceneEditorUrl(item) {
+  return `/scene-editor?video=${encodeURIComponent(item?.path || '')}`;
 }
 
 /**
@@ -40,9 +35,11 @@ export default function ScenesPanel({ item, scenes, videoRef, onJump }) {
         </button>
       ))}
       <div style={{ marginTop: 8 }}>
-        <button type="button" className="pl-btn sm" onClick={() => openSceneManager(item)} disabled={!item?.path}>
-          🎬 Open Scene Manager ↗
-        </button>
+        {item?.path ? (
+          <RouterLink className="pl-btn sm" to={sceneEditorUrl(item)}>🎬 Open in scene editor</RouterLink>
+        ) : (
+          <button type="button" className="pl-btn sm" disabled>🎬 Open in scene editor</button>
+        )}
       </div>
     </section>
   );

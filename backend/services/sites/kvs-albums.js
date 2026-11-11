@@ -45,7 +45,7 @@ function createKvsAlbums(site, http) {
     return [...new Map(links.map(m => [m[2], { slug: m[2], name: decode(m[3]) || m[2], link: m[1] }])).values()];
   }
 
-  const resolved = new Map();   // album id → its performer (or null), read once per run
+  const resolved = new Map();   // album page (or id) → its performer (or null), read once per run
 
   return {
     name: site.name,
@@ -78,7 +78,9 @@ function createKvsAlbums(site, http) {
      * Undies" links "Pink" and "Angel Polikarpova"), else the first.
      */
     async resolve(post) {
-      if (resolved.has(post.postId)) return resolved.get(post.postId);
+      // by its page: Re-judge asks with the post as stored, whose id may be missing
+      const key = post.postUrl || post.postId;
+      if (resolved.has(key)) return resolved.get(key);
       const html = await http.text(post.postUrl);
       const models = parseModels(html);
       const inTitle = plain(`${post.title} ${post.postUrl}`);
@@ -86,7 +88,7 @@ function createKvsAlbums(site, http) {
         .sort((a, b) => plain(b.name).length - plain(a.name).length);
       const model = named[0] || models[0];
       const performer = model ? { name: model.name, link: model.link, images: parsePhotos(html) } : null;
-      resolved.set(post.postId, performer);
+      resolved.set(key, performer);
       return performer;
     },
 

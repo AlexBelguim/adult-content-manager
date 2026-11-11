@@ -1,330 +1,201 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { AppBar, Toolbar as MuiToolbar, Button, IconButton, Box, Tooltip, Divider } from '@mui/material';
-import { Settings, Image, FilterList, Add, FolderOpen, Videocam, People, Science, ViewInAr, Waves, TravelExplore } from '@mui/icons-material';
-import ShortcutSettingsModal from './ShortcutSettingsModal';
+/**
+ * Toolbar — the desktop app bar. Phones never see it (they get PhoneBar and
+ * the bottom navigation). No props: everything comes from the route and the
+ * shell context.
+ *
+ * Left: logo (home), the Library item (a Gallery | Filter segment on the
+ * library lists, a text link elsewhere), then the section links from lg up.
+ * Right: jobs, the Handy control and More. Below lg the sections fold into
+ * More's Pages group.
+ */
+import React, { useEffect, useState } from 'react';
+import { Link as RouterLink, useLocation } from 'react-router-dom';
+import { AppBar, Toolbar as MuiToolbar, Button, IconButton, Box, Divider, useMediaQuery } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import { Image, FilterList, MoreHoriz } from '@mui/icons-material';
 import JobsIndicator from './JobsIndicator';
 import Logo from './Logo';
+import AppMoreMenu, { navIcon } from './AppMoreMenu';
+import { SECTIONS, sectionOf, libraryState } from '../nav';
 
-// NOTE: ./Toolbar.css was imported here but every one of its 14 classes
-// (.toolbar, .mode-toggle, .sidebar-controls, .handy-*, …) had zero usages —
-// this component renders a MUI AppBar. The import is removed rather than
-// tokenised; the file can be deleted.
+/** A text link in the bar: full height, so the active underline sits on the bar's edge. */
+const barLinkSx = (active) => ({
+  alignSelf: 'stretch',
+  minWidth: 0,
+  px: 1.25,
+  fontSize: 13,
+  textTransform: 'none',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+  borderRadius: 0,
+  fontWeight: active ? 600 : 500,
+  color: active ? 'var(--text)' : 'var(--dim)',
+  boxShadow: active ? 'inset 0 -2px 0 var(--accent)' : 'none',
+  '& .MuiButton-startIcon': { mr: 0.75 },
+  '& .MuiButton-startIcon svg': { fontSize: 15 },
+  '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' },
+});
 
-// Simple modal for video path input
-const VideoPathModal = ({ open, onClose, onSubmit }) => {
-  const [videoPath, setVideoPath] = useState('');
+const segmentSx = (on) => ({
+  fontSize: 13,
+  px: 1.75,
+  minWidth: 0,
+  textTransform: 'none',
+  whiteSpace: 'nowrap',
+  borderRadius: 'var(--radius-sm, 4px)',
+  fontWeight: on ? 600 : 500,
+  color: on ? 'var(--on-accent)' : 'var(--dim)',
+  bgcolor: on ? 'var(--accent)' : 'transparent',
+  '&:hover': {
+    bgcolor: on ? 'var(--accent-hover)' : 'var(--raised)',
+    color: on ? 'var(--on-accent)' : 'var(--text)',
+  },
+});
 
-  if (!open) return null;
-
-  const handleSubmit = () => {
-    if (videoPath.trim()) {
-      onSubmit(videoPath.trim());
-      setVideoPath('');
-    }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      handleSubmit();
-    } else if (e.key === 'Escape') {
-      onClose();
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 10000
-    }} onClick={onClose}>
-      <div style={{
-        backgroundColor: 'var(--surface)',
-        padding: '24px',
-        borderRadius: '12px',
-        minWidth: '500px',
-        maxWidth: '800px',
-        border: '1px solid rgba(255,255,255,0.1)'
-      }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: 'var(--text)', marginTop: 0 }}>🎬 Open Video in Scene Editor</h3>
-        <p style={{ color: 'var(--dim)', fontSize: '14px' }}>
-          Enter the full path to the video file. Scene data will be saved as JSON in the same folder.
-        </p>
-        <input
-          type="text"
-          value={videoPath}
-          onChange={(e) => setVideoPath(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="e.g., F:\Videos\example.mp4"
-          autoFocus
-          style={{
-            width: '100%',
-            padding: '12px',
-            fontSize: '14px',
-            backgroundColor: 'var(--bg)',
-            border: '1px solid #444',
-            borderRadius: '8px',
-            color: 'var(--text)',
-            marginBottom: '16px',
-            boxSizing: 'border-box'
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button onClick={onClose} variant="outlined" color="inherit">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={!videoPath.trim()} variant="contained" color="primary">Open</Button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-function Toolbar({
-  mode,
-  subMode,
-  onModeChange,
-  onSubModeChange,
-  basePath = null,
-  onFolderDeleted = null,
-  onScanPerformers = null,
-  onUploadFolder = null,
-  isScanning = false,
-  onThemeChange = null,
-  currentThemeId = 'default',
-  hashQueue = null
-}) {
-  const navigate = useNavigate();
+export default function Toolbar() {
   const location = useLocation();
-  const [showSettings, setShowSettings] = useState(false);
-  // VR is only enterable on a WebXR headset; gate the toolbar entry on support.
-  const [vrSupported, setVrSupported] = useState(null); // null = unknown yet
+  const { pathname } = location;
+  const theme = useTheme();
+  const belowLg = useMediaQuery(theme.breakpoints.down('lg'));
+  const [moreAnchor, setMoreAnchor] = useState(null);
 
-  const [showVideoPathModal, setShowVideoPathModal] = useState(false);
-
+  // Any route change closes the menu.
   useEffect(() => {
-    let active = true;
-    if (navigator.xr && navigator.xr.isSessionSupported) {
-      navigator.xr
-        .isSessionSupported('immersive-vr')
-        .then((ok) => active && setVrSupported(ok))
-        .catch(() => active && setVrSupported(false));
-    } else {
-      setVrSupported(false);
-    }
-    return () => { active = false; };
-  }, []);
+    setMoreAnchor(null);
+  }, [pathname, location.search]);
 
-  const handleModeChange = (newMode) => {
-    onModeChange(newMode);
-    if (location.pathname !== '/') {
-      navigate('/');
-    }
-  };
-
-  const handleSubModeChange = (newSubMode) => {
-    onSubModeChange(newSubMode);
-    if (location.pathname !== '/') {
-      navigate('/');
-    }
-  };
-
-  const handleVideoPathSubmit = (videoPath) => {
-    // Open scene editor in new tab with video path as query param
-    const url = `/scene-editor?video=${encodeURIComponent(videoPath)}`;
-    window.open(url, '_blank');
-    setShowVideoPathModal(false);
-  };
+  const section = sectionOf(pathname);
+  const lib = libraryState(pathname);
+  const showSegment = !!lib && (lib.list === 'gallery' || lib.list === 'filter') && !lib.galleryId;
+  const libraryItem = SECTIONS[0];
+  const moreActive =
+    section === 'tools' || section === 'system' || section === null || (belowLg && section !== 'library');
+  // Mode-switch rule: history holds at most one mode switch.
+  const replaceSwitch = !!location.state?.modeSwitch;
 
   return (
-    <AppBar position="sticky">
-      <MuiToolbar sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', minHeight: { xs: 56, sm: 64 }, py: { xs: 0.5, sm: 0 } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          {/* Home. The bar had no way back to the gallery — the only route was
-              clicking a mode segment, which nobody reads as "home". Goes
-              through handleModeChange so the mode resets too; navigating to '/'
-              alone would land you on the main route still filtered. */}
-          <Tooltip title="Gallery">
-            <IconButton
-              onClick={() => handleModeChange('gallery')}
-              aria-label="Go to gallery"
-              sx={{
-                p: 0.75,
-                borderRadius: 'var(--radius, 6px)',
-                border: '1px solid transparent',
-                '&:hover': { bgcolor: 'var(--raised)', borderColor: 'var(--line)' }
-              }}
-            >
-              <Logo size={26} />
-            </IconButton>
-          </Tooltip>
+    <AppBar
+      position="sticky"
+      data-app-bar=""
+      elevation={0}
+      sx={{
+        background: 'var(--surface)',
+        bgcolor: 'var(--surface)',
+        backgroundImage: 'none',
+        color: 'var(--text)',
+        borderBottom: '1px solid var(--line)',
+        boxShadow: 'none',
+      }}
+    >
+      <MuiToolbar
+        disableGutters
+        sx={{ minHeight: { xs: 56, sm: 56 }, height: 56, px: 2, gap: 1, flexWrap: 'nowrap', alignItems: 'center' }}
+      >
+        <IconButton
+          component={RouterLink}
+          to="/"
+          aria-label="Home"
+          sx={{
+            p: 0.75,
+            flexShrink: 0,
+            borderRadius: 'var(--radius, 6px)',
+            border: '1px solid transparent',
+            '&:hover': { bgcolor: 'var(--raised)', borderColor: 'var(--line)' },
+          }}
+        >
+          <Logo size={26} />
+        </IconButton>
 
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.25, my: 1.25, borderColor: 'var(--line)' }} />
+        <Divider orientation="vertical" flexItem sx={{ mx: 0.25, my: 1.25, borderColor: 'var(--line)' }} />
 
-          {/* Mode toggle. A segmented control on the page background, so only
-              the SELECTED segment carries the accent — with ButtonGroup
-              variant="contained" both segments were filled and the inactive
-              one relied on 'inherit' to look different. */}
+        {showSegment ? (
           <Box
             role="group"
-            aria-label="View mode"
+            aria-label="Library view"
             sx={{
-              display: 'flex', gap: '2px', p: '2px',
+              display: 'flex',
+              flexShrink: 0,
+              gap: '2px',
+              p: '2px',
               bgcolor: 'var(--bg)',
               border: '1px solid var(--line)',
-              borderRadius: 'var(--radius, 6px)'
+              borderRadius: 'var(--radius, 6px)',
             }}
           >
-            {[['gallery', 'Gallery', <Image key="g" />], ['filter', 'Filter', <FilterList key="f" />]].map(([key, label, icon]) => (
-              <Button
-                key={key}
-                onClick={() => handleModeChange(key)}
-                startIcon={icon}
-                size="small"
-                disableElevation
-                sx={{
-                  fontSize: { xs: '0.7rem', sm: '0.8125rem' },
-                  px: { xs: 1, sm: 1.75 },
-                  minWidth: 0,
-                  borderRadius: 'var(--radius-sm, 4px)',
-                  fontWeight: mode === key ? 650 : 550,
-                  color: mode === key ? 'var(--on-accent)' : 'var(--dim)',
-                  bgcolor: mode === key ? 'var(--accent)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: mode === key ? 'var(--accent-hover)' : 'var(--raised)',
-                    color: mode === key ? 'var(--on-accent)' : 'var(--text)'
-                  }
-                }}
-              >
-                {label}
-              </Button>
-            ))}
+            {[
+              ['gallery', 'Gallery', '/', <Image key="g" />],
+              ['filter', 'Filter', '/filter', <FilterList key="f" />],
+            ].map(([key, label, to, icon]) => {
+              const on = lib.list === key;
+              return (
+                <Button
+                  key={key}
+                  component={RouterLink}
+                  to={to}
+                  replace={replaceSwitch}
+                  state={{ modeSwitch: true }}
+                  aria-current={on ? 'page' : undefined}
+                  startIcon={icon}
+                  size="small"
+                  disableElevation
+                  sx={segmentSx(on)}
+                >
+                  {label}
+                </Button>
+              );
+            })}
           </Box>
-
-          {/* Upload Folder — a secondary action, so outlined rather than a
-              second filled accent competing with the active mode segment. */}
+        ) : (
           <Button
-            variant="outlined"
-            onClick={() => navigate('/local-import')}
-            startIcon={<FolderOpen />}
-            size="small"
-            sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
+            component={RouterLink}
+            to={libraryItem.to}
+            startIcon={navIcon(libraryItem.icon, 15)}
+            aria-current={section === 'library' ? 'page' : undefined}
+            sx={barLinkSx(section === 'library')}
           >
-            Upload Folder
+            {libraryItem.label}
           </Button>
-          <Tooltip title="Upload Folder">
-            <IconButton onClick={() => navigate('/local-import')} sx={{ display: { xs: 'inline-flex', lg: 'none' }, color: 'var(--dim)' }}>
-              <FolderOpen />
-            </IconButton>
-          </Tooltip>
-        </Box>
+        )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-          {/* Seven identical icon buttons in a row read as one undifferentiated
-              block. Grouped by what they do — library tools, then AI/media —
-              with a hairline between, and a single shared style so hover is
-              the only thing that changes. */}
-          {[
-            [
-              ['Scene Editor — open video file', <Videocam key="v" />, () => setShowVideoPathModal(true)],
-              ['Performer Management — hash DBs and duplicates too', <People key="p" />, () => window.open('/performer-management', '_blank')]
-            ],
-            [
-              ['AI & Training — models, training and app health', <Science key="s" />, () => navigate('/ai-training')],
-              ['Funpipe — funscript queue & library', <Waves key="w" />, () => navigate('/funpipe')],
-              ['Discover: new performers found by the watchers', <TravelExplore key="d" />, () => navigate('/discover')]
-            ]
-          ].map((group, gi) => (
-            <React.Fragment key={gi}>
-              {gi > 0 && (
-                <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 1.25, borderColor: 'var(--line)' }} />
-              )}
-              {group.map(([title, icon, onClick]) => (
-                <Tooltip title={title} key={title}>
-                  <IconButton
-                    onClick={onClick}
-                    size="small"
-                    sx={{ color: 'var(--dim)', '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' } }}
-                  >
-                    {icon}
-                  </IconButton>
-                </Tooltip>
-              ))}
-            </React.Fragment>
-          ))}
-
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 1.25, borderColor: 'var(--line)' }} />
-
-          {/* Background work is visible from every page; the floating queue
-              boxes this replaces only showed on the page that started them. */}
-          <JobsIndicator hashQueue={hashQueue} />
-
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 1.25, borderColor: 'var(--line)' }} />
-
-          {/* Kept on desktop as a pointer to the headset; on a phone or tablet
-              it can only ever be disabled, so there it just takes room. */}
-          <Tooltip title={vrSupported === false ? 'Enter VR — open this page on a headset (e.g. Quest 3)' : 'Enter VR mode'}>
-            <Box component="span" sx={{ display: vrSupported === false ? { xs: 'none', lg: 'inline-flex' } : 'inline-flex' }}>
-              <IconButton
-                onClick={() => navigate('/vr')}
-                disabled={vrSupported === false}
-                size="small"
-                sx={{
-                  color: vrSupported ? 'var(--accent)' : 'var(--dim)',
-                  '&:hover': { bgcolor: 'var(--raised)' },
-                  '&.Mui-disabled': { color: 'var(--faint)' }
-                }}
-              >
-                <ViewInAr />
-              </IconButton>
-            </Box>
-          </Tooltip>
-
-          <Tooltip title="Keyboard shortcuts & settings">
-            <IconButton
-              onClick={() => setShowSettings(true)}
-              size="small"
-              sx={{ color: 'var(--dim)', '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' } }}
+        {SECTIONS.filter((s) => s.id !== 'library').map((s) => {
+          const active = section === s.id;
+          return (
+            <Button
+              key={s.id}
+              component={RouterLink}
+              to={s.to}
+              startIcon={navIcon(s.icon, 15)}
+              aria-current={active ? 'page' : undefined}
+              sx={{ ...barLinkSx(active), display: { xs: 'none', lg: 'inline-flex' } }}
             >
-              <Settings />
-            </IconButton>
-          </Tooltip>
+              {s.label}
+            </Button>
+          );
+        })}
 
-          {/* Handy connection and its settings: public/handy-control.js, shared with faptap-dl. Inline from lg up;
-              narrower (the unfolded Fold held sideways is ~960px) just its dot and gear, with the key in the gear's panel,
-              since the inline one pushed the bar onto two rows. */}
-          <Box sx={{ display: { xs: 'none', lg: 'flex' }, ml: 1 }}>
-            <handy-control />
-          </Box>
-          <Box sx={{ display: { xs: 'flex', lg: 'none' } }}>
-            <handy-control compact="" />
-          </Box>
+        <Box sx={{ flex: 1, minWidth: 0 }} />
+
+        <JobsIndicator />
+
+        {/* Shared with faptap-dl (public/handy-control.js). Compact at every width: the key field lives in its panel. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <handy-control compact="" />
         </Box>
+
+        <Button
+          id="app-more-button"
+          onClick={(e) => setMoreAnchor(e.currentTarget)}
+          startIcon={<MoreHoriz />}
+          aria-haspopup="true"
+          aria-expanded={moreAnchor ? 'true' : 'false'}
+          aria-controls={moreAnchor ? 'app-more-menu' : undefined}
+          sx={barLinkSx(moreActive)}
+        >
+          More
+        </Button>
       </MuiToolbar>
 
-      <ShortcutSettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        basePath={basePath}
-        onFolderDeleted={onFolderDeleted}
-        onThemeChange={onThemeChange}
-        currentThemeId={currentThemeId}
-      />
-
-
-
-      <VideoPathModal
-        open={showVideoPathModal}
-        onClose={() => setShowVideoPathModal(false)}
-        onSubmit={handleVideoPathSubmit}
-      />
+      <AppMoreMenu anchorEl={moreAnchor} open={!!moreAnchor} onClose={() => setMoreAnchor(null)} />
     </AppBar>
   );
 }
-
-export default Toolbar;

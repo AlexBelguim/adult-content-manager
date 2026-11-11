@@ -1,266 +1,541 @@
-import React, { useState, useEffect, useCallback } from 'react';
+/**
+ * Rank pictures: one row per performer in the after folder, with how many picture pairs they have. Rank opens the
+ * ranker; a click on the row opens its ranking lane (the pictures, best first), where two taps fix the order of a
+ * pair. Everything comes from the main server (pairwise routes); the fixes are stored as 'intra' pairs, the kind
+ * the CLIP models train on.
+ */
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Box, Typography, Button, TextField, Select, MenuItem, IconButton } from '@mui/material';
+import { ExpandMore, ExpandLess, Close, PhotoLibraryOutlined } from '@mui/icons-material';
 import {
-    Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-    List, ListItem, ListItemButton, Checkbox, ListItemText,
-    Slider, IconButton, Tooltip
-} from '@mui/material';
-import { Refresh, FilterList, CompareArrows, Block, Insights } from '@mui/icons-material';
-import {
-    PageShell, PageHeader, Section, Panel, Toolbar, EmptyState, LoadingState, SPACE
+    PageShell, PageHeader, Panel, Toolbar, EmptyState, LoadingState, iconBtnSx, overlayChipSx, SPACE
 } from '../components/layout';
+import { useNotify } from '../components/ui';
+import { useIsPhone } from '../nav';
+import RateTabs from '../components/rating/RateTabs';
 
-/** Score -> semantic tone. Three bands, not five: two of the original five
- *  resolved to the same colour, so the extra steps conveyed nothing. */
-function scoreTone(score) {
-    if (score >= 60) return 'var(--ok)';
-    if (score >= 20) return 'var(--warn)';
-    return 'var(--bad)';
+const SORT_KEY = 'rate.pictures.sort';
+const SORTS = [['needs', 'Needs pairs'], ['most', 'Most pairs'], ['name', 'Name']];
+const LANE_LIMIT = 60; // above this a lane shows the best 40 and the worst 20 until 'Show all'
+const LANE_HEAD = 40;
+const LANE_TAIL = 20;
+const TILE = { xs: 88, sm: 110 };
+
+const readSort = () => {
+    try {
+        const v = localStorage.getItem(SORT_KEY);
+        return SORTS.some(([id]) => id === v) ? v : 'needs';
+    } catch { return 'needs'; }
+};
+const writeSort = (v) => { try { localStorage.setItem(SORT_KEY, v); } catch { /* a per-viewer convenience only */ } };
+
+/** '1,234 pairs', '1 pair' */
+const count = (n, word) => `${n.toLocaleString()} ${n === 1 ? word : `${word}s`}`;
+
+const previewUrl = (p) => `/api/files/preview?path=${encodeURIComponent(p)}`;
+// The large pictures in the tray: the whole picture (the preview is a centre crop), loaded the way the ranker does.
+const fullUrl = (p, basePath) => (basePath
+    ? `/api/files/cached-image?path=${encodeURIComponent(p)}&basePath=${encodeURIComponent(basePath)}&folderType=${p.includes('before filter performer') ? 'before' : 'after'}`
+    : previewUrl(p));
+// The same parameters as the gallery's 'Rank images'
+const rankPath = (p) => `/pairwise-rank?performerId=${p.id}&performerName=${encodeURIComponent(p.name)}&basePath=${encodeURIComponent(p.folder_path || '')}`;
+
+/** A thrown fetch (no answer) or a refused answer, as one line of text. */
+const messageOf = (err) => (err && err.name !== 'TypeError' && err.message ? err.message : 'No answer from the server');
+
+async function getJson(url) {
+    const res = await fetch(url);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
+
+async function postJson(url, body) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `The server refused it (${res.status})`);
+    return data;
+}
+
+/** Best first; pictures marked both-bad go last. */
+function laneOrder(images) {
+    const byScore = (a, b) => (b.score ?? 0) - (a.score ?? 0);
+    return [...images.filter(i => !i.bothBad).sort(byScore), ...images.filter(i => i.bothBad).sort(byScore)];
+}
+
+const factChipSx = (tone = 'var(--dim)') => ({
+    display: 'inline-flex', alignItems: 'center', height: 20, px: '6px', flexShrink: 0,
+    border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)',
+    fontSize: 12, lineHeight: 1, color: tone, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'
+});
+
+const tileChipSx = (tone) => ({
+    ...overlayChipSx(tone), position: 'absolute', fontSize: 12, fontWeight: 600, px: '6px', py: '3px', gap: 0
+});
+
+const plainBtnSx = {
+    p: 0, m: 0, border: 0, background: 'none', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
+    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' }
+};
+
+function Avatar({ performer }) {
+    const [failed, setFailed] = useState(false);
+    const src = performer.thumbnail && !failed ? previewUrl(performer.thumbnail) : null;
+    return (
+        <Box sx={{
+            width: 36, height: 36, flexShrink: 0, borderRadius: '50%', overflow: 'hidden', bgcolor: 'var(--raised)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 13, fontWeight: 600
+        }}>
+            {src
+                ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : (performer.name || '?').trim().charAt(0).toUpperCase()}
+        </Box>
+    );
+}
+
+function Tile({ img, rank, selected, onClick }) {
+    const score = img.bothBad ? 'bad' : Math.round(img.score ?? 0);
+    return (
+        <Box
+            component="button" type="button" onClick={onClick} aria-pressed={!!selected}
+            aria-label={`Picture ${rank}, ${img.bothBad ? 'marked bad' : `score ${score}`}`}
+            sx={{
+                ...plainBtnSx, position: 'relative', flex: 'none', width: TILE, height: TILE,
+                borderRadius: 'var(--radius-sm)', overflow: 'hidden', bgcolor: 'var(--raised)',
+                opacity: img.bothBad ? 0.45 : 1
+            }}
+        >
+            <img src={previewUrl(img.path)} alt="" loading="lazy" decoding="async" draggable={false}
+                style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
+            <Box sx={{ ...tileChipSx('var(--text)'), top: 4, left: 4 }}>{rank}</Box>
+            <Box sx={{ ...tileChipSx(img.bothBad ? 'var(--bad)' : 'var(--text)'), bottom: 4, right: 4 }}>{score}</Box>
+            {selected && (
+                <>
+                    <Box sx={{ position: 'absolute', inset: 0, border: '2px solid var(--accent)', borderRadius: 'inherit', pointerEvents: 'none' }} />
+                    <Box sx={{ ...tileChipSx('var(--accent)'), top: 4, right: 4 }}>{selected}</Box>
+                </>
+            )}
+        </Box>
+    );
+}
+
+function Lane({ performer, lane, selectedOf, onTile, onRetry, onShowAll, onRank }) {
+    let body = null;
+    if (!lane || lane.status === 'loading') {
+        body = (
+            <Box sx={{ display: 'flex', gap: SPACE.sm, overflow: 'hidden' }} aria-label="Loading pictures">
+                {Array.from({ length: 8 }, (_, i) => (
+                    <Box key={i} sx={{ flex: 'none', width: TILE, height: TILE, borderRadius: 'var(--radius-sm)', bgcolor: 'var(--raised)' }} />
+                ))}
+            </Box>
+        );
+    } else if (lane.status === 'ready' && (lane.images || []).length === 0) {
+        body = (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap' }}>
+                <Typography sx={{ fontSize: 13, color: 'var(--dim)' }}>No pictures ranked yet.</Typography>
+                <Button size="small" variant="outlined" onClick={onRank}>Rank</Button>
+            </Box>
+        );
+    } else if (lane.status === 'ready') {
+        const images = lane.images;
+        const cut = images.length > LANE_LIMIT && !lane.showAll;
+        const shown = cut
+            ? [...images.slice(0, LANE_HEAD).map((img, i) => [img, i + 1]), null,
+                ...images.slice(-LANE_TAIL).map((img, i) => [img, images.length - LANE_TAIL + i + 1])]
+            : images.map((img, i) => [img, i + 1]);
+        body = (
+            <Box sx={{
+                display: 'flex', gap: SPACE.sm, overflowX: 'auto', overscrollBehaviorX: 'contain', pb: SPACE.xs,
+                opacity: lane.refreshing ? 0.6 : 1, transition: 'opacity .16s ease'
+            }}>
+                {shown.map((entry) => {
+                    if (!entry) {
+                        return (
+                            <Box key="show-all" component="button" type="button" onClick={onShowAll}
+                                sx={{
+                                    ...plainBtnSx, flex: 'none', width: TILE, height: TILE, textAlign: 'center',
+                                    borderRadius: 'var(--radius-sm)', border: '1px dashed var(--line-strong)',
+                                    color: 'var(--dim)', fontSize: 13, fontVariantNumeric: 'tabular-nums',
+                                    '&:hover': { color: 'var(--text)', bgcolor: 'var(--raised)' }
+                                }}>
+                                {`Show all ${images.length.toLocaleString()}`}
+                            </Box>
+                        );
+                    }
+                    const [img, rank] = entry;
+                    return <Tile key={img.path} img={img} rank={rank} selected={selectedOf(img)} onClick={() => onTile(img)} />;
+                })}
+            </Box>
+        );
+    }
+
+    return (
+        <Panel id={`lane-${performer.id}`} padded={false} sx={{ p: 1.5, mt: SPACE.xs, minWidth: 0 }}>
+            <Typography sx={{ fontSize: 12, color: 'var(--dim)', mb: SPACE.sm }}>
+                Best first. Tap two pictures to fix their order.
+            </Typography>
+            {lane?.error && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, mb: body ? SPACE.sm : 0, flexWrap: 'wrap' }}>
+                    <Typography sx={{ fontSize: 13, color: 'var(--bad)', minWidth: 0 }}>{lane.error}</Typography>
+                    <Button size="small" variant="text" onClick={onRetry}>Retry</Button>
+                </Box>
+            )}
+            {body}
+        </Panel>
+    );
+}
+
+function Tray({ tray, onChoose, onClose }) {
+    const { performer, first, second, busy, error } = tray;
+    const picSx = {
+        ...plainBtnSx, position: 'relative', width: 'calc((100% - 12px) / 2)', maxWidth: 200, aspectRatio: '3 / 4',
+        border: '1px solid var(--line)', borderRadius: 'var(--radius)', overflow: 'hidden', bgcolor: 'var(--bg)',
+        '&:hover': { borderColor: 'var(--accent)' },
+        '&:disabled': { cursor: 'wait', opacity: 0.6 }
+    };
+    return (
+        <Panel role="dialog" aria-label={`Fix the order for ${performer.name}`} padded={false} sx={{
+            position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 'calc(16px + var(--nav-bottom, 0px))',
+            width: 'min(520px, calc(100vw - 32px))', boxSizing: 'border-box', zIndex: 1250, p: 1.5,
+            borderColor: 'var(--accent)', boxShadow: 'var(--shadow-lg)'
+        }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, mb: SPACE.sm }}>
+                <Typography noWrap sx={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', flex: 1, minWidth: 0 }}>
+                    Tap the better picture
+                </Typography>
+                <IconButton aria-label="Cancel" onClick={onClose} disabled={busy} sx={iconBtnSx()}>
+                    <Close />
+                </IconButton>
+            </Box>
+            {error && <Typography sx={{ fontSize: 13, color: 'var(--bad)', mb: SPACE.sm }}>{error}</Typography>}
+            <Box sx={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                {[[first, second, 'First picture is better', 1], [second, first, 'Second picture is better', 2]].map(([win, lose, label, n]) => (
+                    <Box key={n} component="button" type="button" aria-label={label} disabled={busy}
+                        onClick={() => onChoose(win, lose)} sx={picSx}>
+                        <img src={fullUrl(win.path, performer.folder_path)} alt="" decoding="async" draggable={false}
+                            style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }} />
+                        <Box sx={{ ...tileChipSx('var(--accent)'), top: 6, left: 6 }}>{n}</Box>
+                    </Box>
+                ))}
+            </Box>
+        </Panel>
+    );
 }
 
 function RankingInsightPage() {
-    const serverUrl = localStorage.getItem('pairwiseServerUrl') || 'http://localhost:3334';
+    const navigate = useNavigate();
+    const notify = useNotify();
+    const isPhone = useIsPhone();
 
-    const [performers, setPerformers] = useState([]);
-    const [selectedPerformers, setSelectedPerformers] = useState([]);
-    const [rankingData, setRankingData] = useState({});
-    const [loading, setLoading] = useState(false);
-    const [showPerformerModal, setShowPerformerModal] = useState(false);
-    const [imageSize, setImageSize] = useState(150);
-    const [isCompareMode, setIsCompareMode] = useState(false);
-    const [selectedForComparison, setSelectedForComparison] = useState([]);
+    const [load, setLoad] = useState({ status: 'loading', error: null });
+    const [performers, setPerformers] = useState([]); // [{ id, name, folder_path, thumbnail, pics_count, pairs }]
+    const [query, setQuery] = useState('');
+    const [sort, setSort] = useState(readSort);
+    const [open, setOpen] = useState({}); // id -> true; several lanes can be open
+    const [lanes, setLanes] = useState({}); // id -> { status, images, error, refreshing, showAll }
+    const [selection, setSelection] = useState(null); // { id, img }: the first of two taps
+    const [tray, setTray] = useState(null); // { performer, first, second, busy, error }
 
-    const toggleSelection = (img) => {
-        if (!isCompareMode) return;
+    const laneGen = useRef({});
+    const openRef = useRef(open);
+    openRef.current = open;
 
-        setSelectedForComparison(prev => {
-            if (prev.find(i => i.path === img.path)) {
-                return prev.filter(i => i.path !== img.path);
+    const loadPerformers = useCallback(async () => {
+        setLoad({ status: 'loading', error: null });
+        // without the stats the rows still show, with '–' for pairs
+        const statsPromise = getJson('/api/training/performer-stats')
+            .then(d => (Array.isArray(d?.performers) ? d.performers : null))
+            .catch(() => null);
+        let gallery;
+        try {
+            gallery = await getJson('/api/performers/gallery');
+            if (!Array.isArray(gallery)) throw new Error('The server sent no performer list');
+        } catch (err) {
+            setLoad({ status: 'error', error: messageOf(err) });
+            return;
+        }
+        const stats = await statsPromise;
+        const pairsById = new Map();
+        if (stats) for (const s of stats) pairsById.set(s?.id, Number(s?.pairwise?.total) || 0);
+        setPerformers(gallery
+            .filter(p => p && p.id != null)
+            .map(p => ({
+                id: p.id,
+                name: p.name || '',
+                folder_path: p.folder_path || '',
+                thumbnail: p.thumbnail || '',
+                pics_count: Number(p.pics_count) || 0,
+                pairs: stats ? (pairsById.get(p.id) ?? 0) : null
+            })));
+        setLoad({ status: 'ready', error: null });
+    }, []);
+
+    useEffect(() => { loadPerformers(); }, [loadPerformers]);
+
+    // A refetch keeps the tiles mounted (dimmed), so the lane keeps its scroll position.
+    const loadLane = useCallback(async (id) => {
+        const gen = (laneGen.current[id] || 0) + 1;
+        laneGen.current[id] = gen;
+        setLanes(prev => ({
+            ...prev,
+            [id]: prev[id]?.images
+                ? { ...prev[id], refreshing: true, error: null }
+                : { status: 'loading', images: null, error: null, refreshing: false, showAll: prev[id]?.showAll || false }
+        }));
+        try {
+            const data = await getJson(`/api/pairwise/image-rankings?performer_id=${encodeURIComponent(id)}`);
+            if (!Array.isArray(data?.images)) throw new Error('The server sent no picture list');
+            if (laneGen.current[id] !== gen) return;
+            setLanes(prev => ({
+                ...prev,
+                [id]: { ...prev[id], status: 'ready', images: laneOrder(data.images.filter(i => i && i.path)), error: null, refreshing: false }
+            }));
+        } catch (err) {
+            if (laneGen.current[id] !== gen) return;
+            setLanes(prev => ({
+                ...prev,
+                [id]: { ...prev[id], status: prev[id]?.images ? 'ready' : 'error', error: messageOf(err), refreshing: false }
+            }));
+        }
+    }, []);
+
+    /** After a fix or an undo: refetch an open lane in place; a closed one fetches when it opens. */
+    const refreshLane = useCallback((id) => {
+        if (openRef.current[id]) loadLane(id);
+    }, [loadLane]);
+
+    const bumpPairs = useCallback((id, delta) => {
+        setPerformers(prev => prev.map(p => (p.id === id && p.pairs != null ? { ...p, pairs: Math.max(0, p.pairs + delta) } : p)));
+    }, []);
+
+    const toggle = (id) => {
+        const opening = !open[id];
+        setOpen(prev => {
+            const next = { ...prev };
+            if (opening) next[id] = true; else delete next[id];
+            return next;
+        });
+        if (opening) loadLane(id);
+    };
+
+    const closeTray = useCallback(() => { setTray(null); setSelection(null); }, []);
+
+    useEffect(() => {
+        if (!tray) return undefined;
+        const onKey = (e) => {
+            if (e.key === 'Escape' && !e.defaultPrevented && !tray.busy) { e.preventDefault(); closeTray(); }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [tray, closeTray]);
+
+    const onTile = (performer, img) => {
+        if (tray?.busy) return;
+        if (tray) {
+            if (tray.performer.id === performer.id && (img.path === tray.first.path || img.path === tray.second.path)) {
+                // unselect that one; the other stays picked
+                setSelection({ id: performer.id, img: img.path === tray.first.path ? tray.second : tray.first });
+            } else {
+                setSelection({ id: performer.id, img });
             }
-            if (prev.length >= 2) return [prev[1], img]; // keep most recent
-            return [...prev, img];
+            setTray(null);
+            return;
+        }
+        if (!selection || selection.id !== performer.id) { setSelection({ id: performer.id, img }); return; }
+        if (selection.img.path === img.path) { setSelection(null); return; }
+        setTray({ performer, first: selection.img, second: img, busy: false, error: null });
+    };
+
+    const selectedOf = (performerId) => (img) => {
+        if (tray) {
+            if (tray.performer.id !== performerId) return null;
+            if (img.path === tray.first.path) return '1';
+            if (img.path === tray.second.path) return '2';
+            return null;
+        }
+        return selection && selection.id === performerId && selection.img.path === img.path ? '1' : null;
+    };
+
+    const undo = useCallback(async (performer, pairId) => {
+        try {
+            await postJson('/api/pairwise/undo', { performer_id: performer.id, pair_id: pairId });
+        } catch (err) {
+            notify({ message: messageOf(err), severity: 'error' });
+            return;
+        }
+        bumpPairs(performer.id, -1);
+        refreshLane(performer.id);
+    }, [notify, bumpPairs, refreshLane]);
+
+    const choose = async (winner, loser) => {
+        if (!tray || tray.busy) return;
+        const { performer } = tray;
+        setTray(t => (t ? { ...t, busy: true, error: null } : t));
+        let data;
+        try {
+            data = await postJson('/api/pairwise/submit', {
+                performer_id: performer.id, winner: winner.path, loser: loser.path, type: 'intra'
+            });
+        } catch (err) {
+            setTray(t => (t ? { ...t, busy: false, error: messageOf(err) } : t)); // the selection stays
+            return;
+        }
+        closeTray();
+        if (data?.duplicate) {
+            notify({ message: 'That order was already stored', severity: 'info' });
+            return;
+        }
+        bumpPairs(performer.id, 1);
+        refreshLane(performer.id);
+        const pairId = data?.pairId;
+        notify({
+            message: `Order fixed for ${performer.name}`,
+            // Undo only names an exact pair: an undo without pair_id would take the performer's newest pair
+            ...(typeof pairId === 'number' && { action: { label: 'Undo', onClick: () => undo(performer, pairId) } })
         });
     };
 
-    // Load data for selected performers
-    const loadRankings = useCallback(async () => {
-        if (selectedPerformers.length === 0) return;
-        setLoading(true);
-        const newData = {};
+    const shown = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        const list = q ? performers.filter(p => p.name.toLowerCase().includes(q)) : [...performers];
+        const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        if (sort === 'name') return list.sort(byName);
+        const sign = sort === 'most' ? -1 : 1;
+        return list.sort((a, b) => sign * ((a.pairs ?? 0) - (b.pairs ?? 0)) || byName(a, b));
+    }, [performers, query, sort]);
 
-        try {
-            await Promise.all(selectedPerformers.map(async (name) => {
-                const res = await fetch(`${serverUrl}/api/calibrate/${encodeURIComponent(name)}`);
-                const data = await res.json();
-                newData[name] = data.images;
-            }));
-            setRankingData(newData);
-        } catch (err) {
-            console.error('Error loading rankings:', err);
-        } finally {
-            setLoading(false);
-        }
-    }, [selectedPerformers, serverUrl]);
+    const totalPairs = useMemo(
+        () => (performers.some(p => p.pairs == null) ? null : performers.reduce((sum, p) => sum + p.pairs, 0)),
+        [performers]
+    );
 
-    const handleCompareVote = async (winnerSide) => {
-        if (selectedForComparison.length !== 2) return;
+    let content;
+    if (load.status === 'loading') {
+        content = <LoadingState label="Loading performers…" />;
+    } else if (load.status === 'error') {
+        content = (
+            <EmptyState
+                title="Could not load performers"
+                description={load.error}
+                action={<Button variant="contained" onClick={loadPerformers}>Retry</Button>}
+            />
+        );
+    } else if (performers.length === 0) {
+        content = (
+            <EmptyState
+                icon={<PhotoLibraryOutlined />}
+                title="No performers in the after folder"
+                description="Performers show up here once Filter has moved them to the after folder."
+                action={<Button variant="contained" onClick={() => navigate('/filter')}>Open Filter</Button>}
+            />
+        );
+    } else if (shown.length === 0) {
+        content = <Typography sx={{ fontSize: 13, color: 'var(--dim)', py: SPACE.md }}>No names match.</Typography>;
+    } else {
+        content = (
+            <Box sx={{ display: 'grid', gap: SPACE.sm, minWidth: 0 }}>
+                {shown.map((p) => {
+                    const isOpen = !!open[p.id];
+                    let pairsChip;
+                    if (p.pairs == null) pairsChip = <Box component="span" sx={factChipSx()}>– pairs</Box>;
+                    else if (p.pairs === 0) pairsChip = <Box component="span" sx={factChipSx('var(--warn)')}>Needs pairs</Box>;
+                    else pairsChip = <Box component="span" sx={factChipSx()}>{count(p.pairs, 'pair')}</Box>;
+                    return (
+                        <Box key={p.id} sx={{ minWidth: 0 }}>
+                            <Panel padded={false} sx={{
+                                height: 56, display: 'flex', alignItems: 'center', gap: SPACE.sm, pr: 1.5, overflow: 'hidden',
+                                contentVisibility: 'auto', containIntrinsicSize: '0 56px',
+                                ...(isOpen && { borderColor: 'var(--line-strong)' })
+                            }}>
+                                <Box component="button" type="button" onClick={() => toggle(p.id)}
+                                    aria-expanded={isOpen} aria-controls={isOpen ? `lane-${p.id}` : undefined}
+                                    sx={{
+                                        ...plainBtnSx, flex: '1 1 auto', minWidth: 0, alignSelf: 'stretch',
+                                        display: 'flex', alignItems: 'center', gap: 1.25, pl: 1.5,
+                                        borderRadius: 'var(--radius-lg)'
+                                    }}>
+                                    <Avatar performer={p} />
+                                    <Box sx={{
+                                        flex: '1 1 auto', minWidth: 0, display: 'flex', gap: isPhone ? 0.5 : SPACE.sm,
+                                        flexDirection: isPhone ? 'column' : 'row', alignItems: isPhone ? 'flex-start' : 'center'
+                                    }}>
+                                        <Typography noWrap sx={{
+                                            fontSize: 14, fontWeight: 560, color: 'var(--text)', minWidth: 0, maxWidth: '100%',
+                                            flex: isPhone ? 'none' : '0 1 auto'
+                                        }}>
+                                            {p.name}
+                                        </Typography>
+                                        <Box sx={{ display: 'flex', gap: SPACE.xs, flexShrink: 0, overflow: 'hidden', maxWidth: '100%' }}>
+                                            {pairsChip}
+                                            <Box component="span" sx={factChipSx()}>{count(p.pics_count, 'picture')}</Box>
+                                        </Box>
+                                    </Box>
+                                    <Box sx={{ color: 'var(--dim)', display: 'flex', flexShrink: 0, '& svg': { fontSize: 20 } }}>
+                                        {isOpen ? <ExpandLess /> : <ExpandMore />}
+                                    </Box>
+                                </Box>
+                                <Button size="small" variant="contained" sx={{ flexShrink: 0 }}
+                                    onClick={() => navigate(rankPath(p))}>
+                                    Rank
+                                </Button>
+                            </Panel>
+                            {isOpen && (
+                                <Lane
+                                    performer={p}
+                                    lane={lanes[p.id]}
+                                    selectedOf={selectedOf(p.id)}
+                                    onTile={(img) => onTile(p, img)}
+                                    onRetry={() => loadLane(p.id)}
+                                    onShowAll={() => setLanes(prev => ({ ...prev, [p.id]: { ...prev[p.id], showAll: true } }))}
+                                    onRank={() => navigate(rankPath(p))}
+                                />
+                            )}
+                        </Box>
+                    );
+                })}
+            </Box>
+        );
+    }
 
-        const left = selectedForComparison[0];
-        const right = selectedForComparison[1];
-        const winner = winnerSide === 'left' ? left : right;
-        const loser = winnerSide === 'left' ? right : left;
-
-        try {
-            await fetch(`${serverUrl}/api/submit`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: 'manual-fix-' + Date.now(),
-                    winner: winner.path,
-                    loser: loser.path,
-                    type: 'manual_fix'
-                })
-            });
-
-            setSelectedForComparison([]);
-            loadRankings();
-        } catch (err) {
-            console.error('Vote failed:', err);
-        }
-    };
-
-    // Initial load: fetch performer list
-    useEffect(() => {
-        fetch(`${serverUrl}/api/performers`)
-            .then(res => res.json())
-            .then(setPerformers)
-            .catch(err => console.error('Error fetching performers:', err));
-    }, [serverUrl]);
-
-    useEffect(() => {
-        loadRankings();
-    }, [selectedPerformers, loadRankings]);
+    const facts = load.status === 'ready' && performers.length > 0
+        ? `${query.trim() ? `${shown.length.toLocaleString()} of ` : ''}${count(performers.length, 'performer')} · ${totalPairs == null ? '– pairs' : count(totalPairs, 'pair')}`
+        : null;
 
     return (
         <PageShell full>
-            <PageHeader
-                title="Ranking Insight"
-                subtitle="Compare how the model orders each performer's images. Turn on Fix Order to correct a pair."
-                back
-                actions={
-                    <>
-                        <Button variant="outlined" startIcon={<FilterList />} onClick={() => setShowPerformerModal(true)}>
-                            Performers ({selectedPerformers.length})
-                        </Button>
-                        <Button
-                            variant={isCompareMode ? 'contained' : 'outlined'}
-                            startIcon={<CompareArrows />}
-                            onClick={() => { setIsCompareMode(!isCompareMode); setSelectedForComparison([]); }}
-                        >
-                            {isCompareMode ? 'Comparing…' : 'Fix order'}
-                        </Button>
-                        <Tooltip title="Reload rankings">
-                            <IconButton onClick={loadRankings} sx={{ color: 'var(--dim)' }}>
-                                <Refresh />
-                            </IconButton>
-                        </Tooltip>
-                    </>
-                }
-            />
+            <PageHeader title="Rank pictures" />
 
             <Toolbar>
-                <Typography variant="caption" sx={{ color: 'var(--muted)' }}>Thumbnail size</Typography>
-                <Slider
-                    value={imageSize}
-                    onChange={(e, val) => setImageSize(val)}
-                    min={50}
-                    max={300}
-                    size="small"
-                    sx={{ width: 140 }}
-                />
+                <RateTabs current="pictures" />
+                {facts && (
+                    <Typography sx={{ fontSize: 13, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        {facts}
+                    </Typography>
+                )}
+                <Box sx={{ display: 'flex', gap: SPACE.sm, alignItems: 'center', width: { xs: '100%', sm: 'auto' }, ml: { sm: 'auto' } }}>
+                    <TextField
+                        size="small" type="search" placeholder="Search names" value={query}
+                        onChange={(e) => setQuery(e.target.value)} inputProps={{ 'aria-label': 'Search names' }}
+                        sx={{
+                            flex: { xs: '1 1 auto', sm: '0 0 180px' }, minWidth: 0,
+                            '& .MuiInputBase-root': { fontSize: 13, height: 32, bgcolor: 'var(--surface)' }
+                        }}
+                    />
+                    <Select
+                        size="small" value={sort} inputProps={{ 'aria-label': 'Sort' }}
+                        onChange={(e) => { setSort(e.target.value); writeSort(e.target.value); }}
+                        sx={{ flexShrink: 0, fontSize: 13, height: 32, bgcolor: 'var(--surface)' }}
+                    >
+                        {SORTS.map(([id, label]) => <MenuItem key={id} value={id}>{label}</MenuItem>)}
+                    </Select>
+                </Box>
             </Toolbar>
 
-            {loading && <LoadingState label="Loading rankings…" />}
+            {content}
 
-            {!loading && selectedPerformers.length === 0 && (
-                <EmptyState
-                    icon={<Insights />}
-                    title="No performers selected"
-                    description="Pick one or more performers to see how their images are ranked."
-                    action={
-                        <Button variant="contained" onClick={() => setShowPerformerModal(true)}>
-                            Select performers
-                        </Button>
-                    }
-                />
-            )}
-
-            {!loading && selectedPerformers.map(perfName => {
-                const images = rankingData[perfName] || [];
-                const peak = performers.find(p => p.name === perfName)?.peakScore;
-
-                return (
-                    <Section
-                        key={perfName}
-                        title={perfName}
-                        description={`${images.length} images${peak ? ` • peak ${peak}` : ''}`}
-                    >
-                        <Box sx={{
-                            display: 'flex', gap: SPACE.sm, overflowX: 'auto', pb: SPACE.md,
-                            '::-webkit-scrollbar': { height: 8 },
-                            '::-webkit-scrollbar-track': { background: 'var(--surface)' },
-                            '::-webkit-scrollbar-thumb': { background: 'var(--raised)', borderRadius: 4 }
-                        }}>
-                            {images.map((img) => {
-                                const dimmed = isCompareMode
-                                    && selectedForComparison.length > 0
-                                    && !selectedForComparison.find(i => i.path === img.path);
-
-                                return (
-                                    <Box key={img.path} sx={{ position: 'relative', flexShrink: 0 }}>
-                                        <Box sx={{
-                                            width: imageSize, height: imageSize,
-                                            borderRadius: 'var(--radius-sm, 4px)',
-                                            overflow: 'hidden',
-                                            border: `2px solid ${scoreTone(img.score)}`
-                                        }}>
-                                            <img
-                                                src={`${serverUrl}/api/image?path=${encodeURIComponent(img.path)}`}
-                                                loading="lazy"
-                                                onClick={() => toggleSelection(img)}
-                                                style={{
-                                                    width: '100%', height: '100%', objectFit: 'cover',
-                                                    cursor: isCompareMode ? 'pointer' : 'default',
-                                                    opacity: dimmed ? 0.45 : 1
-                                                }}
-                                                alt=""
-                                            />
-                                        </Box>
-                                        <Box sx={{
-                                            position: 'absolute', bottom: 0, left: 0, right: 0,
-                                            bgcolor: 'rgba(0,0,0,0.7)', color: 'var(--text)',
-                                            textAlign: 'center', fontSize: 12, py: 0.5,
-                                            fontVariantNumeric: 'tabular-nums'
-                                        }}>
-                                            {Math.round(img.score)}
-                                        </Box>
-                                    </Box>
-                                );
-                            })}
-                        </Box>
-                    </Section>
-                );
-            })}
-
-            {/* Comparison tray — appears once two images are picked */}
-            {selectedForComparison.length === 2 && (
-                <Panel sx={{
-                    position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-                    zIndex: 1000, display: 'flex', gap: SPACE.md, alignItems: 'center',
-                    borderColor: 'var(--accent)', boxShadow: 'var(--shadow-lg)'
-                }}>
-                    <Typography variant="body2">Which is better?</Typography>
-                    <Button variant="contained" size="small" onClick={() => handleCompareVote('left')}>Left</Button>
-                    <Button variant="contained" size="small" onClick={() => handleCompareVote('right')}>Right</Button>
-                    <IconButton onClick={() => setSelectedForComparison([])} sx={{ color: 'var(--dim)' }}>
-                        <Block />
-                    </IconButton>
-                </Panel>
-            )}
-
-            <Dialog
-                open={showPerformerModal}
-                onClose={() => setShowPerformerModal(false)}
-                maxWidth="sm"
-                fullWidth
-            >
-                <DialogTitle>Select performers to compare</DialogTitle>
-                <DialogContent>
-                    <List sx={{ maxHeight: 400, overflow: 'auto' }}>
-                        {performers.map((p) => (
-                            <ListItem key={p.name} disablePadding>
-                                <ListItemButton onClick={() => {
-                                    setSelectedPerformers(prev =>
-                                        prev.includes(p.name)
-                                            ? prev.filter(n => n !== p.name)
-                                            : [...prev, p.name]
-                                    );
-                                }}>
-                                    <Checkbox checked={selectedPerformers.includes(p.name)} />
-                                    <ListItemText
-                                        primary={p.name}
-                                        secondary={`${p.totalCount} images`}
-                                        secondaryTypographyProps={{ sx: { color: 'var(--dim)' } }}
-                                    />
-                                </ListItemButton>
-                            </ListItem>
-                        ))}
-                    </List>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setSelectedPerformers([])}>Clear</Button>
-                    <Button onClick={() => setShowPerformerModal(false)} variant="contained">Done</Button>
-                </DialogActions>
-            </Dialog>
+            {tray && <Tray tray={tray} onChoose={choose} onClose={closeTray} />}
         </PageShell>
     );
 }
