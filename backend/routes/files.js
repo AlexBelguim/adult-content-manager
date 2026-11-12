@@ -821,6 +821,37 @@ const serveRawFile = async (req, res) => {
 router.get('/raw', serveRawFile);
 router.get('/file', serveRawFile);
 
+/**
+ * GET /thumb?path=<image>&max=<px> → a JPEG no larger than max px on its longest side (64..2048, default 512; never
+ * enlarged), EXIF orientation applied. For pictures shown many at a time (the VR screen), where the originals would be
+ * far too heavy. Same path checks as /raw (resolveMediaPath). Not cached on disk: the browser keeps it a day.
+ */
+const THUMB_IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff'];
+router.get('/thumb', async (req, res) => {
+  const { path: requestedPath } = req.query;
+  if (!requestedPath) return res.status(400).send({ error: 'File path is required' });
+  const max = Math.max(64, Math.min(2048, parseInt(req.query.max, 10) || 512));
+  try {
+    const filePath = await resolveMediaPath(requestedPath);
+    if (!filePath) return res.status(404).send({ error: 'File not found' });
+    if (!THUMB_IMAGE_EXT.includes(path.extname(filePath).toLowerCase())) {
+      return res.status(400).send({ error: 'File is not an image' });
+    }
+    const buf = await sharp(filePath, { failOn: 'none' })
+      .rotate()
+      .resize({ width: max, height: max, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    res.set('Content-Type', 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
+  } catch (err) {
+    console.error('Error making a resized image:', err.message);
+    if (!res.headersSent) res.status(500).send({ error: err.message });
+    return undefined;
+  }
+});
+
 // Stream video with range request support (for large files / network shares)
 router.get('/stream', async (req, res) => {
   const { path: filePath } = req.query;

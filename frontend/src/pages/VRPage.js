@@ -9,37 +9,9 @@ import ArrowBack from '@mui/icons-material/ArrowBack';
 import ViewInAr from '@mui/icons-material/ViewInAr';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import Refresh from '@mui/icons-material/Refresh';
-import { registerVRComponents } from '../vr/aframeComponents';
-import { buildGallery } from '../vr/buildGallery';
+import { createSalon, parseFlags } from '../vr/salon';
 import { PageShell, PageHeader, Panel, SPACE } from '../components/layout';
 import { FactRows, useNotify, plural } from '../components/ui';
-import { useBack } from '../nav';
-
-const AFRAME_SRC = 'https://aframe.io/releases/1.6.0/aframe.min.js';
-
-// Load A-Frame from its CDN once, lazily (only when the VR route mounts), so it never weighs on the rest of the
-// app. It cannot be bundled for now (no aframe package in node_modules), so this stays on the deferred list.
-let aframePromise = null;
-function loadAframe() {
-  if (window.AFRAME) return Promise.resolve(window.AFRAME);
-  if (aframePromise) return aframePromise;
-  aframePromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = AFRAME_SRC;
-    s.async = true;
-    s.setAttribute('data-aframe', '1');
-    s.onload = () => resolve(window.AFRAME);
-    s.onerror = () => {
-      s.remove();
-      aframePromise = null;
-      const err = new Error('A-Frame did not load from aframe.io');
-      err.kind = 'script';
-      reject(err);
-    };
-    document.head.appendChild(s);
-  });
-  return aframePromise;
-}
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]', '::1'];
 const monoFont = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -55,13 +27,7 @@ const TONE = {
 /** The one status line. The first rule that matches wins. */
 function statusOf(scene, xr) {
   if (scene.state === 'failed') {
-    const script = scene.kind === 'script';
-    return {
-      key: 'failed',
-      tone: 'bad',
-      title: script ? 'The VR scene did not load' : 'The VR scene did not start',
-      text: script ? 'This device needs internet access to aframe.io for VR, for now.' : 'Retry, or reload the page.'
-    };
+    return { key: 'failed', tone: 'bad', title: 'The VR scene did not start', text: 'Retry, or reload the page.' };
   }
   if (xr === 'insecure') {
     return { key: 'insecure', tone: 'warn', title: 'VR needs https', text: 'Browsers start VR only on an https address or on localhost.' };
@@ -132,27 +98,26 @@ function AddressBox({ url }) {
 const codeSx = { fontFamily: monoFont, fontSize: '0.8rem', color: 'var(--text)' };
 
 /**
- * VR (WebXR). Mounts an A-Frame scene (built imperatively in vr/buildGallery) in a container ref and draws one
+ * VR (WebXR). Mounts the Salon scene (three.js, bundled with the app: vr/salon.js) in a container ref and draws one
  * of three modes over it:
  *   landing  an opaque page with the status, the address to open, the facts and Enter VR / Look around
- *   look     the scene on this screen, look only, with a way back (button or Esc)
- *   vr       nothing: the headset shows the scene and its own Menu
- * A-Frame and its font come from the aframe.io CDN (see loadAframe). On unmount the scene is torn down, so it stops
- * owning the WebGL canvas.
+ *   look     the scene on this screen (drag to look, click = trigger), with a way back (button or Esc)
+ *   vr       nothing: the headset shows the scene and its own panel (Exit VR is on it)
+ * The scene only renders in look and vr. On unmount it is torn down (textures, videos, the WebGL context), so going
+ * back to the app frees the GPU memory. ?look=1 starts in look mode (for screenshots; see vr/salon.js for the rest).
  */
 export default function VRPage() {
   const containerRef = useRef(null);
   const handleRef = useRef(null);
-  const backRef = useRef(null);
   const notify = useNotify();
-  const back = useBack('/');
-  backRef.current = back;
+  const flags = useMemo(() => parseFlags(window.location.search), []);
 
   const [mode, setMode] = useState('landing'); // landing | look | vr
-  const [scene, setScene] = useState({ state: 'loading', kind: null, message: '' });
+  const [scene, setScene] = useState({ state: 'loading', message: '' });
   const [xr, setXr] = useState('checking'); // checking | yes | no | insecure
   const [library, setLibrary] = useState({ loaded: false, count: null, error: null });
   const [attempt, setAttempt] = useState(0);
+  const [entering, setEntering] = useState(false);
 
   const secure = window.isSecureContext === true;
   const host = window.location.host;
@@ -175,53 +140,50 @@ export default function VRPage() {
     return () => { cancelled = true; };
   }, [secure]);
 
-  // Start-up: load A-Frame, build the scene. Runs again on Retry.
+  // Start-up: build the scene (the library loads in the background). Runs again on Retry.
   useEffect(() => {
     let cancelled = false;
-    setScene({ state: 'loading', kind: null, message: '' });
+    setScene({ state: 'loading', message: '' });
     setLibrary({ loaded: false, count: null, error: null });
-    if (attempt > 0 && containerRef.current) containerRef.current.innerHTML = '';
 
     (async () => {
       try {
-        const AFRAME = await loadAframe();
-        if (cancelled || !containerRef.current) return;
-        registerVRComponents(AFRAME);
-        const handle = await buildGallery(AFRAME, containerRef.current, {
-          onEnterVR: () => setMode('vr'),
-          onExitVR: () => setMode('landing'),
-          onLeave: () => backRef.current(),
+        if (!containerRef.current) return;
+        const handle = await createSalon(containerRef.current, {
+          flags,
+          onXR: (presenting) => { if (!cancelled) setMode(presenting ? 'vr' : 'landing'); },
           onLibrary: (r) => {
-            if (!cancelled) {
-              setLibrary({ loaded: true, count: r && r.count != null ? r.count : null, error: (r && r.error) || null });
-            }
+            if (!cancelled) setLibrary({ loaded: true, count: r && r.count != null ? r.count : null, error: (r && r.error) || null });
           }
         });
         if (cancelled) {
-          handle.destroy();
+          handle.dispose();
           return;
         }
         handleRef.current = handle;
-        setScene({ state: 'ready', kind: null, message: '' });
+        setScene({ state: 'ready', message: '' });
+        if (flags.look) setMode('look');
       } catch (e) {
         console.error('[VR] init failed', e);
-        if (!cancelled) {
-          if (containerRef.current) containerRef.current.innerHTML = '';
-          setScene({ state: 'failed', kind: e && e.kind === 'script' ? 'script' : 'scene', message: (e && e.message) || String(e) });
-        }
+        if (!cancelled) setScene({ state: 'failed', message: (e && e.message) || String(e) });
       }
     })();
 
     return () => {
       cancelled = true;
       if (handleRef.current) {
-        handleRef.current.destroy();
+        handleRef.current.dispose();
         handleRef.current = null;
       }
     };
-  }, [attempt]);
+  }, [attempt, flags]);
 
-  // Look only: Esc goes back to the landing.
+  // The scene renders and takes input only on this screen's look mode (the headset session renders by itself).
+  useEffect(() => {
+    if (handleRef.current) handleRef.current.setActive(mode === 'look');
+  }, [mode, scene.state]);
+
+  // Look around: Esc goes back to the landing.
   useEffect(() => {
     if (mode !== 'look') return undefined;
     const onKey = (e) => { if (e.key === 'Escape') setMode('landing'); };
@@ -238,12 +200,15 @@ export default function VRPage() {
 
   const enterVR = () => {
     const h = handleRef.current;
-    if (!h || !h.sceneEl) return;
-    // Mode changes come from the scene's 'enter-vr' event (onEnterVR), not from here.
-    Promise.resolve(h.sceneEl.enterVR()).catch((e) => {
-      console.error('[VR] enterVR failed', e);
-      notify({ message: `VR did not start: ${e && e.message ? e.message : 'the browser refused it'}`, severity: 'error' });
-    });
+    if (!h || entering) return;
+    // The mode changes when the session starts and ends (onXR), not here.
+    setEntering(true);
+    h.enterVR()
+      .catch((e) => {
+        console.error('[VR] enterVR failed', e);
+        notify({ message: `VR did not start: ${e && e.message ? e.message : 'the browser refused it'}`, severity: 'error' });
+      })
+      .finally(() => setEntering(false));
   };
 
   const rows = [
@@ -251,7 +216,7 @@ export default function VRPage() {
       ? `http://${host} · not secure`
       : window.location.protocol === 'https:' ? `https://${host}` : `http://${host} · allowed on localhost`],
     ['WebXR', { checking: 'Checking…', yes: 'Supported', no: 'Not supported in this browser', insecure: 'Not checked: needs https first' }[xr]],
-    ['Scene', scene.state === 'loading' ? 'Loading A-Frame 1.6.0 from aframe.io…' : scene.state === 'ready' ? 'Loaded' : scene.message],
+    ['Scene', scene.state === 'loading' ? 'Starting…' : scene.state === 'ready' ? 'Ready · bundled with the app, no internet needed' : scene.message],
     ['Library', scene.state === 'failed'
       ? 'Not loaded'
       : !library.loaded ? 'Loading…' : library.error ? `Not loaded: ${library.error}` : plural(library.count, 'performer')]
@@ -292,7 +257,7 @@ export default function VRPage() {
               title="VR"
               back
               parent="/"
-              subtitle="Your performer library on a ring around you, in a WebXR headset"
+              subtitle="Your library on a band of pictures around you, in a WebXR headset"
             />
             <Panel sx={{ maxWidth: 560, mx: 'auto' }}>
               <StatusRow status={status} />
@@ -303,7 +268,7 @@ export default function VRPage() {
                   variant="contained"
                   size="medium"
                   startIcon={<ViewInAr />}
-                  disabled={status.tone !== 'ok'}
+                  disabled={status.tone !== 'ok' || entering}
                   onClick={enterVR}
                   sx={{ flex: '1 1 auto' }}
                 >
@@ -325,8 +290,8 @@ export default function VRPage() {
                 )}
               </Box>
               <Typography component="div" sx={{ fontSize: '0.75rem', color: 'var(--muted)', mt: SPACE.md, lineHeight: 1.5 }}>
-                <div>In the headset: trigger selects · stick turns the ring or steps · stick press recentres · Menu, left of the bar: Exit VR and Back to library.</div>
-                <div>On this screen: look only. Drag to look · W A S D move · R recentre · Esc back to this page.</div>
+                <div>In the headset: trigger opens · hold trigger or grip on the band and pull to move it · right stick scrolls · Y back · in Filter: A keep, B delete, X undo, or grip and throw up / down · right stick press or both grips recentre · the panel has Exit VR.</div>
+                <div>On this screen: drag to look · click = trigger · drag the band to move it · wheel or arrows scroll · 1 2 3 4 = A B X Y · Backspace back · Esc back to this page.</div>
               </Typography>
             </Panel>
           </PageShell>
@@ -347,19 +312,19 @@ export default function VRPage() {
               VR page
             </Button>
             <Box sx={{
-              fontSize: '0.75rem', fontWeight: 600, color: 'var(--warn)', bgcolor: 'var(--warn-quiet)',
+              fontSize: '0.75rem', fontWeight: 600, color: 'var(--dim)', bgcolor: 'var(--scrim-strong)',
               p: '2px 8px', borderRadius: '99px'
             }}>
-              Look only
+              On this screen
             </Box>
           </Box>
           <Box sx={{
-            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 11,
-            maxWidth: 'calc(100% - 24px)', width: 'max-content', bgcolor: 'var(--scrim-strong)',
+            position: 'absolute', top: 12, right: 12, zIndex: 11,
+            maxWidth: 'min(560px, calc(100% - 260px))', width: 'max-content', bgcolor: 'var(--scrim-strong)',
             border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', p: '8px 12px',
-            fontSize: '0.78rem', color: 'var(--dim)', textAlign: 'center'
+            fontSize: '0.75rem', color: 'var(--dim)', textAlign: 'right', pointerEvents: 'none'
           }}>
-            Drag to look · W A S D move · R recentre · Esc back to the VR page. Opening performers and playing media needs a headset.
+            Drag to look · click = trigger · drag the band to move it · wheel or arrows scroll · 1 2 3 4 = A B X Y · M panel here · R recentre · Backspace back · Esc leaves
           </Box>
         </>
       )}
