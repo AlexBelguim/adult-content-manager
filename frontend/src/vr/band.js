@@ -42,7 +42,7 @@ export class Band {
    * items: [{ aspect, src?: { kind, path }, perf?, genre?, video?, sub? }].
    * onPick(piece) is called for a tap (trigger pressed and released without dragging).
    */
-  constructor(ctx, parent, { kind, items, shape = 'dome', onPick, startIndex = 0 }) {
+  constructor(ctx, parent, { kind, items, shape = 'dome', onPick, startIndex = 0, label = '' }) {
     this.ctx = ctx; this.app = ctx.app; this.kind = kind; this.items = items; this.shape = shape; this.onPick = onPick;
     this.unit = ctx.assets.unitPlane;
     this.gap = kind === 'pictures' ? 0.022 : 0.06;
@@ -61,7 +61,20 @@ export class Band {
     this.vel = 0; this.drag = null; this.samples = [];
     this.outline = new THREE.Mesh(this.unit, new THREE.MeshBasicMaterial({ color: C.accent, transparent: true, opacity: 0, depthWrite: false }));
     this.outline.renderOrder = 1;
-    // the slim position bar under the band (not scrolled)
+    // a label over the band (a search that is on), and the slim position bar under it (neither scrolls)
+    this.label = label;
+    this.title = null;
+    if (label) {
+      const lw = Math.min(1.6, measure(label, { size: 0.034, weight: 600 }) + 0.07), tp = 24.5 * DEG, td = 2.2;
+      this.title = canvasPlane(lw, 0.06, { density: 1400 });
+      this.title.draw((c, s, w, h) => {
+        rrect(c, s, 0.002, 0.002, w - 0.004, h - 0.004, 0.028, rgba(C.bg, 0.88), rgba(C.accent, 0.55), 0.002);
+        text(c, s, label, { x: w / 2, y: h / 2, size: 0.034, weight: 600, align: 'center', color: C.text, maxW: w - 0.05, minSize: 0.026 });
+      });
+      this.title.renderOrder = 4;
+      this.title.position.set(0, Math.sin(tp) * td, -Math.cos(tp) * td); this.title.rotation.set(tp, 0, 0);
+      this.root.add(this.title);
+    }
     this.bar = canvasPlane(0.7, 0.05, { density: 1400 });
     this.bar.renderOrder = 4;
     const bp = -24.5 * DEG, bd = 2.2;
@@ -255,6 +268,7 @@ export class Band {
   }
 
   updateBar() {
+    if (this.title) this.title.material.opacity = this.fade;
     this.bar.visible = this.scrollable && this.fade > 0.01;
     this.bar.material.opacity = this.fade;
     if (!this.bar.visible) return;
@@ -285,6 +299,7 @@ export class Band {
       }
     }
     this.bar.userData.canvasTex.dispose(); this.bar.material.dispose(); this.bar.geometry.dispose();
+    if (this.title) { this.title.userData.canvasTex.dispose(); this.title.material.dispose(); this.title.geometry.dispose(); }
     this.outline.material.dispose();
     this.root.parent?.remove(this.root);
   }

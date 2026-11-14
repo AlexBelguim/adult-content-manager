@@ -290,8 +290,9 @@ export default function VRPage() {
                 )}
               </Box>
               <Typography component="div" sx={{ fontSize: '0.75rem', color: 'var(--muted)', mt: SPACE.md, lineHeight: 1.5 }}>
-                <div>In the headset: trigger opens · hold trigger or grip on the band and pull to move it · right stick scrolls · Y back · in Filter: A keep, B delete, X undo, or grip and throw up / down · right stick press or both grips recentre · the panel has Exit VR.</div>
-                <div>On this screen: drag to look · click = trigger · drag the band to move it · wheel or arrows scroll · 1 2 3 4 = A B X Y · Backspace back · Esc back to this page.</div>
+                <div>In the headset: trigger opens · hold trigger or grip on the band and pull to move it · right stick scrolls · Y back · in Filter: A keep, B delete, X undo, or grip and throw up / down · right stick press or both grips recentre · the panel has Search and Exit VR.</div>
+                <div>Videos: the viewer&apos;s Screen button plays one big, or around you for 180° and 360° files · A play / pause · stick -10 / +10 s · B or Y back · the bar&apos;s Format menu sets 2D, 3D and the view · a connected Handy follows a video&apos;s funscript.</div>
+                <div>On this screen: drag to look · click = trigger · drag the band to move it · wheel or arrows scroll · 1 2 3 4 = A B X Y · / search · Backspace back · Esc back to this page.</div>
               </Typography>
             </Panel>
           </PageShell>
@@ -324,7 +325,7 @@ export default function VRPage() {
             border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', p: '8px 12px',
             fontSize: '0.75rem', color: 'var(--dim)', textAlign: 'right', pointerEvents: 'none'
           }}>
-            Drag to look · click = trigger · drag the band to move it · wheel or arrows scroll · 1 2 3 4 = A B X Y · M panel here · R recentre · Backspace back · Esc leaves
+            Drag to look · click = trigger · drag the band to move it · wheel or arrows scroll · 1 2 3 4 = A B X Y · / search · M panel here · R recentre · Backspace back · Esc leaves · video: Space, arrows, F format
           </Box>
         </>
       )}

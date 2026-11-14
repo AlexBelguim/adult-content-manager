@@ -22,7 +22,7 @@ export function createPanel(app) {
   const reg = (m, onClick) => { app.pointer.add(m, { onClick }); regs.push(m); return m; };
 
   /**
-   * spec: { title, sub, back: fn|null, rows: [{ label, items: [{ id, label, active, onClick, size? }] }],
+   * spec: { title, sub, back: fn|null, rows: [{ label, items: [{ id, label, active, onClick, size?, grow?, field?, empty? }] }],
    *         actions: [{ id, label, onClick }], legend: [str] }
    */
   function build(spec) {
@@ -60,11 +60,13 @@ export function createPanel(app) {
       lab.position.x = -IN / 2 + LABEL_W / 2; row.add(lab);
       const avail = IN - LABEL_W, g = 0.005, n = r.items.length;
       // widths follow the labels, so a long one ("Most pictures") gets the room it needs
-      const wt = r.items.map((it) => it.label.length + 7), sum = wt.reduce((a, b) => a + b, 0);
+      const wt = r.items.map((it) => it.grow ?? it.label.length + 7), sum = wt.reduce((a, b) => a + b, 0);
       let x = -IN / 2 + LABEL_W;
       r.items.forEach((it, i) => {
         const bw = ((avail - g * (n - 1)) * wt[i]) / sum;
-        const b = makeButton(it.label, { w: bw, h: ROW_H, ...BTN, size: it.size || BTN.size });
+        // a field (the search) is a darker, left-aligned button
+        const look = it.field ? { align: 'left', base: C.bg, hover: C.hover, textColor: it.empty ? C.muted : C.text } : {};
+        const b = makeButton(it.label, { w: bw, h: ROW_H, ...BTN, size: it.size || BTN.size, ...look });
         b.position.x = x + bw / 2; x += bw + g;
         b.setActive(it.active);
         row.add(b); reg(b, it.onClick);

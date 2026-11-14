@@ -60,6 +60,11 @@ export const api = {
   /** sizes for paths: { [path]: [w, h] } (read-only) */
   dims: (paths) => (paths.length ? postJson('/api/files/dimensions', { paths }).then((j) => (j && j.dims) || {}) : Promise.resolve({})),
   videoDuration: (p) => getJson(`/api/files/video-duration?path=${enc(p)}`).then((j) => Number(j.duration) || 0),
+  /** a video's funscripts, main first: [{ name, path, size, axis }] (as the player's useFunscripts reads them) */
+  funscripts: (p) => getJson(`/api/funscripts?file=${enc(p)}`).then((j) => (Array.isArray(j && j.funscripts) ? j.funscripts : [])
+    .map((f) => (typeof f === 'string' ? { name: f.split(/[\\/]/).pop(), path: f, axis: '' } : f)).filter((f) => f && f.path)),
+  /** a funscript's JSON */
+  funscript: (p) => getJson(`/api/files/raw?path=${enc(p)}`),
 
   /** a keep or delete decision, exactly as the app's Filter page sends it */
   decide: (performerId, filePath, action) => postJson('/api/filter/action', { performerId, filePath, action }),

@@ -10,7 +10,15 @@
 //               to decide (one big): A keep, B delete, X undo, or grip and throw up (keep) / down (delete). These are
 //               REAL decisions (POST /api/filter/action, /api/filter/undo, as the app's Filter page sends them).
 //   Genres      the library's content genres; trigger on one = its pictures and videos in the band + the viewer.
-// Settings kept in localStorage: the shape (Dome / Cylinder) and where the panel was put.
+// Videos: the viewer plays one on its plane; its Screen button (labelled by the file's format: Screen, 3D screen,
+// VR 180°, VR 360°, Fisheye) opens the cinema (cinema.js): a big curved screen, or the picture around you for 180 / 360
+// / fisheye, with a controls bar and the format menu; the band and the panel hide meanwhile. The format comes from the
+// file name (stereo.js) or the choice made in the menu, kept per file. A: play / pause, stick: -10 / +10 s, B or Y: back.
+// The Handy (handySync.js): a video with a funscript plays it on the Handy when the app has it connected, in sync.
+// Search: the panel's Search field opens a keyboard (keyboard.js); the band then shows only what matches (performers
+// by name and aliases, genres by name, her pictures and videos by file name) and says so on its position bar.
+// Settings kept in localStorage: the shape (Dome / Cylinder), where the panel was put, the screen size, each file's
+// format, the Handy offset.
 // Recentre: right stick press, both grips held 0.6 s, or the panel's Recentre button (a short countdown).
 //
 // Flags for screenshots (read once at start, only outside XR; never decide anything):
@@ -21,6 +29,12 @@
 //   ?viewer=N                 her gallery: item N in the viewer (a video plays)
 //   ?focus=N                  triage: file N in focus                     ?hover=N  piece N hovered
 //   ?at=N  the band starts at item N   ?shape=dome|cylinder   ?panel=front|moved   ?test=1  window.__vrSalon
+//   ?play=<file path>         that video in the cinema, in its format      ?screen=1  the viewer's video in the cinema
+//   ?t=<s>                    the video paused at t seconds                ?size=s|m|l  the screen's size
+//   ?menu=format              the format menu open                         ?bar=1   the controls bar stays up
+//   ?eye=left|right           which eye the flat camera shows (default left)
+//   ?handy=mock               a connected Handy with a script, faked here (no SDK, no network)
+//   ?search=<text>            a search on (the library's, or her gallery's with ?open)   ?kbd=1  the keyboard open
 // Shot list (F:/acm-sandbox/shots/vr-app/, flat mode, headless Chrome):
 //   landing.png (the VR page)            library.png      ?look=1&pitch=0
 //   filter.png       ?look=1&view=filter                   genres.png  ?look=1&view=genres
@@ -28,6 +42,8 @@
 //   viewer-video.png ?look=1&open=1&show=vids&viewer=1     triage.png  ?look=1&view=filter&open=1&focus=2
 //   triage-videos.png ?look=1&view=filter&open=1&show=vids  hover.png ?look=1&hover=5   cylinder.png ?look=1&shape=cylinder
 //   genre-open.png   ?look=1&view=genres&open=1           (all with &pitch=0&test=1; flow-*.png: clicks and keys, no decisions)
+//   screen-*.png, vr180-lr.png, vr360-tb.png, format-menu.png, handy-*.png, search-*.png: ?play / ?menu / ?handy /
+//   ?search / ?kbd as above (shot script: notes/test/p9vr/shoot-vr.cjs)
 import * as THREE from 'three';
 import { C, refreshColors } from './palette';
 import { DEG, clamp, plural, easeInOut, loadFonts, canvasPlane, text, disposeTree } from './kit';
@@ -39,6 +55,10 @@ import { api, pool } from './data';
 import { Band } from './band';
 import { FocusView } from './focus';
 import { createPanel } from './panel';
+import { Cinema, SCREEN_SIZES } from './cinema';
+import { Keyboard } from './keyboard';
+import { createHandySync, createMockHandyControl } from './handySync';
+import { formatFor } from './stereo';
 
 const STORE_KEY = 'vr.salon';
 function loadSettings() { try { return JSON.parse(window.localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
@@ -58,7 +78,29 @@ export function parseFlags(search) {
     open: num('open'), viewer: num('viewer'), focus: num('focus'), hover: num('hover'), at: num('at'),
     fov: num('fov'), yaw: num('yaw'), pitch: num('pitch'),
     test: q.get('test') === '1',
+    play: q.get('play') || null, screen: q.get('screen') === '1', t: num('t'),
+    size: pick('size', Object.keys(SCREEN_SIZES)), menu: pick('menu', ['format']), bar: q.get('bar') === '1',
+    eye: pick('eye', ['left', 'right']), handy: pick('handy', ['mock']),
+    search: q.has('search') ? String(q.get('search')).slice(0, 40).toLowerCase() : null, kbd: q.get('kbd') === '1',
   };
+}
+
+/** text folded for matching: lower case, no accents */
+const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+/** a performer's aliases (stored as a JSON array, or a comma list in older rows) */
+function aliasesOf(p) {
+  const a = p && p.aliases;
+  if (!a) return [];
+  if (Array.isArray(a)) return a.map(String);
+  try { const j = JSON.parse(a); if (Array.isArray(j)) return j.map(String); } catch { /* a plain list */ }
+  return String(a).split(',').map((x) => x.trim()).filter(Boolean);
+}
+const matchAny = (q, list) => { const f = fold(q).trim(); return !f || list.some((s) => fold(s).includes(f)); };
+/** a short name for the viewer's button that opens a video in the cinema, from its format */
+export function screenLabel(it) {
+  const f = formatFor(it.path, it.name);
+  if (f.proj === 'flat') return f.layout === 'mono' ? 'Screen' : '3D screen';
+  return f.proj === 'fisheye' ? `Fisheye ${f.fov}` : `VR ${f.proj}°`;
 }
 
 const SORT_TRIAGE = { name: { sortBy: 'name', sortOrder: 'asc' }, newest: { sortBy: 'date', sortOrder: 'desc' }, largest: { sortBy: 'size', sortOrder: 'desc' } };
@@ -82,9 +124,25 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
 
   let lib = null, focus = null, her = null;
   const leaving = new Set();
-  const player = createVideoPlayer({ say: app.say, onMeta: (it, a) => focus?.fixAspect(it, a) });
+  // the Handy: the app's connection (window.HandyControl), or a fake one for ?handy=mock screenshots (no network)
+  const mockHandy = flags.handy === 'mock' ? createMockHandyControl() : null;
+  const handy = createHandySync({
+    control: () => mockHandy || window.HandyControl || null,
+    listScripts: mockHandy ? async (p) => [{ name: `${String(p).split(/[\\/]/).pop().replace(/\.[^.]+$/, '')}.funscript`, path: 'mock', axis: '' }] : api.funscripts,
+    readScript: mockHandy
+      ? async () => ({ actions: Array.from({ length: 120 }, (_, i) => ({ at: i * 400, pos: i % 2 ? 90 : 10 })) })
+      : (s) => api.funscript(s.path),
+    onChange: () => { if (!disposed) updateStatus(); },
+  });
+  const player = createVideoPlayer({
+    say: app.say, onMeta: (it, a) => focus?.fixAspect(it, a),
+    onOpen: (it, p) => handy.attach(it, p), onClose: () => handy.detach(),
+  });
   const ctx = { app, tex, assets, player };
   const settings = loadSettings();
+  // the flat camera shows the left eye of a 3D video (?eye=right: the right one); a headset's own cameras see each
+  // their own (layers 1 and 2)
+  camera.layers.enable(flags.eye === 'right' ? 2 : 1);
 
   // ?fov=<horizontal degrees> widens the flat camera (one screenshot shows how the whole view is filled)
   const applyFov = () => { if (!flags.fov) return; camera.fov = (2 * Math.atan(Math.tan((flags.fov / 2) * DEG) / camera.aspect)) / DEG; camera.updateProjectionMatrix(); };
@@ -230,6 +288,8 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     her: null, herMode: 'gallery', viewer: false, herItems: [], show: 'all', pSort: 'name', showKept: true,
     triType: 'pics', tri: null, loading: false,
     libAt: 0, libScroll: null,
+    search: { lib: '', her: '', keep: false }, // the library's search, her gallery's, and Keep (it stays on a view change)
+    cinema: null,                              // { from: 'viewer' | 'flag' } while the cinema is open
   };
   const SORTS = {
     name: byName,
@@ -238,10 +298,12 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   };
 
   function libraryItems() {
-    if (S.view === 'genres') return [...(D.genres || [])].sort(SORTS[S.sort] || byName).map((g) => ({ aspect: 1.3, genre: g }));
+    const q = S.search.lib;
+    if (S.view === 'genres') return (D.genres || []).filter((g) => matchAny(q, [g.name])).sort(SORTS[S.sort] || byName).map((g) => ({ aspect: 1.3, genre: g }));
     const filter = S.view === 'filter';
     if (filter && !D.countsReady) return [];
     let src = (filter ? D.filterList : D.base) || [];
+    if (q) src = src.filter((p) => matchAny(q, [p.name, ...aliasesOf(p)]));
     if (S.newOnly) src = src.filter(isNew);
     if (S.hasVideos) src = src.filter((p) => (filter ? (D.counts.get(p.id)?.vids || 0) : (p.vids_count || 0)) > 0);
     if (filter) src = src.filter((p) => toDecide(p) > 0);
@@ -251,6 +313,8 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     }));
   }
   function libraryNote(count) {
+    const loaded = S.view === 'genres' ? !!D.genres : S.view === 'filter' ? D.countsReady : !!D.base;
+    if (S.search.lib && loaded && !count) return `Nothing matches “${S.search.lib}”${S.newOnly || S.hasVideos ? ' with these filters' : ''}`;
     if (S.view === 'genres') {
       if (!D.genres) return 'Loading genres · the first scan can take a while';
       if (D.genresError) return `Genres not loaded: ${D.genresError}`;
@@ -273,7 +337,7 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   function makeLibrary(startIndex = 0) {
     const items = libraryItems();
     const B = new Band(ctx, stage, {
-      kind: S.view === 'genres' ? 'genres' : 'performers', items, shape: S.shape, startIndex,
+      kind: S.view === 'genres' ? 'genres' : 'performers', items, shape: S.shape, startIndex, label: searchLabel(S.search.lib, items.length),
       onPick: (pc) => {
         if (pc.item.genre) openGenre(pc.item.genre);
         else openPerformer(pc.item.perf, S.view === 'filter' ? 'triage' : 'gallery');
@@ -288,7 +352,7 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     if (instant) { neu.fade = 1; neu.depth = 1; } else neu.enter();
   }
   function showLibrary({ instant = false } = {}) {
-    S.level = 'library'; S.viewer = false; S.her = null; S.tri = null;
+    S.level = 'library'; S.viewer = false; S.her = null; S.tri = null; S.search.her = '';
     loadSeq++;
     const neu = makeLibrary(S.libAt);
     if (S.libScroll != null) { neu.scroll = clamp(S.libScroll, neu.min, neu.max); S.libScroll = null; } // back where you were
@@ -308,6 +372,7 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   function setView(v) {
     if (v === S.view) return;
     S.view = v;
+    if (!S.search.keep) { S.search.lib = ''; if (kbd.open) kbd.show(''); }
     if (v === 'genres') { ensureGenres(); if (!['name', 'most'].includes(S.sort)) S.sort = 'name'; }
     rebuildLibrary({ keepPlace: false });
   }
@@ -319,6 +384,7 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     S.libScroll = lib ? lib.scroll : null;
     S.libAt = lib ? lib.nearestIndex() : 0;
     S.level = 'her'; S.her = her0; S.herMode = mode; S.viewer = false; S.herItems = []; S.tri = null;
+    S.search.her = '';
     undoStack.length = 0;
     retire(lib, instant); lib = null;
     setNote(`Loading ${her0.name}…`);
@@ -413,7 +479,8 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   function herList() {
     if (S.herMode === 'triage') return S.herItems.filter((i) => i.decision !== 'delete' && (S.showKept || i.decision !== 'keep'));
     const fn = S.pSort === 'newest' ? (a, b) => b.modified - a.modified : S.pSort === 'largest' ? (a, b) => b.size - a.size : (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
-    const pics = S.herItems.filter((i) => !i.video).sort(fn), vids = S.herItems.filter((i) => i.video).sort(fn);
+    const q = S.search.her, items = q ? S.herItems.filter((i) => matchAny(q, [i.name])) : S.herItems;
+    const pics = items.filter((i) => !i.video).sort(fn), vids = items.filter((i) => i.video).sort(fn);
     if (S.show === 'pics') return pics;
     if (S.show === 'vids') return vids;
     const all = [...pics];
@@ -427,19 +494,22 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     focus = her = null;
     const triage = S.herMode === 'triage';
     if (!triage && !S.viewer) {
-      her = new Band(ctx, stage, { kind: 'pictures', items: list, shape: S.shape, startIndex: at, onPick: (pc) => openViewer(pc.index) });
+      her = new Band(ctx, stage, { kind: 'pictures', items: list, shape: S.shape, startIndex: at, onPick: (pc) => openViewer(pc.index), label: searchLabel(S.search.her, list.length) });
       const B = her; B.onPress = (pc, src) => { if (src?.controller) startBandPress(B, pc, src, 'trigger'); };
       her.list = list;
       swapIn(old, her, instant);
-      setNote(list.length ? '' : 'Nothing here');
+      setNote(list.length ? '' : S.search.her ? `Nothing matches “${S.search.her}”` : 'Nothing here');
     } else {
       focus = new FocusView(ctx, stage, {
-        title: triage ? `${S.her.name} · to filter` : S.her.name, decide: triage,
+        title: triage ? `${S.her.name} · to filter` : S.her.name, decide: triage, screenLabel,
         onPick: (i, isFocus) => {
           if (!isFocus) { focus.setFocus(i); updateStatus(); loadMoreTriage(); return; }
           tapFocus();
         },
-        onAction: (k) => ({ prev: () => step(-1), next: () => step(1), keep: () => decide('keep'), del: () => decide('delete'), undo: () => undo(), close: () => closeViewer() })[k]?.(),
+        onAction: (k) => ({
+          prev: () => step(-1), next: () => step(1), keep: () => decide('keep'), del: () => decide('delete'), undo: () => undo(), close: () => closeViewer(),
+          screen: () => { if (focus?.current?.video) openCinema(focus.current, 'viewer'); },
+        })[k]?.(),
       });
       focus.setList(list, list[at] || null, { instant: true });
       swapIn(old, focus, instant);
@@ -479,7 +549,9 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
       menu.setSub(`${plural(c.pics, 'picture')}, ${plural(c.vids, 'video')} to decide · ${k} kept · ${d} deleted`);
     } else {
       const np = S.herItems.filter((i) => !i.video).length, nv = S.herItems.length - np;
-      if (focus) focus.setStatus(focus.list.length ? `${focus.f + 1} of ${focus.list.length}${focus.current?.video ? ' · video' : ''}` : 'Nothing here');
+      const hk = focus?.current?.video && handy.active ? handy.status().key : '';
+      const hs = { syncing: ' · Handy syncing', loaded: ' · Handy ready', sending: ' · Handy loading' }[hk] || '';
+      if (focus) focus.setStatus(focus.list.length ? `${focus.f + 1} of ${focus.list.length}${focus.current?.video ? ` · video${hs}` : ''}` : 'Nothing here');
       menu.setSub(S.loading ? 'Loading…' : `${plural(np, 'picture')} · ${plural(nv, 'video')}`);
     }
   }
@@ -604,8 +676,10 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   const onHandleObj = (o) => { while (o) { if (o === menu.handle) return true; o = o.parent; } return false; };
   app.listen(window, 'pointerdown', (ev) => {
     if (renderer.xr.isPresenting || !app.isActive() || ev.target !== app.canvas) return;
+    if (S.cinema) return; // the cinema has its own (its seek and volume bars)
     app.toNDC(ev, mouseNDC);
     ray.setFromCamera(mouseNDC, camera);
+    if (kbd.open && ray.intersectObject(kbd.root, true).length) return; // a key: the runtime turns the click into the press
     const onPanel = menu.root.visible ? ray.intersectObject(menu.root, true)[0] : null;
     if (onPanel && onHandleObj(onPanel.object)) { ev.stopPropagation(); startPanelGrab('mouse', 'mouse', onPanel.point); return; }
     if (onPanel) return; // panel buttons: the runtime turns a click into the button press
@@ -712,6 +786,26 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     saveSettings({ panel: menu.root.position.toArray().map((v) => +v.toFixed(3)) });
   }
 
+  // ---------- the cinema (Screen, 180, 360, fisheye) and the search keyboard ----------
+  const cinema = new Cinema(ctx, stage, { handy, onExit: () => closeCinema() });
+  const kbd = new Keyboard(app, stage, { onChange: (v) => setSearch(v), onDone: () => closeKeyboard() });
+  /** play `item` in the cinema. from 'viewer': the viewer's video carries on there, and Exit goes back to it */
+  function openCinema(item, from = 'viewer') {
+    if (!item || !item.video) return;
+    if (kbd.open) closeKeyboard();
+    S.cinema = { from };
+    cinema.open(item);
+    app.say(`${cinema.around ? 'Around you' : 'Screen'} · B or Y: back`, 2200);
+  }
+  function closeCinema() {
+    const c = S.cinema;
+    if (!c) return;
+    S.cinema = null;
+    cinema.close();
+    if (c.from !== 'viewer' || !focus || focus.current !== player.item) player.close();
+    buildMenu();
+  }
+
   // ---------- the control panel ----------
   function seg(rowLabel, opts, value, set) { return { label: rowLabel, items: opts.map(([id, label]) => ({ id: `${rowLabel}-${id}`, label, active: value === id, onClick: () => set(id) })) }; }
   function buildMenu() {
@@ -724,7 +818,7 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
       const filter = S.view === 'filter', genres = S.view === 'genres';
       const n = lib ? lib.count : 0;
       const noun = genres ? plural(n, 'genre') : plural(n, 'performer');
-      const rows = [seg('View', [['performers', 'Performers'], ['filter', 'Filter'], ['genres', 'Genres']], S.view, setView)];
+      const rows = [seg('View', [['performers', 'Performers'], ['filter', 'Filter'], ['genres', 'Genres']], S.view, setView), searchRow(n)];
       rows.push(seg('Sort', genres ? [['name', 'Name'], ['most', 'Most files']] : [['name', 'Name'], ['most', filter ? 'Most to decide' : 'Most pictures'], ['newest', 'Newest']], S.sort, (v) => { if (v !== S.sort) { S.sort = v; rebuildLibrary({ keepPlace: false }); } }));
       if (!genres) {
         rows.push({ label: 'Show', items: [
@@ -737,18 +831,19 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
         title: `${filter ? 'To filter' : genres ? 'Genres' : 'Library'} · ${noun}`,
         sub: filter ? 'Trigger: decide her files · drag: move the band' : genres ? 'Trigger: its pictures · drag: move the band' : 'Trigger: her gallery · drag: move the band',
         back: null, rows, actions,
-        legend: ['Trigger: open · hold trigger and drag: move', 'Right stick: scroll', ...keys],
+        legend: ['Trigger: open · hold trigger and drag: move', 'Right stick: scroll · Search: type a name', ...keys],
       });
     } else if (S.herMode === 'gallery') {
       const rows = [];
       if (S.her.fromFilter) rows.push(seg('View', [['gallery', 'Gallery'], ['triage', 'Filter her files']], 'gallery', (v) => switchHerMode(v)));
+      rows.push(searchRow(herList().length));
       rows.push(seg('Show', [['all', 'All'], ['pics', 'Pictures'], ['vids', 'Videos']], S.show, (v) => { if (v !== S.show) { S.show = v; showHer({ focusAt: 0 }); } }));
       rows.push(seg('Sort', [['name', 'Name'], ['newest', 'Newest'], ['largest', 'Largest']], S.pSort, (v) => { if (v !== S.pSort) { S.pSort = v; showHer({ focusAt: 0 }); } }));
       rows.push(shapeRow);
       menu.build({
         title: S.her.name, sub: '', back: goBack, rows, actions,
         legend: S.viewer
-          ? ['Stick: previous / next · B or Y: close', 'Trigger on a video: play / pause', ...keys]
+          ? ['Stick: previous / next · B or Y: close', 'Trigger on a video: play / pause · Screen: watch it big', ...keys]
           : ['Trigger: open a picture · hold and drag: move', 'Right stick: scroll · Y: back', ...keys],
       });
     } else {
@@ -769,6 +864,44 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     updateStatus();
   }
   function setTriType(t) { if (t === S.triType) return; S.triType = t; reloadTriage(); }
+
+  // ---------- search: a field on the panel, the keyboard, the band filtered live ----------
+  const searchKey = () => (S.level === 'library' ? 'lib' : 'her');
+  const searchCount = () => (S.level === 'library' ? libraryItems().length : herList().length);
+  function searchLabel(q, n) { return q ? `Search “${q}” · ${n === 1 ? '1 match' : `${n} matches`}` : ''; }
+  function searchRow(n) {
+    const q = S.search[searchKey()];
+    const items = [{ id: 'search', field: true, empty: !q, grow: 34, label: q ? `“${q}”   ${n === 1 ? '1 match' : `${n} matches`}` : 'Search names', onClick: () => openKeyboard() }];
+    if (q) items.push({ id: 'search-clear', label: '×', grow: 6, size: 0.016, onClick: () => setSearch('') });
+    if (S.level === 'library') items.push({ id: 'search-keep', label: 'Keep', grow: 10, active: S.search.keep, onClick: () => { S.search.keep = !S.search.keep; buildMenu(); } });
+    return { label: 'Search', items };
+  }
+  /** the search of what is on show now; the band follows at once */
+  function setSearch(v) {
+    const k = searchKey();
+    v = String(v || '').slice(0, 40);
+    if (v === S.search[k]) return;
+    S.search[k] = v;
+    if (S.level === 'library') rebuildLibrary({ keepPlace: false });
+    else if (S.herMode === 'gallery') showHer({ focusAt: 0 });
+    if (kbd.open) { if (kbd.value !== v) kbd.show(v); kbd.setCount(searchCount()); }
+    buildMenu();
+  }
+  function openKeyboard() {
+    if (S.level === 'her' && S.herMode !== 'gallery') return;
+    readHead();
+    // in front of where you look, a little below, close enough to point at comfortably
+    const d = new THREE.Vector3(0, 0, -1).applyQuaternion(headQ).applyQuaternion(stage.quaternion.clone().invert());
+    const yaw = Math.atan2(d.x, -d.z), pitch = clamp(Math.asin(clamp(d.y, -1, 1)) - 24 * DEG, -60 * DEG, 30 * DEG), dist = 0.8;
+    kbd.root.position.set(Math.sin(yaw) * Math.cos(pitch) * dist, Math.sin(pitch) * dist, -Math.cos(yaw) * Math.cos(pitch) * dist);
+    stage.updateMatrixWorld(true);
+    kbd.root.up.copy(stageUpWorld());
+    kbd.root.lookAt(headPos);
+    kbd.show(S.search[searchKey()]);
+    kbd.setCount(searchCount());
+    app.captureKeys((e) => kbd.key(e));
+  }
+  function closeKeyboard() { kbd.hide(); app.captureKeys(null); buildMenu(); }
   async function reloadTriage() {
     if (S.level !== 'her' || S.herMode !== 'triage') return;
     retire(focus); focus = null;
@@ -788,6 +921,15 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   // ---------- buttons and sticks ----------
   //  right: A keep, B delete (viewer: close), stick press recentre;  left: X undo, Y back (viewer: close), stick press panel
   app.on('button', ({ hand, name }) => {
+    if (S.cinema) { // A play / pause, B or Y back (the format menu first), X the controls bar, right stick press recentre
+      cinema.wake();
+      if (name === 'a') player.toggle();
+      else if (name === 'b' || name === 'y') { if (cinema.menuOpen) cinema.setMenu(false); else closeCinema(); }
+      else if (name === 'x') cinema.toggleBar();
+      else if (name === 'stick' && hand === 'right') recentre();
+      return;
+    }
+    if (kbd.open && (name === 'b' || name === 'y')) { closeKeyboard(); return; }
     const triage = S.level === 'her' && S.herMode === 'triage' && !S.viewer;
     if (name === 'stick') { if (hand === 'left') summonPanel(); else recentre(); }
     else if (name === 'y') goBack();
@@ -796,6 +938,16 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     else if (name === 'x') { if (triage) undo(); }
   });
   app.on('key', (e) => {
+    if (S.cinema) { // on a screen: Space play / pause, arrows -10 / +10 s, F the format menu, Backspace back
+      cinema.wake();
+      if (e.key === ' ') { e.preventDefault(); player.toggle(); }
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') player.seekBy(e.key === 'ArrowLeft' ? -10 : 10);
+      else if (e.key === 'f' || e.key === 'F') cinema.setMenu(!cinema.menuOpen);
+      else if (e.key === 'Backspace') { if (cinema.menuOpen) cinema.setMenu(false); else closeCinema(); }
+      else if (e.key === 'r' || e.key === 'R') recentre();
+      return;
+    }
+    if (e.key === '/' && !(S.level === 'her' && S.herMode !== 'gallery')) { e.preventDefault(); openKeyboard(); return; }
     if (e.key === 'r' || e.key === 'R') recentre();
     if (e.key === 'm' || e.key === 'M') summonPanel();
     if (e.key === 'Backspace') goBack();
@@ -806,6 +958,7 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   let held = 0, nextAt = 0;
   function updateSticks(dt, t) {
     const x = Math.abs(app.sticks.right.x) >= Math.abs(app.sticks.left.x) ? app.sticks.right.x : app.sticks.left.x;
+    if (S.cinema) { if (renderer.xr.isPresenting) cinema.stick(x, t); return; } // on a screen the arrow keys seek
     if (focus) {
       if (!renderer.xr.isPresenting) return; // keys step on their own (above)
       if (Math.abs(x) > 0.65) {
@@ -829,16 +982,31 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   showLibrary({ instant: true });
 
   // the screenshot flags: open a piece, a picture in the viewer, a file in focus, a hovered piece
+  let pendingAt = null;
   const ready = (async () => {
     const wait = S.view === 'filter' ? filterPromise : S.view === 'genres' ? ensureGenres() : basePromise;
     await wait;
     if (disposed || renderer.xr.isPresenting) return;
+    if (flags.search != null && !(flags.open > 0)) setSearch(flags.search);
     if (flags.open > 0 && lib && lib.count) {
       const it = lib.items[(flags.open - 1) % lib.count];
       const ok = it.genre ? await openGenre(it.genre, { instant: true }) : await openPerformer(it.perf, S.view === 'filter' ? 'triage' : 'gallery', { instant: true });
       if (!ok || disposed) return;
+      if (flags.search != null && S.herMode === 'gallery') { S.search.her = flags.search; showHer({ instant: true, focusAt: 0 }); }
       if (flags.focus > 0 && focus) { focus.setFocus(flags.focus - 1, { instant: true }); updateStatus(); }
       if (flags.viewer > 0 && her) { S.viewer = true; showHer({ instant: true, focusAt: flags.viewer - 1 }); }
+      if (flags.screen && focus?.current?.video) openCinema(focus.current, 'viewer');
+    }
+    if (flags.kbd) openKeyboard();
+    if (flags.play) {
+      const name = flags.play.split(/[\\/]/).pop();
+      openCinema({ key: flags.play, path: flags.play, name, video: true, aspect: 16 / 9, src: { kind: 'video', path: flags.play } }, 'flag');
+    }
+    if (S.cinema) {
+      if (flags.size) { cinema.size = flags.size; cinema.vidKey = ''; cinema.placeBar(); }
+      if (flags.bar) cinema.pinned = true;
+      if (flags.menu === 'format') cinema.setMenu(true);
+      if (flags.t != null) pendingAt = flags.t;
     }
     if (flags.hover > 0) {
       if (focus) { const it = focus.list[flags.hover - 1]; const n = it && focus.nodes.get(it); if (n) n.on = true; }
@@ -863,6 +1031,14 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
     for (const o of leaving) { o.update(dt, opts); if (o.disposed) leaving.delete(o); }
     focus?.update(dt, opts);
     note.material.opacity = stageFade;
+    // the cinema: the band, the viewer and the panel step aside; around you (180 / 360) the floor goes too
+    const inCinema = !!S.cinema;
+    for (const o of [lib, her, focus, ...leaving]) if (o) o.root.visible = !inCinema;
+    menu.root.visible = !inCinema && !kbd.open; // while typing, the keyboard's own field shows the search
+    note.visible = !!noteText && !inCinema;
+    disc.visible = !(inCinema && cinema.around);
+    cinema.update(dt);
+    if (pendingAt != null && player.ready && player.item) { const t0 = pendingAt; pendingAt = null; player.seekTo(t0); player.pause(); }
   });
 
   const handle = {
@@ -876,7 +1052,10 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
       if (disposed) return;
       disposed = true;
       timers.forEach((id) => clearTimeout(id)); timers.clear();
+      app.captureKeys(null);
+      cinema.dispose(); kbd.dispose();
       player.close();
+      handy.dispose();
       for (const o of [lib, her, focus, ...leaving]) o?.dispose();
       lib = her = focus = null; leaving.clear();
       menu.dispose();
@@ -892,6 +1071,8 @@ export async function createSalon(container, { flags = {}, onLibrary, onXR } = {
   const testHook = flags.test ? {
     get S() { return S; }, get lib() { return lib; }, get her() { return her; }, get focus() { return focus; },
     ready, goBack, step, setShape, closeViewer, openViewer, recentre, summonPanel,
+    camera, cinema, handy, kbd, player, setSearch, openKeyboard, closeKeyboard, openCinema, closeCinema,
+    get handyLog() { return mockHandy ? mockHandy.log : null; },
   } : null;
   if (testHook) window.__vrSalon = testHook;
   return handle;

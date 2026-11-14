@@ -60,8 +60,9 @@ export function arcLayout(list, f) {
 const lerpPose = (a, b, t) => ({ yaw: lerp(a.yaw, b.yaw, t), pitch: lerp(a.pitch, b.pitch, t), dist: lerp(a.dist, b.dist, t), w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t), b: lerp(a.b, b.b, t), op: lerp(a.op, b.op, t) });
 
 export class FocusView {
-  /** ctx: { app, tex, assets, player }. decide: true = triage; false = the plain viewer */
-  constructor(ctx, parent, { title, onPick, onAction, decide = true }) {
+  /** ctx: { app, tex, assets, player }. decide: true = triage; false = the plain viewer, whose bar has a button to
+   *  watch a video in the cinema (onAction('screen')), labelled screenLabel(item) */
+  constructor(ctx, parent, { title, onPick, onAction, decide = true, screenLabel = null }) {
     this.ctx = ctx; this.app = ctx.app; this.player = ctx.player; this.unit = ctx.assets.unitPlane;
     this.decide = decide; this.onPick = onPick; this.onAction = onAction;
     this.root = new THREE.Group(); this.root.name = 'focus-view';
@@ -85,14 +86,13 @@ export class FocusView {
       del: B('Delete   B', 0.19, { base: C.del, hover: C.delHover, textColor: C.delText }),
       undo: B('Undo   X', 0.16),
       next: B('›', 0.08, { size: 0.044 }),
-    } : { prev: B('‹', 0.1, { size: 0.044 }), close: B('Close   B', 0.2), next: B('›', 0.1, { size: 0.044 }) };
-    let x = -0.39;
+    } : { prev: B('‹', 0.1, { size: 0.044 }), close: B('Close   B', 0.2), screen: B('Screen', 0.2), next: B('›', 0.1, { size: 0.044 }) };
     for (const [k, b] of Object.entries(this.btn)) {
-      const bw = b.userData.w;
-      b.position.x = x + bw / 2; x += bw + 0.016; this.bar.add(b);
+      this.bar.add(b);
       this.app.pointer.add(b, { onClick: () => { if (!this.dead) this.onAction?.(k); } });
     }
-    this.bar.children.forEach((b) => { b.position.x -= (x - 0.016 - 0.39) / 2; });
+    this.screenLabel = screenLabel;
+    this.layoutBar();
     // grab hints: above = keep, below = delete
     const hint = (label, tone, fg) => {
       const m = canvasPlane(0.5, 0.08, { density: 1400 });
@@ -105,6 +105,19 @@ export class FocusView {
     this.keepHint.position.z += 0.05; this.delHint.position.z += 0.05;
     this.keepHint.material.opacity = this.delHint.material.opacity = 0;
     this.strip = null; this.videoItem = null; this.videoAt = 0;
+  }
+
+  /** the buttons under the focus, centred (the viewer's Screen button only shows for a video) */
+  layoutBar() {
+    const it = this.current, sb = this.btn.screen;
+    if (sb) {
+      sb.visible = !!it?.video;
+      if (sb.visible) sb.setLabel(this.screenLabel?.(it) || 'Screen');
+    }
+    const shown = Object.values(this.btn).filter((b) => b.visible);
+    const total = shown.reduce((a, b) => a + b.userData.w, 0) + 0.016 * (shown.length - 1);
+    let x = -total / 2;
+    for (const b of shown) { b.position.x = x + b.userData.w / 2; x += b.userData.w + 0.016; }
   }
 
   place(obj, pitch, dist) {
@@ -157,6 +170,7 @@ export class FocusView {
     }
     this.loadTextures();
     this.syncVideo(instant);
+    this.layoutBar();
   }
 
   makeNode(it) {
@@ -307,7 +321,7 @@ export class FocusView {
     if (!n) return;
     if (!this.videoOpened && performance.now() >= this.videoAt && n.focus && !this.dead) {
       this.videoOpened = true;
-      this.player.open(it);
+      if (this.player.item !== it) this.player.open(it); // the cinema may have it playing already
       this.buildStrip(n, n.to.w);
     }
     if (!this.videoOpened) return;

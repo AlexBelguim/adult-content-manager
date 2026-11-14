@@ -5,6 +5,7 @@
 //   app.scene / camera / player; app.pointer.add(mesh, { onClick(hit, src), onHover(on, hit) }); app.onFrame((dt, t) => {})
 //   app.on('button', ({ hand, name }) => {})   names: a b x y stick
 //   app.sticks.right.x; app.say(text, ms); app.listen(target, type, fn, opts)   (removed on dispose)
+//   app.on('select', ({ hand, entry }) => {}) on any trigger;  app.captureKeys(fn) gives a text field the keyboard
 //   await app.enterXR(); app.setActive(on); app.dispose()
 //
 // Coordinates: metres; the player stands at the origin of app.player (a group the camera and controllers live in),
@@ -131,8 +132,13 @@ export function createRuntime(container, { yaw: yaw0 = 0, pitch: pitch0 = 0, eye
   const keys = new Set();
   let wheel = 0;
   const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
+  let keyCapture = null; // the search keyboard while it is open: it gets every key (Escape included), nothing else does
   listen(window, 'keydown', (e) => {
     if (!active || typing(e)) return;
+    if (keyCapture && !renderer.xr.isPresenting) {
+      if (keyCapture(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      return;
+    }
     keys.add(e.key.toLowerCase());
     const b = { 1: 'a', 2: 'b', 3: 'x', 4: 'y' }[e.key];
     if (b) emit('button', { hand: b === 'a' || b === 'b' ? 'right' : 'left', name: b });
@@ -237,6 +243,8 @@ export function createRuntime(container, { yaw: yaw0 = 0, pitch: pitch0 = 0, eye
     isXR: () => renderer.xr.isPresenting,
     isActive: () => active,
     toNDC,
+    /** hand every key to fn(e) (true = used) instead of the sticks and buttons, or null to stop */
+    captureKeys(fn) { keyCapture = fn || null; keys.clear(); },
     /** the camera's flat-mode pose (radians) */
     setLook(y, p) { yaw = y; pitch = p; },
     /** render (and read input) or not; the XR session renders on its own */
