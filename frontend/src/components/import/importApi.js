@@ -62,17 +62,21 @@ export function fmtGb(gb) {
 // A part of a folder name that is a site tag, not a name: a domain ("Gigafans.net", "DailyOFHub.com", "t.me/x"),
 // "By Website …", "By Telegram …", a channel or leak tag.
 const SITE_PART = /\b[\w-]+\.(?:com|net|org|io|to|me|cc|tv|xyz|site|club|win|vip|app|co|ru|su|is|la|ws|fans)\b|\bby\s+(?:website|telegram|site)\b|\b(?:telegram|join|leaks?|leaked|onlyfans|fansly|patreon|mega\s*(?:folder|link)?)\b/i;
+// A part that only numbers a batch of one performer: "Group 01", "Part 2", "Vol. 3", "Pack 4", "Set 5", "Batch 6"
+const BATCH_PART = /^(?:group|part|pt\.?|vol\.?|volume|pack|set|batch)\s*#?\d+$/i;
 
 /**
- * A folder name without its site tags: "Biatrois - By Website Gigafans.net" and "AryMinh - DailyOFHub.com" give
- * "Biatrois" and "AryMinh". The name is split on " - ", " – " and " | "; the parts that are site tags are dropped
- * and the rest is kept as it was (underscores, dots and case stay). Nothing left: the name as it was.
+ * A folder name without its site tags and batch numbers: "Biatrois - By Website Gigafans.net",
+ * "AryMinh - DailyOFHub.com" and "Nattyprincessx - Group 01 - By Website Gigafans.net" give "Biatrois", "AryMinh"
+ * and "Nattyprincessx" (so a later "Group 02" folder adds to the same performer). The name is split on " - ", " – "
+ * and " | "; the parts that are site tags or batch numbers are dropped and the rest is kept as it was (underscores,
+ * dots and case stay). Nothing left: the name as it was.
  */
 export function siteFreeName(folderName) {
   const raw = String(folderName || '').trim();
   const parts = raw.split(/\s+[-–—|]\s+/);
   if (parts.length < 2) return raw;
-  const kept = parts.filter(p => !SITE_PART.test(p));
+  const kept = parts.filter(p => !SITE_PART.test(p) && !BATCH_PART.test(p.trim()));
   return kept.length ? kept.join(' - ').trim() : raw;
 }
 
