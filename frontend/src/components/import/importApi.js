@@ -59,9 +59,26 @@ export function fmtGb(gb) {
 }
 
 // ── names ────────────────────────────────────────────────────
-/** A performer name from a folder name: drops channel tags, emoji, @handles, (n), #n and .com, and tidies spaces. */
+// A part of a folder name that is a site tag, not a name: a domain ("Gigafans.net", "DailyOFHub.com", "t.me/x"),
+// "By Website …", "By Telegram …", a channel or leak tag.
+const SITE_PART = /\b[\w-]+\.(?:com|net|org|io|to|me|cc|tv|xyz|site|club|win|vip|app|co|ru|su|is|la|ws|fans)\b|\bby\s+(?:website|telegram|site)\b|\b(?:telegram|join|leaks?|leaked|onlyfans|fansly|patreon|mega\s*(?:folder|link)?)\b/i;
+
+/**
+ * A folder name without its site tags: "Biatrois - By Website Gigafans.net" and "AryMinh - DailyOFHub.com" give
+ * "Biatrois" and "AryMinh". The name is split on " - ", " – " and " | "; the parts that are site tags are dropped
+ * and the rest is kept as it was (underscores, dots and case stay). Nothing left: the name as it was.
+ */
+export function siteFreeName(folderName) {
+  const raw = String(folderName || '').trim();
+  const parts = raw.split(/\s+[-–—|]\s+/);
+  if (parts.length < 2) return raw;
+  const kept = parts.filter(p => !SITE_PART.test(p));
+  return kept.length ? kept.join(' - ').trim() : raw;
+}
+
+/** A performer name from a folder name: drops site tags, channel tags, emoji, @handles, (n), #n and .com, and tidies spaces. */
 export function cleanName(folderName) {
-  return String(folderName || '')
+  return siteFreeName(folderName)
     .replace(/Join Telegram.*$/i, '')
     .replace(/BY Telegram.*$/i, '')
     .replace(/on \[TELEGRAM\].*$/i, '')

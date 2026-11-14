@@ -29,7 +29,7 @@ import { TILE_GRID, TileSkeleton } from '../discover/Tile';
 import { SmallButton } from '../discover/shared';
 import Lightbox from '../discover/Lightbox';
 import FolderTile, { countsOf, folderFacts } from './FolderTile';
-import { scanFolders, folderDetails, checkName, queueLocal, nameError, removeLeftover, fmtBytes } from './importApi';
+import { scanFolders, folderDetails, checkName, queueLocal, nameError, removeLeftover, fmtBytes, siteFreeName } from './importApi';
 import './import.css';
 
 const RESET = '\u0000reset';
@@ -89,6 +89,7 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
   foldersRef.current = folders;
   const scanCtl = useRef(null);
   const nameCtl = useRef(new Map());
+  const keepRaw = useRef(new Set());   // folders whose own name the user chose over the site-free one
   const baseRef = useRef(basePath);
   baseRef.current = basePath;
   // The page's callbacks through refs: a new function from the page never restarts a scan.
@@ -177,7 +178,14 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
       }
       const given = new Map(foldersRef.current.filter(f => f.override).map(f => [f.name, f.override]));
       const before = new Map(foldersRef.current.map(f => [f.name, f]));
-      const list = (data?.performers || []).map(p => fromScan(p, given.get(p.name), before.get(p.name)));
+      // A folder named with a site tag ("Biatrois - By Website Gigafans.net") imports as the name alone, unless the
+      // user chose the folder name for it (Change the name > Use the folder name)
+      const auto = (name) => {
+        if (keepRaw.current.has(name)) return undefined;
+        const clean = siteFreeName(name);
+        return clean && clean !== name ? clean : undefined;
+      };
+      const list = (data?.performers || []).map(p => fromScan(p, given.get(p.name) ?? auto(p.name), before.get(p.name)));
       const names = new Set(list.map(f => f.name));
       setBeforePath(data?.beforeUploadPath || '');
       setFolders(list);
@@ -248,6 +256,7 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
       alt: { label: 'Use the folder name', value: RESET }
     });
     if (answer == null || answer === false) return;
+    if (answer === RESET) keepRaw.current.add(name); else keepRaw.current.delete(name);
     check(name, answer === RESET ? '' : String(answer).trim());
   }, [ask, check]);
 
