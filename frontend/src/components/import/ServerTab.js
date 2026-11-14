@@ -29,7 +29,7 @@ import { TILE_GRID, TileSkeleton } from '../discover/Tile';
 import { SmallButton } from '../discover/shared';
 import Lightbox from '../discover/Lightbox';
 import FolderTile, { countsOf, folderFacts } from './FolderTile';
-import { scanFolders, folderDetails, checkName, queueLocal, nameError } from './importApi';
+import { scanFolders, folderDetails, checkName, queueLocal, nameError, removeLeftover, fmtBytes } from './importApi';
 import './import.css';
 
 const RESET = '\u0000reset';
@@ -37,6 +37,13 @@ const SHOW_ICON = <FilterListIcon />;
 const SERVER_ICON = <FolderOpenIcon />;
 const AT_ONCE = 3;
 const LIFT = { xs: 'calc(150px + var(--nav-bottom, 0px))', sm: 'calc(88px + var(--nav-bottom, 0px))' };
+/** What is left in a folder with nothing to import: "1 file (.txt) · 169 B" */
+function leftText(f) {
+  const o = f.details?.other;
+  if (!o || !o.count) return 'nothing';
+  return `${plural(o.count, 'file')}${o.exts?.length ? ` (${o.exts.join(', ')})` : ''} · ${fmtBytes(o.bytes)}`;
+}
+
 const switchSx = {
   '& .MuiSwitch-switchBase.Mui-checked': { color: 'var(--accent)' },
   '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: 'var(--accent)', opacity: 0.5 }
@@ -249,6 +256,43 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
     if (signal && !signal.aborted) readOne(name, signal);
   }, [readOne]);
 
+  // ── leftovers: folders with nothing to import, what an import leaves behind (a .txt, a website's files) ──
+  const dropFolders = useCallback((names) => {
+    const gone = new Set(names);
+    setFolders(list => list.filter(f => !gone.has(f.name)));
+    setSelected(prev => {
+      const next = new Set(prev);
+      names.forEach(n => next.delete(n));
+      return next;
+    });
+  }, []);
+
+  // A folder that is already gone counts as removed
+  const removeOne = useCallback(async (name) => {
+    try {
+      await removeLeftover(basePath, name);
+    } catch (err) {
+      if (err.status !== 404) throw err;
+    }
+  }, [basePath]);
+
+  const removeFolder = useCallback(async (name) => {
+    const f = foldersRef.current.find(x => x.name === name);
+    if (!f) return;
+    const ok = await ask({
+      title: 'Remove this folder?',
+      text: `Nothing in "${name}" can be imported. The folder and what is left in it are deleted for good.`,
+      rows: [['Folder', `before upload / ${name}`], ['Left in it', leftText(f)]],
+      okLabel: 'Remove folder',
+      busyLabel: 'Removing…',
+      danger: true,
+      run: () => removeOne(name)
+    });
+    if (!ok) return;
+    dropFolders([name]);
+    notify(`Removed "${name}" from before upload`);
+  }, [ask, dropFolders, notify, removeOne]);
+
   const openPictures = useCallback((name, index = 0) => setPictures({ name, index }), []);
 
   // ── what is shown ──
@@ -272,6 +316,29 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
       visibleImportable.forEach(f => next.add(f.name));
       return next;
     });
+  };
+
+  const leftovers = folders.filter(f => folderFacts(f).unsupportedOnly && !f.job);
+  const removeLeftovers = async () => {
+    const names = leftovers.map(f => f.name);
+    const ok = await ask({
+      title: `Remove ${plural(names.length, 'leftover folder')}?`,
+      text: 'Nothing in these folders can be imported: they hold what earlier imports left behind. They are deleted for good.',
+      rows: leftovers.map(f => [f.name, leftText(f)]),
+      okLabel: `Remove ${names.length}`,
+      busyLabel: 'Removing…',
+      danger: true,
+      run: async () => {
+        const done = [];
+        const failed = [];
+        for (const n of names) {
+          try { await removeOne(n); done.push(n); } catch (err) { failed.push({ n, err }); }
+        }
+        if (done.length) dropFolders(done);
+        if (failed.length) throw new Error(`${failed[0].n}: ${errorText(failed[0].err, 'could not be removed')}${failed.length > 1 ? ` (and ${failed.length - 1} more)` : ''}`);
+      }
+    });
+    if (ok) notify(`Removed ${plural(names.length, 'leftover folder')} from before upload`);
   };
 
   const showBar = folders.length > 0;
@@ -383,6 +450,9 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
       <ContentLine
         title="From the server folder"
         meta={!scanned ? 'Scanning…' : `${plural(folders.length, 'folder')} · ${importableCount.toLocaleString()} can be imported`}
+        actions={leftovers.length > 1
+          ? <SmallButton danger onClick={removeLeftovers} tip="Folders with nothing to import, left behind by earlier imports">{`Remove ${leftovers.length} leftover folders`}</SmallButton>
+          : null}
       />
     </>
   ) : null;
@@ -439,11 +509,13 @@ export default function ServerTab({ basePath, active, onCount, onSwitchTab, onNo
                 onRename={rename}
                 onReload={reload}
                 onPictures={openPictures}
+                onRemove={removeFolder}
               />
             ))}
           </div>
         )}
 
+      {showBar && <div className="im-foot" aria-hidden />}
       {showBar && (
         <div className="im-bar" role="region" aria-label="Import">
           <div className="im-count">

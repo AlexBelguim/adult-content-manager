@@ -4,7 +4,9 @@
  *
  *   folder: { name, match, job, details, detailsError, loading, override, checking, checkError }
  *   facts:  folderFacts(folder) (below): what the tile, the selection and the bar read
- *   onToggle(name), onRename(name), onReload(name), onPictures(name, index): stable callbacks (the tile is memoised)
+ *   onToggle(name), onRename(name), onReload(name), onPictures(name, index), onRemove(name): stable callbacks (the tile
+ *   is memoised). A folder with only unsupported files (what an import leaves behind) gets Remove folder instead of
+ *   Select.
  *
  * The picture opens her pictures (the viewer), and a strip of the next four sits under it; the counts and the size are
  * the line under the name. Only the match is on the picture. Select is in the control row.
@@ -44,7 +46,7 @@ export function folderFacts(f) {
   return { counts, unsupportedOnly, importable: !reason, reason };
 }
 
-function FolderTile({ folder: f, selected, onToggle, onRename, onReload, onPictures }) {
+function FolderTile({ folder: f, selected, onToggle, onRename, onReload, onPictures, onRemove }) {
   const { counts, unsupportedOnly, importable, reason } = folderFacts(f);
   const shown = f.override || f.name;
   const details = f.details;
@@ -121,7 +123,13 @@ function FolderTile({ folder: f, selected, onToggle, onRename, onReload, onPictu
         <>
           {f.detailsError
             ? <RowBtn onClick={() => onReload(f.name)}>Read again</RowBtn>
-            : (
+            : unsupportedOnly && !f.job
+              ? (
+                <RowBtn tone="bad" title="Nothing here can be imported: delete the folder" onClick={() => onRemove(f.name)}>
+                  Remove folder
+                </RowBtn>
+              )
+              : (
               <RowBtn primary={selected} disabled={!importable} title={reason || undefined} onClick={() => onToggle(f.name)}>
                 {selected ? 'Selected' : 'Select'}
               </RowBtn>

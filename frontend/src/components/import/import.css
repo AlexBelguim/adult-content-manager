@@ -11,6 +11,18 @@
 /* the one dim line under each tab: what happens */
 .im-line { margin: 0 0 12px; font-size: .85rem; line-height: 1.45; color: var(--dim); }
 
+/* ── the frame: SidebarPage (className im-frame). Its content column is a flex column and the shown tab fills it,
+   so the action bar, the tab's last child after a growing spacer (.im-foot), stands at the foot of the window even
+   when there are few folders, as on the duplicates page ── */
+.im-frame > [data-sidebar-content] { display: flex; flex-direction: column; }
+.im-frame[data-sidebar-mode="phone"] {
+  display: flex; flex-direction: column;
+  min-height: calc(100dvh - 49px - env(safe-area-inset-top, 0px) - 57px - env(safe-area-inset-bottom, 0px));
+}
+.im-tab { flex: 1 0 auto; flex-direction: column; min-width: 0; }
+.im-tab > .im-page { flex: 1 0 auto; display: flex; flex-direction: column; min-width: 0; }
+.im-foot { flex: 1 0 0; }
+
 /* ── the sticky action bar: after the grid, always on screen while the tab has folders.
    Its sides undo the content column's padding (SidebarPage: 24px beside the sidebar, 12px on a phone) so it runs
    across the content column, edge to edge, and its content lines up with the page's. ── */

@@ -6,7 +6,7 @@ const { importPerformer, getPerformerFiles } = require('../services/importer');
 const { addLocalImportToQueue, activeJobFor, jobForUpload, anyJobForUpload } = require('../services/uploadQueue');
 const {
   SUPPORTED, UPLOAD_ID, resolveLibrary, requireLibrary, checkFolder, resolveImportName,
-  safeRel, safeBase, uploadTempDir, readManifests, countOther
+  safeRel, safeBase, uploadTempDir, readManifests, countOther, kindOf
 } = require('../services/importGuard');
 
 const db = require('../db');
@@ -322,6 +322,51 @@ router.post('/local-import', async (req, res) => {
 
   if (jobs.length) return res.json({ success: true, jobs, refused });
   res.status(409).json({ error: refused[0].error, jobs: [], refused });
+});
+
+/**
+ * Remove a folder left in "before upload" that holds nothing to import: what an import leaves behind (a .txt, a
+ * website's .url and .html files). Refused (409, code 'importable') when any picture, video or funscript is in it,
+ * hidden folders included, and (409, 'queued') while an import job holds it. The files are deleted for good: the
+ * page asks first and lists what goes. { performerName, basePath? } -> { success, removed: { count, bytes } }
+ */
+router.post('/before-upload/remove', async (req, res) => {
+  const { performerName, basePath } = req.body || {};
+  if (typeof performerName !== 'string' || !performerName) {
+    return res.status(400).json({ error: 'performerName is required', code: 'invalid' });
+  }
+  try {
+    const lib = requireLibrary(basePath);
+    const problem = await checkFolder(lib.path, performerName);
+    if (problem) return res.status(problem.code === 'missing' ? 404 : 400).json({ error: problem.error, code: problem.code });
+    if (activeJobFor({ libPath: lib.path, folderName: performerName })) {
+      return res.status(409).json({ error: `"${performerName}" is queued for import`, code: 'queued' });
+    }
+    const dir = path.join(lib.path, 'before upload', performerName);
+    let importable = 0;
+    let count = 0;
+    let bytes = 0;
+    const walk = async (d) => {
+      for (const e of await fs.readdir(d, { withFileTypes: true })) {
+        const full = path.join(d, e.name);
+        if (e.isSymbolicLink()) { count++; continue; }   // removed as a link, never followed
+        if (e.isDirectory()) { await walk(full); continue; }
+        if (kindOf(e.name)) importable++;
+        count++;
+        try { bytes += (await fs.stat(full)).size; } catch (err) { /* gone meanwhile */ }
+      }
+    };
+    await walk(dir);
+    if (importable > 0) {
+      return res.status(409).json({ error: `"${performerName}" has ${importable} file${importable === 1 ? '' : 's'} to import`, code: 'importable' });
+    }
+    await fs.remove(dir);
+    console.log(`Removed the leftover folder "${performerName}" from before upload (${count} files, ${bytes} bytes)`);
+    res.json({ success: true, removed: { count, bytes } });
+  } catch (err) {
+    console.error(`Error removing "${performerName}" from before upload:`, err);
+    sendError(res, err);
+  }
 });
 
 const toInt = (v) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);

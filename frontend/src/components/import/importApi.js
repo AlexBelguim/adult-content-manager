@@ -255,6 +255,16 @@ export function queueLocal(basePath, performers, createHashes) {
   });
 }
 
+/**
+ * Delete a folder of "before upload" that holds nothing to import (what an import leaves behind). The server
+ * refuses (409) when anything importable is in it or a job holds it. Resolves with { removed: { count, bytes } }.
+ */
+export function removeLeftover(basePath, name) {
+  const body = { performerName: name };
+  if (basePath) body.basePath = basePath;
+  return request('POST', '/api/folders/before-upload/remove', { body });
+}
+
 /** What the server has of an upload: { uploadId, exists, batches, files, bytes, job }. */
 export function uploadStatus(basePath, id) {
   return request('GET', `/api/folders/upload-import/${enc(id)}${qs({ basePath })}`);

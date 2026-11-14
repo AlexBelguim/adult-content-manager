@@ -122,7 +122,7 @@ export default function LocalImportPage({ basePath: given }) {
   }));
 
   return (
-    <SidebarPage title="Import" views={views} view={tab}>
+    <SidebarPage title="Import" views={views} view={tab} className="im-frame">
       {noLibrary
         ? (
           <>
@@ -136,7 +136,7 @@ export default function LocalImportPage({ basePath: given }) {
         )
         : (
           <>
-            <div style={{ display: tab === 'server' ? 'block' : 'none' }}>
+            <div className="im-tab" style={{ display: tab === 'server' ? 'flex' : 'none' }}>
               <ServerTab
                 basePath={basePath}
                 active={tab === 'server'}
@@ -146,7 +146,7 @@ export default function LocalImportPage({ basePath: given }) {
                 watchJobs={watchJobs}
               />
             </div>
-            <div style={{ display: tab === 'computer' ? 'block' : 'none' }}>
+            <div className="im-tab" style={{ display: tab === 'computer' ? 'flex' : 'none' }}>
               <ComputerTab basePath={basePath} active={tab === 'computer'} />
             </div>
           </>
