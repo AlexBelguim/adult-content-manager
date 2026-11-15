@@ -121,6 +121,8 @@ async function editsAreMeaningful(editsPath) {
   try {
     const e = await fs.readJson(editsPath);
     return !!(
+      // the current editor keeps its work as picks; an implicit one is only the editor's starting idle
+      (Array.isArray(e.picks) && e.picks.some(p => p && !p.implicit)) ||
       (e.cluster_marks && e.cluster_marks.length) ||
       (e.range_marks && e.range_marks.length) ||
       (e.regions && e.regions.length) ||
@@ -239,13 +241,15 @@ router.get('/library', async (req, res) => {
     });
 
     const counts = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+    const { performers, labelled } = performerSummary(rows);
 
     res.json({
       total: rows.length,
       counts,
+      performers,
       funpipeOnline: queue.online,
       cached: videos === libraryCache.data && now - libraryCache.time > 0 && !refresh,
-      videos: rows
+      videos: rows.map(v => ({ ...v, labelled: labelled.has(pathKey(v.path)) }))
     });
   } catch (err) {
     console.error('[funpipe] library error:', err);
@@ -253,6 +257,59 @@ router.get('/library', async (req, res) => {
   }
 });
 
+const pathKey = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
+
+/**
+ * One line per performer for the page's performer rows, counted the way Performer Management counts:
+ * - videos:     all her videos (performers.vids_count, which includes the funscript folder's)
+ * - labelled:   her videos with labelmaster's scenes (video_labels, by the "<before|after>/<name>" in the path),
+ *               so unlabelled = videos - labelled, as on Performer Management
+ * - funscript:  videos in her funscript folder (the library rows); noScript: those of them with no .funscript yet
+ * - counts:     her funscript folder's rows by status
+ * Blacklisted performers and those with nothing at all are left out. Also returns the set of labelled paths
+ * (pathKey), for each video's own "labelled" flag.
+ */
+function performerSummary(rows) {
+  const labelled = new Set();
+  const labelledBy = {};
+  for (const { file_path: p } of db.prepare('SELECT file_path FROM video_labels').all()) {
+    labelled.add(pathKey(p));
+    const m = /[\\/](before|after) filter performer[\\/]([^\\/]+)[\\/]/.exec(p);
+    if (m) labelledBy[`${m[1]}/${m[2]}`] = (labelledBy[`${m[1]}/${m[2]}`] || 0) + 1;
+  }
+
+  const byPerformer = new Map();
+  for (const v of rows) {
+    if (!byPerformer.has(v.performerId)) byPerformer.set(v.performerId, []);
+    byPerformer.get(v.performerId).push(v);
+  }
+
+  const performers = db.prepare(`
+    SELECT id, name, moved_to_after, vids_count, thumbnail FROM performers
+    WHERE blacklisted IS NOT 1 AND name NOT LIKE '.%'
+  `).all().map(p => {
+    const where = p.moved_to_after === 1 ? 'after' : 'before';
+    const own = byPerformer.get(p.id) || [];
+    const videos = Math.max(p.vids_count || 0, own.length);
+    const done = Math.min(labelledBy[`${where}/${p.name}`] || 0, videos);
+    const counts = own.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+    return {
+      id: p.id,
+      name: p.name,
+      where,
+      thumbnail: p.thumbnail || null,
+      videos,
+      labelled: done,
+      unlabelled: videos - done,
+      funscript: own.length,
+      noScript: own.filter(v => !v.funscripts.length).length,
+      counts
+    };
+  }).filter(p => p.videos > 0 || p.funscript > 0);
+
+  return { performers, labelled };
+}
+
 module.exports = router;
 // Exposed for tests — status derivation is the tricky part of this file.
-module.exports._internal = { inspectVideoFolder, editsAreMeaningful };
+module.exports._internal = { inspectVideoFolder, editsAreMeaningful, performerSummary };

@@ -1,92 +1,191 @@
+/**
+ * Funscripts (/funpipe): every performer with what is left to do for her funscripts, and her funscript folder.
+ *
+ * The frame is SidebarPage (components/layout), like Performer Management. Its View list is what needs doing, with a
+ * count of performers each: All, Unlabelled (videos without labelmaster's scenes), No script yet (videos in her
+ * funscript folder without a .funscript), Needs review (funpipe scripts nobody reviewed), Funscript folder (has one).
+ * Then, in the sidebar: Show (search, sort) and Funscripts (the review editor as the main action, the library's
+ * totals, acm-gpu's state, Jobs, Rescan, Worker settings).
+ *
+ * A performer row: her picture, name and Before / After, then one facts line: videos, unlabelled, in her funscript
+ * folder, no script yet, need review. On the right her actions (labels & funscripts through scenetest, queue her
+ * unscripted funscript-folder videos with funpipe) and the chevron that opens her funscript folder under the row.
+ * A search that matches only file names lists those videos, opened. Ticked videos are queued from the content line.
+ *
+ * The URL holds view (v), sort and search (q), all replace. Data: GET /api/funpipe/library ({ videos, counts,
+ * performers }, backend/routes/funpipe.js); the queue lives on /jobs.
+ */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import {
-  Box, Typography, Button, IconButton, Chip, Alert,
-  LinearProgress, Stack, Tooltip,
-  TextField, Checkbox
-} from '@mui/material';
-import { PageShell, Panel, StatRow, SPACE, iconBtnSx } from '../components/layout';
-import { useNotify } from '../components/ui';
-import { useShell } from '../nav';
-import useJobs, { isActive } from '../hooks/useJobs';
+import { Alert, Box, ButtonBase, Checkbox, IconButton, LinearProgress, Tooltip } from '@mui/material';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import TuneIcon from '@mui/icons-material/Tune';
+import PeopleIcon from '@mui/icons-material/People';
+import LabelOffIcon from '@mui/icons-material/LabelOff';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import RateReviewIcon from '@mui/icons-material/RateReview';
+import FolderSpecialIcon from '@mui/icons-material/FolderSpecial';
 import MovieIcon from '@mui/icons-material/Movie';
 import QueueIcon from '@mui/icons-material/Queue';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import SettingsIcon from '@mui/icons-material/Settings';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import {
+  ContentLine, EmptyState, LoadingState, Panel, SIDE, SidebarPage, SideButton, SideButtons, SideFacts, SideGroup,
+  SideMain, SideNote, SideSearch, SideSelect, iconBtnSx
+} from '../components/layout';
+import { SmallButton, useQueryState } from '../components/discover/shared';
+import { useNotify } from '../components/ui';
+import { useShell } from '../nav';
+import PipelineQuickButton from '../components/PipelineQuickButton';
+import PipelineDialog from '../components/PipelineDialog';
+import useJobs, { isActive } from '../hooks/useJobs';
+
+const TITLE = 'Funscripts';
 
 // Status vocabulary comes from GET /api/funpipe/library — see backend/routes/funpipe.js
 const STATUS_META = {
-  running:      { label: 'Generating',    color: 'info',      help: 'funpipe is working on this now' },
-  queued:       { label: 'Queued',        color: 'default',   help: 'Waiting in the funpipe queue' },
-  needs_review: { label: 'Needs review',  color: 'warning',   help: 'funpipe made a script, nobody has reviewed it' },
-  reviewed:     { label: 'Reviewed',      color: 'success',   help: 'funpipe script with human edits' },
-  external:     { label: 'External',      color: 'secondary', help: 'Has a funscript that funpipe did not make' },
-  no_script:    { label: 'No script',     color: 'error',     help: 'No funscript and no funpipe output yet' },
-  incomplete:   { label: 'Incomplete',    color: 'warning',   help: 'funpipe started but never produced a signal' },
-  failed:       { label: 'Failed',        color: 'error',     help: 'The funpipe job failed' }
+  running:      { label: 'Generating',    help: 'funpipe is working on this now' },
+  queued:       { label: 'Queued',        help: 'Waiting in the funpipe queue' },
+  needs_review: { label: 'Needs review',  help: 'funpipe made a script, nobody has reviewed it' },
+  reviewed:     { label: 'Reviewed',      help: 'funpipe script with human edits' },
+  external:     { label: 'External',      help: 'Has a funscript that funpipe did not make' },
+  no_script:    { label: 'No script',     help: 'No funscript and no funpipe output yet' },
+  incomplete:   { label: 'Incomplete',    help: 'funpipe started but never produced a signal' },
+  failed:       { label: 'Failed',        help: 'The funpipe job failed' }
 };
-
+const STATUS_TONE = {
+  running: 'var(--accent)', queued: 'var(--dim)', needs_review: 'var(--warn)', reviewed: 'var(--ok)',
+  external: 'var(--info)', no_script: 'var(--bad)', incomplete: 'var(--warn)', failed: 'var(--bad)'
+};
 const QUEUEABLE = ['no_script', 'incomplete', 'failed'];
 
-/* MUI palette names don't reach plain CSS, and the rows need the colour as a
-   var() for borders and text. One map, both uses. */
-const STATUS_TONE = {
-  running: 'accent', queued: 'default', needs_review: 'warn', reviewed: 'ok',
-  external: 'info', no_script: 'bad', incomplete: 'warn', failed: 'bad'
+/* The views: what still needs doing, counted in performers. */
+const VIEWS = [
+  { id: 'all',        label: 'All performers',   icon: PeopleIcon,        test: () => true },
+  { id: 'unlabelled', label: 'Unlabelled',       icon: LabelOffIcon,      test: p => p.unlabelled > 0,
+    title: 'Has videos without labelmaster\'s scenes' },
+  { id: 'noscript',   label: 'No script yet',    icon: ScheduleIcon,      test: p => p.noScript > 0,
+    title: 'Has videos in her funscript folder with no script yet' },
+  { id: 'review',     label: 'Needs review',     icon: RateReviewIcon,    test: p => (p.counts?.needs_review || 0) > 0,
+    title: 'Has funpipe scripts nobody has reviewed' },
+  { id: 'folder',     label: 'Funscript folder', icon: FolderSpecialIcon, test: p => p.funscript > 0,
+    title: 'Has videos in a funscript folder' }
+];
+const SORTS = [
+  { id: 'name',       label: 'Name',                cmp: () => 0 },
+  { id: 'noscript',   label: 'Most without script', cmp: (a, b) => b.noScript - a.noScript },
+  { id: 'unlabelled', label: 'Most unlabelled',     cmp: (a, b) => b.unlabelled - a.unlabelled },
+  { id: 'videos',     label: 'Most videos',         cmp: (a, b) => b.videos - a.videos }
+];
+const NOTHING = {
+  unlabelled: 'Every performer\'s videos are labelled.',
+  noscript: 'Every video in a funscript folder has a script.',
+  review: 'Nothing waits for review.',
+  folder: 'No performer has a funscript folder yet. Use "Move to Funscript" while filtering a performer.'
 };
-const TONE_VAR = {
-  accent: 'var(--accent)', ok: 'var(--ok)', warn: 'var(--warn)',
-  bad: 'var(--bad)', info: 'var(--info)', default: 'var(--dim)'
-};
-/* Worst first — the summary should open on what needs attention, not on the
-   videos that are already done. */
-const STAT_ORDER = ['no_script', 'failed', 'incomplete', 'needs_review', 'running', 'queued', 'reviewed', 'external'];
 
-const filterChipSx = (active, tone) => ({
-  height: 24,
-  fontSize: '0.7rem',
-  fontWeight: active ? 650 : 550,
-  cursor: 'pointer',
-  bgcolor: active ? (tone || 'var(--accent)') : 'var(--bg)',
-  color: active ? 'var(--bg)' : (tone || 'var(--dim)'),
-  border: '1px solid',
-  borderColor: tone || 'var(--line)',
-  '&:hover': { bgcolor: active ? (tone || 'var(--accent)') : 'var(--raised)' }
+const n = (v) => Number(v || 0).toLocaleString();
+const thumbUrl = (p) => (p?.thumbnail ? `/api/files/preview?path=${encodeURIComponent(p.thumbnail)}` : null);
+
+// ── styles (the row is Performer Management's: components/performers/PerformerRow.js) ──
+const PHONE = '@media (max-width: 699.98px)';
+const MID = '@media (max-width: 1099.98px)';
+const rowSx = { '&:not(:first-of-type)': { borderTop: '1px solid var(--line)' } };
+const headSx = (open) => ({
+  boxSizing: 'border-box', display: 'grid', minHeight: 64, px: 1.5, py: 0.75,
+  gridTemplateColumns: '48px minmax(0, 1fr) auto auto',
+  gridTemplateAreas: '"pic name ctl chev" "pic facts ctl chev"',
+  alignContent: 'center', alignItems: 'center', columnGap: 1.5, rowGap: '2px',
+  color: 'var(--text)', bgcolor: open ? 'var(--raised)' : 'transparent',
+  transition: 'background-color .12s ease',
+  '@media (hover: hover)': { '&:hover': { bgcolor: 'var(--raised)' } },
+  [MID]: {
+    gridTemplateColumns: '48px minmax(0, 1fr) auto',
+    gridTemplateAreas: '"pic name chev" "pic facts chev" "ctl ctl ctl"', rowGap: '4px'
+  },
+  [PHONE]: { px: 1.25, columnGap: 1, gridTemplateColumns: '40px minmax(0, 1fr) auto' }
+});
+const picSx = {
+  gridArea: 'pic', boxSizing: 'border-box', width: 48, height: 48, overflow: 'hidden',
+  borderRadius: 'var(--radius-sm, 4px)', bgcolor: 'var(--raised)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  color: 'var(--dim)', fontSize: '1rem', fontWeight: 600, userSelect: 'none',
+  '& img': { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+  [PHONE]: { width: 40, height: 40 }
+};
+const nameLineSx = { gridArea: 'name', display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0, height: 24 };
+const nameSx = {
+  flex: '0 1 auto', minWidth: 48, maxWidth: '100%', display: 'block', textAlign: 'left',
+  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  font: 'inherit', fontSize: '.875rem', fontWeight: 620, lineHeight: '24px', color: 'var(--text)',
+  borderRadius: 'var(--radius-sm, 4px)',
+  '&.Mui-focusVisible': { outline: '2px solid var(--accent)', outlineOffset: 1 }
+};
+const pillSx = (tone) => ({
+  flex: 'none', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', height: 20, px: 0.75,
+  border: '1px solid', borderColor: tone, color: tone, borderRadius: 'var(--radius-sm, 4px)',
+  fontSize: '.75rem', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap'
+});
+const factsSx = {
+  gridArea: 'facts', display: 'flex', alignItems: 'center', columnGap: 1.25, rowGap: '2px', minWidth: 0,
+  flexWrap: 'wrap', fontSize: '.75rem', lineHeight: '20px', color: 'var(--dim)', fontVariantNumeric: 'tabular-nums',
+  '& > span': { whiteSpace: 'nowrap' },
+  '& b': { color: 'var(--text)', fontWeight: 600 }
+};
+const toneB = (tone) => ({ '& b': { color: tone } });
+const dotSx = (tone) => ({
+  display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap',
+  '&::before': { content: '""', width: 6, height: 6, borderRadius: '50%', bgcolor: tone, flexShrink: 0 }
+});
+const ctlSx = { gridArea: 'ctl', display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0, [MID]: { flexWrap: 'wrap' } };
+const groupSx = {
+  display: 'flex', alignItems: 'center', gap: '2px', px: '2px', py: '1px', flexShrink: 0,
+  border: '1px solid var(--line)', borderRadius: 'var(--radius, 6px)', bgcolor: 'var(--bg)'
+};
+const btnSx = {
+  ...iconBtnSx(),
+  '&.Mui-disabled': { color: 'var(--faint)' },
+  '&.Mui-focusVisible': { outline: '2px solid var(--accent)', outlineOffset: 1 }
+};
+const chevSx = { gridArea: 'chev', ...btnSx };
+const videosSx = {
+  display: 'flex', flexDirection: 'column', bgcolor: 'var(--bg)', borderTop: '1px solid var(--line)',
+  pl: { xs: 1, sm: 'calc(48px + 24px)' }, pr: 1.5, py: 0.5
+};
+const videoSx = (selected) => ({
+  display: 'grid', gridTemplateColumns: 'auto 64px minmax(0, 1fr) auto', alignItems: 'center', columnGap: 1,
+  py: 0.5, borderRadius: 'var(--radius, 6px)', bgcolor: selected ? 'var(--accent-quiet)' : 'transparent',
+  '&:not(:first-of-type)': { borderTop: '1px solid var(--line)' },
+  [PHONE]: { gridTemplateColumns: 'auto 56px minmax(0, 1fr)', '& .fp-video-ctl': { gridColumn: '2 / -1', justifySelf: 'start' } }
 });
 
-/**
- * Poster frame for one video.
- *
- * The old table had no imagery at all — a video library rendered entirely as
- * text. Falls back to a toned tile when the frame grab fails, which it will for
- * codecs ffmpeg can't open, or files that moved since the last library scan.
- */
+/** Her picture, or her initial. */
+function Picture({ p }) {
+  const [failed, setFailed] = useState(false);
+  const src = failed ? null : thumbUrl(p);
+  return src
+    ? <Box sx={picSx}><img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} /></Box>
+    : <Box sx={picSx} aria-hidden>{(p.name || '?').trim().charAt(0).toUpperCase() || '?'}</Box>;
+}
+
+/** A video's poster frame, or a toned tile when ffmpeg can't open it. */
 function VideoThumb({ path, tone }) {
   const [failed, setFailed] = useState(false);
   const box = {
-    width: 64, height: 44, flexShrink: 0, borderRadius: 'var(--radius-sm, 4px)',
-    overflow: 'hidden', bgcolor: 'var(--raised)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center'
+    width: 64, height: 40, borderRadius: 'var(--radius-sm, 4px)', overflow: 'hidden', bgcolor: 'var(--raised)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', [PHONE]: { width: 56, height: 36 }
   };
-  if (failed) {
-    return (
-      <Box sx={{ ...box, color: tone, '& svg': { fontSize: 18, opacity: 0.7 } }}>
-        <MovieIcon />
-      </Box>
-    );
-  }
+  if (failed) return <Box sx={{ ...box, color: tone, '& svg': { fontSize: 18, opacity: 0.7 } }}><MovieIcon /></Box>;
   return (
     <Box sx={box}>
-      <Box
-        component="img"
-        loading="lazy"
+      <Box component="img" loading="lazy" alt="" onError={() => setFailed(true)}
         src={`/api/files/video-thumbnail?path=${encodeURIComponent(path)}`}
-        alt=""
-        onError={() => setFailed(true)}
-        sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-      />
+        sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
     </Box>
   );
 }
@@ -97,65 +196,183 @@ function fmtBytes(b) {
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(b / 1024 ** 2).toFixed(0)} MB`;
 }
 
-/**
- * Funpipe — the funscript library and the review editor. The queue itself
- * (job list, Start / Stop / Clear done, log tail, worker state) lives on /jobs
- * under the Funscripts filter; this page only adds videos to it.
- */
+/** One video of her funscript folder: tick to queue, its script state and labels, then its buttons. */
+function VideoRow({ v, selected, onToggle, reviewUrl, onQueue, online }) {
+  const meta = STATUS_META[v.status] || { label: v.status };
+  const tone = STATUS_TONE[v.status] || 'var(--dim)';
+  const queueable = QUEUEABLE.includes(v.status);
+  return (
+    <Box sx={videoSx(selected)}>
+      <Checkbox size="small" disabled={!queueable} checked={selected} onChange={onToggle}
+        inputProps={{ 'aria-label': `Select ${v.name}` }}
+        sx={{ p: 0.5, color: 'var(--muted)', '&.Mui-checked': { color: 'var(--accent)' } }} />
+      <VideoThumb path={v.path} tone={tone} />
+      <Box sx={{ minWidth: 0 }}>
+        <Box title={v.name} sx={{
+          fontSize: '.8125rem', fontWeight: 600, color: 'var(--text)', lineHeight: '20px',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+        }}>
+          {v.name}
+        </Box>
+        <Box sx={factsSx}>
+          <Tooltip title={meta.help || ''}><Box component="span" sx={pillSx(tone)}>{meta.label}</Box></Tooltip>
+          {v.job?.stage && <Box component="span" sx={{ color: 'var(--accent)' }}>{v.job.stage}</Box>}
+          <Tooltip title={v.labelled ? 'Has labelmaster\'s scenes' : 'No labelmaster scenes yet'}>
+            <Box component="span" sx={dotSx(v.labelled ? 'var(--ok)' : 'var(--warn)')}>{v.labelled ? 'labelled' : 'unlabelled'}</Box>
+          </Tooltip>
+          <span>{v.funscripts.length ? `${v.funscripts.length} script${v.funscripts.length > 1 ? 's' : ''}` : 'no script'}</span>
+          <span>{fmtBytes(v.size)}</span>
+        </Box>
+      </Box>
+      <Box className="fp-video-ctl" sx={groupSx}>
+        <PipelineQuickButton target={{ paths: [v.path] }} title="Labels & funscripts (scenetest)"
+          hint={v.labelled ? 'labelled' : 'not labelled yet'} sx={btnSx} />
+        {reviewUrl && (
+          <Tooltip title="Review this script in the editor">
+            <IconButton size="small" component="a" target="_blank" rel="noreferrer" href={reviewUrl} sx={btnSx}
+              aria-label={`Review ${v.name}`}>
+              <EditNoteIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+        {queueable && (
+          <Tooltip title={online ? 'Queue this one with funpipe now' : 'Queue with funpipe (runs when acm-gpu is back)'}>
+            <IconButton size="small" sx={btnSx} onClick={onQueue} aria-label={`Queue ${v.name} with funpipe`}>
+              <QueueIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+/** One performer: picture, name, Before / After, the facts line, her buttons; her funscript folder when open. */
+function PerformerLine({ p, videos, open, onToggle, onMore, onQueue, children }) {
+  const queueable = videos.filter(v => QUEUEABLE.includes(v.status)).map(v => v.path);
+  const review = p.counts?.needs_review || 0;
+  const canOpen = p.funscript > 0;
+  return (
+    <Box sx={rowSx}>
+      <Box sx={{ ...headSx(open), cursor: canOpen ? 'pointer' : 'default' }} onClick={canOpen ? onToggle : undefined}>
+        <Picture key={p.thumbnail || ''} p={p} />
+        <Box sx={nameLineSx}>
+          <ButtonBase sx={nameSx} title={p.name} disabled={!canOpen} aria-expanded={canOpen ? open : undefined}
+            onClick={(e) => { e.stopPropagation(); onToggle(); }}>
+            {p.name}
+          </ButtonBase>
+          <Box component="span" sx={pillSx(p.where === 'after' ? 'var(--ok)' : 'var(--warn)')}>
+            {p.where === 'after' ? 'After' : 'Before'}
+          </Box>
+        </Box>
+        <Box sx={factsSx}>
+          <span><b>{n(p.videos)}</b> vids</span>
+          <Tooltip title={`${n(p.labelled)} of ${n(p.videos)} videos labelled (scenes, dress state, tags)`}>
+            <Box component="span" sx={dotSx(p.unlabelled ? 'var(--warn)' : 'var(--ok)')}>
+              {p.unlabelled ? `${n(p.unlabelled)} unlabelled` : 'all labelled'}
+            </Box>
+          </Tooltip>
+          <Box component="span" sx={p.funscript ? toneB('var(--info)') : { color: 'var(--muted)' }}>
+            <b>{n(p.funscript)}</b> in funscript folder
+          </Box>
+          {p.funscript > 0 && (
+            <Box component="span" sx={toneB(p.noScript ? 'var(--bad)' : 'var(--ok)')}><b>{n(p.noScript)}</b> no script yet</Box>
+          )}
+          {review > 0 && <Box component="span" sx={toneB('var(--warn)')}><b>{n(review)}</b> need review</Box>}
+        </Box>
+        <Box sx={ctlSx} onClick={(e) => e.stopPropagation()}>
+          <Box sx={groupSx} role="group" aria-label="Labels & funscripts">
+            <PipelineQuickButton target={{ performerIds: [p.id] }} title="Labels & funscripts (scenetest)"
+              hint={`${n(p.unlabelled)} of ${n(p.videos)} videos unlabelled`} onMore={onMore} sx={btnSx} />
+            <Tooltip title={queueable.length
+              ? `Queue her ${queueable.length} unscripted funscript-folder video${queueable.length === 1 ? '' : 's'} with funpipe`
+              : 'Nothing of hers to queue with funpipe'}>
+              <span style={{ display: 'inline-flex' }}>
+                <IconButton size="small" sx={btnSx} disabled={!queueable.length} aria-label="Queue with funpipe"
+                  onClick={() => onQueue(queueable)}>
+                  <QueueIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
+        </Box>
+        <Tooltip title={!canOpen ? 'No funscript folder' : open ? 'Hide her funscript folder' : 'Show her funscript folder'}>
+          <span style={{ gridArea: 'chev', display: 'inline-flex' }}>
+            <IconButton size="small" sx={chevSx} disabled={!canOpen} aria-expanded={canOpen ? open : undefined}
+              aria-label={`Funscript folder of ${p.name}`} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
+              {open ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Box>
+      {open && videos.length > 0 && <Box sx={videosSx}>{children}</Box>}
+    </Box>
+  );
+}
+
 export default function FunpipePage() {
   const { openSettings } = useShell();
-  const [config, setConfig] = useState({ url: '', aiServerUrl: '' });
-
-  const [library, setLibrary] = useState({ videos: [], counts: {}, total: 0 });
-  const [libraryLoading, setLibraryLoading] = useState(true);
-  const [selected, setSelected] = useState(new Set());
-  const [statusFilter, setStatusFilter] = useState(null);
-  const [query, setQuery] = useState('');
   const notify = useNotify();
+  const [qs, setQs] = useQueryState({ v: 'all', sort: 'name', q: '' });
+  const view = VIEWS.some(x => x.id === qs.v) ? qs.v : 'all';
+  const sort = SORTS.some(x => x.id === qs.sort) ? qs.sort : 'name';
+  const q = qs.q;
+
+  const [config, setConfig] = useState({ url: '', aiServerUrl: '' });
+  const [library, setLibrary] = useState({ videos: [], counts: {}, total: 0, performers: [] });
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(new Set());
+  const [expanded, setExpanded] = useState(new Set());
+  const [pipelineFor, setPipelineFor] = useState(null);
   const [editor, setEditor] = useState({ running: false, url: null });
   const [editorBusy, setEditorBusy] = useState(false);
 
   // Slow poll: it only has to notice when the queue drains (to rescan the
-  // library) and keep the Online / Offline chip and GPU banner honest.
+  // library) and keep acm-gpu's state and the GPU note honest.
   const { jobs, services, refresh: refreshJobs } = useJobs({ activeMs: 5000, idleMs: 20000, withServices: true });
 
-  // ── config ────────────────────────────────────────────────
   useEffect(() => {
     fetch('/api/funpipe/config').then(r => r.json()).then(setConfig).catch(() => {});
   }, []);
 
-  // ── data loading ──────────────────────────────────────────
   const loadLibrary = useCallback(async (refresh = false) => {
-    setLibraryLoading(true);
+    setLoading(true);
     try {
       const res = await fetch(`/api/funpipe/library${refresh ? '?refresh=true' : ''}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setLibrary(data);
+      setLibrary({ performers: [], ...data });
     } catch (err) {
       notify({ severity: 'error', message: `Library scan failed: ${err.message}` });
     } finally {
-      setLibraryLoading(false);
+      setLoading(false);
+      setLoaded(true);
     }
   }, [notify]);
 
   const loadEditor = useCallback(async () => {
     try {
       setEditor(await (await fetch('/api/funpipe/ui/status')).json());
-    } catch { /* AI server offline — the banner already says so */ }
+    } catch { /* acm-gpu offline: the sidebar says so */ }
   }, []);
 
   useEffect(() => { loadLibrary(); loadEditor(); }, [loadLibrary, loadEditor]);
 
-  // The editor is a child process of the AI server; it can exit on its own.
+  const post = async (path, body) => {
+    const res = await fetch(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
+    });
+    return res.json();
+  };
+
+  // The editor is a child process of acm-gpu; it can exit on its own.
   const toggleEditor = async () => {
     setEditorBusy(true);
     try {
       const res = await post(editor.running ? '/api/funpipe/ui/stop' : '/api/funpipe/ui/start');
       if (res.error) notify({ severity: 'error', message: res.error });
-      else if (!editor.running) {
-        notify('Review editor started');
-      }
+      else if (!editor.running) notify('Review editor started');
       await loadEditor();
     } finally {
       setEditorBusy(false);
@@ -170,23 +387,16 @@ export default function FunpipePage() {
     prevActive.current = funpipeActive;
   }, [funpipeActive, loadLibrary]);
 
-  // ── queue controls ────────────────────────────────────────
-  const post = async (path, body) => {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    });
-    return res.json();
-  };
-
-  const queueSelected = async () => {
-    const videos = library.videos.filter(v => selected.has(v.path)).map(v => v.path);
-    if (videos.length === 0) return;
+  const queueVideos = async (videos, what) => {
+    if (!videos.length) return;
     const result = await post('/api/funpipe/queue/add', { videos });
     if (result.queued) {
-      notify(`Queued ${result.added} video(s) with funpipe`);
-      setSelected(new Set());
+      notify(`Queued ${what} with funpipe`);
+      setSelected(s => {
+        const next = new Set(s);
+        videos.forEach(p => next.delete(p));
+        return next;
+      });
     } else {
       notify({ severity: 'warning', message: result.error || 'funpipe accepted nothing — already processed?' });
     }
@@ -194,296 +404,192 @@ export default function FunpipePage() {
     loadLibrary(true);
   };
 
-  // ── derived ───────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const rows = library.videos.filter(v => {
-      if (statusFilter && v.status !== statusFilter) return false;
-      if (!q) return true;
-      return v.name.toLowerCase().includes(q) || (v.performer || '').toLowerCase().includes(q);
-    });
-    return [...rows].sort((a, b) =>
-      a.performer.localeCompare(b.performer) || a.name.localeCompare(b.name));
-  }, [library.videos, statusFilter, query]);
+  // ── derived ──
+  const videosOf = useMemo(() => {
+    const by = new Map();
+    for (const v of library.videos) {
+      if (!by.has(v.performerId)) by.set(v.performerId, []);
+      by.get(v.performerId).push(v);
+    }
+    for (const list of by.values()) list.sort((a, b) => a.name.localeCompare(b.name));
+    return by;
+  }, [library.videos]);
 
-  const selectableInView = filtered.filter(v => QUEUEABLE.includes(v.status));
-  const allInViewSelected = selectableInView.length > 0 && selectableInView.every(v => selected.has(v.path));
-  // Optimistic until the first services poll answers, as the old queue poll was.
+  const viewCounts = useMemo(
+    () => Object.fromEntries(VIEWS.map(x => [x.id, library.performers.filter(x.test).length])),
+    [library.performers]
+  );
+
+  /* A performer shows when she is in the view and her name or one of her funscript videos matches the search; a
+     search that matched only videos lists just those, opened. */
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const test = VIEWS.find(x => x.id === view).test;
+    const cmp = SORTS.find(x => x.id === sort).cmp;
+    const out = [];
+    for (const p of library.performers) {
+      if (!test(p)) continue;
+      const own = videosOf.get(p.id) || [];
+      if (!needle || p.name.toLowerCase().includes(needle)) { out.push({ p, videos: own, byVideo: false }); continue; }
+      const hits = own.filter(v => v.name.toLowerCase().includes(needle));
+      if (hits.length) out.push({ p, videos: hits, byVideo: true });
+    }
+    return out.sort((a, b) => cmp(a.p, b.p) || a.p.name.localeCompare(b.p.name));
+  }, [library.performers, videosOf, view, sort, q]);
+
+  const totals = useMemo(() => library.performers.reduce((t, p) => ({
+    videos: t.videos + p.videos, unlabelled: t.unlabelled + p.unlabelled, noScript: t.noScript + p.noScript
+  }), { videos: 0, unlabelled: 0, noScript: 0 }), [library.performers]);
+
+  // Optimistic until the first services poll answers.
   const online = services ? services.funpipe.online : true;
   const gpuWarning = services?.gpu.warning || null;
-  const funpipeCount = jobs.filter(j => j.type === 'funpipe' && isActive(j)).length;
+  const queued = jobs.filter(j => j.type === 'funpipe' && isActive(j)).length;
+  const reviewUrl = (v) => (v.fromFunpipe && editor.running && editor.url
+    ? `${editor.url}/?v=${encodeURIComponent(v.stem)}` : null);
 
   const toggle = (path) => setSelected(s => {
     const next = new Set(s);
     next.has(path) ? next.delete(path) : next.add(path);
     return next;
   });
+  const toggleExpanded = (id) => setExpanded(s => {
+    const next = new Set(s);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
-  // The editor resolves a video by its stem, so this deep-links straight to it —
-  // but only once the editor process is actually up.
-  const reviewUrl = (v) => `${editor.url}/?v=${encodeURIComponent(v.stem)}`;
+  // ── the sidebar ──
+  const views = VIEWS.map(x => {
+    const Icon = x.icon;
+    return {
+      id: x.id, label: x.label, count: viewCounts[x.id] ?? 0, icon: <Icon />, title: x.title,
+      dot: x.id === 'noscript' && viewCounts.noscript > 0 ? 'bad' : undefined,
+      onClick: () => setQs({ v: x.id })
+    };
+  });
+  const sortLabel = SORTS.find(x => x.id === sort).label;
+  const showGroup = (
+    <SideGroup id="show" title="Show" icon={<FilterListIcon />} order={SIDE.show}
+      badge={q ? 1 : 0} summary={q ? `"${q.trim()}" · ${sortLabel}` : sortLabel}>
+      <SideSearch value={q} onChange={(value) => setQs({ q: value })} placeholder="Search performer or file" />
+      <SideSelect label="Sort" value={sort} onChange={(value) => setQs({ sort: value })}
+        options={SORTS.map(x => ({ value: x.id, label: x.label }))} />
+    </SideGroup>
+  );
+  const pageGroup = (
+    <SideGroup id="page" title="Funscripts" icon={<TuneIcon />} order={SIDE.page}
+      dot={online ? null : 'bad'} summary={online ? (queued ? `${queued} in queue` : 'acm-gpu online') : 'acm-gpu offline'}>
+      {editor.running
+        ? <SideMain icon={<EditNoteIcon />} label="Stop review editor" onClick={toggleEditor} busy={editorBusy} busyLabel="Stopping…"
+            tip="Shut the editor down when you're done: it holds the video files open" />
+        : <SideMain icon={<EditNoteIcon />} label="Start review editor" onClick={toggleEditor} busy={editorBusy} busyLabel="Starting…"
+            disabled={!online} tip={online ? 'Start the funscript review editor on the GPU machine' : 'acm-gpu is offline'} />}
+      <SideFacts rows={[
+        { label: 'acm-gpu', value: online ? 'Online' : 'Offline', tone: online ? 'ok' : 'bad', title: online ? config.url : config.aiServerUrl },
+        { label: 'Videos', value: n(totals.videos) },
+        { label: 'Unlabelled', value: n(totals.unlabelled), tone: totals.unlabelled ? 'warn' : 'ok' },
+        { label: 'In funscript folders', value: n(library.total), tone: 'info' },
+        { label: 'No script yet', value: n(totals.noScript), tone: totals.noScript ? 'bad' : 'ok' },
+        { label: 'Needs review', value: n(library.counts?.needs_review), tone: library.counts?.needs_review ? 'warn' : undefined }
+      ]} />
+      <SideButtons>
+        {editor.running && editor.url && (
+          <SideButton icon={<OpenInNewIcon />} component="a" href={editor.url} target="_blank" rel="noreferrer">Open review editor</SideButton>
+        )}
+        <SideButton icon={<ListAltIcon />} component={RouterLink} to="/jobs">
+          {queued ? `${queued} in queue · Jobs` : 'Queue in Jobs'}
+        </SideButton>
+        <SideButton icon={<RefreshIcon />} onClick={() => loadLibrary(true)} disabled={loading}>
+          {loading ? 'Rescanning…' : 'Rescan folders'}
+        </SideButton>
+        <SideButton plain icon={<SettingsIcon />} onClick={() => openSettings('workers')}>Worker settings</SideButton>
+      </SideButtons>
+      {!online && (
+        <SideNote>
+          Start acm-gpu from the host agent on the GPU machine (tray → acm-gpu → Start). Queueing still works: jobs run
+          once it is back.
+        </SideNote>
+      )}
+    </SideGroup>
+  );
+
+  const dialog = (
+    <PipelineDialog
+      open={pipelineFor != null}
+      initialPerformerIds={pipelineFor != null ? [pipelineFor] : []}
+      onClose={() => setPipelineFor(null)}
+      onQueued={(msg) => notify(`${msg} — follow them on the Jobs page`)}
+    />
+  );
+
+  if (!loaded) {
+    return (
+      <SidebarPage title={TITLE} views={views} view={view}>
+        {showGroup}
+        {pageGroup}
+        <LoadingState label="Reading the funscript folders…" />
+      </SidebarPage>
+    );
+  }
+
+  // ── the content line ──
+  const viewDef = VIEWS.find(x => x.id === view);
+  const total = viewCounts[view] ?? 0;
+  const meta = [
+    `${q ? `${n(rows.length)} of ` : ''}${n(total)} ${total === 1 ? 'performer' : 'performers'}`,
+    `${n(library.total)} videos in funscript folders`
+  ].join(' · ');
+  const line = (
+    <ContentLine title={viewDef.label} meta={meta} actions={selected.size > 0 ? (
+      <>
+        <SmallButton onClick={() => setSelected(new Set())}>Clear</SmallButton>
+        <SmallButton primary startIcon={<QueueIcon />} onClick={() => queueVideos([...selected], `${selected.size} video(s)`)}>
+          Queue {selected.size} with funpipe
+        </SmallButton>
+      </>
+    ) : null} />
+  );
+
+  let body;
+  if (library.performers.length === 0) {
+    body = <EmptyState title="No performers yet" description="Performers with videos show here." />;
+  } else if (rows.length === 0) {
+    body = (
+      <EmptyState title="Nothing here"
+        description={q ? `Nothing matches "${q.trim()}" here.` : (NOTHING[view] || 'Nothing matches.')}
+        action={(q || view !== 'all') ? <SmallButton onClick={() => setQs({ v: 'all', q: '' })}>Show all</SmallButton> : undefined} />
+    );
+  } else {
+    body = (
+      <Panel padded={false} sx={{ overflow: 'hidden' }}>
+        {rows.map(({ p, videos, byVideo }) => (
+          <PerformerLine key={p.id} p={p} videos={videos} open={byVideo || expanded.has(p.id)}
+            onToggle={() => toggleExpanded(p.id)} onMore={() => setPipelineFor(p.id)}
+            onQueue={(paths) => queueVideos(paths, `${paths.length} of ${p.name}'s videos`)}>
+            {videos.map(v => (
+              <VideoRow key={v.path} v={v} online={online} selected={selected.has(v.path)} onToggle={() => toggle(v.path)}
+                reviewUrl={reviewUrl(v)} onQueue={() => queueVideos([v.path], v.name)} />
+            ))}
+          </PerformerLine>
+        ))}
+      </Panel>
+    );
+  }
 
   return (
-    <PageShell>
-      {/* No title block and no back arrow: the toolbar logo is the way home,
-          and "Funpipe" was stating what the Funscript library panel below
-          already says. Just the controls. */}
-      <Box
-        sx={{
-          display: 'flex', alignItems: 'center', gap: SPACE.sm,
-          flexWrap: 'wrap', mb: SPACE.md
-        }}
-      >
-        <Chip
-          size="small"
-          variant="outlined"
-          label={online ? `Online — ${config.url}` : 'Offline'}
-          sx={{
-            borderColor: online ? 'var(--ok)' : 'var(--bad)',
-            color: online ? 'var(--ok)' : 'var(--bad)'
-          }}
-        />
-        <Button
-          size="small"
-          variant="outlined"
-          component={RouterLink}
-          to="/jobs"
-          sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
-        >
-          {funpipeCount > 0 ? `${funpipeCount} in queue — view in Jobs` : 'View queue in Jobs'}
-        </Button>
-        <Tooltip title={editor.running
-          ? 'Shut the review editor down when you\'re done — it holds the video files open'
-          : 'Start the funscript review editor on the GPU machine'}>
-          <span>
-            <Button
-              size="small"
-              variant={editor.running ? 'outlined' : 'contained'}
-              startIcon={<EditNoteIcon />}
-              disabled={!online || editorBusy}
-              onClick={toggleEditor}
-            >
-              {editorBusy ? 'Working…' : editor.running ? 'Stop editor' : 'Start review editor'}
-            </Button>
-          </span>
-        </Tooltip>
-        {editor.running && editor.url && (
-          <Tooltip title="Open the review editor">
-            <IconButton component="a" href={editor.url} target="_blank" rel="noreferrer" sx={{ color: 'var(--dim)' }}>
-              <OpenInNewIcon />
-            </IconButton>
-          </Tooltip>
-        )}
-        <Tooltip title="Runs on acm-gpu, ACM's GPU worker — its address is in Settings → Workers">
-          <IconButton onClick={() => openSettings('workers')} aria-label="Settings → Workers" sx={{ color: 'var(--dim)' }}><SettingsIcon /></IconButton>
-        </Tooltip>
-        <Tooltip title="Rescan funscript folders">
-          <span>
-            <IconButton onClick={() => loadLibrary(true)} disabled={libraryLoading} sx={{ color: 'var(--dim)' }}><RefreshIcon /></IconButton>
-          </span>
-        </Tooltip>
-      </Box>
-
-      {!online && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Can't reach acm-gpu, ACM's GPU worker, at <strong>{config.aiServerUrl}</strong>. Start it from
-          the host agent on the GPU machine (tray → acm-gpu → Start). Moving videos to a funscript folder still
-          works — they just won't be queued.
-        </Alert>
-      )}
-
+    <SidebarPage title={TITLE} views={views} view={view}>
+      {showGroup}
+      {pageGroup}
+      {line}
+      {loading && <LinearProgress sx={{ mb: 1 }} />}
       {online && gpuWarning && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <strong>GPU is busy:</strong> {gpuWarning}. Generation will still run — it shares the
-          card rather than waiting — but expect both to be slower.
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          <strong>GPU is busy:</strong> {gpuWarning}. Generation still runs, sharing the card, but expect both to be slower.
         </Alert>
       )}
-
-      {/* ── library ── */}
-      {/* Status counts double as the filter. "What needs doing" is the only
-          question this page exists to answer, and as a sortable column it was
-          invisible — you had to scan every row to find the 24 that mattered. */}
-      {library.total > 0 && (
-        <StatRow
-          min={132}
-          sx={{ mb: SPACE.md }}
-          items={STAT_ORDER
-            .filter(s => library.counts?.[s])
-            .map(s => ({
-              label: STATUS_META[s].label,
-              value: library.counts[s],
-              tone: STATUS_TONE[s] || 'default'
-            }))}
-        />
-      )}
-
-      <Panel>
-        <Box>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: SPACE.sm, flexWrap: 'wrap' }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 620, color: 'var(--text)' }}>Funscript library</Typography>
-            <Typography variant="body2" sx={{ color: 'var(--muted)' }}>
-              {filtered.length === library.total
-                ? `${library.total} video(s)`
-                : `${filtered.length} of ${library.total}`}
-            </Typography>
-            <Box sx={{ flex: 1 }} />
-            {selected.size > 0 && (
-              <Button variant="contained" size="small" startIcon={<QueueIcon />}
-                      disabled={!online} onClick={queueSelected}>
-                Queue {selected.size} with funpipe
-              </Button>
-            )}
-          </Stack>
-
-          <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-            <Chip label={`All ${library.total}`} size="small"
-                  onClick={() => setStatusFilter(null)}
-                  sx={filterChipSx(statusFilter === null)} />
-            {Object.entries(library.counts || {}).map(([status, count]) => (
-              <Tooltip key={status} title={STATUS_META[status]?.help || status}>
-                <Chip
-                  size="small"
-                  label={`${STATUS_META[status]?.label || status} ${count}`}
-                  onClick={() => setStatusFilter(statusFilter === status ? null : status)}
-                  sx={filterChipSx(statusFilter === status, TONE_VAR[STATUS_TONE[status]])}
-                />
-              </Tooltip>
-            ))}
-            <TextField
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search performer or file…"
-              size="small"
-              sx={{ flex: 1, minWidth: 180, '& .MuiInputBase-input': { fontSize: '0.8rem', py: 0.75 } }}
-            />
-            {selectableInView.length > 0 && (
-              <Button
-                size="small"
-                onClick={() => setSelected(allInViewSelected ? new Set() : new Set(selectableInView.map(v => v.path)))}
-                sx={{ color: 'var(--dim)', textTransform: 'none', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-              >
-                {allInViewSelected ? 'Clear' : `Select ${selectableInView.length}`}
-              </Button>
-            )}
-          </Stack>
-
-          {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
-
-          {!libraryLoading && filtered.length === 0 && (
-            <Typography variant="body2" sx={{ color: 'var(--dim)' }}>
-              {library.total === 0
-                ? 'No videos in any funscript folder yet. Use "Move to Funscript" while filtering a performer.'
-                : 'Nothing matches those filters.'}
-            </Typography>
-          )}
-
-          {filtered.length > 0 && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, maxHeight: 640, overflowY: 'auto', pr: 0.5 }}>
-              {filtered.map(v => {
-                const meta = STATUS_META[v.status] || { label: v.status };
-                const queueable = QUEUEABLE.includes(v.status);
-                const tone = TONE_VAR[STATUS_TONE[v.status]] || 'var(--dim)';
-                const isSel = selected.has(v.path);
-                return (
-                  <Box
-                    key={v.path}
-                    sx={{
-                      display: 'flex', alignItems: 'center', gap: 1,
-                      // Required. .App is a flex column (App.css), so these rows
-                      // sit in a nested flex context where the default
-                      // flex-shrink:1 collapsed them to 17px — all 28 squeezed
-                      // into the 640px cap instead of scrolling — and the row's
-                      // overflow:hidden then clipped the 44px thumbnail and the
-                      // text to slivers. Measured: 17px before, 55px after.
-                      flexShrink: 0,
-                      background: isSel ? 'var(--accent-quiet)' : 'var(--bg)',
-                      border: '1px solid',
-                      borderColor: isSel ? 'var(--accent)' : 'var(--line)',
-                      borderRadius: 'var(--radius-lg, 10px)',
-                      overflow: 'hidden',
-                      transition: 'border-color .16s ease, background-color .16s ease',
-                      '&:hover': { borderColor: isSel ? 'var(--accent)' : 'var(--line-strong)' }
-                    }}
-                  >
-                    <Checkbox
-                      size="small" disabled={!queueable}
-                      checked={isSel} onChange={() => toggle(v.path)}
-                      sx={{ ml: 0.5, color: 'var(--muted)', '&.Mui-checked': { color: 'var(--accent)' } }}
-                    />
-
-                    <VideoThumb path={v.path} tone={tone} />
-
-                    <Box sx={{ flex: 1, minWidth: 0, py: 0.75 }}>
-                      {/* The filename is the thing you recognise a video by, so
-                          it leads. It used to sit in a 380px cell with
-                          wordBreak:'break-all', which shattered long names
-                          mid-word across three lines. */}
-                      <Typography
-                        title={v.name}
-                        sx={{
-                          fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
-                        }}
-                      >
-                        {v.name}
-                      </Typography>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.25, flexWrap: 'wrap' }}>
-                        <Typography sx={{ fontSize: '0.72rem', color: 'var(--dim)' }}>{v.performer}</Typography>
-                        <Tooltip title={meta.help || ''}>
-                          <Box component="span" sx={{
-                            fontSize: '0.65rem', fontWeight: 700, color: tone,
-                            border: '1px solid', borderColor: tone, opacity: 0.95,
-                            borderRadius: 'var(--radius-sm, 4px)', px: 0.75, py: '1px'
-                          }}>
-                            {meta.label}
-                          </Box>
-                        </Tooltip>
-                        {v.job?.stage && (
-                          <Typography sx={{ fontSize: '0.68rem', color: 'var(--accent)' }}>{v.job.stage}</Typography>
-                        )}
-                        <Typography sx={{ fontSize: '0.7rem', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-                          {v.funscripts.length
-                            ? `${v.funscripts.length} script${v.funscripts.length > 1 ? 's' : ''}`
-                            : 'no script'}
-                        </Typography>
-                        <Typography sx={{ fontSize: '0.7rem', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-                          {fmtBytes(v.size)}
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, pr: 1 }}>
-                      {v.fromFunpipe && editor.running && editor.url && (
-                        <Tooltip title="Review this script in the editor">
-                          <IconButton size="small" component="a" target="_blank"
-                                      rel="noreferrer" href={reviewUrl(v)} sx={iconBtnSx()}>
-                            <EditNoteIcon />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                      {queueable && (
-                        <Tooltip title="Queue this one now">
-                          <span>
-                            <IconButton size="small" disabled={!online} sx={iconBtnSx()} onClick={async () => {
-                              const r = await post('/api/funpipe/queue/add', { videos: [v.path] });
-                              notify(r.queued
-                                ? { severity: 'success', message: `Queued ${v.name}` }
-                                : { severity: 'warning', message: r.error || 'funpipe accepted nothing' });
-                              refreshJobs();
-                            }}>
-                              <QueueIcon />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      )}
-                    </Box>
-                  </Box>
-                );
-              })}
-            </Box>
-          )}
-        </Box>
-      </Panel>
-    </PageShell>
+      {body}
+      {dialog}
+    </SidebarPage>
   );
 }

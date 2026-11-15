@@ -17,7 +17,8 @@ const db = require('../db');
 
 const VIDEO_EXTS = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts'];
 // what a worker may read and write next to a video: funpipe's sidecars and the playable script
-const SIDECARS = ['.scenes.json', '.tracks.npz', '.pose.json', '.signal.json', '.edits.json', '.funscript'];
+// (.vjepa.npz is carried along for extract but not planned: a video without it is not tracked again)
+const SIDECARS = ['.scenes.json', '.tracks.npz', '.pose.json', '.signal.json', '.edits.json', '.vjepa.npz', '.funscript'];
 const ONLINE_MS = 90 * 1000;
 const STALE_MS = 10 * 60 * 1000;
 const LOG_LINES = 60;
@@ -216,6 +217,36 @@ function sidecarFile(video, ext) {
   return v && SIDECARS.includes(ext) ? sidecarPath(v, ext) : null;
 }
 
+const stamp = (d = new Date()) => {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+};
+
+/**
+ * before a new <stem>.funscript goes in, the old one is copied aside by its author: funpipe's own to
+ * <stem>.funscript.bak, scenetest's to "<stem> (auto).funscript", the review editor's to <stem>.reviewed.funscript
+ * and anyone else's (or one that cannot be read) to <stem>.human.funscript; those two take a dated name when taken.
+ * Only copied: the caller's move replaces dest, so a failed move never leaves the video without a script.
+ */
+async function keepExistingScript(dest) {
+  if (!(await fs.pathExists(dest))) return null;
+  let author = null;
+  try { author = (await fs.readJson(dest)).author; } catch (_) { /* unreadable: treated as a human's */ }
+  const stem = dest.slice(0, -'.funscript'.length);
+  let to;
+  if (author === 'funpipe') to = `${dest}.bak`;
+  else if (author === 'scenetest+funpipe') to = `${stem} (auto).funscript`;   // scenetest's own name for its script
+  if (to) {
+    await fs.copy(dest, to, { overwrite: true });
+    return to;
+  }
+  const kind = author === 'funpipe-review' ? 'reviewed' : 'human';
+  to = `${stem}.${kind}.funscript`;
+  if (await fs.pathExists(to)) to = `${stem}.${kind}.${stamp()}.funscript`;
+  await fs.copy(dest, to, { overwrite: false, errorOnExist: true });
+  return to;
+}
+
 /** write a sidecar from a request body: to a temporary file first, so a broken upload never replaces a good file */
 async function writeSidecar(video, ext, stream) {
   const dest = sidecarFile(video, ext);
@@ -229,6 +260,7 @@ async function writeSidecar(video, ext, stream) {
       out.on('finish', resolve);
       stream.pipe(out);
     });
+    if (ext === '.funscript') await keepExistingScript(dest);   // never lose a script someone else wrote
     await fs.move(tmp, dest, { overwrite: true });
   } catch (err) {
     await fs.remove(tmp).catch(() => {});
@@ -241,5 +273,5 @@ async function writeSidecar(video, ext, stream) {
 module.exports = {
   STALE_MS, VIDEO_EXTS, SIDECARS, events, workerToken, libraryVideo, sidecarPath,
   enqueue, list, start, stop, remove, clearDone,
-  heartbeat, claim, queued, paused, progress, complete, fail, sidecarFile, writeSidecar,
+  heartbeat, claim, queued, paused, progress, complete, fail, sidecarFile, writeSidecar, keepExistingScript,
 };
