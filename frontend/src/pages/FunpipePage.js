@@ -1,5 +1,6 @@
 /**
- * Funscripts (/funpipe): every performer with what is left to do for her funscripts, and her funscript folder.
+ * Funscripts (/funpipe): every After performer (filtered and kept) with what is left to do for her funscripts, and
+ * her funscript folder. Before performers are left out of the list, the counts and the totals.
  *
  * The frame is SidebarPage (components/layout), like Performer Management. Its View list is what needs doing, with a
  * count of performers each: All, Unlabelled (videos without labelmaster's scenes), No script yet (videos in her
@@ -261,9 +262,6 @@ function PerformerLine({ p, videos, open, onToggle, onMore, onQueue, children })
             onClick={(e) => { e.stopPropagation(); onToggle(); }}>
             {p.name}
           </ButtonBase>
-          <Box component="span" sx={pillSx(p.where === 'after' ? 'var(--ok)' : 'var(--warn)')}>
-            {p.where === 'after' ? 'After' : 'Before'}
-          </Box>
         </Box>
         <Box sx={factsSx}>
           <span><b>{n(p.videos)}</b> vids</span>
@@ -405,6 +403,8 @@ export default function FunpipePage() {
   };
 
   // ── derived ──
+  // only After performers: the ones that are filtered and kept (Before ones are still being sorted)
+  const performers = useMemo(() => library.performers.filter(p => p.where === 'after'), [library.performers]);
   const videosOf = useMemo(() => {
     const by = new Map();
     for (const v of library.videos) {
@@ -416,8 +416,8 @@ export default function FunpipePage() {
   }, [library.videos]);
 
   const viewCounts = useMemo(
-    () => Object.fromEntries(VIEWS.map(x => [x.id, library.performers.filter(x.test).length])),
-    [library.performers]
+    () => Object.fromEntries(VIEWS.map(x => [x.id, performers.filter(x.test).length])),
+    [performers]
   );
 
   /* A performer shows when she is in the view and her name or one of her funscript videos matches the search; a
@@ -427,7 +427,7 @@ export default function FunpipePage() {
     const test = VIEWS.find(x => x.id === view).test;
     const cmp = SORTS.find(x => x.id === sort).cmp;
     const out = [];
-    for (const p of library.performers) {
+    for (const p of performers) {
       if (!test(p)) continue;
       const own = videosOf.get(p.id) || [];
       if (!needle || p.name.toLowerCase().includes(needle)) { out.push({ p, videos: own, byVideo: false }); continue; }
@@ -435,11 +435,16 @@ export default function FunpipePage() {
       if (hits.length) out.push({ p, videos: hits, byVideo: true });
     }
     return out.sort((a, b) => cmp(a.p, b.p) || a.p.name.localeCompare(b.p.name));
-  }, [library.performers, videosOf, view, sort, q]);
+  }, [performers, videosOf, view, sort, q]);
 
-  const totals = useMemo(() => library.performers.reduce((t, p) => ({
-    videos: t.videos + p.videos, unlabelled: t.unlabelled + p.unlabelled, noScript: t.noScript + p.noScript
-  }), { videos: 0, unlabelled: 0, noScript: 0 }), [library.performers]);
+  const totals = useMemo(() => performers.reduce((t, p) => ({
+    performers: t.performers + 1,
+    videos: t.videos + p.videos,
+    unlabelled: t.unlabelled + p.unlabelled,
+    funscript: t.funscript + p.funscript,
+    noScript: t.noScript + p.noScript,
+    review: t.review + (p.counts?.needs_review || 0)
+  }), { performers: 0, videos: 0, unlabelled: 0, funscript: 0, noScript: 0, review: 0 }), [performers]);
 
   // Optimistic until the first services poll answers.
   const online = services ? services.funpipe.online : true;
@@ -486,12 +491,15 @@ export default function FunpipePage() {
         : <SideMain icon={<EditNoteIcon />} label="Start review editor" onClick={toggleEditor} busy={editorBusy} busyLabel="Starting…"
             disabled={!online} tip={online ? 'Start the funscript review editor on the GPU machine' : 'acm-gpu is offline'} />}
       <SideFacts rows={[
-        { label: 'acm-gpu', value: online ? 'Online' : 'Offline', tone: online ? 'ok' : 'bad', title: online ? config.url : config.aiServerUrl },
+        { label: 'acm-gpu', value: online ? 'Online' : 'Offline', tone: online ? 'ok' : 'bad', title: online ? config.url : config.aiServerUrl }
+      ]} />
+      <SideFacts rows={[
+        { label: 'After performers', value: n(totals.performers) },
         { label: 'Videos', value: n(totals.videos) },
         { label: 'Unlabelled', value: n(totals.unlabelled), tone: totals.unlabelled ? 'warn' : 'ok' },
-        { label: 'In funscript folders', value: n(library.total), tone: 'info' },
+        { label: 'In funscript folders', value: n(totals.funscript), tone: 'info' },
         { label: 'No script yet', value: n(totals.noScript), tone: totals.noScript ? 'bad' : 'ok' },
-        { label: 'Needs review', value: n(library.counts?.needs_review), tone: library.counts?.needs_review ? 'warn' : undefined }
+        { label: 'Needs review', value: n(totals.review), tone: totals.review ? 'warn' : undefined }
       ]} />
       <SideButtons>
         {editor.running && editor.url && (
@@ -538,7 +546,7 @@ export default function FunpipePage() {
   const total = viewCounts[view] ?? 0;
   const meta = [
     `${q ? `${n(rows.length)} of ` : ''}${n(total)} ${total === 1 ? 'performer' : 'performers'}`,
-    `${n(library.total)} videos in funscript folders`
+    `${n(totals.funscript)} videos in funscript folders`
   ].join(' · ');
   const line = (
     <ContentLine title={viewDef.label} meta={meta} actions={selected.size > 0 ? (
@@ -552,8 +560,8 @@ export default function FunpipePage() {
   );
 
   let body;
-  if (library.performers.length === 0) {
-    body = <EmptyState title="No performers yet" description="Performers with videos show here." />;
+  if (performers.length === 0) {
+    body = <EmptyState title="No After performers yet" description="Performers you have filtered (After) show here." />;
   } else if (rows.length === 0) {
     body = (
       <EmptyState title="Nothing here"
