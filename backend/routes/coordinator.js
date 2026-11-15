@@ -4,6 +4,8 @@
  *   GET    /api/coordinator    { url, connected, worker, gpu: { url, node, online } }
  *   POST   /api/coordinator    { url }: connect (this app pairs itself with the coordinator at that address)
  *   DELETE /api/coordinator    disconnect
+ *   GET    /api/coordinator/kinds  { connected, parts: { label|funscript|training|encode: { kind, mode, now, nodes } } }:
+ *                              the nodes that take each kind, in their order (an app's "Run on" choices)
  */
 const express = require('express');
 const coordinator = require('../services/coordinator');
@@ -15,6 +17,8 @@ const handle = (fn) => async (req, res) => {
 };
 
 router.get('/', handle(() => coordinator.status()));
+// "Run on": the nodes that take each of this app's GPU kinds, in the coordinator's order
+router.get('/kinds', handle((req) => coordinator.kinds(req.query.fresh === '1')));
 router.post('/', handle(async (req) => { const s = await coordinator.connect(req.body?.url, req); clearCache(); return s; }));
 router.delete('/', handle(async (req) => { const s = await coordinator.disconnect(req); clearCache(); return s; }));
 

@@ -14,15 +14,17 @@ import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import StorageIcon from '@mui/icons-material/Storage';
 import ListAltIcon from '@mui/icons-material/ListAlt';
+import LabelIcon from '@mui/icons-material/Label';
 
-export const KIND_ORDER = ['import', 'hash', 'encode', 'funpipe', 'pipeline', 'train', 'cleanup', 'discover', 'probe'];
+export const KIND_ORDER = ['import', 'hash', 'encode', 'label', 'funpipe', 'pipeline', 'train', 'cleanup', 'discover', 'probe'];
 
 export const KIND_LABEL = {
   import: 'Import',
   hash: 'Hashing',
   encode: 'Encoding',
-  funpipe: 'Funscript (funpipe)',
-  pipeline: 'Labels + funscript (scenetest)',
+  label: 'Labels',
+  funpipe: 'Funscript',
+  pipeline: 'scenetest (lab)',
   train: 'Training',
   cleanup: 'Cleanup',
   discover: 'Discover',
@@ -32,8 +34,7 @@ export const KIND_LABEL = {
 /** Shorter names where the room is small (the Jobs sidebar); the full name goes in the row's title. */
 export const KIND_SHORT = {
   ...KIND_LABEL,
-  funpipe: 'Funscript',
-  pipeline: 'Labels + funscript'
+  pipeline: 'scenetest'
 };
 
 /** One icon per kind. */
@@ -41,6 +42,7 @@ export const KIND_ICON = {
   import: MoveToInboxIcon,
   hash: VpnKeyIcon,
   encode: MovieFilterIcon,
+  label: LabelIcon,
   funpipe: SmartToyIcon,
   pipeline: ViewTimelineIcon,
   train: PsychologyIcon,

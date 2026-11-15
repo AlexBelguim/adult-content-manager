@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Box, TextField, Checkbox, FormControlLabel, Typography } from '@mui/material';
 import { queuePipeline } from '../utils/pipelines';
 import { AppDialog, DialogText, errorText } from './ui';
+import RunOnSelect from './RunOnSelect';
 
 /**
- * Pick performers and/or content folders and queue labels (labelmaster's scenes) and funscripts for all their
- * videos on scenetest (POST /api/pipelines/queue). `initialPerformerIds` preselects, e.g. from Performer Management.
+ * Pick performers and/or content folders and queue labels (labelmaster's scenes), or labels and the funscripts made
+ * from them, for all their videos (POST /api/pipelines/queue): this app's jobs, run by the worker nodes. Run on: the
+ * coordinator's order, or one machine. `initialPerformerIds` preselects, e.g. from Performer Management.
  */
 export default function PipelineDialog({ open, onClose, onQueued, initialPerformerIds = [] }) {
   const [targets, setTargets] = useState({ performers: [], folders: [] });
@@ -14,6 +16,7 @@ export default function PipelineDialog({ open, onClose, onQueued, initialPerform
   const [folders, setFolders] = useState(() => new Set());
   const [steps, setSteps] = useState({ labels: true, funscript: true });
   const [skipDone, setSkipDone] = useState(true);
+  const [runOn, setRunOn] = useState(null);
   const [count, setCount] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -56,7 +59,8 @@ export default function PipelineDialog({ open, onClose, onQueued, initialPerform
     setBusy(true);
     setError('');
     try {
-      onQueued(await queuePipeline({ ...body, steps: Object.keys(steps).filter(k => steps[k]), skipDone }));
+      // a funscript is made from the labels: it always comes with them
+      onQueued(await queuePipeline({ ...body, steps: steps.funscript ? ['labels', 'funscript'] : ['labels'], skipDone, runOn }));
       onClose();
     } catch (e) {
       setError(errorText(e, 'Could not queue them'));
@@ -83,12 +87,13 @@ export default function PipelineDialog({ open, onClose, onQueued, initialPerform
         label: 'Queue',
         busyLabel: 'Queuing…',
         onClick: queue,
-        disabled: !count?.videos || (!steps.labels && !steps.funscript),
+        disabled: !count?.videos,
       }}
     >
       <DialogText sx={{ mb: 2 }}>
-        scenetest on the GPU PC labels every video of what you pick (scenes, dress state, tags), then makes funscripts
-        from the scenes. They run ahead of its own backlog; pause them from the Jobs page.
+        Every video of what you pick gets labelled (scenes, dress state, tags), and with Funscripts a funscript made from
+        its scenes. The worker machines run them, in the order set in the coordinator or on the machine you pick; the Jobs
+        page shows them.
       </DialogText>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 2, '@media (max-width: 700px)': { gridTemplateColumns: '1fr' } }}>
         <Box>
@@ -118,9 +123,10 @@ export default function PipelineDialog({ open, onClose, onQueued, initialPerform
         </Box>
       </Box>
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', mt: 2 }}>
-        <FormControlLabel label="Labels" control={<Checkbox checked={steps.labels} onChange={e => setSteps(s => ({ ...s, labels: e.target.checked }))} />} />
-        <FormControlLabel label="Funscripts" control={<Checkbox checked={steps.funscript} onChange={e => setSteps(s => ({ ...s, funscript: e.target.checked }))} />} />
+        <FormControlLabel label="Labels" control={<Checkbox checked disabled />} />
+        <FormControlLabel label="Funscripts from the labels" control={<Checkbox checked={steps.funscript} onChange={e => setSteps(s => ({ ...s, funscript: e.target.checked }))} />} />
         <FormControlLabel label="Skip videos already done" control={<Checkbox checked={skipDone} onChange={e => setSkipDone(e.target.checked)} />} />
+        <RunOnSelect parts={steps.funscript ? ['label', 'funscript'] : ['label']} value={runOn} onChange={setRunOn} sx={{ ml: 'auto' }} />
       </Box>
     </AppDialog>
   );

@@ -30,13 +30,14 @@ const TITLE = {
 const titleOf = (type) => TITLE[type] || `Training ${type}`;
 const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
-/** a run at the end of the queue: { id, position } */
-function enqueue(payload) {
+/** a run at the end of the queue: { id, position }. runOn: the coordinator node it must run on (null: the kind's order) */
+function enqueue(payload, { runOn = null } = {}) {
   const pos = db.prepare(`SELECT COALESCE(MAX(position), 0) AS p FROM training_jobs WHERE status IN ${ACTIVE}`).get().p + 1;
   // K always trains a fixed run (acm-gpu's trainer sets it), so its label names no epochs
   const label = payload.type === 'clip_keepdelete' ? titleOf(payload.type) : `${titleOf(payload.type)} · ${payload.epochs || '?'} epochs`;
-  const r = db.prepare('INSERT INTO training_jobs (type, label, payload, status, position, created_at) VALUES (?, ?, ?, \'queued\', ?, ?)')
-    .run(payload.type, label, JSON.stringify(payload), pos, Date.now());
+  const node = typeof runOn === 'string' && runOn.trim() ? runOn.trim().slice(0, 100) : null;
+  const r = db.prepare('INSERT INTO training_jobs (type, label, payload, status, position, created_at, run_on) VALUES (?, ?, ?, \'queued\', ?, ?, ?)')
+    .run(payload.type, label, JSON.stringify(payload), pos, Date.now(), node);
   const ahead = db.prepare(`SELECT COUNT(*) AS n FROM training_jobs WHERE status IN ${ACTIVE} AND id != ?`).get(Number(r.lastInsertRowid)).n;
   return { id: Number(r.lastInsertRowid), label, ahead };
 }
@@ -49,7 +50,7 @@ function failStale() {
 
 function view(r) {
   return {
-    id: r.id, type: r.type, trainable: TRAINABLE.includes(r.type), title: titleOf(r.type), label: r.label, status: r.status, priority: r.priority, worker: r.worker,
+    id: r.id, type: r.type, trainable: TRAINABLE.includes(r.type), title: titleOf(r.type), label: r.label, status: r.status, priority: r.priority, worker: r.worker, runOn: r.run_on || null,
     phase: r.phase, progress: r.progress, message: r.message, state: parse(r.state), result: parse(r.result), error: r.error,
     cancelling: !!r.cancel, createdAt: r.created_at, startedAt: r.started_at, heartbeatAt: r.heartbeat_at, finishedAt: r.finished_at,
     epochs: parse(r.payload)?.epochs ?? null,
@@ -137,8 +138,8 @@ function claim(name, wantId = null) {
 
 /** what's waiting, in the order it would be handed out (for the control panel) */
 function queued() {
-  return db.prepare("SELECT id, label, priority FROM training_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 200").all()
-    .map(r => ({ id: r.id, label: r.label, kind: 'training', priority: r.priority || 0 }));
+  return db.prepare("SELECT id, label, priority, run_on FROM training_jobs WHERE status = 'queued' ORDER BY priority DESC, position, id LIMIT 200").all()
+    .map(r => ({ id: r.id, label: r.label, kind: 'training', priority: r.priority || 0, node: r.run_on || null }));
 }
 
 const own = (name, id) => db.prepare("SELECT * FROM training_jobs WHERE id = ? AND worker = ? AND status = 'running'").get(id, name);

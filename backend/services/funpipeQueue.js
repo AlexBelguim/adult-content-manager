@@ -18,7 +18,11 @@ const db = require('../db');
 const VIDEO_EXTS = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts'];
 // what a worker may read and write next to a video: funpipe's sidecars and the playable script
 // (.vjepa.npz is carried along for extract but not planned: a video without it is not tracked again)
-const SIDECARS = ['.scenes.json', '.tracks.npz', '.pose.json', '.signal.json', '.edits.json', '.vjepa.npz', '.funscript'];
+// .labels.json, .motion.json: a label job's full scenes and motion documents (labelQueue), which a funscript from the scenes reads
+const SIDECARS = ['.scenes.json', '.tracks.npz', '.pose.json', '.signal.json', '.edits.json', '.vjepa.npz', '.funscript', '.labels.json', '.motion.json'];
+// a queued job that may be handed out: not waiting for a label job that is still there and not done (a done one that was
+// cleared off the list holds nothing back; a removed or failed one takes its funscript along, labelQueue.endWaiting)
+const READY = "status = 'queued' AND (wait_label IS NULL OR NOT EXISTS (SELECT 1 FROM label_jobs l WHERE l.id = funpipe_jobs.wait_label AND l.status != 'done'))";
 const ONLINE_MS = 90 * 1000;
 const STALE_MS = 10 * 60 * 1000;
 const LOG_LINES = 60;
@@ -68,9 +72,10 @@ function planStages(video, pose) {
   return stages;
 }
 
-function enqueue(videos, { pose = true } = {}) {
+function enqueue(videos, { pose = true, runOn = null } = {}) {
   const busy = new Set(db.prepare("SELECT video_path FROM funpipe_jobs WHERE status IN ('queued', 'running')").all().map(r => r.video_path));
-  const insert = db.prepare('INSERT INTO funpipe_jobs (video_path, pose, stages, status, created_at) VALUES (?, ?, ?, ?, ?)');
+  const node = typeof runOn === 'string' && runOn.trim() ? runOn.trim().slice(0, 100) : null;
+  const insert = db.prepare('INSERT INTO funpipe_jobs (video_path, pose, stages, status, created_at, run_on) VALUES (?, ?, ?, ?, ?, ?)');
   let added = 0;
   const skipped = [];
   for (const raw of videos) {
@@ -79,7 +84,7 @@ function enqueue(videos, { pose = true } = {}) {
     if (busy.has(video)) { skipped.push({ video: raw, reason: 'already queued' }); continue; }
     const stages = planStages(video, pose);
     if (!stages.length) { skipped.push({ video: raw, reason: 'already processed' }); continue; }
-    insert.run(video, pose ? 1 : 0, JSON.stringify(stages), 'queued', Date.now());
+    insert.run(video, pose ? 1 : 0, JSON.stringify(stages), 'queued', Date.now(), node);
     busy.add(video);
     added += 1;
   }
@@ -99,6 +104,7 @@ function view(r) {
     id: r.id, video: r.video_path, src: r.video_path, name: path.basename(r.video_path),
     stages: JSON.parse(r.stages), pose: !!r.pose, status: r.status, stage: r.stage, phase: r.phase, progress: r.progress,
     windows_done: r.windows_done, total_windows: r.total_windows, gpu_warning: r.gpu_warning, worker: r.worker,
+    mode: r.mode || null, runOn: r.run_on || null, waitLabel: r.wait_label || null,
     started: r.started_at ? r.started_at / 1000 : null,
     elapsed: r.finished_at && r.started_at ? (r.finished_at - r.started_at) / 1000 : null,
     error: r.error, log_tail: log.slice(-6),
@@ -156,8 +162,8 @@ function claim(name, info, wantId = null) {
   if (paused()) return null;
   const take = db.transaction(() => {
     const r = wantId
-      ? db.prepare("SELECT * FROM funpipe_jobs WHERE status = 'queued' AND id = ?").get(wantId)
-      : db.prepare("SELECT * FROM funpipe_jobs WHERE status = 'queued' ORDER BY id LIMIT 1").get();
+      ? db.prepare(`SELECT * FROM funpipe_jobs WHERE ${READY} AND id = ?`).get(wantId)
+      : db.prepare(`SELECT * FROM funpipe_jobs WHERE ${READY} ORDER BY id LIMIT 1`).get();
     if (!r) return null;
     const now = Date.now();
     db.prepare("UPDATE funpipe_jobs SET status = 'running', worker = ?, started_at = ?, heartbeat_at = ?, stage = NULL, phase = 'claimed', progress = NULL, error = NULL, finished_at = NULL WHERE id = ?")
@@ -170,11 +176,11 @@ function claim(name, info, wantId = null) {
     fail(name, r.id, 'the video is no longer in the library');
     return wantId ? null : claim(name, info);
   }
-  // planned again now: a sidecar may have arrived since it was queued
-  const stages = planStages(r.video_path, !!r.pose);
+  // planned again now: a sidecar may have arrived since it was queued (a funscript from the scenes is one step)
+  const stages = r.mode === 'scenes' ? ['from-scenes'] : planStages(r.video_path, !!r.pose);
   db.prepare('UPDATE funpipe_jobs SET stages = ? WHERE id = ?').run(JSON.stringify(stages), r.id);
   return {
-    id: r.id, video: r.video_path, name: path.basename(r.video_path), pose: !!r.pose, stages,
+    id: r.id, video: r.video_path, name: path.basename(r.video_path), pose: !!r.pose, stages, mode: r.mode || null,
     size: fs.statSync(r.video_path).size,
     sidecars: SIDECARS.filter(ext => fs.existsSync(sidecarPath(r.video_path, ext))),
   };
@@ -182,8 +188,9 @@ function claim(name, info, wantId = null) {
 
 /** what's waiting, in the order it would be handed out (for the control panel); none while the queue is paused */
 function queued() {
-  return db.prepare("SELECT id, video_path, pose FROM funpipe_jobs WHERE status = 'queued' ORDER BY id LIMIT 200").all()
-    .map(r => ({ id: r.id, label: path.basename(r.video_path), kind: 'funscript', why: r.pose ? ['with poses'] : [], priority: 0 }));
+  return db.prepare(`SELECT id, video_path, pose, mode, run_on FROM funpipe_jobs WHERE ${READY} ORDER BY id LIMIT 200`).all()
+    .map(r => ({ id: r.id, label: path.basename(r.video_path), kind: 'funscript', why: r.mode === 'scenes' ? ['from its scenes'] : r.pose ? ['with poses'] : [],
+      priority: 0, node: r.run_on || null }));
 }
 
 const own = (name, id) => db.prepare("SELECT * FROM funpipe_jobs WHERE id = ? AND worker = ?").get(id, name);

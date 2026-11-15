@@ -27,6 +27,17 @@
  *   POST /training/jobs/:id/complete   { result }
  *   POST /training/jobs/:id/fail       { error } ('cancelled' when it was stopped)
  *
+ * And label jobs (labelmaster's scenes; services/labelQueue.js). A funscript job with mode 'scenes' (from /funpipe/claim)
+ * is made from a label job's .labels.json and .motion.json sidecars; it is handed out once that label job is done.
+ *
+ *   GET  /label/queue                  what's waiting -> { paused, jobs: [{ id, label, kind: 'label', priority, node }] }
+ *   POST /label/claim                  { info, jobId? } -> { id, video, name, size }, or 204
+ *   POST /label/jobs/:id/progress      { stage, progress, message, log } -> { action: continue | cancel }
+ *   POST /label/jobs/:id/complete      { labels: { seconds, model, scenes, exposure } }, after .labels.json and .motion.json
+ *   POST /label/jobs/:id/fail          { error }
+ *
+ * A queue listing's node: the coordinator node id a job must run on (null: the order set there for its kind).
+ *
  * Encode workers (the re-encode queue, services/encodeQueue.js) speak Hikari's worker protocol exactly, so Hikari's
  * worker program (server/worker/hikari-worker.mjs) runs this app's jobs as it is, started with a link from
  * Settings → Space (<this app>/api/workers/link/<token>). Each has a token of its own (encode_workers); the funpipe
@@ -54,6 +65,7 @@ const crypto = require('crypto');
 const q = require('../services/funpipeQueue');
 const eq = require('../services/encodeQueue');
 const tq = require('../services/trainingQueue');
+const lq = require('../services/labelQueue');
 
 const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -143,7 +155,25 @@ router.post('/jobs/:id/fail', encoderOnly, (req, res) => {
 });
 
 // ── the funpipe worker ───────────────────────────────────────
-router.use(['/funpipe', '/media', '/sidecar', '/beside', '/training'], funpipeOnly);
+router.use(['/funpipe', '/media', '/sidecar', '/beside', '/training', '/label'], funpipeOnly);
+
+// ── label jobs (the same worker; services/labelQueue.js) ─────
+router.get('/label/queue', (req, res) => res.json({ paused: q.paused(), jobs: lq.queued() }));
+router.post('/label/claim', (req, res) => {
+  const job = lq.claim(req.worker, req.body?.info || null, wanted(req));
+  if (!job) return res.status(204).end();
+  res.json(job);
+});
+router.post('/label/jobs/:id/progress', (req, res) => res.json(lq.progress(req.worker, jobId(req), req.body || {})));
+router.post('/label/jobs/:id/complete', (req, res) => {
+  try {
+    res.json({ ok: lq.complete(req.worker, jobId(req), req.body || {}) });
+  } catch (err) {
+    lq.fail(req.worker, jobId(req), `its labels were refused: ${err.message}`);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+router.post('/label/jobs/:id/fail', (req, res) => res.json({ ok: lq.fail(req.worker, jobId(req), req.body?.error) }));
 
 // ── training runs (the same worker) ──────────────────────────
 const wanted = (req) => { const n = Number(req.body?.jobId); return Number.isInteger(n) && n > 0 ? n : null; };

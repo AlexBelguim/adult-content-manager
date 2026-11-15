@@ -26,7 +26,7 @@
  *
  * Job shape:
  *   { id: '<type>:<sourceId>', sourceId,
- *     type: 'import'|'funpipe'|'pipeline'|'hash'|'encode'|'cleanup'|'train'|'discover'|'probe',
+ *     type: 'import'|'label'|'funpipe'|'pipeline'|'hash'|'encode'|'cleanup'|'train'|'discover'|'probe',
  *     title, subtitle, status: 'queued'|'running'|'done'|'failed'|'cancelled',
  *     progress (0-1|null), done (<= total), total, unit, stage, currentFile, note,
  *     elapsedMs, startedAt, finishedAt (ms), error, result, chips: [], thumbPath,
@@ -55,6 +55,8 @@ const funpipeQueue = require('../services/funpipeQueue');
 const encodeQueue = require('../services/encodeQueue');
 const trainingQueue = require('../services/trainingQueue');
 const scenetestService = require('../services/scenetestService');
+const labelQueue = require('../services/labelQueue');
+const coordinatorService = require('../services/coordinator');
 const { getAiServerUrl } = require('../utils/aiUrl');
 const discoverRunner = require('../services/discover/runner');
 const { WATCHERS } = require('../services/discover/watchers');
@@ -65,7 +67,17 @@ const RECENT_MS = 6 * 60 * 60 * 1000;
 const QUEUED_SHOWN = 100;
 const FUNPIPE_STALE_MS = funpipeQueue.STALE_MS || 10 * 60 * 1000;
 
-const KINDS = ['import', 'hash', 'encode', 'funpipe', 'pipeline', 'train', 'cleanup', 'discover', 'probe'];
+const KINDS = ['import', 'hash', 'encode', 'label', 'funpipe', 'pipeline', 'train', 'cleanup', 'discover', 'probe'];
+
+/**
+ * Where a GPU job runs, as a chip: "on <machine>" once a worker has it (the coordinator's node name, or acm-gpu's own
+ * name when it claims straight from the app), "only <machine>" while it waits for the machine it was pinned to.
+ */
+function machineChips(status, worker, runOn) {
+  if (worker && status !== 'queued') return [`on ${worker}`];
+  if (runOn && status === 'queued') return [`only ${coordinatorService.nodeName(runOn) || 'its machine'}`];
+  return [];
+}
 const ACTIONS = ['pause', 'resume', 'front', 'retry', 'cancel', 'remove'];
 
 // Ended cleanup, Discover and library-scan rows the user removed (those sources have no remove of their own).
@@ -307,6 +319,7 @@ function importJobs() {
 async function funpipeJobs(fresh) {
   const queue = await getFunpipeQueue(fresh);
   const now = Date.now();
+  const openLabels = new Set(labelQueue.list().jobs.filter(l => l.status !== 'done').map(l => l.id));
   return (queue.jobs || []).map(j => {
     // a cancelled job whose worker is still reporting: it stops at the worker's next report
     const stopping = j.status === 'cancelled' && j.phase != null && j.heartbeat && now - j.heartbeat < FUNPIPE_STALE_MS;
@@ -336,15 +349,53 @@ async function funpipeJobs(fresh) {
       open: status === 'done' ? { to: playerLink(src), label: 'Play' } : { to: '/funpipe', label: 'Open Funscripts' }
     });
     if (stopping) allOff(actions, 'Stopping: it ends at the worker\'s next report');
+    // a funscript from the scenes that waits for its label job
+    const waiting = status === 'queued' && j.waitLabel && openLabels.has(j.waitLabel);
     return job({
       type: 'funpipe', sourceId: j.id, title,
       subtitle: performerFromPath(src), status,
       progress: status === 'done' ? 1 : clamp01(j.progress),
-      done, total, unit: 'windows', stage: stopping ? 'stopping' : (status === 'running' ? j.stage || null : null),
+      done, total, unit: 'windows',
+      stage: stopping ? 'stopping' : status === 'running' ? j.stage || null : waiting ? 'waits for its labels' : null,
       elapsedMs, startedAt, finishedAt: isEnded(status) ? (j.finished || null) : null,
       error: status === 'failed' ? (j.error || 'funpipe job failed — see the log') : null,
       result: status === 'done' ? 'Funscript written — needs review' : null,
+      chips: [...(j.mode === 'scenes' ? ['from scenes'] : []), ...machineChips(status, j.worker, j.runOn)],
       thumbPath: src,
+      actions,
+      raw: j
+    });
+  });
+}
+
+/** Label jobs (services/labelQueue): labelmaster on a worker node, the funscript waiting for one marked on it. */
+async function labelJobs() {
+  await coordinatorService.kinds().catch(() => null);   // the node names of "only <machine>"
+  return labelQueue.list().jobs.filter(j => j.status === 'queued' || j.status === 'running' || isRecent(j.finished)).map(j => {
+    const status = ['queued', 'running', 'done', 'failed', 'cancelled'].includes(j.status) ? j.status : 'queued';
+    const actions = actionsOf({
+      pause: [false, 'Labels pause with the funscripts: Stop in the Funscript bar'],
+      front: [false, 'Labels run in the order queued'],
+      retry: [status === 'failed' || status === 'cancelled', ONLY_FAILED_OR_CANCELLED],
+      cancel: cancelRule(status),
+      cancelAsk: {
+        title: `Stop labelling ${j.name}?`,
+        text: 'It stops at the worker\'s next report; Retry labels it again from the start. A funscript waiting for it ends too.',
+        okLabel: 'Stop'
+      },
+      remove: removeRule(status),
+      open: { to: playerLink(j.video), label: 'Play' }
+    });
+    const r = j.result || {};
+    return job({
+      type: 'label', sourceId: j.id, title: j.name, subtitle: performerFromPath(j.video), status,
+      progress: status === 'done' ? 1 : clamp01(j.progress),
+      stage: status === 'running' ? (j.message || j.stage || null) : null,
+      startedAt: j.started, finishedAt: isEnded(status) ? j.finished : null, elapsedMs: elapsed(j.started, j.finished),
+      error: status === 'failed' ? (j.error || 'labelling failed') : null,
+      result: status === 'done' ? `${r.scenes ?? '?'} scenes${r.tagsAdded?.length ? ` · tagged ${r.tagsAdded.join(', ')}` : ''}` : null,
+      chips: [...(j.then ? ['then its funscript'] : []), ...machineChips(status, j.worker, j.runOn)],
+      thumbPath: j.video,
       actions,
       raw: j
     });
@@ -624,6 +675,7 @@ async function trainJobs() {
       error: status === 'failed' ? j.error || 'failed' : null,
       result: status === 'done' && j.result ? `best ${metricText(j.type, j.result.best_val_acc || 0)}${j.result.model ? ` · ${j.result.model}` : ''}` : null,
       link: '/ai-training?tab=train', linkLabel: 'AI & Training',
+      chips: machineChips(status, j.worker, j.runOn),
       actions: actionsOf({
         pause: [false, 'Training can\'t pause: Cancel stops it'],
         front: frontRule(status),
@@ -703,6 +755,7 @@ function probeJobs() {
 // ── assembling, once a second for every caller ───────────────
 const SOURCES = [
   ['import', () => importJobs()],
+  ['label', () => labelJobs()],
   ['funpipe', (fresh) => funpipeJobs(fresh)],
   ['pipeline', (fresh) => pipelineJobs(fresh)],
   ['hash', () => hashJobs()],
@@ -780,13 +833,26 @@ async function dispatch(row, action) {
         return null;
       }
       if (action === 'retry') {
+        // a funscript from the scenes again: with a label job first when its label documents aren't beside the video
+        if (raw.mode === 'scenes') {
+          funpipeQueue.remove(Number(id));
+          const r = labelQueue.enqueue([raw.src], { funscript: true, runOn: raw.runOn, skipDone: true });
+          if (!r.funscript) throw httpError(409, r.skipped[0] ? `Not queued again: ${r.skipped[0].reason}` : 'Not queued again');
+          return null;
+        }
         // never reopens a stopped queue: funpipeQueue.enqueue, not funpipeService.enqueue (which starts it)
-        const r = funpipeQueue.enqueue([raw.src], { pose: raw.pose !== false });
+        const r = funpipeQueue.enqueue([raw.src], { pose: raw.pose !== false, runOn: raw.runOn });
         if (!r.added) throw httpError(409, r.reason ? `Not queued again: ${r.reason}` : 'Not queued again');
         funpipeQueue.remove(Number(id));
         return null;
       }
       break;
+    case 'label': {
+      const r = action === 'retry' ? labelQueue.retry(Number(id)) : (action === 'cancel' || action === 'remove') ? labelQueue.remove(Number(id)) : null;
+      if (!r) break;
+      if (!r.ok) throw httpError(r.error === 'no such job' ? 404 : 409, r.error === 'no such job' ? 'That job is no longer in the list' : r.error);
+      return null;
+    }
     case 'pipeline': {
       const r = await scenetestService.act(id, action);
       if (!r.ok) throw httpError(502, r.error || 'scenetest did not answer');
@@ -906,6 +972,7 @@ router.post('/clear-finished', async (req, res) => {
       try {
         if (k === 'import') cleared += num(uploadQueue.clearCompleted().cleared);
         else if (k === 'funpipe') cleared += num(funpipeQueue.clearDone({ keepFailed: true }).removed);
+        else if (k === 'label') cleared += num(labelQueue.clearDone({ keepFailed: true }).removed);
         else if (k === 'hash') cleared += num(await require('../services/hashQueue').clearFinished());
         else if (k === 'encode') cleared += num(encodeQueue.clearFinished({ keepFailed: true }));
         else if (k === 'pipeline') {

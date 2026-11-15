@@ -66,8 +66,8 @@ async function getQueue(urlOverride) {
 async function enqueue(videoPaths, options = {}) {
   const videos = (videoPaths || []).filter(Boolean);
   if (videos.length === 0) return { queued: false, added: 0, error: 'no videos given' };
-  const { pose = true, autoStart = true } = options;
-  const r = queue.enqueue(videos, { pose });
+  const { pose = true, autoStart = true, runOn = null } = options;
+  const r = queue.enqueue(videos, { pose, runOn });
   if (r.added && autoStart) queue.start();
   return r;
 }

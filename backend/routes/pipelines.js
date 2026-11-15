@@ -1,14 +1,17 @@
 /**
- * Pipelines — labels (labelmaster's scenes) and funscripts for whole performers or content folders, run by
- * scenetest on the GPU PC (services/scenetestService). The Jobs page shows the queue (routes/jobs.js) and
- * starts it from here.
+ * Pipelines — labels (labelmaster's scenes) and funscripts made from them, for whole performers, content folders or
+ * single videos. Since 2026-11-15 they are this app's own jobs (services/labelQueue: label_jobs, and funpipe_jobs with
+ * mode 'scenes'), handed to the worker nodes by the coordinator (kinds acm-label and acm-funscript). scenetest on the
+ * GPU PC is the lab: its own queue (pause, job actions below) still shows on the Jobs page while it has jobs.
  *
  * - GET  /api/pipelines/targets        — performers (with their video counts) and content folders to pick from
  * - POST /api/pipelines/preview        — { performerIds, folders, paths } → { videos, labelled }
- * - POST /api/pipelines/queue          — { performerIds, folders, paths, steps: ['labels', 'funscript'], skipDone };
- *                                        paths are single videos (the player's button), checked to be inside the library
+ * - POST /api/pipelines/queue          — { performerIds, folders, paths, steps: ['labels'] | ['labels', 'funscript'], skipDone, runOn };
+ *                                        paths are single videos (the player's button), checked to be inside the library;
+ *                                        a funscript always comes with its labels; runOn: a coordinator node id, or none
+ *                                        (the order set for each kind in the coordinator)
  * - POST /api/pipelines/pause          — { on }: pause / resume scenetest's queue (the current video is put back)
- * - POST /api/pipelines/job/:id/:action — cancel (the running one) | remove | front | retry one job
+ * - POST /api/pipelines/job/:id/:action — cancel (the running one) | remove | front | retry one of scenetest's jobs
  */
 const express = require('express');
 const router = express.Router();
@@ -16,6 +19,8 @@ const fs = require('fs-extra');
 const path = require('path');
 const db = require('../db');
 const scenetest = require('../services/scenetestService');
+const labelQueue = require('../services/labelQueue');
+const funpipeQueue = require('../services/funpipeQueue');
 
 const VIDEO_EXTS = new Set(['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts']);
 
@@ -77,14 +82,14 @@ router.post('/preview', async (req, res) => {
 });
 
 router.post('/queue', async (req, res) => {
-  const { performerIds, folders, paths, steps, skipDone = true } = req.body;
+  const { performerIds, folders, paths, steps, skipDone = true, runOn = null } = req.body;
   const wanted = (steps || []).filter(s => s === 'labels' || s === 'funscript');
   if (!wanted.length) return res.status(400).json({ error: 'steps required: labels and/or funscript' });
   const videos = await collect(performerIds, folders, paths);
   if (!videos.length) return res.status(400).json({ error: 'No videos in the selection' });
-  const r = await scenetest.queue(videos, wanted, skipDone);
-  if (!r.ok) return res.status(502).json({ error: r.error });
-  res.json({ success: true, videos: videos.length, labels: r.labels, funscript: r.funscript, missing: r.missing });
+  const r = labelQueue.enqueue(videos, { funscript: wanted.includes('funscript'), runOn, skipDone: skipDone !== false });
+  if (r.labels || r.funscript) funpipeQueue.start();   // queueing opens the queue, as the Funscripts page's queueing does
+  res.json({ success: true, videos: videos.length, labels: r.labels, funscript: r.funscript, missing: 0, skipped: r.skipped.length });
 });
 
 router.post('/pause', async (req, res) => {

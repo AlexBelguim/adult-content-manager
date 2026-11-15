@@ -11,6 +11,7 @@ import { useNotify, errorText, plural } from '../ui';
 import { SmallButton, Badge, Segment, ListError } from '../discover/shared';
 import { useIsPhone } from '../../nav';
 import { MODEL_TYPES, pairSourcesOf, fmtWhen, fmtDay } from './modelInfo';
+import RunOnSelect from '../RunOnSelect';
 
 const LEGACY_KEY = 'acm.aiTraining.useLegacy';
 const readLegacy = () => {
@@ -78,6 +79,7 @@ export default function TrainTab({ ai, summary, aiData, queue, type, onType, onQ
   const [pairs, setPairs] = useState(500);
   const [useLegacy, setUseLegacyState] = useState(readLegacy);
   const [starting, setStarting] = useState(false);
+  const [runOn, setRunOn] = useState(null);   // "Run on": a coordinator node, or null for the order set there
   const [pushing, setPushing] = useState(null);      // 'data' | 'labels' while a push runs
   const [saving, setSaving] = useState(false);       // Save ZIP in the library folder
   const [exportAt, setExportAt] = useState(null);    // the Export menu's anchor
@@ -170,7 +172,7 @@ export default function TrainTab({ ai, summary, aiData, queue, type, onType, onQ
 
   const start = async () => {
     setStarting(true);
-    const body = { type, use_legacy: useLegacy, synthetic_pairs_per_epoch: isClip ? pairs : 0 };
+    const body = { type, use_legacy: useLegacy, synthetic_pairs_per_epoch: isClip ? pairs : 0, runOn };
     if (isClip) {
       body.epochs = clampInt(epochs, 1, 50, 8);
       body.batch_size = clampInt(batchSize, 1, 64, 16);
@@ -284,6 +286,7 @@ export default function TrainTab({ ai, summary, aiData, queue, type, onType, onQ
           )}
 
           <Box sx={{ mt: 2, display: 'grid', gap: 0.75, justifyItems: isPhone ? 'stretch' : 'start' }}>
+            <RunOnSelect parts={['training']} value={runOn} onChange={setRunOn} sx={{ mb: 0.5 }} />
             <Button variant="contained" startIcon={<PlayArrow />} disabled={starting || noData} onClick={start}
               fullWidth={isPhone} sx={{ textTransform: 'none' }}>
               {starting ? 'Queueing…' : busyQueue ? `Queue ${selected.name}` : `Start ${selected.name}`}

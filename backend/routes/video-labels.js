@@ -12,7 +12,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const tagRules = require('../services/tagRules');
+const videoLabels = require('../services/videoLabels');
 
 router.get('/', (req, res) => {
   const row = db.prepare('SELECT seconds, model, scenes, exposure FROM video_labels WHERE file_path = ?').get(req.query.path);
@@ -31,17 +31,11 @@ router.get('/counts', (req, res) => {
 });
 
 router.put('/', (req, res) => {
-  const { path: filePath, seconds, model, scenes, exposure } = req.body;
-  if (!filePath || !(seconds > 0) || !Array.isArray(scenes) || !Array.isArray(exposure)) {
-    return res.status(400).json({ error: 'path, seconds, scenes and exposure required' });
+  try {
+    res.json({ success: true, ...videoLabels.store(req.body || {}) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
-  db.prepare(`
-    INSERT INTO video_labels (file_path, seconds, model, scenes, exposure, updated_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(file_path) DO UPDATE SET seconds = excluded.seconds, model = excluded.model, scenes = excluded.scenes,
-      exposure = excluded.exposure, updated_at = CURRENT_TIMESTAMP
-  `).run(filePath, seconds, model || null, JSON.stringify(scenes), JSON.stringify(exposure));
-  res.json({ success: true, tagsAdded: tagRules.applyToFile(filePath) });
 });
 
 module.exports = router;

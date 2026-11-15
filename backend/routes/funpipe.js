@@ -64,11 +64,11 @@ router.get('/queue', async (req, res) => {
 });
 
 router.post('/queue/add', async (req, res) => {
-  const { videos, pose = true, autoStart = true, url } = req.body;
+  const { videos, pose = true, autoStart = true, url, runOn = null } = req.body;
   if (!Array.isArray(videos) || videos.length === 0) {
     return res.status(400).json({ error: 'videos array is required' });
   }
-  const result = await funpipeService.enqueue(videos, { pose, autoStart, urlOverride: url });
+  const result = await funpipeService.enqueue(videos, { pose, autoStart, urlOverride: url, runOn });
   libraryCache.time = 0;
   res.json(result);
 });

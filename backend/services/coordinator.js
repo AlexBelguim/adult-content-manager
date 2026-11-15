@@ -62,6 +62,36 @@ async function refreshGpu() {
 setInterval(refreshGpu, 60000).unref();
 setTimeout(refreshGpu, 3000).unref();
 
+/**
+ * "Run on": each of this app's GPU kinds by part (label, funscript, training, encode) with the nodes that take it, in
+ * the order set in the coordinator: { connected, parts: { label: { kind, label, mode, now, nodes: [{ id, name, online,
+ * takes, place }] } } }. Not connected (or the coordinator away): no nodes, and jobs go where they always did.
+ */
+let kindsCache = { at: 0, value: null };
+async function kinds(fresh = false) {
+  const url = getSetting(URL_KEY);
+  if (!url) return { connected: false, parts: {} };
+  if (!fresh && kindsCache.value && Date.now() - kindsCache.at < 10000) return kindsCache.value;
+  try {
+    const r = await call(url, '/api/panel/kinds?app=acm');
+    const parts = {};
+    for (const k of r.kinds || []) parts[k.part] = { kind: k.kind, label: k.label, mode: k.mode, now: k.now, nodes: k.nodes || [] };
+    kindsCache = { at: Date.now(), value: { connected: true, parts } };
+  } catch (e) {
+    return { connected: true, error: e.message, parts: kindsCache.value?.parts || {} };
+  }
+  return kindsCache.value;
+}
+
+/** a coordinator node id → its name, from the last kinds answer (the Jobs page names the machine a job is pinned to) */
+const nodeName = (id) => {
+  for (const p of Object.values(kindsCache.value?.parts || {})) {
+    const n = p.nodes.find((x) => x.id === id);
+    if (n) return n.name;
+  }
+  return null;
+};
+
 /** acm-gpu's address through the coordinator, when it's connected and has said one (utils/aiUrl.js). */
 const gpuUrl = () => (getSetting(URL_KEY) && gpu?.url ? gpu.url : null);
 
@@ -107,4 +137,4 @@ async function disconnect(req) {
   return status();
 }
 
-module.exports = { status, connect, disconnect, gpuUrl };
+module.exports = { status, connect, disconnect, gpuUrl, kinds, nodeName };

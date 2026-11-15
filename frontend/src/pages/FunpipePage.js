@@ -43,6 +43,8 @@ import { SmallButton, useQueryState } from '../components/discover/shared';
 import { useNotify } from '../components/ui';
 import { useShell } from '../nav';
 import PipelineQuickButton from '../components/PipelineQuickButton';
+import { useRunOn } from '../components/RunOnSelect';
+import { queuePipeline } from '../utils/pipelines';
 import PipelineDialog from '../components/PipelineDialog';
 import useJobs, { isActive } from '../hooks/useJobs';
 
@@ -226,7 +228,7 @@ function VideoRow({ v, selected, onToggle, reviewUrl, onQueue, online }) {
         </Box>
       </Box>
       <Box className="fp-video-ctl" sx={groupSx}>
-        <PipelineQuickButton target={{ paths: [v.path] }} title="Labels & funscripts (scenetest)"
+        <PipelineQuickButton target={{ paths: [v.path] }} title="Labels & funscripts" runOn={runOn}
           hint={v.labelled ? 'labelled' : 'not labelled yet'} sx={btnSx} />
         {reviewUrl && (
           <Tooltip title="Review this script in the editor">
@@ -237,8 +239,8 @@ function VideoRow({ v, selected, onToggle, reviewUrl, onQueue, online }) {
           </Tooltip>
         )}
         {queueable && (
-          <Tooltip title={online ? 'Queue this one with funpipe now' : 'Queue with funpipe (runs when acm-gpu is back)'}>
-            <IconButton size="small" sx={btnSx} onClick={onQueue} aria-label={`Queue ${v.name} with funpipe`}>
+          <Tooltip title={online ? 'Labels + funscript for this one' : 'Labels + funscript for this one (runs when a worker is back)'}>
+            <IconButton size="small" sx={btnSx} onClick={onQueue} aria-label={`Labels + funscript for ${v.name}`}>
               <QueueIcon />
             </IconButton>
           </Tooltip>
@@ -280,13 +282,13 @@ function PerformerLine({ p, videos, open, onToggle, onMore, onQueue, children })
         </Box>
         <Box sx={ctlSx} onClick={(e) => e.stopPropagation()}>
           <Box sx={groupSx} role="group" aria-label="Labels & funscripts">
-            <PipelineQuickButton target={{ performerIds: [p.id] }} title="Labels & funscripts (scenetest)"
+            <PipelineQuickButton target={{ performerIds: [p.id] }} title="Labels & funscripts" runOn={runOn}
               hint={`${n(p.unlabelled)} of ${n(p.videos)} videos unlabelled`} onMore={onMore} sx={btnSx} />
             <Tooltip title={queueable.length
-              ? `Queue her ${queueable.length} unscripted funscript-folder video${queueable.length === 1 ? '' : 's'} with funpipe`
-              : 'Nothing of hers to queue with funpipe'}>
+              ? `Labels + funscript for her ${queueable.length} unscripted funscript-folder video${queueable.length === 1 ? '' : 's'}`
+              : 'Every video in her funscript folder has a script'}>
               <span style={{ display: 'inline-flex' }}>
-                <IconButton size="small" sx={btnSx} disabled={!queueable.length} aria-label="Queue with funpipe"
+                <IconButton size="small" sx={btnSx} disabled={!queueable.length} aria-label="Labels + funscript for her unscripted videos"
                   onClick={() => onQueue(queueable)}>
                   <QueueIcon />
                 </IconButton>
@@ -323,6 +325,8 @@ export default function FunpipePage() {
   const [selected, setSelected] = useState(new Set());
   const [expanded, setExpanded] = useState(new Set());
   const [pipelineFor, setPipelineFor] = useState(null);
+  const [runOn, setRunOn] = useState(null);   // "Run on" for everything queued from this page: null = the coordinator's order
+  const runChoices = useRunOn(['label', 'funscript']);
   const [editor, setEditor] = useState({ running: false, url: null });
   const [editorBusy, setEditorBusy] = useState(false);
 
@@ -385,18 +389,18 @@ export default function FunpipePage() {
     prevActive.current = funpipeActive;
   }, [funpipeActive, loadLibrary]);
 
-  const queueVideos = async (videos, what) => {
+  // labels + a funscript from them, on the machines in the coordinator's order or the one picked in the sidebar
+  const queueVideos = async (videos) => {
     if (!videos.length) return;
-    const result = await post('/api/funpipe/queue/add', { videos });
-    if (result.queued) {
-      notify(`Queued ${what} with funpipe`);
+    try {
+      notify(await queuePipeline({ paths: videos, steps: ['labels', 'funscript'], runOn }));
       setSelected(s => {
         const next = new Set(s);
         videos.forEach(p => next.delete(p));
         return next;
       });
-    } else {
-      notify({ severity: 'warning', message: result.error || 'funpipe accepted nothing — already processed?' });
+    } catch (err) {
+      notify({ severity: 'warning', message: err.message });
     }
     refreshJobs();
     loadLibrary(true);
@@ -490,6 +494,11 @@ export default function FunpipePage() {
             tip="Shut the editor down when you're done: it holds the video files open" />
         : <SideMain icon={<EditNoteIcon />} label="Start review editor" onClick={toggleEditor} busy={editorBusy} busyLabel="Starting…"
             disabled={!online} tip={online ? 'Start the funscript review editor on the GPU machine' : 'acm-gpu is offline'} />}
+      {runChoices.connected && runChoices.nodes.length > 0 && (
+        <SideSelect label="Run on" value={runOn || ''} onChange={(value) => setRunOn(value || null)}
+          options={[{ value: '', label: 'Follow the order' },
+            ...runChoices.nodes.map(n => ({ value: n.id, label: `${n.name}${n.online ? '' : ' (away)'}` }))]} />
+      )}
       <SideFacts rows={[
         { label: 'acm-gpu', value: online ? 'Online' : 'Offline', tone: online ? 'ok' : 'bad', title: online ? config.url : config.aiServerUrl }
       ]} />
@@ -553,7 +562,7 @@ export default function FunpipePage() {
       <>
         <SmallButton onClick={() => setSelected(new Set())}>Clear</SmallButton>
         <SmallButton primary startIcon={<QueueIcon />} onClick={() => queueVideos([...selected], `${selected.size} video(s)`)}>
-          Queue {selected.size} with funpipe
+          Labels + funscript for {selected.size}
         </SmallButton>
       </>
     ) : null} />

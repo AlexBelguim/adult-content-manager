@@ -343,7 +343,7 @@ router.post('/start', async (req, res) => {
       trainingPayload.synthetic_pairs_per_epoch = synthetic;
     }
 
-    const q = trainingQueue.enqueue(trainingPayload);
+    const q = trainingQueue.enqueue(trainingPayload, { runOn: req.body?.runOn });
     res.json({
       success: true,
       queued: true,

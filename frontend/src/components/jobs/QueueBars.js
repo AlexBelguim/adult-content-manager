@@ -58,13 +58,16 @@ export default function QueueBars({ jobs = [], capped = [], services, kind = 'al
   const st = services?.scenetest || null;
   const enc = services?.encode || null;
 
-  const fpCounts = countsOf('funpipe', jobs, capped);
+  // label jobs share the funscript queue's Open / Stop (services/labelQueue), so its bar counts them too
+  const fpOnly = countsOf('funpipe', jobs, capped);
+  const lbCounts = countsOf('label', jobs, capped);
+  const fpCounts = { running: fpOnly.running + lbCounts.running, queued: fpOnly.queued + lbCounts.queued };
   const stCounts = countsOf('pipeline', jobs, capped);
   const encCounts = countsOf('encode', jobs, capped);
   const has = (c) => c.running + c.queued > 0;
 
   const fpPaused = fp ? !!(fp.paused ?? (fp.online && !fp.workerRunning)) : false;
-  const showFunpipe = kind === 'funpipe' || (kind === 'all' && (has(fpCounts) || (fpPaused && fpCounts.queued > 0)));
+  const showFunpipe = kind === 'funpipe' || kind === 'label' || (kind === 'all' && (has(fpCounts) || (fpPaused && fpCounts.queued > 0)));
   const showPipeline = kind === 'pipeline' || (kind === 'all' && has(stCounts));
   const showEncode = kind === 'encode' || (kind === 'all' && has(encCounts));
 
