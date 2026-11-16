@@ -200,7 +200,7 @@ function fmtBytes(b) {
 }
 
 /** One video of her funscript folder: tick to queue, its script state and labels, then its buttons. */
-function VideoRow({ v, selected, onToggle, reviewUrl, onQueue, online }) {
+function VideoRow({ v, selected, onToggle, reviewUrl, onQueue, online, runOn }) {
   const meta = STATUS_META[v.status] || { label: v.status };
   const tone = STATUS_TONE[v.status] || 'var(--dim)';
   const queueable = QUEUEABLE.includes(v.status);
@@ -251,7 +251,7 @@ function VideoRow({ v, selected, onToggle, reviewUrl, onQueue, online }) {
 }
 
 /** One performer: picture, name, Before / After, the facts line, her buttons; her funscript folder when open. */
-function PerformerLine({ p, videos, open, onToggle, onMore, onQueue, children }) {
+function PerformerLine({ p, videos, open, onToggle, onMore, onQueue, runOn, children }) {
   const queueable = videos.filter(v => QUEUEABLE.includes(v.status)).map(v => v.path);
   const review = p.counts?.needs_review || 0;
   const canOpen = p.funscript > 0;
@@ -581,11 +581,11 @@ export default function FunpipePage() {
     body = (
       <Panel padded={false} sx={{ overflow: 'hidden' }}>
         {rows.map(({ p, videos, byVideo }) => (
-          <PerformerLine key={p.id} p={p} videos={videos} open={byVideo || expanded.has(p.id)}
+          <PerformerLine key={p.id} p={p} videos={videos} runOn={runOn} open={byVideo || expanded.has(p.id)}
             onToggle={() => toggleExpanded(p.id)} onMore={() => setPipelineFor(p.id)}
             onQueue={(paths) => queueVideos(paths, `${paths.length} of ${p.name}'s videos`)}>
             {videos.map(v => (
-              <VideoRow key={v.path} v={v} online={online} selected={selected.has(v.path)} onToggle={() => toggle(v.path)}
+              <VideoRow key={v.path} v={v} online={online} runOn={runOn} selected={selected.has(v.path)} onToggle={() => toggle(v.path)}
                 reviewUrl={reviewUrl(v)} onQueue={() => queueVideos([v.path], v.name)} />
             ))}
           </PerformerLine>
