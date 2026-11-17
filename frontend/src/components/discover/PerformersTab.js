@@ -4,14 +4,31 @@
  * Keep and Delete reach the profile page and P's training; Remove only takes her off Discover (POST /performer-status).
  * Its search, sort and filters are the sidebar's Show group; the content line says what is shown.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import BadgeOutlinedIcon from '@mui/icons-material/BadgeOutlined';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import { ContentLine, SIDE, SideChecks, SideGroup, SideSearch, SideSegment, SideSelect } from '../layout';
-import { SmallButton, SORT_OPTIONS, useQueryState } from './shared';
+import { ContentLine, SIDE, SideChecks, SideGroup, SideMultiSelect, SideNote, SideSearch, SideSegment, SideSelect } from '../layout';
+import { get, SmallButton, SORT_OPTIONS, useQueryState } from './shared';
 import PerformerGrid from './PerformerGrid';
 import './tabs.css';
 
-const DEFAULTS = { show: 'decide', q: '', sort: 'score', new: '', data: '', pics: '', hideHand: '' };
+// The profile filters (GET /facets, backend/services/discover/facets.js): the query's key and the select's label
+const FACETS = [
+  { key: 'eth', label: 'Ethnicity' },
+  { key: 'country', label: 'Country' },
+  { key: 'tag', label: 'Tags' },
+  { key: 'body', label: 'Body type' },
+  { key: 'cup', label: 'Cup size' }
+];
+const FACETS_OFF = Object.fromEntries(FACETS.map(f => [f.key, '']));
+const listOf = (s) => String(s || '').split(',').map(v => v.trim()).filter(Boolean);
+
+let regionNames = null;
+try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch { regionNames = null; }
+/** 'US' → 'United States'; the code itself when the browser has no name for it */
+const countryName = (code) => { try { return regionNames?.of(code) || code; } catch { return code; } };
+
+const DEFAULTS = { show: 'decide', q: '', sort: 'score', new: '', data: '', pics: '', hideHand: '', ...FACETS_OFF };
 const SORTS = ['score', 'scoreAsc', 'newest', 'name'];
 const TITLE = { all: 'Performers', decided: 'Decided', liked: 'Liked', kept: 'Kept' };
 /** 'score, high to low': a sort's label inside a line */
@@ -46,12 +63,26 @@ export default function PerformersTab({ tab, version, ask, notify, refresh, watc
     hideHand: hasHand && qs.hideHand === '1'
   };
   const q = qs.q || '';
-  const params = new URLSearchParams({ view, q, sort });
-  for (const key of ['new', 'data', 'pics', 'hideHand']) if (on[key]) params.set(key, '1');
+  const chosen = Object.fromEntries(FACETS.map(f => [f.key, listOf(qs[f.key])]));
+  // What is shown, without its order: the list's query, and the one the profile filters' options are counted for
+  const shown = new URLSearchParams({ view, q });
+  for (const key of ['new', 'data', 'pics', 'hideHand']) if (on[key]) shown.set(key, '1');
+  for (const f of FACETS) if (chosen[f.key].length) shown.set(f.key, chosen[f.key].join(','));
+  const shownQuery = shown.toString();
+  const params = new URLSearchParams(shown);
+  params.set('sort', sort);
+
+  const [facets, setFacets] = useState(null);
+  useEffect(() => {
+    let live = true;
+    get(`/facets?${shownQuery}`).then((r) => { if (live) setFacets(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [shownQuery, version]);
 
   const toggle = (key) => setQs({ [key]: on[key] ? '' : '1' });
-  const filtered = !!q || on.new || on.data || on.pics || on.hideHand;
-  const clearFilters = () => setQs({ q: '', new: '', data: '', pics: '', hideHand: '' });
+  const profileOn = FACETS.filter(f => chosen[f.key].length).length;
+  const filtered = !!q || on.new || on.data || on.pics || on.hideHand || profileOn > 0;
+  const clearFilters = () => setQs({ q: '', new: '', data: '', pics: '', hideHand: '', ...FACETS_OFF });
   const exportOnly = tab === 'liked' ? '?only=liked' : tab === 'kept' ? '?only=kept' : '';
 
   const onCount = [q, on.new, on.data, on.pics, on.hideHand].filter(Boolean).length;
@@ -78,6 +109,18 @@ export default function PerformersTab({ tab, version, ask, notify, refresh, watc
             title: 'Leaves out the performers found only by the watchers that run by hand; one also found elsewhere stays'
           }
         ]} />
+      </SideGroup>
+      <SideGroup id="profile" title="Profile" icon={<BadgeOutlinedIcon />} badge={profileOn} summary={profileOn ? `${profileOn} on` : 'any'} order={SIDE.show + 1}>
+        {FACETS.map(f => (
+          <SideMultiSelect key={f.key} label={f.label} values={chosen[f.key]}
+            onChange={(values) => setQs({ [f.key]: values.join(',') })}
+            options={(facets?.facets?.[f.key] || []).map(o => ({ value: o.value, label: f.key === 'country' ? countryName(o.value) : o.value, count: o.count }))} />
+        ))}
+        {facets ? (
+          <SideNote>
+            {`${facets.with_data.toLocaleString()} of ${facets.total.toLocaleString()} have profile data. A filter leaves out the ones without that field.`}
+          </SideNote>
+        ) : null}
       </SideGroup>
       <ContentLine
         title={TITLE[view]}

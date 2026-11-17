@@ -349,19 +349,70 @@ async function retrySkipped({ sites, judge, http }) {
   return counts;
 }
 
-/** Saves a creator's whole profile for the profile page, unless it was saved in the last 30 days. */
+/** Saves a creator's whole profile for the profile page, unless it was saved in the last 30 days. Returns whether she has it now. */
 async function saveCreatorData({ site, adapter, profileId, fallback = null }) {
   const have = store.profile(site.name, profileId);
-  if (have?.full && Date.now() - new Date(have.data_at) < 30 * 864e5) return;
+  if (have?.full && Date.now() - new Date(have.data_at) < 30 * 864e5) return true;
   try {
     const data = await adapter.profileDetails(profileId);
     if (!data?.name) throw new Error('empty profile');
     const scrape = adapter.toScrapeResult(data);
     store.saveProfileData({ site: site.name, profile_id: profileId, name: data.name, url: scrape.url, image_url: data.media?.url, scrape, full: true });
+    return true;
   } catch (err) {
     if (fallback) store.saveProfileData({ site: site.name, profile_id: profileId, ...fallback, full: false });
     warn(`  profile ${profileId}: ${err.message}`);
+    return false;
   }
+}
+
+/** The watcher of a site whose adapter can read a creator's whole profile, by the site's name; null when none can */
+function detailsWatcher(siteName) {
+  return WATCHERS.find((w) => {
+    if (w.name !== siteName || w.enabled === false) return false;
+    try { return typeof ADAPTERS[w.adapter]?.(w, null)?.profileDetails === 'function'; } catch { return false; }
+  }) || null;
+}
+
+/** How many profiles have only what a list gave and a site that can give the rest: what a Whole profiles run would read */
+const wholeProfilesLeft = () => store.partialProfileCounts().reduce((n, r) => n + (detailsWatcher(r.site) ? r.n : 0), 0);
+
+// A site that answers nothing any more (blocked, down): the run stops instead of asking for every profile left
+const DETAILS_FAILS = 10;
+
+/**
+ * Reads the whole profile of every creator that has only what a list gave: leakshaven.com/models sends her ethnicity and
+ * country, and her tags, body type, cup size and the rest only come with her own page (Discover's Profile filters read
+ * them). Best score first; nothing is judged. A profile whose page fails stays as it is, for the next run; a paused run
+ * goes on with the ones left.
+ */
+async function readWholeProfiles({ http }) {
+  const sites = new Map();   // site name → { site, adapter } or null
+  const siteOf = (name) => {
+    if (!sites.has(name)) {
+      const site = detailsWatcher(name);
+      sites.set(name, site ? { site, adapter: ADAPTERS[site.adapter](site, http) } : null);
+    }
+    return sites.get(name);
+  };
+  const todo = store.allProfiles().filter((p) => !p.full && siteOf(p.site)).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  say(`Whole profiles: ${todo.length} to read`);
+  let read = 0, failed = 0, streak = 0;
+  let failure = null;
+  for (const [i, p] of todo.entries()) {
+    if (stopped()) break;
+    if (await saveCreatorData({ ...siteOf(p.site), profileId: p.profile_id })) {
+      read++;
+      streak = 0;
+      say(`  ${i + 1} of ${todo.length}  ${p.name}`);
+    } else {
+      failed++;
+      if (++streak >= DETAILS_FAILS) { failure = new Error(`${DETAILS_FAILS} profiles in a row could not be read`); break; }
+    }
+  }
+  say(`\nThis run: ${read} whole profile${read === 1 ? '' : 's'} read${failed ? `, ${failed} not` : ''}, ${todo.length - read} left`);
+  if (failure) throw failure;
+  return { read, failed };
 }
 
 /**
@@ -547,10 +598,15 @@ function backlogSites(watchers = WATCHERS) {
 
 /**
  * One run. mode: scan (the watchers on watch), watcher (one, options.watcher), profiles (the profiles watchers), backlog
- * (older posts), rescore (every cached picture again), pools (the pictures together alone). Whatever stops the reading, the
+ * (older posts), rescore (every cached picture again), pools (the pictures together alone), details (the whole profile of
+ * the creators that have only a list's data: nothing is judged, so P is not asked). Whatever stops the reading, the
  * steps after it (the pictures together, the profile page's events) still run; then the run ends with that error.
  */
 async function run(mode = 'scan', options = {}) {
+  if (mode === 'details') {
+    await readWholeProfiles({ http: createHttp({ ...LIMITS, flareSolverrUrl: flareSolverrUrl() }) });
+    return {};
+  }
   const chosen = WATCHERS.filter((w) => w.enabled !== false && (mode !== 'watcher' || w.id === options.watcher));
   if (mode === 'watcher' && !chosen.length) throw new Error(`No watcher "${options.watcher}"`);
   const onWatch = mode === 'scan';
@@ -614,4 +670,4 @@ async function run(mode = 'scan', options = {}) {
   return { counts, secondsPerPicture: judge.secondsPerPicture() };
 }
 
-module.exports = { run, scan, judgeWaiting, retrySkipped, currentResults, threshold, backlogSites, ADAPTERS };
+module.exports = { run, scan, judgeWaiting, retrySkipped, currentResults, threshold, backlogSites, wholeProfilesLeft, ADAPTERS };

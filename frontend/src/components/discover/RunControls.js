@@ -54,6 +54,9 @@ export default function RunControls({ summary, ask, notify, act, compact = false
   const busy = !!(summary.job?.running || summary.watchJob?.running);
   const notNow = busy ? ' (a run is going)' : '';
   const next = summary.backlog?.next || null;
+  // Whole profiles: the hand slot alone has to be free, the timer's run goes on beside it
+  const left = summary.whole_profiles_left || 0;
+  const handBusy = !!summary.job?.running;
   const rejudge = totals.rejudge || {};
   const posts = rejudge.posts || 0;
   const profiles = rejudge.profiles || 0;
@@ -89,6 +92,18 @@ export default function RunControls({ summary, ask, notify, act, compact = false
     });
     if (!yes) return;
     await act('/scan', { mode: 'rescore' });
+  };
+
+  const wholeProfiles = async () => {
+    const yes = await ask({
+      title: `Read ${left.toLocaleString()} whole profiles?`,
+      text: `${left.toLocaleString()} profiles have only what their site's list gave. This reads each one's own page for the rest: tags, body type, `
+        + `cup size, height and more (the Profile filters use them). One a second, so about ${Math.max(1, Math.round(left / 60))} min; nothing is judged. `
+        + 'Pause stops it; starting again goes on with the ones left.',
+      okLabel: 'Read'
+    });
+    if (!yes) return;
+    await act('/scan', { mode: 'details' });
   };
 
   const pause = async (slot) => {
@@ -167,7 +182,7 @@ export default function RunControls({ summary, ask, notify, act, compact = false
         <SideButtons columns={info.running.length}>
           {info.running.map(s => (
             <SideButton key={s.key} disabled={pausing === s.key} onClick={() => pause(s.key)}
-              tip={`Stops this run. ${s.j.mode === 'rescore' ? 'Re-judge goes on with the pictures left.' : 'The next run goes on from where it stopped.'}`}>
+              tip={`Stops this run. ${s.j.mode === 'rescore' ? 'Re-judge goes on with the pictures left.' : s.j.mode === 'details' ? 'Whole profiles goes on with the ones left.' : 'The next run goes on from where it stopped.'}`}>
               {info.running.length === 1 ? 'Pause' : s.key === 'hand' ? 'Pause hand run' : 'Pause timer run'}
             </SideButton>
           ))}
@@ -181,6 +196,14 @@ export default function RunControls({ summary, ask, notify, act, compact = false
           <SideButtons columns={2}>
             <SideButton disabled={busy || !next} onClick={olderPosts} tip={next ? `${olderText}${notNow}` : olderText}>Older posts</SideButton>
             <SideButton disabled={busy || !n} onClick={reJudge} tip={n ? `${rejudgeText}${notNow}` : rejudgeText}>Re-judge</SideButton>
+          </SideButtons>
+          <SideButtons>
+            <SideButton disabled={handBusy || !left} onClick={wholeProfiles}
+              tip={left
+                ? `Reads the own page of the ${left.toLocaleString()} profiles that have only a list's data, for their tags, body type and cup size${handBusy ? ' (a run started by hand is going)' : ''}`
+                : 'Every profile has its whole data'}>
+              {left ? `Whole profiles · ${left.toLocaleString()}` : 'Whole profiles'}
+            </SideButton>
           </SideButtons>
           <SideButtons>
             <SideButton plain aria-haspopup="dialog" onClick={() => setLogOpen(true)}>Log</SideButton>

@@ -16,8 +16,8 @@ const watch = { on: false, minutes: LIMITS.watchMinutes, timer: null, nextAt: nu
 const listeners = new Set();
 
 const onWatch = (id) => WATCHERS.find((w) => w.id === id)?.watch !== false;
-/** Whether a run by hand covers watchers the timer runs too */
-const touchesWatched = (mode, watcher) => mode !== 'watcher' || onWatch(watcher);
+/** Whether a run by hand covers watchers the timer runs too; a details run reads no watcher's list, so the timer goes on beside it */
+const touchesWatched = (mode, watcher) => mode !== 'details' && (mode !== 'watcher' || onWatch(watcher));
 
 function startScan(mode = 'scan', options = {}, slot = job) {
   if (slot.running) return false;
@@ -105,4 +105,7 @@ function resume() {
 const plain = ({ log, stopRequested, ...rest }) => ({ ...rest, log: log.slice(-200) });
 const status = () => ({ job: plain(job), watchJob: plain(watchJob), watch: { on: watch.on, minutes: watch.minutes, nextAt: watch.nextAt, waitingForHand: watch.waitingForHand } });
 
-module.exports = { startScan, pause, setWatch, resume, status, onChange: (fn) => listeners.add(fn), slots: { job, watchJob } };
+/** Something outside a run changed what the page shows (libraryLink.js): the listeners hear it as they hear a run's end */
+const changed = () => { for (const fn of listeners) fn(); };
+
+module.exports = { startScan, pause, setWatch, resume, status, changed, onChange: (fn) => listeners.add(fn), slots: { job, watchJob } };

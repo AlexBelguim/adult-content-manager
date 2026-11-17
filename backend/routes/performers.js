@@ -7,6 +7,7 @@ const db = require('../db');
 const fs = require('fs-extra');
 const path = require('path');
 const { deletePerformerRecord, relocatePerformerPaths, BEFORE_FOLDER, AFTER_FOLDER } = require('../services/performerRecords');
+const discoverLink = require('../services/discover/libraryLink');
 const axios = require('axios');
 const { findPerformerByNameOrAlias, findFuzzyMatches } = require('../utils/performerMatcher');
 const mediaDimensions = require('../utils/mediaDimensions');
@@ -1504,7 +1505,9 @@ router.post('/:id/move-to-after-async', async (req, res) => {
           progressText: 'Checking performer location...',
         });
 
+        const her = discoverLink.who(id);
         const result = await merger.movePerformerToAfter(id, keepCurrentThumbnail);
+        discoverLink.movedToAfter(her);   // kept on Discover: Checked there now
 
         backgroundTasks.set(jobId, {
           ...backgroundTasks.get(jobId),
@@ -1557,7 +1560,9 @@ router.post('/:id/move-to-after', async (req, res) => {
   const { keepCurrentThumbnail } = req.body;
 
   try {
+    const her = discoverLink.who(id);
     const result = await merger.movePerformerToAfter(id, keepCurrentThumbnail);
+    discoverLink.movedToAfter(her);   // kept on Discover: Checked there now
     res.send(result);
   } catch (err) {
     if (err.message.includes('Merge required')) {
@@ -1623,7 +1628,9 @@ router.delete('/:id', async (req, res) => {
   const { deleteFromSystem } = req.query;
 
   try {
+    const her = discoverLink.who(id);
     const result = await merger.deletePerformerData(id, deleteFromSystem === 'true');
+    discoverLink.deleted(her);   // kept on Discover: Deleted there now
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: err.message });
@@ -2069,7 +2076,9 @@ router.delete('/:id/folder', async (req, res) => {
 
     // Delete from database first (one transaction, clears every FK dependent) so a
     // failure here can never leave an orphaned card behind without its folder.
+    const her = discoverLink.who(id);
     deletePerformerRecord(id);
+    discoverLink.deleted(her);   // kept on Discover: Deleted there now
 
     // Delete folder from filesystem
     if (await fs.pathExists(performerPath)) {

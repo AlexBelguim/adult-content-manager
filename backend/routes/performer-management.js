@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { deletePerformerRecord } = require('../services/performerRecords');
+const discoverLink = require('../services/discover/libraryLink');
 const fs = require('fs-extra');
 const path = require('path');
 const { normalizeName } = require('../utils/performerMatcher');
@@ -460,7 +461,9 @@ router.delete('/:id/complete', async (req, res) => {
       }
     };
     // Delete all database records (one transaction, clears every FK dependent)
+    const her = discoverLink.who(id);
     Object.assign(deletedItems.databaseRecords, deletePerformerRecord(id));
+    discoverLink.deleted(her);   // kept on Discover: Deleted there now
 
     res.send({
       success: true,
@@ -523,11 +526,14 @@ router.delete('/:id/forget', async (req, res) => {
       return { pairs, scores, ...deletePerformerRecord(performer.id) };
     });
 
+    const her = discoverLink.who(performer.id);
+    const databaseRecords = forget();
+    discoverLink.deleted(her);   // kept on Discover: Deleted there now
     res.send({
       success: true,
       message: `"${performer.name}" deleted with her training data`,
       ...removalFields(done),
-      databaseRecords: forget()
+      databaseRecords
     });
   } catch (err) {
     console.error('Error forgetting performer:', err);

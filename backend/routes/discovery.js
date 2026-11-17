@@ -3,7 +3,9 @@
  *
  * - GET  /api/discovery/summary          — totals, watchers, the runs, what judges and what Older posts reads next
  * - GET  /api/discovery/performers       — ?view=all|liked|kept|decided|everyone|duplicates &q &sort &new &data &pics &hideHand &kind
- *                                          &watcher &offset &limit: Performers, Liked, Kept, Decided, Duplicates, one watcher's
+ *                                          &watcher &offset &limit: Performers, Liked, Kept, Decided, Duplicates, one watcher's;
+ *                                          &eth &country &tag &body &cup: the profile filters (services/discover/facets.js)
+ * - GET  /api/discovery/facets           — the same query: the profile filters' options, each with its count
  * - GET  /api/discovery/performer        — ?key=<member key or performer id>: one performer
  * - GET  /api/discovery/watcher/:id      — ?list=all|above|below|skipped|waiting &q &sort &offset &limit: what a watcher read
  * - GET  /api/discovery/export/profile-data — ?only=liked|kept: the profiles' data, without scores
@@ -32,12 +34,13 @@ const { WATCHERS } = require('../services/discover/watchers');
 const { CACHE, abs, rel, cacheUrl } = require('../services/discover/paths');
 const { profileDataExport } = require('../services/discover/results');
 const { siteLink } = require('../services/discover/links');
+const { matchProfile, facetCounts } = require('../services/discover/facets');
 const { loadLibrary, rememberLibraryNames } = require('../services/discover/library');
 const { decide, isApplying, performerPayload, queueUndecide, sendQueued } = require('../services/discover/events');
 const { applyEvent } = require('../services/discover/verdicts');
 const { currentModel } = require('../services/discover/judge');
 const { MAX_UPLOAD_BYTES, PICTURE_TYPES, judge, moveFiles, newUploadId, uploadDir, send: sendUpload, remove: removeUpload, notSending } = require('../services/discover/uploads');
-const { currentResults: buildCurrent, threshold, backlogSites } = require('../services/discover/scan');
+const { currentResults: buildCurrent, threshold, backlogSites, wholeProfilesLeft } = require('../services/discover/scan');
 const runner = require('../services/discover/runner');
 const store = require('../services/discover/store');
 
@@ -142,6 +145,8 @@ router.get('/summary', (req, res) => {
     uploads: store.uploadCount(),
     // The site an Older posts run starts with; null when every site was read to the end
     backlog: { next: backlogSites()[0]?.label ?? null },
+    // How many profiles a Whole profiles run would read: the ones with only a list's data (no tags, body type or cup size)
+    whole_profiles_left: wholeProfilesLeft(),
     ...runner.status(),
   });
 });
@@ -161,8 +166,8 @@ function viewList(results, view) {
   return results.performers;
 }
 
-/** The filters of ?new, ?data, ?pics, ?hideHand, ?kind and the search */
-function filtered(list, q) {
+/** The filters of ?new, ?data, ?pics, ?hideHand, ?kind, the profile filters (facets.js) and the search */
+function filtered(list, q, { profile = true } = {}) {
   if (q.new === '1') list = list.filter((g) => !g.in_library);
   if (q.data === '1') list = list.filter((g) => g.data);
   // Only the performers with 3 or more pictures to look at (judged on several, or found more than once)
@@ -175,7 +180,20 @@ function filtered(list, q) {
   }
   const kind = q.view === 'duplicates' && q.kind;
   if (kind === 'fallen' || kind === 'pair') list = list.filter((d) => d.kind === kind);
+  // Duplicates' items are pairs: they have no profile of their own to filter on
+  if (profile && q.view !== 'duplicates') list = matchProfile(list, q);
   return matching(list, q.q, (g) => [...g.names, ...(g.data?.aliases || [])]);
+}
+
+/** A view's performers before any filter; with ?watcher= only the ones that watcher found (undefined: no such watcher) */
+function viewBase(results, q) {
+  const list = viewList(results, q.view);
+  if (!q.watcher) return { list };
+  const w = findWatcher(q.watcher);
+  if (!w) return {};
+  const source = `${w.name}:${w.kind}`;
+  const mine = (g) => !!g.sources?.includes(source);
+  return { list: q.view === 'duplicates' ? list.filter((d) => d.groups.some(mine)) : list.filter(mine), mine };
 }
 
 // Performers (to decide), Liked (something above the line), Kept (decided Keep), Decided (deleted, removed, checked with
@@ -184,14 +202,10 @@ function filtered(list, q) {
 router.get('/performers', (req, res) => {
   const q = req.query;
   const results = currentResults();
-  let list = viewList(results, q.view);
+  let { list, mine } = viewBase(results, q);
+  if (!list) return res.status(404).json({ error: 'no such watcher' });
   let counts;
-  if (q.watcher) {
-    const w = findWatcher(q.watcher);
-    if (!w) return res.status(404).json({ error: 'no such watcher' });
-    const source = `${w.name}:${w.kind}`;
-    const mine = (g) => !!g.sources?.includes(source);
-    list = q.view === 'duplicates' ? list.filter((d) => d.groups.some(mine)) : list.filter(mine);
+  if (mine) {
     // The counts after the search and filters, before the view: what each of the watcher's views would show
     const base = filtered(results.everyone.filter(mine), { ...q, view: 'everyone' });
     const inside = (xs) => { const set = new Set(xs); return base.filter((g) => set.has(g)).length; };
@@ -206,6 +220,17 @@ router.get('/performers', (req, res) => {
     list = [...fallen, ...list.filter((d) => d.kind !== 'fallen')];
   }
   res.json({ ...page(list, q), ...(counts ? { counts } : {}) });
+});
+
+// The profile filters' options for a view (the same query as /performers): each ethnicity, country, tag, body type and cup
+// size its performers have, with how many it would show: counted after the search, the checks and the other profile filters.
+// with_data: how many of them have profile data at all, of total.
+router.get('/facets', (req, res) => {
+  const q = req.query;
+  const { list } = viewBase(currentResults(), q);
+  if (!list) return res.status(404).json({ error: 'no such watcher' });
+  const base = q.view === 'duplicates' ? [] : filtered(list, q, { profile: false });
+  res.json({ facets: facetCounts(base, q), total: base.length, with_data: base.filter((g) => g.data).length });
 });
 
 // One performer, by a member key or her id: the drawer opened from a link, a reload, or a row of what a watcher read
@@ -290,11 +315,11 @@ router.get(/^\/cache\/(.+)$/, (req, res) => {
   res.set('Cache-Control', 'max-age=3600').sendFile(file);
 });
 
-// A run by hand: the watchers on watch (scan), one watcher, the profiles watchers, older posts, Re-judge, or the pictures
-// together. Only the watcher is taken from the page: limits and the line are the server's own.
+// A run by hand: the watchers on watch (scan), one watcher, the profiles watchers, older posts, Re-judge, the pictures
+// together, or the whole profiles (details). Only the watcher is taken from the page: limits and the line are the server's own.
 router.post('/scan', (req, res) => {
   const body = req.body || {};
-  const mode = ['rescore', 'backlog', 'profiles', 'watcher', 'pools'].includes(body.mode) ? body.mode : 'scan';
+  const mode = ['rescore', 'backlog', 'profiles', 'watcher', 'pools', 'details'].includes(body.mode) ? body.mode : 'scan';
   if (mode === 'watcher' && !findWatcher(body.watcher)) return res.status(404).json({ error: 'no such watcher' });
   const options = mode === 'watcher' ? { watcher: body.watcher } : {};
   if (runner.startScan(mode, options)) return res.status(202).json(runner.status());

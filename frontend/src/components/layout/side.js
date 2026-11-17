@@ -8,6 +8,7 @@
  *   <SideChecks items={[{ id, label, checked, onChange: (bool)=>…, title?, disabled?, count? }]} />
  *   <SideSearch value onChange placeholder phoneRow={true} />
  *   <SideSelect label value onChange options={[{ value, label }]} />
+ *   <SideMultiSelect label values onChange={(values)=>…} options={[{ value, label, count? }]} disabled? />
  *   <SideSegment label value onChange options={[{ id, label, count? }]} />
  *   <SideField label="Every" hint?>{control}</SideField>
  *   <SideButtons columns={1|2}><SideButton plain? danger? icon? tip? disabled? onClick | component={RouterLink} to | href>Label</SideButton></SideButtons>
@@ -217,6 +218,11 @@ export function SideSearch({ value = '', onChange, placeholder = 'Search', phone
   return <Box sx={{ px: '8px', minWidth: 0 }}>{field}</Box>;
 }
 
+const menuPaperSx = {
+  bgcolor: 'var(--overlay)', backgroundImage: 'none', color: 'var(--text)',
+  border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-md)'
+};
+
 /** A full-width 32px select. */
 export function SideSelect({ label, value, onChange, options = [], sx }) {
   return (
@@ -227,16 +233,7 @@ export function SideSelect({ label, value, onChange, options = [], sx }) {
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
         inputProps={{ 'aria-label': label }}
-        MenuProps={{
-          slotProps: {
-            paper: {
-              sx: {
-                bgcolor: 'var(--overlay)', backgroundImage: 'none', color: 'var(--text)',
-                border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-md)'
-              }
-            }
-          }
-        }}
+        MenuProps={{ slotProps: { paper: { sx: menuPaperSx } } }}
         sx={{
           height: 32, fontSize: 13, color: 'var(--text)', bgcolor: 'var(--bg)', borderRadius: 'var(--radius)',
           '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--line)' },
@@ -250,6 +247,68 @@ export function SideSelect({ label, value, onChange, options = [], sx }) {
         {options.filter(Boolean).map((o) => (
           <MenuItem key={o.value} value={o.value} disabled={!!o.disabled} sx={{ fontSize: 13, minHeight: 34 }}>{o.label}</MenuItem>
         ))}
+      </Select>
+    </Box>
+  );
+}
+
+/**
+ * A full-width 32px select of several: its label while nothing is chosen, "Label: a, b" after. A chosen value that is
+ * not among the options is still listed, so it can be taken off.
+ */
+export function SideMultiSelect({ label, values = [], onChange, options = [], disabled = false, sx }) {
+  const known = new Set(options.map((o) => o.value));
+  const all = [...options, ...values.filter((v) => !known.has(v)).map((v) => ({ value: v, label: v, count: 0 }))];
+  const labelOf = (v) => all.find((o) => o.value === v)?.label ?? v;
+  return (
+    <Box sx={{ px: '8px', minWidth: 0 }}>
+      <Select
+        multiple
+        displayEmpty
+        size="small"
+        fullWidth
+        disabled={disabled}
+        value={values}
+        onChange={(e) => onChange?.(e.target.value)}
+        inputProps={{ 'aria-label': label }}
+        renderValue={(chosen) => (
+          <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: chosen.length ? 'var(--text)' : 'var(--dim)' }}>
+            {chosen.length ? `${label}: ${chosen.map(labelOf).join(', ')}` : label}
+          </Box>
+        )}
+        MenuProps={{ slotProps: { paper: { sx: { ...menuPaperSx, maxHeight: 360 } } } }}
+        sx={{
+          height: 32, fontSize: 13, color: 'var(--text)', bgcolor: 'var(--bg)', borderRadius: 'var(--radius)',
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: values.length ? 'var(--accent)' : 'var(--line)' },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: values.length ? 'var(--accent)' : 'var(--line-strong)' },
+          '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--accent)', borderWidth: '1px' },
+          '& .MuiSelect-select': { py: 0, pl: '10px', minHeight: 0, display: 'flex', alignItems: 'center', height: '100%' },
+          '& .MuiSelect-icon': { color: 'var(--dim)' },
+          '&.Mui-disabled': { opacity: 0.5 },
+          ...sx
+        }}
+      >
+        {all.map((o) => {
+          const on = values.includes(o.value);
+          return (
+            <MenuItem key={o.value} value={o.value} sx={{ fontSize: 13, minHeight: 34, gap: '8px' }}>
+              <Box component="span" aria-hidden sx={{
+                width: 14, height: 14, flexShrink: 0, borderRadius: '3px', boxSizing: 'border-box',
+                border: '1px solid', borderColor: on ? 'var(--accent)' : 'var(--line-strong)',
+                bgcolor: on ? 'var(--accent)' : 'transparent', color: 'var(--on-accent)',
+                display: 'grid', placeItems: 'center', '& svg': { fontSize: 12 }
+              }}>
+                {on ? <CheckIcon /> : null}
+              </Box>
+              <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</Box>
+              {o.count != null ? (
+                <Box component="span" sx={{ ml: 'auto', pl: '12px', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+                  {o.count.toLocaleString()}
+                </Box>
+              ) : null}
+            </MenuItem>
+          );
+        })}
       </Select>
     </Box>
   );

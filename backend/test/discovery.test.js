@@ -606,6 +606,140 @@ test('Add performer: the preview, her name made a folder name, and the folder wi
   assert.equal(card.in_library_id, r.body.performer_id);
 });
 
+test('the profile filters: any value of a filter, every filter that is set, and each option counted without its own filter', async () => {
+  const store = require('../services/discover/store');
+  const profile = (id, name, fields, tags = []) => {
+    store.saveProfileJudgment({ site: 'facetsite', profile_id: id, name, url: `https://x/${id}`, score: 80, kept: 1, model: 'm' });
+    store.saveProfileData({ site: 'facetsite', profile_id: id, name, url: `https://x/${id}`, scrape: { name, profile: fields, aliases: [], tags }, full: true });
+  };
+  profile('f1', 'Facet Ana', { ethnicity: 'Asian', country_flag: 'jp', body_type: 'Slim', measurements_cup: '32C (Natural)' }, ['Cosplayer', 'Gamer']);
+  profile('f2', 'Facet Bo', { ethnicity: 'Asian', country_flag: 'kr', body_type: 'Average', measurements_cup: 'D (Fake)' }, ['Model']);
+  profile('f3', 'Facet Cy', { ethnicity: 'Latin', country_flag: 'br' }, ['Cosplayer']);
+  profile('f4', 'Facet Di', {});
+  runner.changed();   // written past the routes: the page's results are built again
+
+  const names = async (query) => (await get(`/api/discovery/performers?view=everyone&q=Facet&${query}`)).items.map((g) => g.names[0]).sort();
+  assert.deepEqual(await names(''), ['Facet Ana', 'Facet Bo', 'Facet Cy', 'Facet Di']);
+  assert.deepEqual(await names('eth=Asian'), ['Facet Ana', 'Facet Bo']);
+  assert.deepEqual(await names('eth=asian,Latin'), ['Facet Ana', 'Facet Bo', 'Facet Cy'], 'any of a filter\'s values, whatever the case');
+  assert.deepEqual(await names('eth=Asian&tag=Cosplayer'), ['Facet Ana'], 'every filter that is set');
+  assert.deepEqual(await names('tag=Cosplayer,Model'), ['Facet Ana', 'Facet Bo', 'Facet Cy']);
+  assert.deepEqual(await names('country=JP,BR'), ['Facet Ana', 'Facet Cy']);
+  assert.deepEqual(await names('body=Slim'), ['Facet Ana']);
+  assert.deepEqual(await names('cup=C,D'), ['Facet Ana', 'Facet Bo'], 'the cup without its band size');
+
+  const f = await get('/api/discovery/facets?view=everyone&q=Facet&eth=Asian');
+  assert.equal(f.total, 4);
+  assert.equal(f.with_data, 4);
+  assert.deepEqual(f.facets.eth, [{ value: 'Asian', count: 2 }, { value: 'Latin', count: 1 }], 'its own filter does not count');
+  assert.deepEqual(f.facets.tag, [{ value: 'Cosplayer', count: 1 }, { value: 'Gamer', count: 1 }, { value: 'Model', count: 1 }], 'the other filters do');
+  assert.deepEqual(f.facets.country.map((o) => o.value), ['JP', 'KR']);
+  assert.deepEqual(f.facets.cup, [{ value: 'C', count: 1 }, { value: 'D', count: 1 }]);
+  assert.equal((await api('GET', '/api/discovery/facets?watcher=nobody')).status, 404);
+});
+
+test('the library tells Discover: a kept performer moved to After is Checked, one deleted from the library is Deleted', async () => {
+  const link = require('../services/discover/libraryLink');
+  // her row alone: these performers have nothing else (deletePerformerRecord needs tables the app makes at startup)
+  const deletePerformerRecord = (id) => db.prepare('DELETE FROM performers WHERE id = ?').run(id);
+  const folder = db.prepare('SELECT id FROM folders ORDER BY id LIMIT 1').get().id;
+  const add = (name, after = 0) => Number(db.prepare('INSERT INTO performers (name, folder_id, moved_to_after) VALUES (?, ?, ?)').run(name, folder, after).lastInsertRowid);
+  const statusOf = async (name) => (await get(`/api/discovery/performers?view=everyone&q=${encodeURIComponent(name)}`)).items.find((g) => g.names.includes(name)).status;
+
+  stub.posts = [aPost('high-mira', 'Mira Link'), aPost('high-nell', 'Nell Link'), aPost('high-opal', 'Opal Link')];
+  await runScan();
+  for (const name of ['Mira Link', 'Nell Link']) await post('/api/discovery/performer-status', { group: (await performerNamed(name)).id, status: 'kept' });
+  await settle();
+
+  // moved to After: Checked, and nothing more is sent to the profile page
+  const mira = add('Mira Link');
+  const events = db.prepare('SELECT COUNT(*) AS n FROM discover_events').get().n;
+  db.prepare('UPDATE performers SET moved_to_after = 1 WHERE id = ?').run(mira);
+  assert.deepEqual((await link.movedToAfter(link.who(mira))).map((g) => g.names[0]), ['Mira Link']);
+  assert.equal(await statusOf('Mira Link'), 'checked');
+  assert.equal(await performerNamed('Mira Link', 'kept'), undefined, 'off Kept');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM discover_events').get().n, events);
+
+  // deleted from the library, also after she was checked: Deleted, as the Delete button does it
+  const her = link.who(mira);
+  deletePerformerRecord(mira);
+  assert.equal((await link.deleted(her)).length, 1);
+  await settle();
+  assert.equal(await statusOf('Mira Link'), 'deleted');
+  assert.equal(labels()['discover/miralink'].verdict, 'delete');
+
+  // a Before and an After record of her: deleting one leaves her in the library, so she stays kept
+  const [before_, after_] = [add('Nell Link'), add('Nell Link', 1)];
+  const nell = link.who(before_);
+  deletePerformerRecord(before_);
+  assert.deepEqual(await link.deleted(nell), []);
+  assert.equal(await statusOf('Nell Link'), 'kept');
+  // moved to After by a merge into her After record (her Before row went): still her, by name
+  assert.equal((await link.movedToAfter(nell)).length, 1);
+  assert.equal(await statusOf('Nell Link'), 'checked');
+  deletePerformerRecord(after_);
+
+  // only what was kept: an undecided performer stays to decide
+  const opal = add('Opal Link');
+  const opalRow = link.who(opal);
+  assert.deepEqual(await link.movedToAfter(opalRow), []);
+  deletePerformerRecord(opal);
+  assert.deepEqual(await link.deleted(opalRow), []);
+  assert.equal(await statusOf('Opal Link'), null);
+  assert.deepEqual(await link.deleted(link.who(999999)), [], 'nobody: nothing happens');
+});
+
+test('Whole profiles: reads the own page of the profiles with only a list\'s data, best score first, and judges nothing', async () => {
+  const store = require('../services/discover/store');
+  const plain = ADAPTERS.standin;
+  const asked = [];
+  let down = false;
+  ADAPTERS.standin = (site, http) => ({
+    ...plain(site, http),
+    profileDetails: async (id) => {
+      asked.push(id);
+      if (down || id === 'w-gone') throw new Error('not found');
+      return { name: `Whole ${id}` };
+    },
+    toScrapeResult: (d) => ({ name: d.name, url: 'https://x/whole', profile: { ethnicity: 'Asian', body_type: 'Slim' }, aliases: [], tags: ['Wholetag'] }),
+  });
+  const partial = (site, id, score) => {
+    const row = { site, profile_id: id, name: `Whole ${id}`, url: 'https://x/whole' };
+    store.saveProfileJudgment({ ...row, score, kept: 1, model: 'm' });
+    store.saveProfileData({ ...row, scrape: { name: row.name, profile: { ethnicity: 'Asian' }, aliases: [], tags: [] }, full: false });
+  };
+  try {
+    partial('standin', 'w-low', 60);
+    partial('standin', 'w-high', 90);
+    partial('standin', 'w-gone', 70);
+    partial('nowatcher', 'w-other', 80);   // no site to ask: not counted, not read
+    assert.equal((await get('/api/discovery/summary')).whole_profiles_left, 3);
+
+    const s = await runScan({ mode: 'details' });
+    assert.equal(s.job.exitCode, 0, s.job.log.join('\n'));
+    assert.equal(s.job.mode, 'details');
+    assert.deepEqual(asked, ['w-high', 'w-gone', 'w-low'], 'best score first');
+    assert.equal(stub.gpuCalls + stub.cpuCalls, 0, 'P is not asked');
+    assert.match(s.job.log.join('\n'), /This run: 2 whole profiles read, 1 not, 1 left/);
+    assert.equal(s.whole_profiles_left, 1, 'the one that failed is left for the next run');
+    const tagged = (await get('/api/discovery/performers?view=everyone&tag=Wholetag')).items.map((g) => g.names[0]).sort();
+    assert.deepEqual(tagged, ['Whole w-high', 'Whole w-low'], 'the Profile filters find them now');
+
+    // a site that answers nothing: the run gives up after 10 in a row instead of asking for every profile left
+    for (let i = 0; i < 14; i++) partial('standin', `w-down${i}`, 50);
+    down = true;
+    asked.length = 0;
+    const stopped = await runScan({ mode: 'details' });
+    assert.equal(stopped.job.exitCode, 1);
+    assert.match(stopped.job.error, /10 profiles in a row/);
+    assert.equal(asked.length, 10);
+  } finally {
+    ADAPTERS.standin = plain;
+    db.prepare("DELETE FROM discover_profiles WHERE profile_id LIKE 'w-%'").run();
+    runner.changed();
+  }
+});
+
 test('Upload: a page at a time, pictures by their bytes, a name to send', async () => {
   const u = (await post('/api/discovery/uploads', { kind: 'performer' })).body;
   const fake = await fetch(`${base}/api/discovery/uploads/${u.id}/files?name=x.jpg`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: Buffer.from('not a picture at all') });

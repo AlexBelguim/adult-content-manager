@@ -13,7 +13,8 @@ const HAND = {
   backlog: 'Reading older posts',
   rescore: 'Re-judging',
   profiles: 'Judging profiles',
-  pools: 'Judging pictures together'
+  pools: 'Judging pictures together',
+  details: 'Reading whole profiles'
 };
 const GOES_ON = 'the next run goes on from where it stopped';
 
@@ -40,6 +41,7 @@ function pausedText(j, watchers) {
     case 'backlog': return 'Older posts goes on from the last page it finished';
     case 'rescore': return 'Re-judge again goes on with the pictures left';
     case 'pools': return 'the next run scores the rest';
+    case 'details': return 'Whole profiles goes on with the ones left';
     default: return GOES_ON;
   }
 }

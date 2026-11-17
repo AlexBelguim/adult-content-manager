@@ -29,9 +29,17 @@ function rememberLibraryNames(names, performerId) {
   db.prepare('INSERT INTO discover_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(ADDED_KEY, JSON.stringify(next));
 }
 
-function loadLibrary() {
+const ROW = 'id, name, aliases, leakshaven_search_name, leakshaven_alias, leakshaven_url';
+
+/** A library performer as loadLibrary reads her, or null: kept before her row goes, to ask afterwards who she was (plus) */
+const libraryRow = (id) => db.prepare(`SELECT ${ROW} FROM performers WHERE id = ?`).get(Number(id)) || null;
+
+/** plus: rows to count as in the library although they are gone from it (libraryLink.js); a row still there is not doubled */
+function loadLibrary({ plus = [] } = {}) {
   const known = new Map();   // normalized name → library performer
-  const rows = db.prepare('SELECT id, name, aliases, leakshaven_search_name, leakshaven_alias, leakshaven_url FROM performers').all();
+  const rows = db.prepare(`SELECT ${ROW} FROM performers`).all();
+  const have = new Set(rows.map((row) => row.id));
+  rows.push(...plus.filter((row) => row && !have.has(row.id)));
   for (const row of rows) {
     let aliases = [];
     try { aliases = JSON.parse(row.aliases || '[]'); } catch { aliases = String(row.aliases || '').split(','); }
@@ -54,4 +62,4 @@ function loadLibrary() {
   return { size: rows.length, find: (...names) => lookup(names)?.name || null, performer: (...names) => lookup(names) };
 }
 
-module.exports = { normalize, fullName, loadLibrary, rememberLibraryNames };
+module.exports = { normalize, fullName, loadLibrary, libraryRow, rememberLibraryNames };

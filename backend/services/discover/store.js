@@ -64,6 +64,8 @@ const store = {
       image_url = COALESCE(discover_profiles.image_url, excluded.image_url), scrape = excluded.scrape, full = excluded.full, data_at = excluded.data_at
   `).run(site, id(profile_id), name ?? null, url ?? null, image_url, JSON.stringify(scrape), full ? 1 : 0, now()),
   allProfiles: () => db.prepare('SELECT * FROM discover_profiles ORDER BY name').all().map(parseProfile),
+  /** Per site, how many profiles have only what a list gave (not her whole profile): [{ site, n }] */
+  partialProfileCounts: () => db.prepare('SELECT site, COUNT(*) AS n FROM discover_profiles WHERE COALESCE(full, 0) = 0 GROUP BY site').all(),
   /** A watcher ran just now: found = what it judged or skipped, error = why it stopped (null when it went fine) */
   setChecked: (watcher, found, error = null) => db.prepare(`
     INSERT INTO discover_watcher_checks (watcher, checked_at, found, error) VALUES (?, ?, ?, ?)

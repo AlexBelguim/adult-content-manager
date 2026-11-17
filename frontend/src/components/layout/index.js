@@ -22,7 +22,7 @@
  *   </PageShell>
  *
  * Pages with a sidebar use SidebarPage instead (SidebarPage.js: the frame, rail, flyout, phone tabs and sheet;
- * side.js: SideGroup, SideList, SideFacts, SideChecks, SideSearch, SideSelect, SideSegment, SideField,
+ * side.js: SideGroup, SideList, SideFacts, SideChecks, SideSearch, SideSelect, SideMultiSelect, SideSegment, SideField,
  * SideButtons/SideButton, SideMain, SideNote, ContentLine; FillGrid.js: grids that meet both edges). All are
  * re-exported here.
  */
