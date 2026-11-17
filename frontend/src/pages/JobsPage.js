@@ -34,6 +34,7 @@ import { useUploads } from '../components/import/UploadsProvider';
 import { KIND_ORDER, KIND_LABEL, KIND_SHORT, KIND_ICON, STATE_FILTERS, inState } from '../components/jobs/kinds';
 import JobRow, { detailText } from '../components/jobs/JobRow';
 import QueueBars from '../components/jobs/QueueBars';
+import { RowRunOn, BulkRunOn } from '../components/jobs/RunOnChoice';
 import { ServicesList, StartLinks, servicesShort, servicesTone, gpuState } from '../components/jobs/ServicesPanel';
 import { runSlot, bulkClear, bulkRetry, post } from '../components/jobs/jobActions';
 
@@ -188,9 +189,17 @@ export default function JobsPage() {
     return () => clearTimeout(t);
   }, [highlight]);
 
+  // a waiting job's machine changed (RunOnChoice): say so, read the list again
+  const runOnDone = useCallback((err, msg) => {
+    if (err) notify({ severity: 'error', message: `Run on not changed: ${errorText(err)}` });
+    else if (msg) notify(msg);
+    refresh();
+  }, [notify, refresh]);
+
   // ── the content line's actions ────────────────────────
   const lineActions = (
     <>
+      <BulkRunOn jobs={visible} onDone={runOnDone} disabled={bulkBusy} />
       <SmallButton disabled={clearN === 0 || bulkBusy} onClick={clearFinished}>
         Clear finished ({clearN.toLocaleString()})
       </SmallButton>
@@ -276,6 +285,7 @@ export default function JobsPage() {
                 highlight={highlight === j.id}
                 showKind={kind === 'all'}
                 onSlot={(slotKey) => onSlot(j, slotKey)}
+                extra={<RowRunOn job={j} onDone={runOnDone} />}
               />
             ))}
           </Panel>

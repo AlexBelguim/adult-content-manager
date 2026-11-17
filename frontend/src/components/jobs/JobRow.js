@@ -262,7 +262,7 @@ function metaParts(job, compact = false) {
 }
 
 // ── the row ──────────────────────────────────────────────────
-export default function JobRow({ job, compact = false, busy = false, offline = false, open = false, onToggle, highlight = false, showKind = false, onSlot }) {
+export default function JobRow({ job, compact = false, busy = false, offline = false, open = false, onToggle, highlight = false, showKind = false, onSlot, extra = null }) {
   const detail = detailText(job);
   const hasDetail = !!detail;
   const height = compact ? 56 : 60;
@@ -353,7 +353,10 @@ export default function JobRow({ job, compact = false, busy = false, offline = f
             <MoreHorizIcon />
           </IconButton>
         ) : (
-          <Slots job={job} busy={busy} offline={offline} onSlot={onSlot} />
+          <>
+            {extra}
+            <Slots job={job} busy={busy} offline={offline} onSlot={onSlot} />
+          </>
         )}
       </Box>
 

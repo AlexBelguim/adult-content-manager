@@ -15,6 +15,8 @@
  *                                    looked up in a fresh list (404), its slot must be on (409 with its `why`),
  *                                    then the source does it. Answers { success, undo } (undo: a removed queued
  *                                    hash build can be put back with that request).
+ * - POST /api/jobs/run-on          — { ids, runOn }: the machine waiting label, funscript and training rows run on
+ *                                    (a coordinator node id, or null for the order set there)
  * - POST /api/jobs/clear-finished  — { kind? } every done or cancelled row whose Remove is on. Failed rows stay.
  *                                    Answers { success, cleared, errors: [{ kind, error }] }.
  * - POST /api/jobs/retry-failed    — { kind? } Retry on every failed row whose Retry is on, one after another.
@@ -691,13 +693,13 @@ async function trainJobs() {
         remove: [status === 'queued' || ended, IS_RUNNING],
         open: { to: '/ai-training?tab=train', label: 'Open AI & Training' }
       }),
-      raw: { status: j.status, type: j.type, trainable: !!j.trainable, phase: t.phase || j.phase, epoch: t.epoch, total_epochs: t.total_epochs, val_acc: t.val_acc, best_val_acc: t.best_val_acc }
+      raw: { status: j.status, type: j.type, trainable: !!j.trainable, phase: t.phase || j.phase, epoch: t.epoch, total_epochs: t.total_epochs, val_acc: t.val_acc, best_val_acc: t.best_val_acc, runOn: j.runOn || null }
     });
   });
 }
 
 /** Discover's runs (services/discover/runner.js): the one started by hand and the timer's, running or just ended. */
-const DISCOVER_TITLE = { scan: 'Scan of the watchers', backlog: 'Older posts', profiles: 'All creator profiles', rescore: 'Judging again with the current P', pools: 'Pictures together' };
+const DISCOVER_TITLE = { scan: 'Scan of the watchers', backlog: 'Older posts', profiles: 'All creator profiles', rescore: 'Judging again with the current P', pools: 'Pictures together', details: 'Whole profiles' };
 function discoverJobs() {
   const { job: byHand, watchJob } = discoverRunner.status();
   return [['hand', byHand], ['timer', watchJob]]
@@ -956,6 +958,28 @@ const kindOf = (req) => {
   if (kind != null && !KINDS.includes(kind)) throw httpError(400, `kind must be one of ${KINDS.join(', ')}`);
   return kind;
 };
+
+/**
+ * "Run on" for jobs still waiting: { ids: ['label:3', 'funpipe:8', 'train:2'], runOn: a coordinator node id or null
+ * (the order set there) }. Only queued label, funscript and training rows change; a running or ended one is skipped.
+ * -> { success, changed, skipped }
+ */
+const RUN_ON_TABLE = { label: 'label_jobs', funpipe: 'funpipe_jobs', train: 'training_jobs' };
+router.post('/run-on', (req, res) => {
+  const { ids, runOn } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids is required' });
+  const node = typeof runOn === 'string' && runOn.trim() ? runOn.trim().slice(0, 100) : null;
+  let changed = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    const [type, sourceId] = String(id).split(':');
+    const table = RUN_ON_TABLE[type];
+    const n = table ? db.prepare(`UPDATE ${table} SET run_on = ? WHERE id = ? AND status = 'queued'`).run(node, Number(sourceId)).changes : 0;
+    if (n) changed += 1; else skipped += 1;
+  }
+  invalidate();
+  res.json({ success: true, changed, skipped });
+});
 
 router.post('/clear-finished', async (req, res) => {
   let kind;
