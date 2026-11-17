@@ -1178,16 +1178,23 @@ router.post('/scene/:sceneId/play', async (req, res) => {
 router.post('/video/move-to-funscript', async (req, res) => {
   try {
     const { videoPath, targetGenre, copyExportedFunscripts } = req.body;
-    
+
     if (!videoPath) {
       return res.status(400).send({ error: 'Video path is required' });
     }
-    
+
     // Validate video file exists
     if (!await fs.pathExists(videoPath)) {
       return res.status(404).send({ error: 'Video file not found' });
     }
-    
+    // only a video of the library, and not one already in a funscript folder (<...>/funscript/<name>/<file>)
+    if (!require('../services/funpipeQueue').libraryVideo(videoPath)) {
+      return res.status(400).send({ error: 'Not a video in the library' });
+    }
+    if (path.basename(path.dirname(path.dirname(videoPath))).toLowerCase() === 'funscript') {
+      return res.status(409).send({ error: 'It is in a funscript folder already' });
+    }
+
     const videoDir = path.dirname(videoPath);
     const videoFileName = path.basename(videoPath);
     const videoName = path.basename(videoPath, path.extname(videoPath));
@@ -1292,16 +1299,23 @@ router.post('/video/move-to-funscript', async (req, res) => {
       await fs.move(originalFunscriptPath, targetFunscriptPath);
       console.log(`Moved funscript from ${originalFunscriptPath} to ${targetFunscriptPath}`);
     }
-    
-    // Update database records
+
+    // its sidecars (<file>.labels.json, .motion.json, funpipe's files …) go along
+    for (const f of originalFiles.filter(n => n.startsWith(`${videoFileName}.`) && !n.endsWith('.funscript'))) {
+      await fs.move(path.join(videoDir, f), path.join(targetDir, f), { overwrite: false }).catch((e) => console.warn(`Kept ${f} where it was: ${e.message}`));
+    }
+
+    // Update database records: its scenes and exports, and every row that knows it by its path (labels, tags, ratings…)
     await updateVideoPathsInDatabase(videoPath, targetVideoPath, targetDir);
-    
-    res.send({ 
-      success: true, 
+    const repointed = require('../services/movedFile').repoint(videoPath, targetVideoPath);
+
+    res.send({
+      success: true,
       message: 'Video moved to funscript folder',
       newVideoPath: targetVideoPath,
       newDirectory: targetDir,
-      funscriptsCopied: copiedFunscriptsCount
+      funscriptsCopied: copiedFunscriptsCount,
+      repointed
     });
     
   } catch (err) {

@@ -340,6 +340,17 @@ export default function PlayerPage() {
     if (ctxId && ctx && mounted.current && list[n]) navigate(playerUrl(ctxId, n, list[n].path), { replace: true });
   }, [ctxId, ctx, navigate]);
 
+  // moved to its funscript folder (FileInfoPanel): the same item at its new path, and the URL follows when it's the one shown
+  const onMoved = useCallback(({ from, to }) => {
+    if (!from || !to) return;
+    const next = itemsRef.current.map((it) => (it.path === from ? { ...it, path: to } : it));
+    commitItems(next);
+    if (from === pathRef.current) {
+      const i = next.findIndex((it) => it.path === to);
+      if (i >= 0) showAt(i, next);
+    }
+  }, [commitItems, showAt]);
+
   const putBack = useCallback(async (deleted, oldIndex, trashed) => {
     const name = deleted.name || fileNameOf(deleted.path);
     try {
@@ -510,7 +521,7 @@ export default function PlayerPage() {
         {isVideo && (labels
           ? <ScenesCompact data={labels} videoEl={videoEl} item={item} />
           : <ScenesPanel item={item} scenes={scenes} videoRef={videoRef} />)}
-        <FileInfoPanel item={item} dimensions={info} duration={(isVideo && videoSource.duration) || info?.duration} />
+        <FileInfoPanel item={item} dimensions={info} duration={(isVideo && videoSource.duration) || info?.duration} onMoved={onMoved} />
       </aside>
       {isPhone && sheet && <button type="button" className="pp-sheet-scrim" aria-label="Close panel" onClick={closeSheet} />}
 
